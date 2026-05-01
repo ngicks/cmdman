@@ -1,0 +1,35 @@
+lockfile_version: '1'
+generated_at: '2026-05-01T06:50:02.551272+00:00'
+apm_version: 0.9.2
+dependencies:
+- repo_url: ngicks/agents-package
+  host: github.com
+  virtual_path: instructions/base-env.instructions.md
+  is_virtual: true
+  deployed_files:
+  - .github/instructions/base-env.instructions.md
+  deployed_file_hashes:
+    .github/instructions/base-env.instructions.md: sha256:b86fc771e152b8501e950d6c2575ae10283f4ee9aa7a354dfc2b0313be96b20d
+  content_hash: sha256:e8e2f850d9cb676f3e9dc7756563576bc3dca4aed77f162987d88b6a7a0d18c5
+- repo_url: ngicks/agents-package
+  host: github.com
+  virtual_path: instructions/go/go-basics.instructions.md
+  is_virtual: true
+  deployed_files:
+  - .github/instructions/go-basics.instructions.md
+  deployed_file_hashes:
+    .github/instructions/go-basics.instructions.md: sha256:024bab80620aa496acc0cabca8c51ccb1efa8ddb7bbfd89d298160adf3d20987
+  content_hash: sha256:fa26d9e17858c7c5a2abb429a549c2a7a4ea5a19c627c5e33ab5bcc069f68220
+- repo_url: ngicks/agents-package
+  host: github.com
+  resolved_commit: 31ca5ef77578c54958eae4154bb408583fe376c2
+  virtual_path: skills/go-edit-cobra
+  is_virtual: true
+  package_type: claude_skill
+  deployed_files:
+  - .github/skills/go-edit-cobra
+  content_hash: sha256:209820e6d95b51768a36d0685c113df05d4f2974678654539668f31d82564dd7
+local_deployed_files:
+- .github/instructions/base.instructions.md
+local_deployed_file_hashes:
+  .github/instructions/base.instructions.md: sha256:1d8c43069b48748d68510a1108e07f13e88bcfc43a620ef9a0106dc03bf77766

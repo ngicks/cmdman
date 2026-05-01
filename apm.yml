@@ -1,0 +1,11 @@
+name: cmdman
+version: 1.0.0
+description: APM project for cmdman
+author: ngicks
+dependencies:
+  apm:
+  - ngicks/agents-package/instructions/base-env.instructions.md
+  - ngicks/agents-package/instructions/go/go-basics.instructions.md
+  - ngicks/agents-package/skills/go-edit-cobra
+  mcp: []
+scripts: {}

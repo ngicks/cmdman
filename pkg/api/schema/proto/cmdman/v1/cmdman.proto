@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package cmdman.v1;
+
+service CommandMonitorService {
+  // Bidirectional streaming — PTY I/O + control
+  rpc Attach(stream AttachRequest) returns (stream AttachResponse);
+
+  // Read scrollback buffer (non-interactive)
+  rpc Logs(LogsRequest) returns (stream LogsResponse);
+
+  // Write raw stdin bytes to the command PTY
+  rpc WriteStdin(WriteStdinRequest) returns (WriteStdinResponse);
+
+  // Send signal to the command process
+  rpc Signal(SignalRequest) returns (SignalResponse);
+
+  // Stop the command and prevent restart policy from re-spawning it
+  rpc Stop(StopRequest) returns (StopResponse);
+
+  // Query monitor status
+  rpc Status(StatusRequest) returns (StatusResponse);
+}
+
+message AttachRequest {
+  oneof input {
+    bytes stdin = 1; // raw bytes to write to PTY
+    ResizeEvent resize = 2; // terminal resize (SIGWINCH)
+  }
+}
+
+message AttachResponse {
+  bytes stdout = 1; // raw bytes from PTY
+}
+
+message ResizeEvent {
+  uint32 rows = 1;
+  uint32 cols = 2;
+}
+
+message LogsRequest {
+  bool follow = 1; // stream live output after scrollback
+}
+
+message LogsResponse {
+  bytes data = 1;
+}
+
+message WriteStdinRequest {
+  bytes stdin = 1; // raw bytes to write to PTY
+}
+
+message WriteStdinResponse {}
+
+message SignalRequest {
+  int32 signal = 1; // e.g. 15 for SIGTERM
+}
+
+message SignalResponse {}
+
+message StopRequest {
+  int32 signal = 1; // e.g. 15 for SIGTERM
+}
+
+message StopResponse {}
+
+message StatusRequest {}
+
+message StatusResponse {
+  string state = 1; // starting, running, exited, failed
+  int32 exit_code = 2;
+  int32 pid = 3;
+}
