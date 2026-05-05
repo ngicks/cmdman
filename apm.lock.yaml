@@ -1,35 +1,77 @@
 lockfile_version: '1'
-generated_at: '2026-05-01T06:50:02.551272+00:00'
+generated_at: '2026-05-06T02:52:52.938594+00:00'
 apm_version: 0.9.2
 dependencies:
 - repo_url: ngicks/agents-package
   host: github.com
+  resolved_commit: b7abaae75569a2b1cbb479388f86da780bdc233b
+  virtual_path: hooks/golangci-lint-fmt-after-edit
+  is_virtual: true
+  package_type: hook_package
+  deployed_files:
+  - .claude/hooks/golangci-lint-fmt-after-edit/run.sh
+  - .codex/hooks/golangci-lint-fmt-after-edit/run.sh
+  deployed_file_hashes:
+    .claude/hooks/golangci-lint-fmt-after-edit/run.sh: sha256:1357cc481656077413fc49cbe095a2941e6a21034b254e298ad4ee12978d8d44
+    .codex/hooks/golangci-lint-fmt-after-edit/run.sh: sha256:1357cc481656077413fc49cbe095a2941e6a21034b254e298ad4ee12978d8d44
+  content_hash: sha256:2df09a9d0d9c5bf396e306a0e698aa4280f33add88070e1bbfca8eed78b324b3
+- repo_url: ngicks/agents-package
+  host: github.com
+  resolved_commit: b7abaae75569a2b1cbb479388f86da780bdc233b
+  virtual_path: hooks/golangci-lint-run-after-edit
+  is_virtual: true
+  package_type: hook_package
+  deployed_files:
+  - .claude/hooks/golangci-lint-run-after-edit/run.sh
+  - .codex/hooks/golangci-lint-run-after-edit/run.sh
+  deployed_file_hashes:
+    .claude/hooks/golangci-lint-run-after-edit/run.sh: sha256:9530f29de9d8eba8281463d21d58f8b021a327a10d2a911161036848d8ab5a64
+    .codex/hooks/golangci-lint-run-after-edit/run.sh: sha256:9530f29de9d8eba8281463d21d58f8b021a327a10d2a911161036848d8ab5a64
+  content_hash: sha256:4e6be68d8e52e2f3e36aeda23f0b5b7369336e9c938ba087dd69528bcac67051
+- repo_url: ngicks/agents-package
+  host: github.com
   virtual_path: instructions/base-env.instructions.md
   is_virtual: true
-  deployed_files:
-  - .github/instructions/base-env.instructions.md
-  deployed_file_hashes:
-    .github/instructions/base-env.instructions.md: sha256:b86fc771e152b8501e950d6c2575ae10283f4ee9aa7a354dfc2b0313be96b20d
   content_hash: sha256:e8e2f850d9cb676f3e9dc7756563576bc3dca4aed77f162987d88b6a7a0d18c5
 - repo_url: ngicks/agents-package
   host: github.com
   virtual_path: instructions/go/go-basics.instructions.md
   is_virtual: true
   deployed_files:
-  - .github/instructions/go-basics.instructions.md
+  - .claude/rules/go-basics.md
   deployed_file_hashes:
-    .github/instructions/go-basics.instructions.md: sha256:024bab80620aa496acc0cabca8c51ccb1efa8ddb7bbfd89d298160adf3d20987
-  content_hash: sha256:fa26d9e17858c7c5a2abb429a549c2a7a4ea5a19c627c5e33ab5bcc069f68220
+    .claude/rules/go-basics.md: sha256:9e9687137db1dcd534e909aa4bc1ae62e0439d849837cb2bed37791a8d01616f
+  content_hash: sha256:3377a6fbb48ef1d8f562c62cc7b382d85c75964726c423ba14dde945bbb0bead
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: 31ca5ef77578c54958eae4154bb408583fe376c2
+  virtual_path: instructions/go/go-design-preference.instructions.md
+  is_virtual: true
+  deployed_files:
+  - .claude/rules/go-design-preference.md
+  deployed_file_hashes:
+    .claude/rules/go-design-preference.md: sha256:0a0c45354f94f7333de69d5fe4ff1cb247736155a0ba1645b7db3c101572f773
+  content_hash: sha256:08392ce26cee0ed77f6865678fe518f2e224c3706351936d7e59eed4b5e4d43b
+- repo_url: ngicks/agents-package
+  host: github.com
+  resolved_commit: b7abaae75569a2b1cbb479388f86da780bdc233b
+  virtual_path: skills/go-check-outdated-patterns
+  is_virtual: true
+  package_type: claude_skill
+  deployed_files:
+  - .agents/skills/go-check-outdated-patterns
+  - .claude/skills/go-check-outdated-patterns
+  content_hash: sha256:685001bfd8f313b73fd9534494c06dde40f1d596c25afc2310a4c4ee9f4f92ed
+- repo_url: ngicks/agents-package
+  host: github.com
+  resolved_commit: b7abaae75569a2b1cbb479388f86da780bdc233b
   virtual_path: skills/go-edit-cobra
   is_virtual: true
   package_type: claude_skill
   deployed_files:
-  - .github/skills/go-edit-cobra
-  content_hash: sha256:209820e6d95b51768a36d0685c113df05d4f2974678654539668f31d82564dd7
+  - .agents/skills/go-edit-cobra
+  - .claude/skills/go-edit-cobra
+  content_hash: sha256:e19fc9ad8c6040b722aba62061c9382f7f7321ad9c19ba4997f67e6e151d453f
 local_deployed_files:
-- .github/instructions/base.instructions.md
+- .claude/rules/base.md
 local_deployed_file_hashes:
-  .github/instructions/base.instructions.md: sha256:1d8c43069b48748d68510a1108e07f13e88bcfc43a620ef9a0106dc03bf77766
+  .claude/rules/base.md: sha256:e9caa57b35106ed599a19e6541991354b9a368c3c50cf9be5e8284a0606abff9
