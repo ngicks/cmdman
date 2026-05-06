@@ -1,3 +1,5 @@
+// Package migrations holds the ordered SQL schema migrations applied by
+// the cmdman store on open.
 package migrations
 
 import "database/sql"

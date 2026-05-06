@@ -9,9 +9,17 @@ import (
 	"github.com/ngicks/cmdman/pkg/mux"
 )
 
-// parseWindows parses tmux list-windows output formatted as "#{window_id}\t#{window_index}\t#{window_name}".
+// parseWindows parses tmux list-windows output formatted as
+// "#{window_id}\t#{window_index}\t#{window_name}".
 // sessionStartupKeys and windowKeys are injected into each constructed window.
-func parseWindows(out string, sessionName string, exec *executor, sessionStartupKeys []string, windowKeys map[string][]string, sessionID string) []mux.Window {
+func parseWindows(
+	out string,
+	sessionName string,
+	exec *executor,
+	sessionStartupKeys []string,
+	windowKeys map[string][]string,
+	sessionID string,
+) []mux.Window {
 	if out == "" {
 		return nil
 	}

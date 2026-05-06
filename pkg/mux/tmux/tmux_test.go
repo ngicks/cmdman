@@ -307,7 +307,8 @@ func TestTmuxWindowSplit(t *testing.T) {
 		{"split 0 is noop", 0, 1},
 		{"split 1 adds 1 pane", 1, 2},
 		{"split 3 adds 3 panes", 3, 4},
-		// {"split 7 adds 7 panes", 7, 8}, Fails with no space for new pane; detached session does not have enough space.
+		// {"split 7 adds 7 panes", 7, 8}, Fails with no space for new pane; detached session does
+		// not have enough space.
 	}
 
 	for _, tt := range tests {

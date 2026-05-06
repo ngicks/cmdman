@@ -1,3 +1,7 @@
+// Package cmdman is the command-daemon service that backs the cmdman
+// binary: it persists command definitions, spawns per-command monitor
+// processes, and exposes control over a Unix-domain gRPC socket. The
+// CLI under cmd/cmdman is a thin wiring layer on top of this package.
 package cmdman
 
 import (
@@ -214,7 +218,13 @@ func (s *Service) Start(_ context.Context, idOrName string) error {
 	switch state {
 	case store.StateCreated, store.StateExited:
 	default:
-		return fmt.Errorf("command %s is in state %q, must be %q or %q", idOrName, state, store.StateCreated, store.StateExited)
+		return fmt.Errorf(
+			"command %s is in state %q, must be %q or %q",
+			idOrName,
+			state,
+			store.StateCreated,
+			store.StateExited,
+		)
 	}
 
 	if _, err := SpawnMonitor(s.cfg, id); err != nil {
@@ -386,7 +396,13 @@ func (s *Service) Stop(ctx context.Context, req StopRequest) ([]CommandActionRes
 	return results, nil
 }
 
-func (s *Service) stopTarget(ctx context.Context, st *store.Store, id string, signalOverride string, timeout time.Duration) error {
+func (s *Service) stopTarget(
+	ctx context.Context,
+	st *store.Store,
+	id string,
+	signalOverride string,
+	timeout time.Duration,
+) error {
 	_, _, cfg, err := st.GetCommandConfig(id)
 	if err != nil {
 		return fmt.Errorf("get command config: %w", err)

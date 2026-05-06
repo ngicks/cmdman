@@ -35,7 +35,7 @@ func lsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 
 func runLs(
 	cmd *cobra.Command,
-	args []string,
+	_ []string,
 	rootCfg *cmdman.CmdmanConfig,
 	labelSlice []string,
 	allStates, quiet bool,

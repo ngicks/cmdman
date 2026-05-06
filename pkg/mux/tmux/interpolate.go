@@ -45,10 +45,12 @@ func interpolateKey(key, sessionID, windowID, paneID string) string {
 	}
 
 	replacements := map[string]string{
-		"SESSION_ID":  sessionID,
-		"WINDOW_ID":   windowID,
-		"PANE_ID":     paneID,
-		"INJECT_META": "export CRAB_SESSION_ID='" + sessionID + "' CRAB_WINDOW_ID='" + windowID + "' CRAB_PANE_ID='" + paneID + "'",
+		"SESSION_ID": sessionID,
+		"WINDOW_ID":  windowID,
+		"PANE_ID":    paneID,
+		"INJECT_META": "export CRAB_SESSION_ID='" + sessionID +
+			"' CRAB_WINDOW_ID='" + windowID +
+			"' CRAB_PANE_ID='" + paneID + "'",
 	}
 
 	var b strings.Builder

@@ -26,7 +26,7 @@ func monitorCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	parent.AddCommand(cmd)
 }
 
-func runMonitor(cmd *cobra.Command, args []string, rootCfg *cmdman.CmdmanConfig, id string) error {
+func runMonitor(cmd *cobra.Command, _ []string, rootCfg *cmdman.CmdmanConfig, id string) error {
 	cfg, err := rootCfg.WithDefaults()
 	if err != nil {
 		return err

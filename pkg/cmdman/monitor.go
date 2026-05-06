@@ -244,9 +244,7 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 
 	// PTY read goroutine: read -> ring buffer + fanout.
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := ptmx.Read(buf)
@@ -259,13 +257,11 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 				return
 			}
 		}
-	}()
+	})
 
 	// PTY write goroutine: stdin channel -> PTY.
 	done := make(chan struct{})
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case data := <-m.stdinCh:
@@ -276,7 +272,7 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 				return
 			}
 		}
-	}()
+	})
 
 	// Wait for command exit.
 	err = cmd.Wait()

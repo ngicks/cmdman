@@ -1,3 +1,6 @@
+// Package store is the SQLite-backed persistence layer for cmdman: it
+// holds command definitions, runtime state, and exit history, and runs
+// schema migrations on open.
 package store
 
 import (
@@ -102,7 +105,8 @@ func initOrCheckSchema(db *sql.DB) error {
 		// Fresh database or pre-DBConfig database.
 		// Check if CommandConfig table exists (pre-DBConfig v1 database).
 		var check int
-		err := db.QueryRow(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='CommandConfig'`).Scan(&check)
+		err := db.QueryRow(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='CommandConfig'`).
+			Scan(&check)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("checking existing tables: %w", err)
 		}
@@ -111,7 +115,9 @@ func initOrCheckSchema(db *sql.DB) error {
 			return createSchema(db)
 		}
 		// Pre-DBConfig database (v1) — needs migration.
-		return fmt.Errorf("database needs migration (no DBConfig table found), run 'cmdman migrate'")
+		return fmt.Errorf(
+			"database needs migration (no DBConfig table found), run 'cmdman migrate'",
+		)
 	}
 
 	ver, err := readSchemaVersion(db)
@@ -122,9 +128,17 @@ func initOrCheckSchema(db *sql.DB) error {
 		return nil
 	}
 	if ver > schemaVersion {
-		return fmt.Errorf("database schema version %d is newer than supported version %d", ver, schemaVersion)
+		return fmt.Errorf(
+			"database schema version %d is newer than supported version %d",
+			ver,
+			schemaVersion,
+		)
 	}
-	return fmt.Errorf("database schema version %d is outdated (current: %d), run 'cmdman migrate'", ver, schemaVersion)
+	return fmt.Errorf(
+		"database schema version %d is outdated (current: %d), run 'cmdman migrate'",
+		ver,
+		schemaVersion,
+	)
 }
 
 // Migrate runs all pending schema migrations.
@@ -141,7 +155,8 @@ func runMigrations(db *sql.DB) error {
 	if !exists {
 		// Check if this is a pre-DBConfig database or truly fresh.
 		var check int
-		err := db.QueryRow(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='CommandConfig'`).Scan(&check)
+		err := db.QueryRow(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='CommandConfig'`).
+			Scan(&check)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("checking existing tables: %w", err)
 		}
@@ -170,7 +185,11 @@ func runMigrations(db *sql.DB) error {
 		return nil
 	}
 	if ver > schemaVersion {
-		return fmt.Errorf("database schema version %d is newer than supported version %d", ver, schemaVersion)
+		return fmt.Errorf(
+			"database schema version %d is newer than supported version %d",
+			ver,
+			schemaVersion,
+		)
 	}
 
 	// Run migrations one version at a time.
@@ -200,7 +219,8 @@ func runMigrations(db *sql.DB) error {
 
 func dbConfigExists(db *sql.DB) (bool, error) {
 	var check int
-	err := db.QueryRow(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='DBConfig'`).Scan(&check)
+	err := db.QueryRow(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='DBConfig'`).
+		Scan(&check)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -267,7 +287,10 @@ CREATE INDEX IF NOT EXISTS idx_command_exit_code_id_ts ON CommandExitCode(ID, Ti
 		return fmt.Errorf("create schema: %w", err)
 	}
 	// Insert DBConfig row at current schema version.
-	if _, err := db.Exec(`INSERT OR IGNORE INTO DBConfig (ID, SchemaVersion) VALUES (1, ?)`, schemaVersion); err != nil {
+	if _, err := db.Exec(
+		`INSERT OR IGNORE INTO DBConfig (ID, SchemaVersion) VALUES (1, ?)`,
+		schemaVersion,
+	); err != nil {
 		return fmt.Errorf("insert DBConfig: %w", err)
 	}
 	return nil
@@ -321,7 +344,11 @@ func (s *Store) InsertCommandState(id, state string, stateJSON *CommandStateJSON
 }
 
 // UpdateCommandState updates the state and JSON of a CommandState row.
-func (s *Store) UpdateCommandState(id, state string, exitCode *int, stateJSON *CommandStateJSON) error {
+func (s *Store) UpdateCommandState(
+	id, state string,
+	exitCode *int,
+	stateJSON *CommandStateJSON,
+) error {
 	data, err := json.Marshal(stateJSON)
 	if err != nil {
 		return err
@@ -345,7 +372,9 @@ func (s *Store) InsertCommandExitCode(id string, exitCode int) error {
 // GetCommandConfig retrieves a CommandConfig by ID or name.
 // GetCommandConfig retrieves a CommandConfig by exact name, exact ID, or ID prefix.
 // If the input matches multiple commands by prefix, an error is returned.
-func (s *Store) GetCommandConfig(idOrName string) (id, name string, cfg *CommandConfigJSON, err error) {
+func (s *Store) GetCommandConfig(
+	idOrName string,
+) (id, name string, cfg *CommandConfigJSON, err error) {
 	resolvedID, err := s.ResolveID(idOrName)
 	if err != nil {
 		return "", "", nil, err
@@ -370,7 +399,9 @@ func (s *Store) GetCommandConfig(idOrName string) (id, name string, cfg *Command
 }
 
 // GetCommandState retrieves the CommandState for a command by ID.
-func (s *Store) GetCommandState(id string) (state string, exitCode *int, stateJSON *CommandStateJSON, err error) {
+func (s *Store) GetCommandState(
+	id string,
+) (state string, exitCode *int, stateJSON *CommandStateJSON, err error) {
 	var ecSQL sql.NullInt64
 	var jsonStr string
 	err = s.db.QueryRow(
@@ -445,7 +476,15 @@ func (s *Store) ListCommands(allStates bool, labels map[string]string) ([]Comman
 		var nameSQL sql.NullString
 		var ecSQL sql.NullInt64
 		var cfgStr, stateStr string
-		if err := rows.Scan(&e.ID, &nameSQL, &e.CreatedAt, &e.State, &ecSQL, &cfgStr, &stateStr); err != nil {
+		if err := rows.Scan(
+			&e.ID,
+			&nameSQL,
+			&e.CreatedAt,
+			&e.State,
+			&ecSQL,
+			&cfgStr,
+			&stateStr,
+		); err != nil {
 			return nil, err
 		}
 		if nameSQL.Valid {

@@ -1,3 +1,7 @@
+// Package commands implements the cmdman CLI subcommands. It composes the
+// root cobra.Command, wires every leaf subcommand via its wrapper function,
+// and translates parsed flags / positional arguments into calls on the
+// service in pkg/cmdman.
 package commands
 
 import (

@@ -53,7 +53,8 @@ func (w *window) Name(ctx context.Context) (string, error) {
 
 // Split adds n panes to the window using a stateless deterministic algorithm.
 // Each iteration queries the current pane count to derive the round and step.
-// After each split, session-level and window-level startup keys are sent, then metadata is injected.
+// After each split, session-level and window-level startup keys are sent, then metadata is
+// injected.
 func (w *window) Split(ctx context.Context, n int) error {
 	paneIDs, err := w.listPaneIDs(ctx)
 	if err != nil {
@@ -69,7 +70,11 @@ func (w *window) Split(ctx context.Context, n int) error {
 
 		direction, index := splitTargetPaneIndex(numPane)
 		if index >= numPane {
-			return fmt.Errorf("tmux: target pane index %d out of range (have %d panes)", index, numPane)
+			return fmt.Errorf(
+				"tmux: target pane index %d out of range (have %d panes)",
+				index,
+				numPane,
+			)
 		}
 
 		out, err := w.exec.run(ctx, "split-window", direction,
@@ -80,7 +85,15 @@ func (w *window) Split(ctx context.Context, n int) error {
 		}
 
 		newPaneID := strings.TrimSpace(out)
-		if err := sendStartupKeys(ctx, w.exec, newPaneID, w.sessionID, w.id, w.sessionStartupKeys, w.startupKeys); err != nil {
+		if err := sendStartupKeys(
+			ctx,
+			w.exec,
+			newPaneID,
+			w.sessionID,
+			w.id,
+			w.sessionStartupKeys,
+			w.startupKeys,
+		); err != nil {
 			return err
 		}
 
@@ -144,7 +157,12 @@ func (w *window) listPaneIDs(ctx context.Context) ([]string, error) {
 // sendStartupKeys sends session-level then window-level startup keys to a pane.
 // Placeholder interpolation is handled by pane.SendKeys.
 // It is a no-op if all inputs are nil/empty.
-func sendStartupKeys(ctx context.Context, exec *executor, paneID, sessionID, windowID string, sessionKeys, windowKeys []string) error {
+func sendStartupKeys(
+	ctx context.Context,
+	exec *executor,
+	paneID, sessionID, windowID string,
+	sessionKeys, windowKeys []string,
+) error {
 	var keys []string
 	keys = append(keys, sessionKeys...)
 	keys = append(keys, windowKeys...)
@@ -154,4 +172,3 @@ func sendStartupKeys(ctx context.Context, exec *executor, paneID, sessionID, win
 	p := &pane{id: paneID, sessionID: sessionID, windowID: windowID, exec: exec}
 	return p.SendKeys(ctx, keys)
 }
-

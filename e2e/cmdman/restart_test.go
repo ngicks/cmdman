@@ -112,7 +112,10 @@ func TestRestart_Always(t *testing.T) {
 	// Should have multiple exit history entries.
 	history, _ := info["exit_history"].([]any)
 	if len(history) < 2 {
-		t.Errorf("expected at least 2 exit_history entries with restart=always, got %d", len(history))
+		t.Errorf(
+			"expected at least 2 exit_history entries with restart=always, got %d",
+			len(history),
+		)
 	}
 
 	// Stop the always-restarting command.

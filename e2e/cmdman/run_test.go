@@ -154,7 +154,16 @@ func TestRun_DuplicateName(t *testing.T) {
 	env.waitForState(ctx, "unique-name", "running", defaultTimeout)
 
 	// Running another command with the same name should fail.
-	stdout, stderr, err := env.exec(ctx, "run", "-n", "unique-name", "--", "/bin/sh", "-c", "echo duplicate")
+	stdout, stderr, err := env.exec(
+		ctx,
+		"run",
+		"-n",
+		"unique-name",
+		"--",
+		"/bin/sh",
+		"-c",
+		"echo duplicate",
+	)
 	if err == nil {
 		t.Logf("expected error for duplicate name, got stdout=%q stderr=%q", stdout, stderr)
 		t.Fatal("run with duplicate name should fail")

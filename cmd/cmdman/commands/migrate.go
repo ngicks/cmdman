@@ -21,7 +21,7 @@ func migrateCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	parent.AddCommand(cmd)
 }
 
-func runMigrate(cmd *cobra.Command, args []string, rootCfg *cmdman.CmdmanConfig) error {
+func runMigrate(cmd *cobra.Command, _ []string, rootCfg *cmdman.CmdmanConfig) error {
 	svc, err := cmdmanService(rootCfg)
 	if err != nil {
 		return err

@@ -9,10 +9,16 @@
 //	  -socket             tmux socket name (default "splitpane-demo")
 //	  -tmux               path to tmux binary (default: lookup from PATH)
 //	  -no-attach          don't attach; just print the socket/session name and exit
-//	  -session-keys       comma-separated session-level startup keys sent to every pane (supports #{SESSION_ID}, #{WINDOW_ID}, #{PANE_ID}, #{INJECT_META} placeholders)
-//	  -windows int        number of additional windows to create via NewWindow (default 0)
-//	  -window-keys        comma-separated window-level startup keys for extra windows (supports placeholders)
-//	  -split-per-window   number of panes to add via Split in each extra window (default 0)
+//	  -session-keys       comma-separated session-level startup keys sent to every pane (supports
+//
+// #{SESSION_ID}, #{WINDOW_ID}, #{PANE_ID}, #{INJECT_META} placeholders)
+//
+//	-windows int        number of additional windows to create via NewWindow (default 0)
+//	-window-keys        comma-separated window-level startup keys for extra windows (supports
+//
+// placeholders)
+//
+//	-split-per-window   number of panes to add via Split in each extra window (default 0)
 package main
 
 import (
@@ -39,10 +45,26 @@ func main() {
 	socket := flag.String("socket", "splitpane-demo", "tmux socket name")
 	tmuxBin := flag.String("tmux", "", "path to tmux binary (empty = lookup PATH)")
 	noAttach := flag.Bool("no-attach", false, "don't attach to the session after setup")
-	sessionKeysFlag := flag.String("session-keys", "", "comma-separated session-level startup keys sent to every pane")
-	windowsFlag := flag.Int("windows", 0, "number of additional windows to create via NewWindow with window-level keys")
-	windowKeysFlag := flag.String("window-keys", "", "comma-separated window-level startup keys for extra windows")
-	splitPerWindow := flag.Int("split-per-window", 0, "number of panes to add via Split in each extra window")
+	sessionKeysFlag := flag.String(
+		"session-keys",
+		"",
+		"comma-separated session-level startup keys sent to every pane",
+	)
+	windowsFlag := flag.Int(
+		"windows",
+		0,
+		"number of additional windows to create via NewWindow with window-level keys",
+	)
+	windowKeysFlag := flag.String(
+		"window-keys",
+		"",
+		"comma-separated window-level startup keys for extra windows",
+	)
+	splitPerWindow := flag.Int(
+		"split-per-window",
+		0,
+		"number of panes to add via Split in each extra window",
+	)
 	flag.Parse()
 
 	tmuxPath := *tmuxBin
@@ -56,9 +78,9 @@ func main() {
 
 	ctx := context.Background()
 	cfg := tmux.Config{
-		Name:           "splitpane-demo",
-		TmuxPath:       tmuxPath,
-		SocketName:     *socket,
+		Name:        "splitpane-demo",
+		TmuxPath:    tmuxPath,
+		SocketName:  *socket,
 		StartupKeys: parseKeys(*sessionKeysFlag),
 	}
 
@@ -145,7 +167,10 @@ func main() {
 			}
 		}
 
-		summaries = append(summaries, windowSummary{name: name, id: ew.Id(), paneCount: len(epanes)})
+		summaries = append(
+			summaries,
+			windowSummary{name: name, id: ew.Id(), paneCount: len(epanes)},
+		)
 	}
 
 	// Print summary.
@@ -162,7 +187,15 @@ func main() {
 	}
 
 	fmt.Println("attaching... (detach with Ctrl-b d, or exit to clean up)")
-	attach := exec.CommandContext(ctx, tmuxPath, "-L", *socket, "attach-session", "-t", "splitpane-demo")
+	attach := exec.CommandContext(
+		ctx,
+		tmuxPath,
+		"-L",
+		*socket,
+		"attach-session",
+		"-t",
+		"splitpane-demo",
+	)
 	attach.Stdin = os.Stdin
 	attach.Stdout = os.Stdout
 	attach.Stderr = os.Stderr

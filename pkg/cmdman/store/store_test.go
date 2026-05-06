@@ -77,8 +77,13 @@ func TestDeferredForeignKey(t *testing.T) {
 		"deferred-1", StateCreated, "{}")
 	assert.NilError(t, err)
 
-	_, err = tx.Exec(`INSERT INTO CommandConfig (ID, Name, JSON) VALUES (?, ?, ?)`,
-		"deferred-1", nil, `{"argv":["/bin/true"],"dir":"/tmp","env":["PATH=/usr/bin:/bin"],"command_dir":"/tmp/test","restart_policy":"no","scrollback_bytes":1048576}`)
+	_, err = tx.Exec(
+		`INSERT INTO CommandConfig (ID, Name, JSON) VALUES (?, ?, ?)`,
+		"deferred-1",
+		nil,
+		`{"argv":["/bin/true"],"dir":"/tmp","env":["PATH=/usr/bin:/bin"],`+
+			`"command_dir":"/tmp/test","restart_policy":"no","scrollback_bytes":1048576}`,
+	)
 	assert.NilError(t, err)
 
 	assert.NilError(t, tx.Commit())

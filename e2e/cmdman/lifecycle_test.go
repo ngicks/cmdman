@@ -131,9 +131,42 @@ func TestLifecycle_MultipleCommands(t *testing.T) {
 	env := newTestEnv(t)
 
 	// Start three commands.
-	id1 := env.run(ctx, "run", "-n", "multi-1", "-l", "group=multi", "--", "/bin/sh", "-c", "sleep 300")
-	id2 := env.run(ctx, "run", "-n", "multi-2", "-l", "group=multi", "--", "/bin/sh", "-c", "sleep 300")
-	id3 := env.run(ctx, "run", "-n", "multi-3", "-l", "group=multi", "--", "/bin/sh", "-c", "sleep 300")
+	id1 := env.run(
+		ctx,
+		"run",
+		"-n",
+		"multi-1",
+		"-l",
+		"group=multi",
+		"--",
+		"/bin/sh",
+		"-c",
+		"sleep 300",
+	)
+	id2 := env.run(
+		ctx,
+		"run",
+		"-n",
+		"multi-2",
+		"-l",
+		"group=multi",
+		"--",
+		"/bin/sh",
+		"-c",
+		"sleep 300",
+	)
+	id3 := env.run(
+		ctx,
+		"run",
+		"-n",
+		"multi-3",
+		"-l",
+		"group=multi",
+		"--",
+		"/bin/sh",
+		"-c",
+		"sleep 300",
+	)
 	t.Cleanup(func() {
 		env.cleanupCommand(ctx, id1)
 		env.cleanupCommand(ctx, id2)

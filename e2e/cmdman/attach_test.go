@@ -129,7 +129,12 @@ func TestAttach_DetachRestoresShellTtyMode(t *testing.T) {
 		t.Fatalf("shell script exited with status %q\noutput:\n%s", status, text)
 	}
 	if before != after {
-		t.Fatalf("tty mode changed across attach detach\nbefore=%q\nafter=%q\noutput:\n%s", before, after, text)
+		t.Fatalf(
+			"tty mode changed across attach detach\nbefore=%q\nafter=%q\noutput:\n%s",
+			before,
+			after,
+			text,
+		)
 	}
 }
 
@@ -187,7 +192,12 @@ func TestAttach_CtrlCRestoresShellTtyMode(t *testing.T) {
 		t.Fatalf("shell script exited with status %q\noutput:\n%s", status, text)
 	}
 	if before != after {
-		t.Fatalf("tty mode changed across attach ctrl-c\nbefore=%q\nafter=%q\noutput:\n%s", before, after, text)
+		t.Fatalf(
+			"tty mode changed across attach ctrl-c\nbefore=%q\nafter=%q\noutput:\n%s",
+			before,
+			after,
+			text,
+		)
 	}
 }
 
@@ -212,7 +222,7 @@ func waitAttachExit(t *testing.T, cmd *exec.Cmd, timeout time.Duration) {
 func extractMarkedLine(t *testing.T, text, prefix string) string {
 	t.Helper()
 
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		line = strings.TrimSpace(line)
 		if idx := strings.Index(line, prefix); idx >= 0 {
 			return strings.TrimPrefix(line[idx:], prefix)

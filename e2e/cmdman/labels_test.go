@@ -11,9 +11,42 @@ func TestLabels_MultipleLabelsANDLogic(t *testing.T) {
 	env := newTestEnv(t)
 
 	// Create commands with different label combinations.
-	id1 := env.run(ctx, "run", "-l", "env=prod", "-l", "tier=web", "--", "/bin/sh", "-c", "sleep 300")
-	id2 := env.run(ctx, "run", "-l", "env=prod", "-l", "tier=api", "--", "/bin/sh", "-c", "sleep 300")
-	id3 := env.run(ctx, "run", "-l", "env=staging", "-l", "tier=web", "--", "/bin/sh", "-c", "sleep 300")
+	id1 := env.run(
+		ctx,
+		"run",
+		"-l",
+		"env=prod",
+		"-l",
+		"tier=web",
+		"--",
+		"/bin/sh",
+		"-c",
+		"sleep 300",
+	)
+	id2 := env.run(
+		ctx,
+		"run",
+		"-l",
+		"env=prod",
+		"-l",
+		"tier=api",
+		"--",
+		"/bin/sh",
+		"-c",
+		"sleep 300",
+	)
+	id3 := env.run(
+		ctx,
+		"run",
+		"-l",
+		"env=staging",
+		"-l",
+		"tier=web",
+		"--",
+		"/bin/sh",
+		"-c",
+		"sleep 300",
+	)
 	t.Cleanup(func() {
 		env.cleanupCommand(ctx, id1)
 		env.cleanupCommand(ctx, id2)

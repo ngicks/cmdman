@@ -129,7 +129,11 @@ func TestInspect_ByNameAndByID(t *testing.T) {
 
 	// Both should return the same id.
 	if byName["id"] != byID["id"] {
-		t.Errorf("inspect by name and by ID returned different IDs: %v vs %v", byName["id"], byID["id"])
+		t.Errorf(
+			"inspect by name and by ID returned different IDs: %v vs %v",
+			byName["id"],
+			byID["id"],
+		)
 	}
 }
 

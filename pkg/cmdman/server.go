@@ -81,7 +81,10 @@ func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) err
 	}
 }
 
-func (s *monitorServer) Logs(req *pb.LogsRequest, stream pb.CommandMonitorService_LogsServer) error {
+func (s *monitorServer) Logs(
+	req *pb.LogsRequest,
+	stream pb.CommandMonitorService_LogsServer,
+) error {
 	// Send scrollback.
 	scrollback := s.monitor.ring.Bytes()
 	if len(scrollback) > 0 {
@@ -113,14 +116,20 @@ func (s *monitorServer) Logs(req *pb.LogsRequest, stream pb.CommandMonitorServic
 	}
 }
 
-func (s *monitorServer) WriteStdin(ctx context.Context, req *pb.WriteStdinRequest) (*pb.WriteStdinResponse, error) {
+func (s *monitorServer) WriteStdin(
+	ctx context.Context,
+	req *pb.WriteStdinRequest,
+) (*pb.WriteStdinResponse, error) {
 	if err := s.monitor.QueueStdin(ctx, req.Stdin); err != nil {
 		return nil, err
 	}
 	return &pb.WriteStdinResponse{}, nil
 }
 
-func (s *monitorServer) Signal(_ context.Context, req *pb.SignalRequest) (*pb.SignalResponse, error) {
+func (s *monitorServer) Signal(
+	_ context.Context,
+	req *pb.SignalRequest,
+) (*pb.SignalResponse, error) {
 	if err := s.monitor.SignalProcess(syscall.Signal(req.Signal)); err != nil {
 		return nil, err
 	}

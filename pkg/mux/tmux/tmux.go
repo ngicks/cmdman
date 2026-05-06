@@ -38,7 +38,7 @@ type Session struct {
 
 	mu          sync.RWMutex
 	startupKeys []string            // session-level, defensively copied from Config
-	windowKeys     map[string][]string // window ID → window-level startup keys
+	windowKeys  map[string][]string // window ID → window-level startup keys
 }
 
 // Verify interface compliance.
@@ -49,7 +49,16 @@ var _ mux.Session = (*Session)(nil)
 func New(ctx context.Context, cfg Config) (*Session, error) {
 	exec := newExecutor(cfg.TmuxPath, cfg.SocketName)
 
-	out, err := exec.run(ctx, "new-session", "-d", "-s", cfg.Name, "-P", "-F", "#{session_id}\t#{window_id}\t#{pane_id}")
+	out, err := exec.run(
+		ctx,
+		"new-session",
+		"-d",
+		"-s",
+		cfg.Name,
+		"-P",
+		"-F",
+		"#{session_id}\t#{window_id}\t#{pane_id}",
+	)
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate session") {
 			if cfg.DisallowReuse {
@@ -83,10 +92,13 @@ func New(ctx context.Context, cfg Config) (*Session, error) {
 	// NOTE: ## escapes # for tmux format expansion in run-shell.
 	// All dynamic values are shell-quoted with shellQuote() to prevent injection.
 	rebalanceCmd := fmt.Sprintf(
-		"run-shell 'for w in $(%s %slist-windows -t %s -F \"##{window_id}\"); do %s %sselect-layout -t \"$w\" tiled; done'",
-		shellQuote(exec.tmuxPath), exec.socketFlag(),
+		"run-shell 'for w in $(%s %slist-windows -t %s -F \"##{window_id}\"); "+
+			"do %s %sselect-layout -t \"$w\" tiled; done'",
+		shellQuote(exec.tmuxPath),
+		exec.socketFlag(),
 		shellQuote(cfg.Name),
-		shellQuote(exec.tmuxPath), exec.socketFlag(),
+		shellQuote(exec.tmuxPath),
+		exec.socketFlag(),
 	)
 	for _, hook := range []string{"client-attached[100]", "client-detached[100]"} {
 		_, err = exec.run(ctx, "set-hook", "-t", cfg.Name, hook, rebalanceCmd)
@@ -96,7 +108,15 @@ func New(ctx context.Context, cfg Config) (*Session, error) {
 	}
 
 	// Send session-level startup keys to the initial pane.
-	if err := sendStartupKeys(ctx, exec, initialPaneID, sessionID, initialWindowID, sess.startupKeys, nil); err != nil {
+	if err := sendStartupKeys(
+		ctx,
+		exec,
+		initialPaneID,
+		sessionID,
+		initialWindowID,
+		sess.startupKeys,
+		nil,
+	); err != nil {
 		return nil, err
 	}
 
@@ -151,8 +171,22 @@ func (s *Session) StartupKeys() []string {
 // NewWindow creates a new window and sends session-level + window-level
 // startup keys to its initial pane. Window-level keys are persisted so that
 // panes created later via Split also receive them. Pass nil for no window-level keys.
-func (s *Session) NewWindow(ctx context.Context, name string, startupKeys []string) (mux.Window, error) {
-	out, err := s.exec.run(ctx, "new-window", "-t", s.name, "-n", name, "-P", "-F", "#{window_id}\t#{pane_id}")
+func (s *Session) NewWindow(
+	ctx context.Context,
+	name string,
+	startupKeys []string,
+) (mux.Window, error) {
+	out, err := s.exec.run(
+		ctx,
+		"new-window",
+		"-t",
+		s.name,
+		"-n",
+		name,
+		"-P",
+		"-F",
+		"#{window_id}\t#{pane_id}",
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +214,15 @@ func (s *Session) NewWindow(ctx context.Context, name string, startupKeys []stri
 	}
 
 	// Send session + window startup keys to the initial pane.
-	if err := sendStartupKeys(ctx, s.exec, paneID, s.id, windowID, s.startupKeys, startupKeys); err != nil {
+	if err := sendStartupKeys(
+		ctx,
+		s.exec,
+		paneID,
+		s.id,
+		windowID,
+		s.startupKeys,
+		startupKeys,
+	); err != nil {
 		return nil, err
 	}
 
@@ -188,7 +230,14 @@ func (s *Session) NewWindow(ctx context.Context, name string, startupKeys []stri
 }
 
 func (s *Session) List(ctx context.Context) ([]mux.Window, error) {
-	out, err := s.exec.run(ctx, "list-windows", "-t", s.name, "-F", "#{window_id}\t#{window_index}\t#{window_name}")
+	out, err := s.exec.run(
+		ctx,
+		"list-windows",
+		"-t",
+		s.name,
+		"-F",
+		"#{window_id}\t#{window_index}\t#{window_name}",
+	)
 	if err != nil {
 		return nil, err
 	}
