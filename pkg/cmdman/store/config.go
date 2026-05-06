@@ -11,6 +11,10 @@ import (
 // ConfigFileName is the fixed name of the per-command configuration file.
 const ConfigFileName = "config.json"
 
+// LogFileName is the fixed name of the per-command log file when a file-
+// based log driver is in use.
+const LogFileName = "console.log"
+
 // RestartPolicy determines how the monitor handles command exits.
 type RestartPolicy string
 
@@ -29,6 +33,65 @@ func IsRestartPolicy(s string) bool {
 	return false
 }
 
+// LogDriver determines how the monitor persists command output.
+type LogDriver string
+
+const (
+	// LogDriverK8sFile writes a per-command log file in the same format
+	// podman uses for its k8s-file driver (a.k.a. json-file). Each entry
+	// is `<RFC3339Nano> <stream> <F|P> <content>\n`.
+	LogDriverK8sFile LogDriver = "k8s-file"
+	// LogDriverNone disables on-disk log capture.
+	LogDriverNone LogDriver = "none"
+)
+
+// DefaultLogDriver is the log driver used when no explicit value is supplied.
+const DefaultLogDriver = LogDriverK8sFile
+
+// IsLogDriver reports whether s is a valid LogDriver value.
+func IsLogDriver(s string) bool {
+	switch LogDriver(s) {
+	case LogDriverK8sFile, LogDriverNone:
+		return true
+	}
+	return false
+}
+
+// LogOpt key constants. These mirror keys in podman's `--log-opt`
+// vocabulary; only a subset is currently implemented.
+const (
+	// LogOptPath overrides the on-disk log file path for file-based
+	// drivers. The value must be an absolute path.
+	LogOptPath = "path"
+)
+
+// IsValidLogOpt reports whether key is meaningful for the given driver.
+func IsValidLogOpt(driver LogDriver, key string) bool {
+	switch driver {
+	case LogDriverK8sFile:
+		switch key {
+		case LogOptPath:
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateLogOpt checks that key is meaningful for the driver and that
+// value satisfies any per-key constraints.
+func ValidateLogOpt(driver LogDriver, key, value string) error {
+	if !IsValidLogOpt(driver, key) {
+		return fmt.Errorf("log_opt %q not valid for driver %q", key, driver)
+	}
+	switch key {
+	case LogOptPath:
+		if !filepath.IsAbs(value) {
+			return fmt.Errorf("log_opt %q must be an absolute path: %q", key, value)
+		}
+	}
+	return nil
+}
+
 // CommandConfigJSON is the canonical command configuration stored in CommandConfig.JSON.
 type CommandConfigJSON struct {
 	// Argv is the command and its arguments.
@@ -43,6 +106,11 @@ type CommandConfigJSON struct {
 	StopSignal string `json:"stop_signal,omitempty"`
 	// ScrollbackBytes is the scrollback buffer size in bytes.
 	ScrollbackBytes int `json:"scrollback_bytes"`
+	// LogDriver controls how command output is persisted to disk.
+	LogDriver LogDriver `json:"log_driver"`
+	// LogOpts is a driver-specific bag of options, mirroring podman's
+	// `--log-opt KEY=VALUE` mechanism. Valid keys depend on LogDriver.
+	LogOpts map[string]string `json:"log_opts,omitempty"`
 	// Labels are user-defined key-value metadata.
 	Labels map[string]string `json:"labels,omitempty"`
 	// Annotations are system metadata (e.g., auto-remove).
@@ -54,6 +122,19 @@ type CommandConfigJSON struct {
 // ConfigPath returns the full path to this command's config file.
 func (c *CommandConfigJSON) ConfigPath() string {
 	return filepath.Join(c.CommandDir, ConfigFileName)
+}
+
+// LogPath returns the full path to this command's log file when a file-
+// based log driver is configured. LogOpts["path"] takes precedence over
+// the per-command default. Empty when neither is set.
+func (c *CommandConfigJSON) LogPath() string {
+	if p, ok := c.LogOpts[LogOptPath]; ok && p != "" {
+		return p
+	}
+	if c.CommandDir == "" {
+		return ""
+	}
+	return filepath.Join(c.CommandDir, LogFileName)
 }
 
 // Validate rejects incomplete command configs so runtime code can assume values are present.
@@ -69,26 +150,39 @@ func (c *CommandConfigJSON) Validate() error {
 
 // ValidateCreate validates caller-supplied config before derived fields are filled in.
 func (c *CommandConfigJSON) ValidateCreate() error {
-	switch {
-	case c == nil:
+	if c == nil {
 		return errors.New("command config is nil")
-	case len(c.Argv) == 0:
+	}
+	if len(c.Argv) == 0 {
 		return errors.New("command config: argv is empty")
-	case c.Dir == "":
+	}
+	if c.Dir == "" {
 		return errors.New("command config: dir is empty")
-	case len(c.Env) == 0:
+	}
+	if len(c.Env) == 0 {
 		return errors.New("command config: env is empty")
-	case !IsRestartPolicy(string(c.RestartPolicy)):
+	}
+	if !IsRestartPolicy(string(c.RestartPolicy)) {
 		return fmt.Errorf("command config: invalid restart policy %q", c.RestartPolicy)
-	case c.StopSignal != "":
+	}
+	if c.StopSignal != "" {
 		if _, _, err := ParseSignal(c.StopSignal); err != nil {
 			return fmt.Errorf("command config: invalid stop_signal %q: %w", c.StopSignal, err)
 		}
-	case c.ScrollbackBytes <= 0:
+	}
+	if c.ScrollbackBytes <= 0 {
 		return fmt.Errorf(
 			"command config: scrollback_bytes must be positive: %d",
 			c.ScrollbackBytes,
 		)
+	}
+	if !IsLogDriver(string(c.LogDriver)) {
+		return fmt.Errorf("command config: invalid log_driver %q", c.LogDriver)
+	}
+	for k, v := range c.LogOpts {
+		if err := ValidateLogOpt(c.LogDriver, k, v); err != nil {
+			return fmt.Errorf("command config: %w", err)
+		}
 	}
 	return nil
 }
@@ -125,10 +219,20 @@ func ReadCommandConfig(commandDir string) (*CommandConfigJSON, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+	backfillCommandConfigDefaults(&cfg)
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+// backfillCommandConfigDefaults populates fields that may be missing from
+// command configs persisted before they were introduced. It only fills
+// fields that are unambiguously equivalent to the old behavior.
+func backfillCommandConfigDefaults(cfg *CommandConfigJSON) {
+	if cfg.LogDriver == "" {
+		cfg.LogDriver = DefaultLogDriver
+	}
 }
 
 const (

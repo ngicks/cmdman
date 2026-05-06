@@ -119,6 +119,7 @@ func TestServiceSendKeys(t *testing.T) {
 		Env:             testEnv(),
 		RestartPolicy:   store.RestartPolicyNo,
 		ScrollbackBytes: 4096,
+		LogDriver:       store.DefaultLogDriver,
 		CommandDir:      commandDir,
 	}
 

@@ -46,6 +46,7 @@ func TestExitCodeRangeCheck(t *testing.T) {
 		Env:             testEnv(),
 		RestartPolicy:   RestartPolicyNo,
 		ScrollbackBytes: DefaultScrollbackBytes,
+		LogDriver:       DefaultLogDriver,
 		CommandDir:      "/tmp/test",
 	}
 	assert.NilError(t, st.InsertCommandConfig("test-1", "", cfg))
@@ -98,6 +99,7 @@ func TestInsertAndGetCommandConfig(t *testing.T) {
 		Env:             testEnv(),
 		RestartPolicy:   RestartPolicyNo,
 		ScrollbackBytes: DefaultScrollbackBytes,
+		LogDriver:       DefaultLogDriver,
 		Labels:          map[string]string{"app": "test", "env": "dev"},
 		CommandDir:      "/tmp/cmd/test-1",
 	}
@@ -124,6 +126,7 @@ func TestListCommandsWithLabels(t *testing.T) {
 		Env:             testEnv(),
 		RestartPolicy:   RestartPolicyNo,
 		ScrollbackBytes: DefaultScrollbackBytes,
+		LogDriver:       DefaultLogDriver,
 		Labels:          map[string]string{"app": "web", "env": "prod"},
 		CommandDir:      "/tmp/cmd/1",
 	}
@@ -133,6 +136,7 @@ func TestListCommandsWithLabels(t *testing.T) {
 		Env:             testEnv(),
 		RestartPolicy:   RestartPolicyNo,
 		ScrollbackBytes: DefaultScrollbackBytes,
+		LogDriver:       DefaultLogDriver,
 		Labels:          map[string]string{"app": "api", "env": "prod"},
 		CommandDir:      "/tmp/cmd/2",
 	}
@@ -161,6 +165,7 @@ func TestDeleteCommand(t *testing.T) {
 		Env:             testEnv(),
 		RestartPolicy:   RestartPolicyNo,
 		ScrollbackBytes: DefaultScrollbackBytes,
+		LogDriver:       DefaultLogDriver,
 		CommandDir:      "/tmp/cmd/del-1",
 	}
 	assert.NilError(t, st.InsertCommandConfig("del-1", "", cfg))
@@ -183,6 +188,7 @@ func TestConfigJSONMaterialization(t *testing.T) {
 		Env:             testEnv(),
 		RestartPolicy:   RestartPolicyNo,
 		ScrollbackBytes: DefaultScrollbackBytes,
+		LogDriver:       DefaultLogDriver,
 		CommandDir:      commandDir,
 	}
 

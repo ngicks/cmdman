@@ -2,22 +2,21 @@ package cmdman
 
 import "sync"
 
-// Fanout distributes byte slices to multiple subscribers.
-type Fanout struct {
+// fanout distributes byte slices to multiple subscribers.
+type fanout struct {
 	mu          sync.Mutex
 	subscribers map[int]chan []byte
 	nextID      int
 }
 
-// NewFanout creates a new Fanout.
-func NewFanout() *Fanout {
-	return &Fanout{
+func newFanout() *fanout {
+	return &fanout{
 		subscribers: make(map[int]chan []byte),
 	}
 }
 
 // Subscribe adds a new subscriber and returns a channel and unsubscribe function.
-func (f *Fanout) Subscribe() (<-chan []byte, func()) {
+func (f *fanout) Subscribe() (<-chan []byte, func()) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -35,7 +34,7 @@ func (f *Fanout) Subscribe() (<-chan []byte, func()) {
 }
 
 // Send sends data to all subscribers. Non-blocking: drops data for slow subscribers.
-func (f *Fanout) Send(data []byte) {
+func (f *fanout) Send(data []byte) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 

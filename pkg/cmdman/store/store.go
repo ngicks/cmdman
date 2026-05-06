@@ -395,6 +395,7 @@ func (s *Store) GetCommandConfig(
 	if err := json.Unmarshal([]byte(jsonStr), cfg); err != nil {
 		return "", "", nil, err
 	}
+	backfillCommandConfigDefaults(cfg)
 	return id, name, cfg, nil
 }
 
@@ -498,6 +499,7 @@ func (s *Store) ListCommands(allStates bool, labels map[string]string) ([]Comman
 		if err := json.Unmarshal([]byte(cfgStr), e.ConfigJSON); err != nil {
 			return nil, err
 		}
+		backfillCommandConfigDefaults(e.ConfigJSON)
 		e.StateJSON = &CommandStateJSON{}
 		if err := json.Unmarshal([]byte(stateStr), e.StateJSON); err != nil {
 			return nil, err

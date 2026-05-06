@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"sync"
@@ -21,6 +22,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
+	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -52,6 +54,8 @@ type CreateRequest struct {
 	StopSignal      string
 	AutoRemove      bool
 	ScrollbackBytes int
+	LogDriver       store.LogDriver
+	LogOpts         map[string]string
 	Argv            []string
 }
 
@@ -79,6 +83,13 @@ type RemoveRequest struct {
 	Targets []string
 	Labels  map[string]string
 	Force   bool
+}
+
+// LogsRequest defines a log read operation.
+type LogsRequest struct {
+	IDOrName string
+	Follow   bool
+	Writer   io.Writer
 }
 
 // CommandActionResult reports per-command outcome for bulk operations.
@@ -179,6 +190,11 @@ func (s *Service) buildCommandConfig(req CreateRequest) *store.CommandConfigJSON
 		scrollbackBytes = s.cfg.DefaultScrollbackBytes
 	}
 
+	logDriver := req.LogDriver
+	if logDriver == "" {
+		logDriver = s.cfg.DefaultLogDriver
+	}
+
 	annotations := map[string]string(nil)
 	if req.AutoRemove {
 		annotations = map[string]string{store.AnnotationAutoRemove: "true"}
@@ -191,6 +207,8 @@ func (s *Service) buildCommandConfig(req CreateRequest) *store.CommandConfigJSON
 		RestartPolicy:   restartPolicy,
 		StopSignal:      stopSignal,
 		ScrollbackBytes: scrollbackBytes,
+		LogDriver:       logDriver,
+		LogOpts:         cloneStringMap(req.LogOpts),
 		Labels:          cloneStringMap(req.Labels),
 		Annotations:     annotations,
 	}
@@ -459,6 +477,27 @@ func (s *Service) Remove(ctx context.Context, req RemoveRequest) ([]CommandActio
 		})
 	}
 	return results, nil
+}
+
+// Logs writes the persisted command output for req.IDOrName to req.Writer.
+// With Follow=true, it tails the on-disk log file and continues to emit
+// new content until ctx is cancelled. The monitor is not contacted; logs
+// remain readable after the command exits.
+func (s *Service) Logs(ctx context.Context, req LogsRequest) error {
+	if req.Writer == nil {
+		return errors.New("logs: writer is nil")
+	}
+	st, err := s.openStore(true)
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer st.Close()
+
+	_, _, cfg, err := st.GetCommandConfig(req.IDOrName)
+	if err != nil {
+		return fmt.Errorf("resolve command: %w", err)
+	}
+	return logdriver.NewReader(ctx, cfg.LogDriver, cfg.LogPath(), req.Writer, req.Follow)
 }
 
 func (s *Service) Migrate(_ context.Context) error {

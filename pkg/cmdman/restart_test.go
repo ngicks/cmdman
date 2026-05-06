@@ -54,6 +54,7 @@ exit 0
 		Env:             testEnv(),
 		RestartPolicy:   store.RestartPolicyOnFailure,
 		ScrollbackBytes: 4096,
+		LogDriver:       store.DefaultLogDriver,
 		CommandDir:      commandDir,
 	}
 
@@ -108,6 +109,7 @@ func TestRestartPolicyAlways(t *testing.T) {
 		Env:             testEnv(),
 		RestartPolicy:   store.RestartPolicyAlways,
 		ScrollbackBytes: 4096,
+		LogDriver:       store.DefaultLogDriver,
 		CommandDir:      commandDir,
 	}
 

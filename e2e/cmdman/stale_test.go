@@ -79,6 +79,7 @@ func TestStale_AutoRemoveOnStale(t *testing.T) {
 		Env:             os.Environ(),
 		RestartPolicy:   store.RestartPolicyNo,
 		ScrollbackBytes: 1024,
+		LogDriver:       store.DefaultLogDriver,
 		Annotations:     map[string]string{store.AnnotationAutoRemove: "true"},
 		CommandDir:      filepath.Join(env.dataHome, "commands", id),
 	}

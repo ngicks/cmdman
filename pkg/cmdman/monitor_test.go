@@ -37,6 +37,7 @@ func TestMonitorRunAndExit(t *testing.T) {
 		Env:             testEnv(),
 		RestartPolicy:   store.RestartPolicyNo,
 		ScrollbackBytes: 4096,
+		LogDriver:       store.DefaultLogDriver,
 		CommandDir:      commandDir,
 	}
 
@@ -93,6 +94,7 @@ func TestMonitorNonZeroExit(t *testing.T) {
 		Env:             testEnv(),
 		RestartPolicy:   store.RestartPolicyNo,
 		ScrollbackBytes: 4096,
+		LogDriver:       store.DefaultLogDriver,
 		CommandDir:      commandDir,
 	}
 
@@ -141,6 +143,7 @@ func TestMonitorAutoRemove(t *testing.T) {
 		Env:             testEnv(),
 		RestartPolicy:   store.RestartPolicyNo,
 		ScrollbackBytes: 4096,
+		LogDriver:       store.DefaultLogDriver,
 		Annotations:     map[string]string{store.AnnotationAutoRemove: "true"},
 		CommandDir:      commandDir,
 	}
@@ -192,6 +195,7 @@ func TestMonitorGracefulShutdown(t *testing.T) {
 		Env:             testEnv(),
 		RestartPolicy:   store.RestartPolicyNo,
 		ScrollbackBytes: 4096,
+		LogDriver:       store.DefaultLogDriver,
 		CommandDir:      commandDir,
 	}
 
@@ -229,6 +233,7 @@ func TestStaleEntryCleanup(t *testing.T) {
 		Env:             testEnv(),
 		RestartPolicy:   store.RestartPolicyNo,
 		ScrollbackBytes: store.DefaultScrollbackBytes,
+		LogDriver:       store.DefaultLogDriver,
 		CommandDir:      "/tmp/cmd/stale-1",
 	}
 	assert.NilError(t, st.InsertCommandConfig("stale-1", "", cfg))

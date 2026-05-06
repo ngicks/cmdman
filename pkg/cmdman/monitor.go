@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc"
 
 	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
+	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	cmdstore "github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -37,7 +38,7 @@ type Monitor struct {
 
 	ptmx    *os.File
 	cmd     *exec.Cmd
-	fanout  *Fanout
+	fanout  *fanout
 	ring    *ringBuffer
 	stdinCh chan []byte
 
@@ -66,7 +67,7 @@ func RunMonitor(ctx context.Context, id string, cfg CmdmanConfig, logger *slog.L
 		DBPath:     dbPath,
 		Config:     cfg,
 		Logger:     logger,
-		fanout:     NewFanout(),
+		fanout:     newFanout(),
 		stdinCh:    make(chan []byte, 64),
 	}
 
@@ -224,6 +225,16 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	}
 	cmd.WaitDelay = 10 * time.Second
 
+	logWriter, err := logdriver.New(m.cfg.LogDriver, m.cfg.LogPath())
+	if err != nil {
+		return -1, fmt.Errorf("open log writer: %w", err)
+	}
+	defer func() {
+		if cerr := logWriter.Close(); cerr != nil {
+			m.Logger.Warn("close log writer", slog.String("error", cerr.Error()))
+		}
+	}()
+
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		return -1, fmt.Errorf("pty start: %w", err)
@@ -242,7 +253,7 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 		m.Logger.Error("update state to running failed", slog.String("error", err.Error()))
 	}
 
-	// PTY read goroutine: read -> ring buffer + fanout.
+	// PTY read goroutine: read -> ring buffer + log file + fanout.
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		buf := make([]byte, 32*1024)
@@ -251,6 +262,9 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 			if n > 0 {
 				data := buf[:n]
 				m.ring.Write(data)
+				if _, werr := logWriter.Write(data); werr != nil {
+					m.Logger.Warn("log writer", slog.String("error", werr.Error()))
+				}
 				m.fanout.Send(data)
 			}
 			if err != nil {

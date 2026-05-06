@@ -29,3 +29,18 @@ func parseLabels(labelSlice []string) (map[string]string, error) {
 	}
 	return labels, nil
 }
+
+func parseLogOpts(opts []string) (map[string]string, error) {
+	if len(opts) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(opts))
+	for _, o := range opts {
+		k, v, ok := strings.Cut(o, "=")
+		if !ok || k == "" {
+			return nil, fmt.Errorf("invalid log-opt format: %s (expected KEY=VALUE)", o)
+		}
+		out[k] = v
+	}
+	return out, nil
+}

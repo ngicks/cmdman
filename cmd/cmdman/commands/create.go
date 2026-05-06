@@ -19,6 +19,8 @@ type createFlags struct {
 	StopSignal      string
 	Rm              bool
 	ScrollbackBytes int
+	LogDriver       string
+	LogOpts         []string
 }
 
 func bindCreateFlags(cmd *cobra.Command, f *createFlags) {
@@ -40,6 +42,18 @@ func bindCreateFlags(cmd *cobra.Command, f *createFlags) {
 		"scrollback-bytes",
 		store.DefaultScrollbackBytes,
 		"Scrollback buffer size in bytes",
+	)
+	flags.StringVar(
+		&f.LogDriver,
+		"log-driver",
+		"",
+		"Log driver: k8s-file, none (default from config)",
+	)
+	flags.StringArrayVar(
+		&f.LogOpts,
+		"log-opt",
+		nil,
+		"Log driver option KEY=VALUE (repeatable)",
 	)
 }
 
@@ -95,6 +109,11 @@ func doCreate(
 		return "", "", err
 	}
 
+	logOpts, err := parseLogOpts(flags.LogOpts)
+	if err != nil {
+		return "", "", err
+	}
+
 	result, err := svc.Create(cmd.Context(), cmdman.CreateRequest{
 		Name:            flags.Name,
 		Dir:             flags.Dir,
@@ -104,6 +123,8 @@ func doCreate(
 		StopSignal:      flags.StopSignal,
 		AutoRemove:      flags.Rm,
 		ScrollbackBytes: flags.ScrollbackBytes,
+		LogDriver:       store.LogDriver(flags.LogDriver),
+		LogOpts:         logOpts,
 		Argv:            args,
 	})
 	if err != nil {
