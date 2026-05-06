@@ -1,9 +1,13 @@
 package commands
 
 import (
+	"context"
+	"os"
+
 	"github.com/spf13/cobra"
 
 	"github.com/ngicks/cmdman/cmd/internal/cmdsignals"
+	"github.com/ngicks/cmdman/cmd/internal/stdiopipe"
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/cli"
 )
@@ -45,17 +49,23 @@ func runAttach(
 		return err
 	}
 
-	ctx := cmd.Context()
-	session, err := svc.OpenAttachSession(ctx, args[0])
+	attachCtx, cancelAttach := context.WithCancel(cmd.Context())
+	defer cancelAttach()
+
+	session, err := svc.OpenAttachSession(attachCtx, args[0])
 	if err != nil {
 		return err
 	}
 	defer func() { _ = session.Close() }()
 
-	return cli.Attach(ctx, session, cli.AttachOptions{
+	return cli.Attach(attachCtx, session, cli.AttachOptions{
 		NoStdin:      flags.NoStdin,
 		SigProxy:     flags.SigProxy,
 		DetachKeys:   flags.DetachKeys,
 		ResetSignals: cmdsignals.ExitSignals[:],
+		Stdin:        os.Stdin,
+		Stdout:       os.Stdout,
+		StdinPipe:    stdiopipe.Stdin(attachCtx),
+		StdoutPipe:   stdiopipe.Stdout(attachCtx),
 	})
 }

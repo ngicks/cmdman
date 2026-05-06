@@ -38,51 +38,70 @@ var forwardedSignals = []os.Signal{
 
 // AttachSession is the minimal interface the attach loop needs from a remote
 // session. *cmdman.Session satisfies it.
+//
+// Close is invoked by Attach on shutdown to unblock a pending Recv. It
+// must be safe to call alongside (or before) any defer Close the caller
+// wires up — the underlying grpc.ClientConn.Close returns an error on a
+// second call but does not panic.
 type AttachSession interface {
 	Recv() ([]byte, error)
 	SendStdin([]byte) error
 	Signal(ctx context.Context, sig int32) error
 	Resize(rows, cols int) error
 	CloseSend() error
+	Close() error
 }
 
-// AttachOptions configure a single attach run.
+// AttachOptions configure a single attach run. All four I/O fields are
+// required; Attach does not fall back to os.Stdin / os.Stdout.
+//
+// Stdin and Stdout are the raw *os.File handles used to inspect and
+// modify terminal state (term.IsTerminal probing, raw-mode toggling,
+// SIGWINCH ioctl). They are never read from or written to as byte
+// streams.
+//
+// StdinPipe and StdoutPipe carry the byte streams. Typically they are
+// cancellable io.Pipe wrappers (see cmd/internal/stdiopipe) around
+// Stdin/Stdout so the attach loop can unblock pending Read/Write calls
+// by closing them.
 type AttachOptions struct {
-	// NoStdin disables stdin forwarding (output-only mode).
-	NoStdin bool
-	// SigProxy forwards signals to the remote command and tracks 3-press
-	// force-exit on SIGINT/SIGTERM.
-	SigProxy bool
-	// DetachKeys is the raw key sequence (e.g. "ctrl-p,ctrl-q") that
-	// detaches the session when typed on stdin. Empty disables detection.
-	DetachKeys string
-	// ResetSignals are signals whose handlers should be cleared before the
-	// attach loop installs its own forwarding handler. Typically the same
-	// set passed to signal.NotifyContext at process start, so that the
-	// attach loop can take exclusive ownership of those signals while it
-	// runs.
+	NoStdin      bool
+	SigProxy     bool
+	DetachKeys   string
 	ResetSignals []os.Signal
-	// Stdin is the input source. Defaults to os.Stdin when nil.
-	Stdin *os.File
-	// Stdout is the output sink. Defaults to os.Stdout when nil.
-	Stdout *os.File
+
+	Stdin      *os.File
+	Stdout     *os.File
+	StdinPipe  io.ReadCloser
+	StdoutPipe io.WriteCloser
+}
+
+func (o AttachOptions) validate() error {
+	switch {
+	case o.Stdin == nil:
+		return errors.New("attach: Stdin is required")
+	case o.Stdout == nil:
+		return errors.New("attach: Stdout is required")
+	case o.StdinPipe == nil:
+		return errors.New("attach: StdinPipe is required")
+	case o.StdoutPipe == nil:
+		return errors.New("attach: StdoutPipe is required")
+	}
+	return nil
 }
 
 // Attach runs the attach loop against session: terminal raw mode, signal
-// forwarding, stdin/stdout multiplexing, and detach-key detection. It
-// returns when the remote stream ends, the user types the detach sequence,
-// the context is cancelled, or the user requests force exit.
+// forwarding, stdin/stdout multiplexing, and detach-key detection.
 //
-// Returns ErrForceExit when the user pressed SIGINT/SIGTERM three times in
-// a row; the terminal has already been restored.
+// All goroutines started by Attach are joined before it returns. Attach
+// triggers their termination by canceling its internal context, closing
+// the session, and closing StdinPipe / StdoutPipe.
+//
+// Returns ErrForceExit when the user pressed SIGINT/SIGTERM three times
+// in a row; the terminal has already been restored.
 func Attach(ctx context.Context, session AttachSession, opts AttachOptions) error {
-	stdin := opts.Stdin
-	if stdin == nil {
-		stdin = os.Stdin
-	}
-	stdout := opts.Stdout
-	if stdout == nil {
-		stdout = os.Stdout
+	if err := opts.validate(); err != nil {
+		return err
 	}
 
 	detachKeys, err := parseDetachKeys(opts.DetachKeys)
@@ -93,7 +112,7 @@ func Attach(ctx context.Context, session AttachSession, opts AttachOptions) erro
 	attachCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	restoreTerminal := setupRawTerminal(opts.NoStdin, stdin, stdout)
+	restoreTerminal := setupRawTerminal(opts.NoStdin, opts.Stdin, opts.Stdout)
 	defer restoreTerminal()
 
 	if len(opts.ResetSignals) > 0 {
@@ -102,8 +121,9 @@ func Attach(ctx context.Context, session AttachSession, opts AttachOptions) erro
 		signal.Reset(opts.ResetSignals...)
 	}
 
-	sendResize(session)
+	sendResize(session, opts.Stdout)
 
+	var wg sync.WaitGroup
 	forceExitCh := make(chan struct{})
 
 	if opts.SigProxy {
@@ -111,13 +131,19 @@ func Attach(ctx context.Context, session AttachSession, opts AttachOptions) erro
 		signal.Notify(sigCh, forwardedSignals...)
 		defer signal.Stop(sigCh)
 
-		go handleAttachSignals(attachCtx, sigCh, session, forceExitCh)
+		wg.Go(func() {
+			handleAttachSignals(attachCtx, sigCh, session, opts.Stdout, forceExitCh)
+		})
 	}
 
 	errCh := make(chan error, 2)
-	go pumpStreamToStdout(session, stdout, errCh)
+	wg.Go(func() {
+		pumpStreamToStdout(session, opts.StdoutPipe, errCh)
+	})
 	if !opts.NoStdin {
-		go pumpStdinToStream(stdin, session, detachKeys, errCh)
+		wg.Go(func() {
+			pumpStdinToStream(opts.StdinPipe, session, detachKeys, errCh)
+		})
 	}
 
 	var exitErr error
@@ -131,7 +157,13 @@ func Attach(ctx context.Context, session AttachSession, opts AttachOptions) erro
 	case <-ctx.Done():
 	}
 
-	cancel()
+	// Trigger goroutine termination, then join them all before returning.
+	cancel()                    // signal handler exits via attachCtx.Done
+	_ = session.Close()         // pumpStreamToStdout: Recv errors out
+	_ = opts.StdinPipe.Close()  // pumpStdinToStream: Read returns io.EOF / closed-pipe
+	_ = opts.StdoutPipe.Close() // unblocks any pending Write in pumpStreamToStdout
+	wg.Wait()
+
 	_ = session.CloseSend()
 	restoreTerminal()
 
@@ -175,6 +207,7 @@ func handleAttachSignals(
 	ctx context.Context,
 	sigCh <-chan os.Signal,
 	session AttachSession,
+	stdout *os.File,
 	forceExitCh chan<- struct{},
 ) {
 	var once sync.Once
@@ -191,7 +224,7 @@ func handleAttachSignals(
 			}
 
 			if sigNum == syscall.SIGWINCH {
-				sendResize(session)
+				sendResize(session, stdout)
 				forceCount = 0
 				continue
 			}
@@ -255,8 +288,8 @@ func pumpStdinToStream(
 	}
 }
 
-func sendResize(session AttachSession) {
-	rows, cols := terminalSizeImpl()
+func sendResize(session AttachSession, stdout *os.File) {
+	rows, cols := terminalSize(stdout)
 	if rows > 0 && cols > 0 {
 		_ = session.Resize(rows, cols)
 	}
