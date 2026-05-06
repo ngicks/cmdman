@@ -66,6 +66,7 @@ It simply starts a monitor process and the monitor damonizes itself and starts s
 	signalCmd(cmd, &rootConfig)
 	startCmd(cmd, &rootConfig)
 	stopCmd(cmd, &rootConfig)
+	waitCmd(cmd, &rootConfig)
 
 	return cmd
 }
