@@ -42,3 +42,7 @@ apm_modules/
 /.github/skills
 
 /bin
+/cmdman
+
+/CLAUDE_*.md
+/CODEX_*.md
