@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"reflect"
@@ -15,30 +14,8 @@ const (
 	DefaultLsHeader    = "ID\tNAME\tSTATE\tEXIT CODE\tCOMMAND"
 	DefaultLsRowFormat = "{{slice .ID 0 12}}\t{{.Name}}\t{{.State}}\t" +
 		"{{if .ExitCode}}{{printf \"%d\" .ExitCode}}{{else}}-{{end}}\t" +
-		"{{command .}}"
+		"{{command .ConfigJSON}}"
 )
-
-const commandMaxLen = 40
-
-var lsFuncMap = template.FuncMap{
-	"json": func(v any) string {
-		b, err := json.Marshal(v)
-		if err != nil {
-			return fmt.Sprintf("ERR: %v", err)
-		}
-		return string(b)
-	},
-	"command": func(e store.CommandEntry) string {
-		if e.ConfigJSON == nil || len(e.ConfigJSON.Argv) == 0 {
-			return "-"
-		}
-		s := strings.Join(e.ConfigJSON.Argv, " ")
-		if len(s) > commandMaxLen {
-			return s[:commandMaxLen-3] + "..."
-		}
-		return s
-	},
-}
 
 // RenderEntries renders the command entries either as ID-only lines (quiet
 // mode) or as a tabular view driven by a Go text/template format string.
@@ -57,7 +34,7 @@ func RenderEntries(out io.Writer, entries []store.CommandEntry, quiet bool, form
 		fmt.Fprintln(out, DefaultLsHeader)
 	}
 
-	tmpl, err := template.New("format").Funcs(lsFuncMap).Parse(format)
+	tmpl, err := template.New("format").Funcs(templateFuncMap).Parse(format)
 	if err != nil {
 		return fmt.Errorf("parse format template: %w", err)
 	}
@@ -79,7 +56,8 @@ func FormatUsage() string {
 		fields = append(fields, fmt.Sprintf(".%s (%s)", f.Name, f.Type))
 	}
 	return fmt.Sprintf(
-		"Go text/template string. Available fields:\n  %s\nTemplate functions: json",
+		"Go text/template string. Available fields:\n  %s\nTemplate functions: %s",
 		strings.Join(fields, ", "),
+		templateFuncList(),
 	)
 }

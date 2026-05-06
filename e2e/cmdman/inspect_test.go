@@ -1,8 +1,67 @@
 package cmdman_test
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 )
+
+func TestInspect_FormatTemplate(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	id := env.run(ctx, "run", "-n", "fmt-tmpl", "--", "/bin/sh", "-c", "exit 5")
+	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
+	env.waitForState(ctx, "fmt-tmpl", "exited", defaultTimeout)
+
+	stdout := env.run(ctx, "inspect", "--format", "{{.Name}} {{.State}}", "fmt-tmpl")
+	if stdout != "fmt-tmpl exited" {
+		t.Errorf("expected %q, got %q", "fmt-tmpl exited", stdout)
+	}
+}
+
+func TestInspect_FormatJSONFunc(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	id := env.run(ctx, "run", "-n", "fmt-json", "--", "/bin/sh", "-c", "echo done")
+	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
+	env.waitForState(ctx, "fmt-json", "exited", defaultTimeout)
+
+	stdout := env.run(ctx, "inspect", "--format", "{{json .Config.Argv}}", "fmt-json")
+	var argv []string
+	if err := json.Unmarshal([]byte(stdout), &argv); err != nil {
+		t.Fatalf("parse json output: %v\nraw: %s", err, stdout)
+	}
+	if len(argv) < 3 || argv[0] != "/bin/sh" || argv[1] != "-c" || argv[2] != "echo done" {
+		t.Errorf("unexpected argv: %v", argv)
+	}
+}
+
+func TestInspect_DefaultStillJSON(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	id := env.run(ctx, "run", "-n", "fmt-default", "--", "/bin/sh", "-c", "echo done")
+	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
+	env.waitForState(ctx, "fmt-default", "exited", defaultTimeout)
+
+	stdout := env.run(ctx, "inspect", "fmt-default")
+	// Pretty-printed JSON should contain a newline and the indented "id" key.
+	if !strings.Contains(stdout, "\n  \"id\":") {
+		t.Errorf("expected indented JSON output, got: %s", stdout)
+	}
+	var info map[string]any
+	if err := json.Unmarshal([]byte(stdout), &info); err != nil {
+		t.Fatalf("default output is not valid JSON: %v\nraw: %s", err, stdout)
+	}
+	if info["name"] != "fmt-default" {
+		t.Errorf("expected name=fmt-default, got %v", info["name"])
+	}
+}
 
 func TestInspect_BasicFields(t *testing.T) {
 	t.Parallel()
