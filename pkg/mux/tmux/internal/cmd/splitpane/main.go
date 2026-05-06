@@ -24,7 +24,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/ngicks/crabswarm/pkg/mux/tmux"
+	"github.com/ngicks/cmdman/pkg/mux/tmux"
 )
 
 func parseKeys(s string) []string {

@@ -122,7 +122,7 @@ const file_crabhook_v1_audit_service_proto_rawDesc = "" +
 	"\x1cReportHookInputEventResponse2{\n" +
 	"\fAuditService\x12k\n" +
 	"\x14ReportHookInputEvent\x12(.crabhook.v1.ReportHookInputEventRequest\x1a).crabhook.v1.ReportHookInputEventResponseB\xba\x01\n" +
-	"\x0fcom.crabhook.v1B\x11AuditServiceProtoP\x01ZGgithub.com/ngicks/crabswarm/pkg/api/gen/proto/go/crabhook/v1;crabhookv1\xa2\x02\x03CXX\xaa\x02\vCrabhook.V1\xca\x02\vCrabhook\\V1\xe2\x02\x17Crabhook\\V1\\GPBMetadata\xea\x02\fCrabhook::V1b\x06proto3"
+	"\x0fcom.crabhook.v1B\x11AuditServiceProtoP\x01ZGgithub.com/ngicks/cmdman/pkg/api/gen/proto/go/crabhook/v1;crabhookv1\xa2\x02\x03CXX\xaa\x02\vCrabhook.V1\xca\x02\vCrabhook\\V1\xe2\x02\x17Crabhook\\V1\\GPBMetadata\xea\x02\fCrabhook::V1b\x06proto3"
 
 var (
 	file_crabhook_v1_audit_service_proto_rawDescOnce sync.Once

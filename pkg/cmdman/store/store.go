@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ngicks/crabswarm/pkg/cmdman/store/internal/migrations"
+	"github.com/ngicks/cmdman/pkg/cmdman/store/internal/migrations"
 	_ "modernc.org/sqlite"
 )
 

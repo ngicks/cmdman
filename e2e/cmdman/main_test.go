@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ngicks/crabswarm/pkg/cmdman"
+	"github.com/ngicks/cmdman/pkg/cmdman"
 )
 
 func must(t *testing.T, err error) {

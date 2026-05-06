@@ -12,8 +12,8 @@ import (
 	"syscall"
 
 	"github.com/moby/term"
-	cmdsignals "github.com/ngicks/crabswarm/cmd/internal/signals"
-	"github.com/ngicks/crabswarm/pkg/cmdman"
+	cmdsignals "github.com/ngicks/cmdman/cmd/internal/signals"
+	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/spf13/cobra"
 )
 

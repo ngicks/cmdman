@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ngicks/crabswarm/pkg/mux"
+	"github.com/ngicks/cmdman/pkg/mux"
 )
 
 // Config configures a tmux session.

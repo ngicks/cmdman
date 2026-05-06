@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/creack/pty/v2"
-	"github.com/ngicks/crabswarm/pkg/cmdman"
+	"github.com/ngicks/cmdman/pkg/cmdman"
 )
 
 func TestAttach_DetachKeysExitWithoutStoppingCommand(t *testing.T) {

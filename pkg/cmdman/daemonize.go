@@ -7,7 +7,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ngicks/crabswarm/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
 // SpawnMonitor starts the monitor as a detached process via re-exec.

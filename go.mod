@@ -1,4 +1,4 @@
-module github.com/ngicks/crabswarm
+module github.com/ngicks/cmdman
 
 go 1.26.0
 

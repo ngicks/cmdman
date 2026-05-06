@@ -16,8 +16,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	cmdmanv1pb "github.com/ngicks/crabswarm/pkg/api/gen/proto/go/cmdman/v1"
-	"github.com/ngicks/crabswarm/pkg/cmdman/store"
+	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
+	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
 type Service struct {

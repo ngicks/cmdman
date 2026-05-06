@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ngicks/crabswarm/pkg/mux"
+	"github.com/ngicks/cmdman/pkg/mux"
 )
 
 // parseWindows parses tmux list-windows output formatted as "#{window_id}\t#{window_index}\t#{window_name}".

@@ -662,8 +662,8 @@ const file_cmdman_v1_cmdman_proto_rawDesc = "" +
 	"WriteStdin\x12\x1c.cmdman.v1.WriteStdinRequest\x1a\x1d.cmdman.v1.WriteStdinResponse\x12=\n" +
 	"\x06Signal\x12\x18.cmdman.v1.SignalRequest\x1a\x19.cmdman.v1.SignalResponse\x127\n" +
 	"\x04Stop\x12\x16.cmdman.v1.StopRequest\x1a\x17.cmdman.v1.StopResponse\x12=\n" +
-	"\x06Status\x12\x18.cmdman.v1.StatusRequest\x1a\x19.cmdman.v1.StatusResponseB\xa6\x01\n" +
-	"\rcom.cmdman.v1B\vCmdmanProtoP\x01ZCgithub.com/ngicks/crabswarm/pkg/api/gen/proto/go/cmdman/v1;cmdmanv1\xa2\x02\x03CXX\xaa\x02\tCmdman.V1\xca\x02\tCmdman\\V1\xe2\x02\x15Cmdman\\V1\\GPBMetadata\xea\x02\n" +
+	"\x06Status\x12\x18.cmdman.v1.StatusRequest\x1a\x19.cmdman.v1.StatusResponseB\xa3\x01\n" +
+	"\rcom.cmdman.v1B\vCmdmanProtoP\x01Z@github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1;cmdmanv1\xa2\x02\x03CXX\xaa\x02\tCmdman.V1\xca\x02\tCmdman\\V1\xe2\x02\x15Cmdman\\V1\\GPBMetadata\xea\x02\n" +
 	"Cmdman::V1b\x06proto3"
 
 var (

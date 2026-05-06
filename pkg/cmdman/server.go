@@ -6,8 +6,8 @@ import (
 	"syscall"
 	"time"
 
-	pb "github.com/ngicks/crabswarm/pkg/api/gen/proto/go/cmdman/v1"
-	"github.com/ngicks/crabswarm/pkg/cmdman/store"
+	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
+	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
 type monitorServer struct {

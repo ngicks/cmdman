@@ -85,7 +85,10 @@ func (c *CommandConfigJSON) ValidateCreate() error {
 			return fmt.Errorf("command config: invalid stop_signal %q: %w", c.StopSignal, err)
 		}
 	case c.ScrollbackBytes <= 0:
-		return fmt.Errorf("command config: scrollback_bytes must be positive: %d", c.ScrollbackBytes)
+		return fmt.Errorf(
+			"command config: scrollback_bytes must be positive: %d",
+			c.ScrollbackBytes,
+		)
 	}
 	return nil
 }
@@ -129,7 +132,7 @@ func ReadCommandConfig(commandDir string) (*CommandConfigJSON, error) {
 }
 
 const (
-	AnnotationAutoRemove = "crabswarm.auto-remove"
+	AnnotationAutoRemove = "cmdman.auto-remove"
 )
 
 const DefaultScrollbackBytes = 1048576 // 1 MiB

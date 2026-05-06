@@ -19,8 +19,8 @@ import (
 	"github.com/creack/pty/v2"
 	"google.golang.org/grpc"
 
-	pb "github.com/ngicks/crabswarm/pkg/api/gen/proto/go/cmdman/v1"
-	cmdstore "github.com/ngicks/crabswarm/pkg/cmdman/store"
+	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
+	cmdstore "github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
 // Monitor is the per-command monitor process.
@@ -87,7 +87,12 @@ func RunMonitor(ctx context.Context, id string, cfg CmdmanConfig, logger *slog.L
 
 	// Update state to starting.
 	m.stateJSON.MonitorPID = os.Getpid()
-	if err := m.store.UpdateCommandState(m.ID, cmdstore.StateStarting, nil, m.stateJSON); err != nil {
+	if err := m.store.UpdateCommandState(
+		m.ID,
+		cmdstore.StateStarting,
+		nil,
+		m.stateJSON,
+	); err != nil {
 		return fmt.Errorf("update state to starting: %w", err)
 	}
 
@@ -114,7 +119,12 @@ func RunMonitor(ctx context.Context, id string, cfg CmdmanConfig, logger *slog.L
 		return err
 	}
 	m.stateJSON.SocketPath = m.sockPath
-	if err := m.store.UpdateCommandState(m.ID, cmdstore.StateStarting, nil, m.stateJSON); err != nil {
+	if err := m.store.UpdateCommandState(
+		m.ID,
+		cmdstore.StateStarting,
+		nil,
+		m.stateJSON,
+	); err != nil {
 		return fmt.Errorf("update state with socket: %w", err)
 	}
 
@@ -223,7 +233,12 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 
 	// Update state to running.
 	m.stateJSON.StartedAt = time.Now().UTC().Format(time.RFC3339)
-	if err := m.store.UpdateCommandState(m.ID, cmdstore.StateRunning, nil, m.stateJSON); err != nil {
+	if err := m.store.UpdateCommandState(
+		m.ID,
+		cmdstore.StateRunning,
+		nil,
+		m.stateJSON,
+	); err != nil {
 		m.Logger.Error("update state to running failed", slog.String("error", err.Error()))
 	}
 
@@ -409,7 +424,7 @@ func CleanStaleEntries(st *cmdstore.Store, cfg CmdmanConfig) error {
 }
 
 // listenMonitorSocket is already defined above, but we need a helper for the gRPC part.
-// Using the existing listenUnixDomainSocket pattern from pkg/crabswarm/server.go.
+// Using the existing listenUnixDomainSocket pattern from pkg/cmdman/server.go.
 var _ io.Closer = (*Monitor)(nil) // ensure Monitor satisfies io.Closer if needed
 
 // Close is not needed as cleanup happens in RunMonitor defers.

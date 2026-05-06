@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ngicks/crabswarm/pkg/mux"
+	"github.com/ngicks/cmdman/pkg/mux"
 )
 
 // tmuxPath resolves the tmux binary. Fatal (not skip) if not found.

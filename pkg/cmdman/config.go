@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ngicks/crabswarm/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
 const (

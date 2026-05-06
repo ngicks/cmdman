@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ngicks/crabswarm/pkg/mux"
+	"github.com/ngicks/cmdman/pkg/mux"
 )
 
 // window implements mux.Window for a tmux window.

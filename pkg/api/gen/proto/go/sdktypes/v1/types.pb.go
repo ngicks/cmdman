@@ -16144,7 +16144,7 @@ const file_sdktypes_v1_types_proto_rawDesc = "" +
 	"*PERMISSION_REQUEST_DECISION_BEHAVIOR_ALLOW\x10\x01\x12-\n" +
 	")PERMISSION_REQUEST_DECISION_BEHAVIOR_DENY\x10\x02B\xb3\x01\n" +
 	"\x0fcom.sdktypes.v1B\n" +
-	"TypesProtoP\x01ZGgithub.com/ngicks/crabswarm/pkg/api/gen/proto/go/sdktypes/v1;sdktypesv1\xa2\x02\x03SXX\xaa\x02\vSdktypes.V1\xca\x02\vSdktypes\\V1\xe2\x02\x17Sdktypes\\V1\\GPBMetadata\xea\x02\fSdktypes::V1b\x06proto3"
+	"TypesProtoP\x01ZGgithub.com/ngicks/cmdman/pkg/api/gen/proto/go/sdktypes/v1;sdktypesv1\xa2\x02\x03SXX\xaa\x02\vSdktypes.V1\xca\x02\vSdktypes\\V1\xe2\x02\x17Sdktypes\\V1\\GPBMetadata\xea\x02\fSdktypes::V1b\x06proto3"
 
 var (
 	file_sdktypes_v1_types_proto_rawDescOnce sync.Once

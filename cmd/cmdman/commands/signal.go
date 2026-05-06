@@ -3,7 +3,7 @@ package commands
 import (
 	"fmt"
 
-	"github.com/ngicks/crabswarm/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"github.com/spf13/cobra"
 )
 

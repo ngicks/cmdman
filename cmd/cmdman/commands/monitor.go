@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/ngicks/crabswarm/pkg/cmdman"
+	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/spf13/cobra"
 )
 

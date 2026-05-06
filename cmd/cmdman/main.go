@@ -6,9 +6,9 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/ngicks/crabswarm/cmd/cmdman/commands"
-	cmdsignals "github.com/ngicks/crabswarm/cmd/internal/signals"
-	"github.com/ngicks/crabswarm/pkg/cmdman"
+	"github.com/ngicks/cmdman/cmd/cmdman/commands"
+	cmdsignals "github.com/ngicks/cmdman/cmd/internal/signals"
+	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/go-common/contextkey"
 )
 

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/ngicks/crabswarm/pkg/mux"
+	"github.com/ngicks/cmdman/pkg/mux"
 )
 
 // pane implements mux.Pane for a tmux pane.

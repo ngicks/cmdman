@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ngicks/crabswarm/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"gotest.tools/v3/assert"
 )
 

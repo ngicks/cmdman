@@ -3,7 +3,7 @@ package cmdman
 import (
 	"context"
 
-	cmdmanv1pb "github.com/ngicks/crabswarm/pkg/api/gen/proto/go/cmdman/v1"
+	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 	"google.golang.org/grpc"
 )
 

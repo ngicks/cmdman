@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	pb "github.com/ngicks/crabswarm/pkg/api/gen/proto/go/cmdman/v1"
+	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 )
 
 func init() {
