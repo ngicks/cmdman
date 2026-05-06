@@ -3,31 +3,42 @@ package commands
 import (
 	"fmt"
 
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"github.com/spf13/cobra"
+
+	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
-func init() {
-	rootCmd.AddCommand(signalCmd)
-	signalCmd.Flags().StringP("signal", "s", "", "Signal to send")
-	_ = signalCmd.MarkFlagRequired("signal")
+func signalCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+	var flagSignal string
+
+	cmd := &cobra.Command{
+		Use:   "signal -s SIGNAL ID|NAME [ID|NAME...]",
+		Short: "Send a raw signal to a running command",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSignal(cmd, args, rootCfg, flagSignal)
+		},
+	}
+
+	cmd.Flags().StringVarP(&flagSignal, "signal", "s", "", "Signal to send")
+	_ = cmd.MarkFlagRequired("signal")
+
+	parent.AddCommand(cmd)
 }
 
-var signalCmd = &cobra.Command{
-	Use:   "signal -s SIGNAL ID|NAME [ID|NAME...]",
-	Short: "Send a raw signal to a running command",
-	Args:  cobra.MinimumNArgs(1),
-	RunE:  runSignal,
-}
-
-func runSignal(cmd *cobra.Command, args []string) error {
-	sigName, _ := cmd.Flags().GetString("signal")
+func runSignal(
+	cmd *cobra.Command,
+	args []string,
+	rootCfg *cmdman.CmdmanConfig,
+	sigName string,
+) error {
 	sig, _, err := store.ParseSignal(sigName)
 	if err != nil {
 		return err
 	}
 
-	svc, err := cmdmanService()
+	svc, err := cmdmanService(rootCfg)
 	if err != nil {
 		return err
 	}

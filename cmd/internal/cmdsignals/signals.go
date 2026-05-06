@@ -1,4 +1,5 @@
-package signals
+// Package cmdsignals lists the OS signals that should cancel top-level CLI execution.
+package cmdsignals
 
 import (
 	"os"

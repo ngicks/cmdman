@@ -1,4 +1,4 @@
-package commands
+package cli
 
 import (
 	"os"
@@ -6,7 +6,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func getTerminalSizeImpl() (rows, cols int) {
+func terminalSizeImpl() (rows, cols int) {
 	ws, err := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ)
 	if err != nil {
 		return 0, 0

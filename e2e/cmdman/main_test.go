@@ -69,6 +69,7 @@ type testEnv struct {
 	t          *testing.T
 	dataHome   string
 	runtimeDir string
+	confPath   string
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -82,6 +83,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		t:          t,
 		dataHome:   filepath.Join(base, "data"),
 		runtimeDir: filepath.Join(base, "run"),
+		confPath:   filepath.Join(base, "no-such-config.json"),
 	}
 	must(t, os.MkdirAll(env.dataHome, 0o755))
 	must(t, os.MkdirAll(env.runtimeDir, 0o755))
@@ -97,6 +99,7 @@ func (e *testEnv) exec(ctx context.Context, args ...string) (string, string, err
 		os.Environ(),
 		cmdman.ENV_CMDMAN_DATA_DIR+"="+e.dataHome,
 		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+e.runtimeDir,
+		cmdman.ENV_CMDMAN_CONF+"="+e.confPath,
 	)
 	// WaitDelay ensures cmd.Wait returns even if spawned child processes
 	// hold stdout/stderr pipe FDs open (e.g. the detached monitor).
@@ -174,7 +177,7 @@ func (e *testEnv) lsJSON(ctx context.Context, extraArgs ...string) []map[string]
 		return nil
 	}
 	var result []map[string]any
-	for _, line := range strings.Split(stdout, "\n") {
+	for line := range strings.SplitSeq(stdout, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

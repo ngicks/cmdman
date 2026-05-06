@@ -3,37 +3,70 @@ package commands
 import (
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
-	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(createCmd)
-	addCreateFlags(createCmd)
+// createFlags holds all flags shared between `create` and `run`.
+type createFlags struct {
+	Name            string
+	Dir             string
+	Env             []string
+	Label           []string
+	Restart         string
+	StopSignal      string
+	Rm              bool
+	ScrollbackBytes int
 }
 
-func addCreateFlags(cmd *cobra.Command) {
-	f := cmd.Flags()
-	f.StringP("name", "n", "", "Human-readable unique name")
-	f.StringP("dir", "C", "", "Working directory for the command")
-	f.StringArrayP("env", "E", nil, "Environment variable KEY=VALUE (repeatable)")
-	f.StringArrayP("label", "l", nil, "Metadata label KEY=VALUE (repeatable)")
-	f.String("restart", string(store.RestartPolicyNo), "Restart policy: no, on-failure, always")
-	f.String("stop-signal", store.DefaultStopSignal, "Default stop signal")
-	f.Bool("rm", false, "Auto-remove on exit")
-	f.Int("scrollback-bytes", store.DefaultScrollbackBytes, "Scrollback buffer size in bytes")
+func bindCreateFlags(cmd *cobra.Command, f *createFlags) {
+	flags := cmd.Flags()
+	flags.StringVarP(&f.Name, "name", "n", "", "Human-readable unique name")
+	flags.StringVarP(&f.Dir, "dir", "C", "", "Working directory for the command")
+	flags.StringArrayVarP(&f.Env, "env", "E", nil, "Environment variable KEY=VALUE (repeatable)")
+	flags.StringArrayVarP(&f.Label, "label", "l", nil, "Metadata label KEY=VALUE (repeatable)")
+	flags.StringVar(
+		&f.Restart,
+		"restart",
+		string(store.RestartPolicyNo),
+		"Restart policy: no, on-failure, always",
+	)
+	flags.StringVar(&f.StopSignal, "stop-signal", store.DefaultStopSignal, "Default stop signal")
+	flags.BoolVar(&f.Rm, "rm", false, "Auto-remove on exit")
+	flags.IntVar(
+		&f.ScrollbackBytes,
+		"scrollback-bytes",
+		store.DefaultScrollbackBytes,
+		"Scrollback buffer size in bytes",
+	)
 }
 
-var createCmd = &cobra.Command{
-	Use:   "create [flags] -- COMMAND [ARGS...]",
-	Short: "Create a new command without starting it",
-	Args:  cobra.MinimumNArgs(1),
-	RunE:  runCreate,
+func createCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+	var flags createFlags
+
+	cmd := &cobra.Command{
+		Use:   "create [flags] -- COMMAND [ARGS...]",
+		Short: "Create a new command without starting it",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCreate(cmd, args, rootCfg, &flags)
+		},
+	}
+
+	bindCreateFlags(cmd, &flags)
+
+	parent.AddCommand(cmd)
 }
 
-func runCreate(cmd *cobra.Command, args []string) error {
-	id, name, err := doCreate(cmd, args)
+func runCreate(
+	cmd *cobra.Command,
+	args []string,
+	rootCfg *cmdman.CmdmanConfig,
+	flags *createFlags,
+) error {
+	id, name, err := doCreate(cmd, args, rootCfg, flags)
 	if err != nil {
 		return err
 	}
@@ -46,36 +79,31 @@ func runCreate(cmd *cobra.Command, args []string) error {
 }
 
 // doCreate creates a command entry in the store and returns the generated ID and name.
-func doCreate(cmd *cobra.Command, args []string) (id, name string, err error) {
-	svc, err := cmdmanService()
+func doCreate(
+	cmd *cobra.Command,
+	args []string,
+	rootCfg *cmdman.CmdmanConfig,
+	flags *createFlags,
+) (id, name string, err error) {
+	svc, err := cmdmanService(rootCfg)
 	if err != nil {
 		return "", "", err
 	}
 
-	f := cmd.Flags()
-	name, _ = f.GetString("name")
-	dir, _ := f.GetString("dir")
-	envSlice, _ := f.GetStringArray("env")
-	labelSlice, _ := f.GetStringArray("label")
-	restartPolicy, _ := f.GetString("restart")
-	stopSignal, _ := f.GetString("stop-signal")
-	autoRemove, _ := f.GetBool("rm")
-	scrollbackBytes, _ := f.GetInt("scrollback-bytes")
-
-	labels, err := parseLabels(labelSlice)
+	labels, err := parseLabels(flags.Label)
 	if err != nil {
 		return "", "", err
 	}
 
 	result, err := svc.Create(cmd.Context(), cmdman.CreateRequest{
-		Name:            name,
-		Dir:             dir,
-		Env:             envSlice,
+		Name:            flags.Name,
+		Dir:             flags.Dir,
+		Env:             flags.Env,
 		Labels:          labels,
-		RestartPolicy:   store.RestartPolicy(restartPolicy),
-		StopSignal:      stopSignal,
-		AutoRemove:      autoRemove,
-		ScrollbackBytes: scrollbackBytes,
+		RestartPolicy:   store.RestartPolicy(flags.Restart),
+		StopSignal:      flags.StopSignal,
+		AutoRemove:      flags.Rm,
+		ScrollbackBytes: flags.ScrollbackBytes,
 		Argv:            args,
 	})
 	if err != nil {

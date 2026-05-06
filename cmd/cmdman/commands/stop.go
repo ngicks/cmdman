@@ -4,34 +4,48 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
-	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(stopCmd)
-	stopCmd.Flags().StringP("signal", "s", "", "Signal to send before waiting for shutdown")
-	stopCmd.Flags().IntP("timeout", "t", 10, "Seconds to wait before sending SIGKILL")
+func stopCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+	var (
+		flagSignal  string
+		flagTimeout int
+	)
+
+	cmd := &cobra.Command{
+		Use:   "stop [flags] ID|NAME [ID|NAME...]",
+		Short: "Gracefully stop a running command",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runStop(cmd, args, rootCfg, flagSignal, flagTimeout)
+		},
+	}
+
+	cmd.Flags().
+		StringVarP(&flagSignal, "signal", "s", "", "Signal to send before waiting for shutdown")
+	cmd.Flags().IntVarP(&flagTimeout, "timeout", "t", 10, "Seconds to wait before sending SIGKILL")
+
+	parent.AddCommand(cmd)
 }
 
-var stopCmd = &cobra.Command{
-	Use:   "stop [flags] ID|NAME [ID|NAME...]",
-	Short: "Gracefully stop a running command",
-	Args:  cobra.MinimumNArgs(1),
-	RunE:  runStop,
-}
-
-func runStop(cmd *cobra.Command, args []string) error {
-	sigName, _ := cmd.Flags().GetString("signal")
-	timeoutSeconds, _ := cmd.Flags().GetInt("timeout")
+func runStop(
+	cmd *cobra.Command,
+	args []string,
+	rootCfg *cmdman.CmdmanConfig,
+	sigName string,
+	timeoutSeconds int,
+) error {
 	if sigName != "" {
 		if _, _, err := store.ParseSignal(sigName); err != nil {
 			return err
 		}
 	}
 
-	svc, err := cmdmanService()
+	svc, err := cmdmanService(rootCfg)
 	if err != nil {
 		return err
 	}

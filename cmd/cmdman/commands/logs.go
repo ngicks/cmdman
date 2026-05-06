@@ -10,24 +10,28 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
+	"github.com/ngicks/cmdman/pkg/cmdman"
 )
 
-func init() {
-	rootCmd.AddCommand(logsCmd)
-	logsCmd.Flags().BoolP("follow", "f", false, "Follow output")
+func logsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+	var flagFollow bool
+
+	cmd := &cobra.Command{
+		Use:   "logs [flags] ID|NAME",
+		Short: "Show command output from scrollback buffer",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runLogs(cmd, args, rootCfg, flagFollow)
+		},
+	}
+
+	cmd.Flags().BoolVarP(&flagFollow, "follow", "f", false, "Follow output")
+
+	parent.AddCommand(cmd)
 }
 
-var logsCmd = &cobra.Command{
-	Use:   "logs [flags] ID|NAME",
-	Short: "Show command output from scrollback buffer",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runLogs,
-}
-
-func runLogs(cmd *cobra.Command, args []string) error {
-	follow, _ := cmd.Flags().GetBool("follow")
-
-	svc, err := cmdmanService()
+func runLogs(cmd *cobra.Command, args []string, rootCfg *cmdman.CmdmanConfig, follow bool) error {
+	svc, err := cmdmanService(rootCfg)
 	if err != nil {
 		return err
 	}
@@ -43,7 +47,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("connect to monitor: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client := pb.NewCommandMonitorServiceClient(conn)
 	stream, err := client.Logs(cmd.Context(), &pb.LogsRequest{Follow: follow})
@@ -59,6 +63,6 @@ func runLogs(cmd *cobra.Command, args []string) error {
 			}
 			return err
 		}
-		os.Stdout.Write(msg.Data)
+		_, _ = os.Stdout.Write(msg.Data)
 	}
 }

@@ -4,30 +4,44 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/ngicks/cmdman/pkg/cmdman"
 )
 
-func init() {
-	rootCmd.AddCommand(runCmd)
-	addCreateFlags(runCmd)
-	runCmd.Flags().Bool("attach", false, "Attach after the command reaches running")
+func runCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+	var (
+		flags      createFlags
+		flagAttach bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "run [flags] -- COMMAND [ARGS...]",
+		Short: "Create and start a new command",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRun(cmd, args, rootCfg, &flags, flagAttach)
+		},
+	}
+
+	bindCreateFlags(cmd, &flags)
+	cmd.Flags().BoolVar(&flagAttach, "attach", false, "Attach after the command reaches running")
+
+	parent.AddCommand(cmd)
 }
 
-var runCmd = &cobra.Command{
-	Use:   "run [flags] -- COMMAND [ARGS...]",
-	Short: "Create and start a new command",
-	Args:  cobra.MinimumNArgs(1),
-	RunE:  runRun,
-}
-
-func runRun(cmd *cobra.Command, args []string) error {
-	attach, _ := cmd.Flags().GetBool("attach")
-
-	id, name, err := doCreate(cmd, args)
+func runRun(
+	cmd *cobra.Command,
+	args []string,
+	rootCfg *cmdman.CmdmanConfig,
+	flags *createFlags,
+	attach bool,
+) error {
+	id, name, err := doCreate(cmd, args, rootCfg, flags)
 	if err != nil {
 		return err
 	}
 
-	if err := doStart(cmd, id); err != nil {
+	if err := doStart(cmd, id, rootCfg); err != nil {
 		return err
 	}
 
@@ -38,7 +52,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(cmd.OutOrStdout(), displayName)
 
 	if attach {
-		svc, err := cmdmanService()
+		svc, err := cmdmanService(rootCfg)
 		if err != nil {
 			return err
 		}
@@ -47,7 +61,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if endpoint.SocketPath != "" {
-			return runAttach(cmd, id)
+			return runAttach(cmd, []string{id}, rootCfg, attachFlags{
+				DetachKeys: "ctrl-p,ctrl-q",
+				SigProxy:   true,
+			})
 		}
 	}
 

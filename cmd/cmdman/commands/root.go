@@ -2,42 +2,70 @@ package commands
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
+	"os"
 
-	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/go-common/contextkey"
 	"github.com/spf13/cobra"
+
+	"github.com/ngicks/cmdman/internal/loggerfactory"
+	"github.com/ngicks/cmdman/pkg/cmdman"
 )
 
-// Execute runs the root command with the given context.
-func Execute(ctx context.Context, cfg cmdman.CmdmanConfig) error {
-	rootConfig = cfg
-	return rootCmd.ExecuteContext(ctx)
+func Execute(ctx context.Context) error {
+	return rootCmd().ExecuteContext(ctx)
 }
 
-var rootConfig cmdman.CmdmanConfig
+func rootCmd() *cobra.Command {
+	var (
+		logConfig  *loggerfactory.Config
+		rootConfig cmdman.CmdmanConfig
+	)
 
-var rootCmd = &cobra.Command{
-	Use:   "cmdman",
-	Short: "command manager",
-	Long: `cmdman, the command manager, is a simple command daemon.
+	cmd := &cobra.Command{
+		Use:   "cmdman",
+		Short: "command manager",
+		Long: `cmdman, the command manager, is a simple command daemon.
 It's the podman without pods, or the tmux without terminals.
 It simply starts a monitor process and the monitor damonizes itself and starts specified commands.`,
-	SilenceUsage: true,
-}
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			if err := loggerfactory.ReadEnv(logConfig, "cmdman", os.Environ()); err != nil {
+				fmt.Fprintln(os.Stderr, "warning:", err)
+			}
+			logger := loggerfactory.BuildLogger(logConfig)
+			slog.SetDefault(logger)
+			cmd.SetContext(contextkey.WithSlogLogger(cmd.Context(), logger))
+		},
+		RunE: runRoot,
+	}
 
-func init() {
-	flags := rootCmd.PersistentFlags()
+	logConfig = loggerfactory.RegisterFlags(cmd)
+
+	flags := cmd.PersistentFlags()
 	flags.StringVar(&rootConfig.DataDir, "data-dir", "", "Cmdman data directory")
 	flags.StringVar(&rootConfig.RuntimeDir, "runtime-dir", "", "Cmdman runtime directory")
+
+	attachCmd(cmd, &rootConfig)
+	createCmd(cmd, &rootConfig)
+	inspectCmd(cmd, &rootConfig)
+	logsCmd(cmd, &rootConfig)
+	lsCmd(cmd, &rootConfig)
+	migrateCmd(cmd, &rootConfig)
+	monitorCmd(cmd, &rootConfig)
+	rmCmd(cmd, &rootConfig)
+	runCmd(cmd, &rootConfig)
+	sendKeysCmd(cmd, &rootConfig)
+	signalCmd(cmd, &rootConfig)
+	startCmd(cmd, &rootConfig)
+	stopCmd(cmd, &rootConfig)
+
+	return cmd
 }
 
-func cmdmanConfig() (cmdman.CmdmanConfig, error) {
-	return rootConfig.WithDefaults()
-}
-
-func cmdmanService() (*cmdman.Service, error) {
-	cfg, err := cmdmanConfig()
-	if err != nil {
-		return nil, err
-	}
-	return cmdman.NewService(cfg), nil
+func runRoot(cmd *cobra.Command, args []string) error {
+	return cmd.Help()
 }

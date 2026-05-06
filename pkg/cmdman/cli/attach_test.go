@@ -1,4 +1,4 @@
-package commands
+package cli
 
 import (
 	"bytes"
@@ -33,7 +33,7 @@ func TestForwardedSignals_DoesNotIncludeSIGURG(t *testing.T) {
 	)
 }
 
-func TestDetachKeys_Parse(t *testing.T) {
+func TestParseDetachKeys(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected []byte
@@ -76,8 +76,7 @@ func TestDetachKeys_ProxyDetectsSequence(t *testing.T) {
 		if n > 0 {
 			output = append(output, buf[:n]...)
 		}
-		var escapeErr term.EscapeError
-		if errors.As(err, &escapeErr) {
+		if _, ok := errors.AsType[term.EscapeError](err); ok {
 			detached = true
 			break
 		}
@@ -101,8 +100,7 @@ func TestDetachKeys_ProxyPartialMatchFlush(t *testing.T) {
 		if n > 0 {
 			output = append(output, buf[:n]...)
 		}
-		var escapeErr term.EscapeError
-		if errors.As(err, &escapeErr) {
+		if _, ok := errors.AsType[term.EscapeError](err); ok {
 			t.Fatal("should not detach")
 		}
 		if err != nil {
@@ -128,9 +126,9 @@ func TestDetachKeys_ProxyOnlySequence(t *testing.T) {
 
 	buf := make([]byte, 1024)
 	n, err := r.Read(buf)
-	var escapeErr term.EscapeError
+	_, ok := errors.AsType[term.EscapeError](err)
 	assert.Equal(t, n, 0)
-	assert.Assert(t, errors.As(err, &escapeErr))
+	assert.Assert(t, ok)
 }
 
 func TestRestoreDisplayModes(t *testing.T) {

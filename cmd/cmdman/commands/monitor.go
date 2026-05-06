@@ -1,37 +1,36 @@
 package commands
 
 import (
-	"log/slog"
-	"os"
+	"github.com/ngicks/go-common/contextkey"
+	"github.com/spf13/cobra"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/spf13/cobra"
 )
 
-func init() {
-	rootCmd.AddCommand(monitorCmd)
-	monitorCmd.Flags().String("id", "", "Command ID")
-	monitorCmd.MarkFlagRequired("id")
+func monitorCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+	var flagID string
+
+	cmd := &cobra.Command{
+		Use:    "__monitor",
+		Short:  "Internal monitor process (do not call directly)",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runMonitor(cmd, args, rootCfg, flagID)
+		},
+	}
+
+	cmd.Flags().StringVar(&flagID, "id", "", "Command ID")
+	_ = cmd.MarkFlagRequired("id")
+
+	parent.AddCommand(cmd)
 }
 
-var monitorCmd = &cobra.Command{
-	Use:    "__monitor",
-	Short:  "Internal monitor process (do not call directly)",
-	Hidden: true,
-	RunE:   runMonitor,
-}
-
-func runMonitor(cmd *cobra.Command, args []string) error {
-	id, _ := cmd.Flags().GetString("id")
-	cfg, err := cmdmanConfig()
+func runMonitor(cmd *cobra.Command, args []string, rootCfg *cmdman.CmdmanConfig, id string) error {
+	cfg, err := rootCfg.WithDefaults()
 	if err != nil {
 		return err
 	}
-
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
-		AddSource: true,
-		Level:     slog.LevelDebug,
-	}))
-
+	logger := contextkey.ValueSlogLoggerDefault(cmd.Context())
 	return cmdman.RunMonitor(cmd.Context(), id, cfg, logger)
 }

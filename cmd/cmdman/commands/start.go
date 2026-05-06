@@ -1,25 +1,31 @@
 package commands
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/spf13/cobra"
 
-func init() {
-	rootCmd.AddCommand(startCmd)
+	"github.com/ngicks/cmdman/pkg/cmdman"
+)
+
+func startCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+	cmd := &cobra.Command{
+		Use:   "start ID_OR_NAME",
+		Short: "Start a created command",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runStart(cmd, args, rootCfg)
+		},
+	}
+
+	parent.AddCommand(cmd)
 }
 
-var startCmd = &cobra.Command{
-	Use:   "start ID_OR_NAME",
-	Short: "Start a created command",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runStart,
-}
-
-func runStart(cmd *cobra.Command, args []string) error {
-	return doStart(cmd, args[0])
+func runStart(cmd *cobra.Command, args []string, rootCfg *cmdman.CmdmanConfig) error {
+	return doStart(cmd, args[0], rootCfg)
 }
 
 // doStart spawns the monitor for an existing command in "created" state.
-func doStart(cmd *cobra.Command, idOrName string) error {
-	svc, err := cmdmanService()
+func doStart(cmd *cobra.Command, idOrName string, rootCfg *cmdman.CmdmanConfig) error {
+	svc, err := cmdmanService(rootCfg)
 	if err != nil {
 		return err
 	}

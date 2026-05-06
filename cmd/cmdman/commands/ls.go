@@ -1,70 +1,52 @@
 package commands
 
 import (
-	"encoding/json"
-	"fmt"
-	"reflect"
-	"strings"
-	"text/template"
+	"github.com/spf13/cobra"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
-	"github.com/spf13/cobra"
+	"github.com/ngicks/cmdman/pkg/cmdman/cli"
 )
 
-const (
-	defaultLsHeader    = "ID\tNAME\tSTATE\tEXIT CODE\tCOMMAND"
-	defaultLsRowFormat = "{{slice .ID 0 12}}\t{{.Name}}\t{{.State}}\t{{if .ExitCode}}{{printf \"%d\" .ExitCode}}{{else}}-{{end}}\t{{command .}}"
-)
+func lsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+	var (
+		flagLabel  []string
+		flagAll    bool
+		flagQuiet  bool
+		flagFormat string
+	)
 
-const commandMaxLen = 40
+	cmd := &cobra.Command{
+		Use:   "ls [flags]",
+		Short: "List commands",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runLs(cmd, args, rootCfg, flagLabel, flagAll, flagQuiet, flagFormat)
+		},
+	}
 
-var lsFuncMap = template.FuncMap{
-	"json": func(v any) string {
-		b, err := json.Marshal(v)
-		if err != nil {
-			return fmt.Sprintf("ERR: %v", err)
-		}
-		return string(b)
-	},
-	"command": func(e store.CommandEntry) string {
-		if e.ConfigJSON == nil || len(e.ConfigJSON.Argv) == 0 {
-			return "-"
-		}
-		s := strings.Join(e.ConfigJSON.Argv, " ")
-		if len(s) > commandMaxLen {
-			return s[:commandMaxLen-3] + "..."
-		}
-		return s
-	},
+	cmd.Flags().
+		StringArrayVarP(&flagLabel, "label", "l", nil, "Filter by label KEY=VALUE (repeatable)")
+	cmd.Flags().BoolVarP(&flagAll, "all", "a", false, "Show all (including exited)")
+	cmd.Flags().BoolVarP(&flagQuiet, "quiet", "q", false, "Print IDs only")
+	cmd.Flags().StringVar(&flagFormat, "format", "", cli.FormatUsage())
+
+	parent.AddCommand(cmd)
 }
 
-func init() {
-	rootCmd.AddCommand(lsCmd)
-	lsCmd.Flags().StringArrayP("label", "l", nil, "Filter by label KEY=VALUE (repeatable)")
-	lsCmd.Flags().BoolP("all", "a", false, "Show all (including exited)")
-	lsCmd.Flags().BoolP("quiet", "q", false, "Print IDs only")
-	lsCmd.Flags().String("format", "", buildFormatUsage())
-}
-
-var lsCmd = &cobra.Command{
-	Use:   "ls [flags]",
-	Short: "List commands",
-	RunE:  runLs,
-}
-
-func runLs(cmd *cobra.Command, args []string) error {
-	labelSlice, _ := cmd.Flags().GetStringArray("label")
-	allStates, _ := cmd.Flags().GetBool("all")
-	quiet, _ := cmd.Flags().GetBool("quiet")
-	format, _ := cmd.Flags().GetString("format")
-
+func runLs(
+	cmd *cobra.Command,
+	args []string,
+	rootCfg *cmdman.CmdmanConfig,
+	labelSlice []string,
+	allStates, quiet bool,
+	format string,
+) error {
 	labels, err := parseLabels(labelSlice)
 	if err != nil {
 		return err
 	}
 
-	svc, err := cmdmanService()
+	svc, err := cmdmanService(rootCfg)
 	if err != nil {
 		return err
 	}
@@ -76,56 +58,5 @@ func runLs(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if quiet {
-		for _, e := range entries {
-			fmt.Fprintln(cmd.OutOrStdout(), e.ID)
-		}
-		return nil
-	}
-
-	if format == "" {
-		format = defaultLsRowFormat
-		fmt.Fprintln(cmd.OutOrStdout(), defaultLsHeader)
-	}
-
-	tmpl, err := template.New("format").Funcs(lsFuncMap).Parse(format)
-	if err != nil {
-		return fmt.Errorf("parse format template: %w", err)
-	}
-	out := cmd.OutOrStdout()
-	for _, e := range entries {
-		if err := tmpl.Execute(out, e); err != nil {
-			return fmt.Errorf("execute format template: %w", err)
-		}
-		fmt.Fprintln(out)
-	}
-	return nil
-}
-
-func buildFormatUsage() string {
-	t := reflect.TypeOf(store.CommandEntry{})
-	var fields []string
-	for i := range t.NumField() {
-		f := t.Field(i)
-		fields = append(fields, fmt.Sprintf(".%s (%s)", f.Name, f.Type))
-	}
-	return fmt.Sprintf(
-		"Go text/template string. Available fields:\n  %s\nTemplate functions: json",
-		strings.Join(fields, ", "),
-	)
-}
-
-func parseLabels(labelSlice []string) (map[string]string, error) {
-	if len(labelSlice) == 0 {
-		return nil, nil
-	}
-	labels := make(map[string]string)
-	for _, l := range labelSlice {
-		k, v, ok := strings.Cut(l, "=")
-		if !ok {
-			return nil, fmt.Errorf("invalid label format: %s (expected KEY=VALUE)", l)
-		}
-		labels[k] = v
-	}
-	return labels, nil
+	return cli.RenderEntries(cmd.OutOrStdout(), entries, quiet, format)
 }

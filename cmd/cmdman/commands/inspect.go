@@ -4,21 +4,25 @@ import (
 	"encoding/json"
 
 	"github.com/spf13/cobra"
+
+	"github.com/ngicks/cmdman/pkg/cmdman"
 )
 
-func init() {
-	rootCmd.AddCommand(inspectCmd)
+func inspectCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+	cmd := &cobra.Command{
+		Use:   "inspect ID|NAME",
+		Short: "Show merged command definition, runtime state, and exit history",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runInspect(cmd, args, rootCfg)
+		},
+	}
+
+	parent.AddCommand(cmd)
 }
 
-var inspectCmd = &cobra.Command{
-	Use:   "inspect ID|NAME",
-	Short: "Show merged command definition, runtime state, and exit history",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runInspect,
-}
-
-func runInspect(cmd *cobra.Command, args []string) error {
-	svc, err := cmdmanService()
+func runInspect(cmd *cobra.Command, args []string, rootCfg *cmdman.CmdmanConfig) error {
+	svc, err := cmdmanService(rootCfg)
 	if err != nil {
 		return err
 	}
