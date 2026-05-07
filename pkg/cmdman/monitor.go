@@ -233,6 +233,7 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	if err != nil {
 		return -1, fmt.Errorf("open log writer: %w", err)
 	}
+	stdoutLogWriter := logdriver.NewStreamWriter(logWriter, logdriver.StreamStdout)
 	defer func() {
 		if cerr := logWriter.Close(); cerr != nil {
 			m.Logger.Warn("close log writer", slog.String("error", cerr.Error()))
@@ -266,7 +267,7 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 			if n > 0 {
 				data := buf[:n]
 				m.ring.Write(data)
-				if _, werr := logWriter.Write(data); werr != nil {
+				if _, werr := stdoutLogWriter.Write(data); werr != nil {
 					m.Logger.Warn("log writer", slog.String("error", werr.Error()))
 				}
 				m.fanout.Send(data)

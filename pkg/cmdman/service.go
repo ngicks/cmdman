@@ -11,7 +11,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"os"
 	"sync"
@@ -89,7 +88,6 @@ type RemoveRequest struct {
 type LogsRequest struct {
 	IDOrName string
 	Follow   bool
-	Writer   io.Writer
 }
 
 // WaitRequest defines a wait operation across explicit targets.
@@ -509,25 +507,22 @@ func (s *Service) Remove(ctx context.Context, req RemoveRequest) ([]CommandActio
 	return results, nil
 }
 
-// Logs writes the persisted command output for req.IDOrName to req.Writer.
-// With Follow=true, it tails the on-disk log file and continues to emit
-// new content until ctx is cancelled. The monitor is not contacted; logs
-// remain readable after the command exits.
-func (s *Service) Logs(ctx context.Context, req LogsRequest) error {
-	if req.Writer == nil {
-		return errors.New("logs: writer is nil")
-	}
+// Logs opens a structured reader for the persisted command output for
+// req.IDOrName. With Follow=true, the reader tails the on-disk log file
+// until ctx is cancelled. The monitor is not contacted; logs remain
+// readable after the command exits.
+func (s *Service) Logs(ctx context.Context, req LogsRequest) (logdriver.Reader, error) {
 	st, err := s.openStore(true)
 	if err != nil {
-		return fmt.Errorf("open store: %w", err)
+		return nil, fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
 
 	_, _, cfg, err := st.GetCommandConfig(req.IDOrName)
 	if err != nil {
-		return fmt.Errorf("resolve command: %w", err)
+		return nil, fmt.Errorf("resolve command: %w", err)
 	}
-	return logdriver.NewReader(ctx, cfg.LogDriver, cfg.LogPath(), req.Writer, req.Follow)
+	return logdriver.NewReader(ctx, cfg.LogDriver, cfg.LogPath(), req.Follow)
 }
 
 // Wait blocks until each target reaches req.Condition (default "stopped",

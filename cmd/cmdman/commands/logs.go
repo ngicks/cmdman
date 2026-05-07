@@ -3,7 +3,9 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/ngicks/cmdman/cmd/internal/stdiopipe"
 	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/pkg/cmdman/cli"
 )
 
 func logsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
@@ -28,9 +30,19 @@ func runLogs(cmd *cobra.Command, args []string, rootCfg *cmdman.CmdmanConfig, fo
 	if err != nil {
 		return err
 	}
-	return svc.Logs(cmd.Context(), cmdman.LogsRequest{
+	r, err := svc.Logs(cmd.Context(), cmdman.LogsRequest{
 		IDOrName: args[0],
 		Follow:   follow,
-		Writer:   cmd.OutOrStdout(),
 	})
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	stdout := stdiopipe.Stdout(cmd.Context())
+	defer stdout.Close()
+	stderr := stdiopipe.Stderr(cmd.Context())
+	defer stderr.Close()
+
+	return cli.RenderLogs(stdout, stderr, r)
 }

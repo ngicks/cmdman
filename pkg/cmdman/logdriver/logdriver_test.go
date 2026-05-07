@@ -126,7 +126,8 @@ func TestNew_Dispatch(t *testing.T) {
 
 	w, err := New(store.LogDriverNone, Options{})
 	assert.NilError(t, err)
-	_, err = w.Write([]byte("ignored\n"))
+	sw := NewStreamWriter(w, StreamStdout)
+	_, err = sw.Write([]byte("ignored\n"))
 	assert.NilError(t, err)
 	assert.NilError(t, w.Close())
 	_, statErr := os.Stat(path)
@@ -134,7 +135,8 @@ func TestNew_Dispatch(t *testing.T) {
 
 	w2, err := New(store.LogDriverK8sFile, Options{store.LogOptPath: path})
 	assert.NilError(t, err)
-	_, err = w2.Write([]byte("captured\n"))
+	sw2 := NewStreamWriter(w2, StreamStdout)
+	_, err = sw2.Write([]byte("captured\n"))
 	assert.NilError(t, err)
 	assert.NilError(t, w2.Close())
 	got, err := os.ReadFile(path)
@@ -143,6 +145,26 @@ func TestNew_Dispatch(t *testing.T) {
 
 	_, err = New("bogus", Options{store.LogOptPath: path})
 	assert.ErrorContains(t, err, "unknown driver")
+}
+
+func TestK8sFileWriter_LogLineStderr(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "console.log")
+	w, err := newK8sFileWriter(path, 0, 0)
+	assert.NilError(t, err)
+	w.now = fixedTime(t)
+
+	err = w.WriteLogLine(LogLine{
+		Stream: StreamStderr,
+		Line:   []byte("problem\n"),
+	})
+	assert.NilError(t, err)
+	assert.NilError(t, w.Close())
+
+	got, err := os.ReadFile(path)
+	assert.NilError(t, err)
+	want := "2023-08-07T19:56:34.223758260Z stderr F problem\n"
+	assert.Equal(t, string(got), want)
 }
 
 func TestNew_K8sFileParsesMaxSize(t *testing.T) {

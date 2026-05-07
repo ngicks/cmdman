@@ -41,26 +41,57 @@ func Stdin(ctx context.Context) io.ReadCloser {
 	return pr
 }
 
-func stdout(ctx context.Context, label string, out *os.File, once *sync.Once) io.WriteCloser {
-	var pw *io.PipeWriter
+func stdOutput(ctx context.Context, label string, out *os.File, once *sync.Once) io.WriteCloser {
+	var wc io.WriteCloser
 	called := false
 	once.Do(func() {
 		called = true
 		var pr *io.PipeReader
+		var pw *io.PipeWriter
 		pr, pw = io.Pipe()
+		done := make(chan struct{})
 		go func() {
 			<-ctx.Done()
 			pw.CloseWithError(ctx.Err())
 		}()
 		go func() {
+			defer close(done)
 			_, err := io.Copy(out, pr)
 			pr.CloseWithError(err)
 		}()
+		wc = &stdoutWriteCloser{
+			ctx:  ctx,
+			pw:   pw,
+			done: done,
+		}
 	})
 	if !called {
 		panic("stdiopipe: " + label + " is called more than once")
 	}
-	return pw
+	return wc
+}
+
+type stdoutWriteCloser struct {
+	ctx  context.Context
+	pw   *io.PipeWriter
+	done <-chan struct{}
+}
+
+func (w *stdoutWriteCloser) Write(p []byte) (int, error) {
+	return w.pw.Write(p)
+}
+
+func (w *stdoutWriteCloser) Close() error {
+	err := w.pw.Close()
+	select {
+	case <-w.done:
+		return err
+	case <-w.ctx.Done():
+		if err != nil {
+			return err
+		}
+		return w.ctx.Err()
+	}
 }
 
 // Stdout returns an [io.WriteCloser] which is piped to [os.Stdout] through an [io.Pipe].
@@ -69,7 +100,7 @@ func stdout(ctx context.Context, label string, out *os.File, once *sync.Once) io
 //
 // Only one invocation is allowed per process; a second call will panic.
 func Stdout(ctx context.Context) io.WriteCloser {
-	return stdout(ctx, "Stdout", os.Stdout, &onceStdout)
+	return stdOutput(ctx, "Stdout", os.Stdout, &onceStdout)
 }
 
 // Stderr returns an [io.WriteCloser] which is piped to [os.Stderr] through an [io.Pipe].
@@ -78,5 +109,5 @@ func Stdout(ctx context.Context) io.WriteCloser {
 //
 // Only one invocation is allowed per process; a second call will panic.
 func Stderr(ctx context.Context) io.WriteCloser {
-	return stdout(ctx, "Stderr", os.Stderr, &onceStderr)
+	return stdOutput(ctx, "Stderr", os.Stderr, &onceStderr)
 }

@@ -20,10 +20,37 @@ import (
 const K8sLogTimeFormat = "2006-01-02T15:04:05.000000000Z07:00"
 
 const (
-	streamStdout = "stdout"
-	tagFull      = "F"
-	tagPartial   = "P"
+	tagFull    = "F"
+	tagPartial = "P"
 )
+
+// Stream names the output stream a log line came from.
+type Stream string
+
+const (
+	StreamStdout Stream = "stdout"
+	StreamStderr Stream = "stderr"
+)
+
+// LogLine is the structured log record exchanged with log drivers.
+type LogLine struct {
+	Time    time.Time
+	Stream  Stream
+	Partial bool
+	Line    []byte
+}
+
+// Writer persists structured log lines.
+type Writer interface {
+	WriteLogLine(LogLine) error
+	Close() error
+}
+
+// Reader returns structured log lines.
+type Reader interface {
+	ReadLogLine() (LogLine, error)
+	Close() error
+}
 
 // Options is a driver-specific bag of raw KEY=VALUE strings, mirroring
 // the on-disk LogOpts vocabulary defined in the store package. Each
@@ -50,7 +77,7 @@ type Options map[string]string
 // Writer is owned by a single producer goroutine and is not safe for
 // concurrent calls. Drivers that do not retain output (currently
 // LogDriverNone) ignore opts.
-func New(driver store.LogDriver, opts Options) (io.WriteCloser, error) {
+func New(driver store.LogDriver, opts Options) (Writer, error) {
 	switch driver {
 	case store.LogDriverNone:
 		return noopWriter{}, nil
@@ -75,8 +102,60 @@ func newK8sFileWriterFromOpts(opts Options) (*k8sFileWriter, error) {
 
 type noopWriter struct{}
 
-func (noopWriter) Write(p []byte) (int, error) { return len(p), nil }
-func (noopWriter) Close() error                { return nil }
+func (noopWriter) WriteLogLine(LogLine) error { return nil }
+func (noopWriter) Close() error               { return nil }
+
+// NewStreamWriter adapts byte writes for a single stream into structured
+// log lines. It is useful for execution paths that already expose stdout
+// and stderr as byte streams. The returned adapter does not own w; callers
+// must close w separately after all stream adapters stop writing.
+func NewStreamWriter(w Writer, stream Stream) io.WriteCloser {
+	return &streamWriter{
+		w:      w,
+		stream: stream,
+		now:    time.Now,
+	}
+}
+
+type streamWriter struct {
+	w      Writer
+	stream Stream
+	now    func() time.Time
+}
+
+func (w *streamWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	ts := w.now()
+	consumed := 0
+	for len(p) > 0 {
+		nl := bytes.IndexByte(p, '\n')
+		var line []byte
+		var partial bool
+		if nl < 0 {
+			line = p
+			partial = true
+		} else {
+			line = p[:nl+1]
+		}
+		if err := w.w.WriteLogLine(LogLine{
+			Time:    ts,
+			Stream:  w.stream,
+			Partial: partial,
+			Line:    line,
+		}); err != nil {
+			return consumed, err
+		}
+		consumed += len(line)
+		p = p[len(line):]
+	}
+	return consumed, nil
+}
+
+func (w *streamWriter) Close() error {
+	return nil
+}
 
 // k8sFileWriter writes podman's k8s-file format, where each entry is:
 //
@@ -136,73 +215,74 @@ func newK8sFileWriter(path string, maxSize int64, maxFile int) (*k8sFileWriter, 
 	}, nil
 }
 
+func (w *k8sFileWriter) WriteLogLine(line LogLine) error {
+	if len(line.Line) == 0 {
+		return nil
+	}
+	ts := line.Time
+	if ts.IsZero() {
+		ts = w.now()
+	}
+	stream := line.Stream
+	if stream == "" {
+		stream = StreamStdout
+	}
+	tag := tagFull
+	if line.Partial {
+		tag = tagPartial
+	}
+
+	tsText := ts.Format(K8sLogTimeFormat)
+	entrySize := int64(len(tsText) + 1 + len(stream) + 1 + len(tag) + 1 + len(line.Line))
+	if line.Partial {
+		entrySize++
+	}
+
+	if w.maxSize > 0 && w.written+entrySize >= w.maxSize {
+		if err := w.rotate(); err != nil {
+			return err
+		}
+	}
+
+	if _, err := w.bw.WriteString(tsText); err != nil {
+		return err
+	}
+	if err := w.bw.WriteByte(' '); err != nil {
+		return err
+	}
+	if _, err := w.bw.WriteString(string(stream)); err != nil {
+		return err
+	}
+	if err := w.bw.WriteByte(' '); err != nil {
+		return err
+	}
+	if _, err := w.bw.WriteString(tag); err != nil {
+		return err
+	}
+	if err := w.bw.WriteByte(' '); err != nil {
+		return err
+	}
+	if _, err := w.bw.Write(line.Line); err != nil {
+		return err
+	}
+	if line.Partial {
+		if err := w.bw.WriteByte('\n'); err != nil {
+			return err
+		}
+	}
+	w.written += entrySize
+	return w.bw.Flush()
+}
+
+// Write preserves byte-stream compatibility for package-local tests and
+// adapters. New callers should use WriteLogLine or NewStreamWriter.
 func (w *k8sFileWriter) Write(p []byte) (int, error) {
-	if len(p) == 0 {
-		return 0, nil
+	sw := &streamWriter{
+		w:      w,
+		stream: StreamStdout,
+		now:    w.now,
 	}
-	ts := w.now().Format(K8sLogTimeFormat)
-	consumed := 0
-	for len(p) > 0 {
-		nl := bytes.IndexByte(p, '\n')
-		var line []byte
-		var partial bool
-		if nl < 0 {
-			line = p
-			partial = true
-		} else {
-			line = p[:nl+1]
-		}
-
-		tag := tagFull
-		if partial {
-			tag = tagPartial
-		}
-		// <ts> <stream> <tag> <line>[\n]
-		entrySize := int64(len(ts) + 1 + len(streamStdout) + 1 + len(tag) + 1 + len(line))
-		if partial {
-			entrySize++
-		}
-
-		if w.maxSize > 0 && w.written+entrySize >= w.maxSize {
-			if err := w.rotate(); err != nil {
-				return consumed, err
-			}
-		}
-
-		if _, err := w.bw.WriteString(ts); err != nil {
-			return consumed, err
-		}
-		if err := w.bw.WriteByte(' '); err != nil {
-			return consumed, err
-		}
-		if _, err := w.bw.WriteString(streamStdout); err != nil {
-			return consumed, err
-		}
-		if err := w.bw.WriteByte(' '); err != nil {
-			return consumed, err
-		}
-		if _, err := w.bw.WriteString(tag); err != nil {
-			return consumed, err
-		}
-		if err := w.bw.WriteByte(' '); err != nil {
-			return consumed, err
-		}
-		if _, err := w.bw.Write(line); err != nil {
-			return consumed, err
-		}
-		if partial {
-			if err := w.bw.WriteByte('\n'); err != nil {
-				return consumed, err
-			}
-		}
-		w.written += entrySize
-		consumed += len(line)
-		p = p[len(line):]
-	}
-	if err := w.bw.Flush(); err != nil {
-		return consumed, err
-	}
-	return consumed, nil
+	return sw.Write(p)
 }
 
 // rotate flushes any buffered output, then either truncates the active

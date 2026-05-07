@@ -14,10 +14,10 @@ import (
 // followPollInterval is how often we re-read the file in --follow mode.
 const followPollInterval = 100 * time.Millisecond
 
-// NewReader writes the persisted command output for the given driver to
-// w. It returns once the source is exhausted, unless follow is true, in
-// which case it tails the source for new entries until ctx is cancelled
-// or w returns an error.
+// NewReader opens the persisted command output for the given driver. It
+// returns a structured log-line reader. ReadLogLine returns io.EOF once
+// the source is exhausted, unless follow is true, in which case it tails
+// the source for new entries until ctx is cancelled.
 //
 // Drivers that don't retain output (currently LogDriverNone) return an
 // error that callers can surface to the user.
@@ -25,94 +25,120 @@ func NewReader(
 	ctx context.Context,
 	driver store.LogDriver,
 	path string,
-	w io.Writer,
 	follow bool,
-) error {
+) (Reader, error) {
 	switch driver {
 	case store.LogDriverNone:
-		return fmt.Errorf("logdriver: driver %q does not retain logs", driver)
+		return nil, fmt.Errorf("logdriver: driver %q does not retain logs", driver)
 	case store.LogDriverK8sFile:
-		return readK8sFile(ctx, path, w, follow)
+		return newK8sFileReader(ctx, path, follow)
 	default:
-		return fmt.Errorf("logdriver: unknown driver %q", driver)
+		return nil, fmt.Errorf("logdriver: unknown driver %q", driver)
 	}
 }
 
-func readK8sFile(ctx context.Context, path string, w io.Writer, follow bool) error {
+type k8sFileReader struct {
+	ctx     context.Context
+	f       *os.File
+	follow  bool
+	rbuf    []byte
+	partial []byte
+}
+
+func newK8sFileReader(ctx context.Context, path string, follow bool) (*k8sFileReader, error) {
 	if path == "" {
-		return fmt.Errorf("logdriver: log file path is empty")
+		return nil, fmt.Errorf("logdriver: log file path is empty")
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("logdriver: open log file: %w", err)
+		return nil, fmt.Errorf("logdriver: open log file: %w", err)
 	}
-	defer f.Close()
+	return &k8sFileReader{
+		ctx:    ctx,
+		f:      f,
+		follow: follow,
+		rbuf:   make([]byte, 32*1024),
+	}, nil
+}
 
-	rbuf := make([]byte, 32*1024)
-	var partial []byte
+func (r *k8sFileReader) ReadLogLine() (LogLine, error) {
 	for {
-		// Drain every complete entry currently buffered.
-		for {
-			i := bytes.IndexByte(partial, '\n')
-			if i < 0 {
-				break
-			}
-			entry := partial[:i+1]
-			partial = partial[i+1:]
-			content, perr := parseK8sFileEntry(entry)
-			if perr != nil {
-				return perr
-			}
-			if _, werr := w.Write(content); werr != nil {
-				return werr
-			}
+		i := bytes.IndexByte(r.partial, '\n')
+		if i >= 0 {
+			entry := r.partial[:i+1]
+			r.partial = r.partial[i+1:]
+			return parseK8sFileEntry(entry)
 		}
 
-		n, err := f.Read(rbuf)
+		n, err := r.f.Read(r.rbuf)
 		if n > 0 {
-			partial = append(partial, rbuf[:n]...)
+			r.partial = append(r.partial, r.rbuf[:n]...)
 			continue
 		}
 		if err != nil && err != io.EOF {
-			return fmt.Errorf("logdriver: read log file: %w", err)
+			return LogLine{}, fmt.Errorf("logdriver: read log file: %w", err)
 		}
-		if !follow {
-			return nil
+		if !r.follow {
+			return LogLine{}, io.EOF
 		}
 		select {
-		case <-ctx.Done():
-			return nil
+		case <-r.ctx.Done():
+			return LogLine{}, io.EOF
 		case <-time.After(followPollInterval):
 		}
 	}
+}
+
+func (r *k8sFileReader) Close() error {
+	if r.f == nil {
+		return nil
+	}
+	err := r.f.Close()
+	r.f = nil
+	return err
 }
 
 // parseK8sFileEntry splits a single k8s-file entry of the form
 //
 //	<RFC3339Nano> <stream> <F|P> <content>\n
 //
-// and returns the unframed content. The trailing '\n' that the writer
-// appends to partial (P) entries is stripped because it is framing
-// rather than original output.
-func parseK8sFileEntry(entry []byte) ([]byte, error) {
+// and returns the unframed log line. The trailing '\n' that the writer
+// appends to partial (P) entries is stripped because it is framing rather
+// than original output.
+func parseK8sFileEntry(entry []byte) (LogLine, error) {
 	sp1 := bytes.IndexByte(entry, ' ')
 	if sp1 < 0 {
-		return nil, fmt.Errorf("logdriver: malformed log entry: %q", entry)
+		return LogLine{}, fmt.Errorf("logdriver: malformed log entry: %q", entry)
 	}
 	sp2 := bytes.IndexByte(entry[sp1+1:], ' ')
 	if sp2 < 0 {
-		return nil, fmt.Errorf("logdriver: malformed log entry: %q", entry)
+		return LogLine{}, fmt.Errorf("logdriver: malformed log entry: %q", entry)
 	}
 	sp2 += sp1 + 1
 	sp3 := bytes.IndexByte(entry[sp2+1:], ' ')
 	if sp3 < 0 {
-		return nil, fmt.Errorf("logdriver: malformed log entry: %q", entry)
+		return LogLine{}, fmt.Errorf("logdriver: malformed log entry: %q", entry)
 	}
 	sp3 += sp2 + 1
+	ts, err := time.Parse(K8sLogTimeFormat, string(entry[:sp1]))
+	if err != nil {
+		return LogLine{}, fmt.Errorf("logdriver: malformed log entry timestamp: %w", err)
+	}
+	stream := Stream(entry[sp1+1 : sp2])
 	tag := entry[sp2+1 : sp3]
 	content := entry[sp3+1:]
-	if bytes.Equal(tag, []byte(tagPartial)) {
+	partial := bytes.Equal(tag, []byte(tagPartial))
+	switch {
+	case partial:
 		content = bytes.TrimRight(content, "\n")
+	case bytes.Equal(tag, []byte(tagFull)):
+	default:
+		return LogLine{}, fmt.Errorf("logdriver: malformed log entry tag %q", tag)
 	}
-	return content, nil
+	return LogLine{
+		Time:    ts,
+		Stream:  stream,
+		Partial: partial,
+		Line:    content,
+	}, nil
 }
