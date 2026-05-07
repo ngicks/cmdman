@@ -271,6 +271,124 @@ func TestLogOpt_RejectedForNoneDriver(t *testing.T) {
 	}
 }
 
+func TestLogOpt_MaxSizeTruncatesFile(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	// Each k8s-file entry is roughly 41 bytes of overhead plus the line.
+	// Print 200 ~20-byte lines and cap at 512 bytes — the file must end up
+	// well below the produced volume because older entries get dropped.
+	env.run(ctx, "run", "-n", "log-max-size",
+		"--log-opt", "max-size=512",
+		"--", "/bin/sh", "-c",
+		"i=1; while [ $i -le 200 ]; do echo \"max-size-line-$i\"; i=$((i+1)); done")
+	t.Cleanup(func() { env.cleanupCommand(ctx, "log-max-size") })
+	env.waitForState(ctx, "log-max-size", "exited", defaultTimeout)
+
+	info := env.inspectJSON(ctx, "log-max-size")
+	hexID, _ := info["id"].(string)
+	if hexID == "" {
+		t.Fatalf("inspect returned empty id; raw=%v", info)
+	}
+	logPath := filepath.Join(env.dataHome, "commands", hexID, "console.log")
+
+	var size int64
+	waitUntil(t, 2*time.Second, func() bool {
+		st, err := os.Stat(logPath)
+		if err != nil {
+			return false
+		}
+		size = st.Size()
+		return size > 0
+	}, "expected log file %s to have content", logPath)
+
+	// The producer wrote at least 200 * ~17 = 3.4 kB of unframed output;
+	// without truncation the framed file would be well over a kilobyte.
+	// With max-size=512 it should land at roughly one or two entries.
+	if size > 2*512 {
+		t.Errorf("expected log file size <= 1024 bytes after truncation, got %d", size)
+	}
+
+	cfg, _ := info["config"].(map[string]any)
+	logOpts, _ := cfg["log_opts"].(map[string]any)
+	if logOpts["max-size"] != "512" {
+		t.Errorf("expected config.log_opts.max-size=512, got %v", logOpts["max-size"])
+	}
+}
+
+func TestLogOpt_RejectsInvalidMaxSize(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	_, stderr := env.runExpectFail(ctx, "run",
+		"--log-opt", "max-size=not-a-size",
+		"--", "/bin/sh", "-c", "true")
+	if !strings.Contains(stderr, "max-size") {
+		t.Errorf("expected error mentioning max-size, got stderr:\n%s", stderr)
+	}
+}
+
+func TestLogOpt_MaxFileRotatesArchives(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	// Each entry is ~41 bytes overhead + line; cap at 256 bytes with
+	// max-file=3, so the 200-line producer will rotate many times. After
+	// the run, the active file plus .1 and .2 should all exist (older
+	// archives get dropped) and no .3 should be created.
+	env.run(ctx, "run", "-n", "log-max-file",
+		"--log-opt", "max-size=256",
+		"--log-opt", "max-file=3",
+		"--", "/bin/sh", "-c",
+		"i=1; while [ $i -le 200 ]; do echo \"max-file-line-$i\"; i=$((i+1)); done")
+	t.Cleanup(func() { env.cleanupCommand(ctx, "log-max-file") })
+	env.waitForState(ctx, "log-max-file", "exited", defaultTimeout)
+
+	info := env.inspectJSON(ctx, "log-max-file")
+	hexID, _ := info["id"].(string)
+	if hexID == "" {
+		t.Fatalf("inspect returned empty id; raw=%v", info)
+	}
+	logPath := filepath.Join(env.dataHome, "commands", hexID, "console.log")
+
+	waitUntil(t, 2*time.Second, func() bool {
+		_, err := os.Stat(logPath + ".1")
+		return err == nil
+	}, "expected .1 archive at %s", logPath+".1")
+
+	// .1 and .2 must be present, .3 must not.
+	for _, suffix := range []string{".1", ".2"} {
+		if _, err := os.Stat(logPath + suffix); err != nil {
+			t.Errorf("expected archive %s, got err=%v", logPath+suffix, err)
+		}
+	}
+	if _, err := os.Stat(logPath + ".3"); !os.IsNotExist(err) {
+		t.Errorf("expected no %s archive (max-file=3), got err=%v", logPath+".3", err)
+	}
+
+	cfg, _ := info["config"].(map[string]any)
+	logOpts, _ := cfg["log_opts"].(map[string]any)
+	if logOpts["max-file"] != "3" {
+		t.Errorf("expected config.log_opts.max-file=3, got %v", logOpts["max-file"])
+	}
+}
+
+func TestLogOpt_RejectsInvalidMaxFile(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	_, stderr := env.runExpectFail(ctx, "run",
+		"--log-opt", "max-file=abc",
+		"--", "/bin/sh", "-c", "true")
+	if !strings.Contains(stderr, "max-file") {
+		t.Errorf("expected error mentioning max-file, got stderr:\n%s", stderr)
+	}
+}
+
 func TestLogs_FollowStreamsAppendedOutput(t *testing.T) {
 	t.Parallel()
 	ctx := testContext(t)

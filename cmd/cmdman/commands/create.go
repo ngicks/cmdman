@@ -53,7 +53,7 @@ func bindCreateFlags(cmd *cobra.Command, f *createFlags) {
 		&f.LogOpts,
 		"log-opt",
 		nil,
-		"Log driver option KEY=VALUE (repeatable)",
+		"Log driver option KEY=VALUE (repeatable; k8s-file: path, max-size, max-file)",
 	)
 }
 

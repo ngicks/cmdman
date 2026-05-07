@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"os"
 	"os/exec"
@@ -225,7 +226,10 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	}
 	cmd.WaitDelay = 10 * time.Second
 
-	logWriter, err := logdriver.New(m.cfg.LogDriver, m.cfg.LogPath())
+	opts := make(logdriver.Options, len(m.cfg.LogOpts)+1)
+	maps.Copy(opts, m.cfg.LogOpts)
+	opts[cmdstore.LogOptPath] = m.cfg.LogPath()
+	logWriter, err := logdriver.New(m.cfg.LogDriver, opts)
 	if err != nil {
 		return -1, fmt.Errorf("open log writer: %w", err)
 	}

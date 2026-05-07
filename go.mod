@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/creack/pty/v2 v2.0.1
+	github.com/dustin/go-humanize v1.0.1
 	github.com/moby/term v0.5.2
 	github.com/ngicks/go-common/contextkey v0.2.0
 	github.com/spf13/cobra v1.10.2
@@ -16,7 +17,6 @@ require (
 
 require (
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
-	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

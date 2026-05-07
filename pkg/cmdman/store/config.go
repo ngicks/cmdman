@@ -4,8 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
+
+	"github.com/dustin/go-humanize"
 )
 
 // ConfigFileName is the fixed name of the per-command configuration file.
@@ -63,6 +67,19 @@ const (
 	// LogOptPath overrides the on-disk log file path for file-based
 	// drivers. The value must be an absolute path.
 	LogOptPath = "path"
+	// LogOptMaxSize caps the size of the active log file. When a write
+	// would push the file to or past this byte count, the k8s-file driver
+	// rotates: the active file becomes <path>.1, the previous .1 becomes
+	// .2, and so on. Accepted as a human-readable string parsed by
+	// dustin/go-humanize.ParseBytes (e.g. "10mb", "1KiB", "1024"). The
+	// empty string and "0" both disable the cap.
+	LogOptMaxSize = "max-size"
+	// LogOptMaxFile caps the total number of log files kept (active +
+	// archives). When a rotation would push the count past this value,
+	// the oldest archive is dropped. Only meaningful when LogOptMaxSize
+	// is set; with LogOptMaxFile <= 1 the active file is truncated in
+	// place instead of being rotated. Empty / "0" means "unset".
+	LogOptMaxFile = "max-file"
 )
 
 // IsValidLogOpt reports whether key is meaningful for the given driver.
@@ -70,7 +87,7 @@ func IsValidLogOpt(driver LogDriver, key string) bool {
 	switch driver {
 	case LogDriverK8sFile:
 		switch key {
-		case LogOptPath:
+		case LogOptPath, LogOptMaxSize, LogOptMaxFile:
 			return true
 		}
 	}
@@ -88,8 +105,52 @@ func ValidateLogOpt(driver LogDriver, key, value string) error {
 		if !filepath.IsAbs(value) {
 			return fmt.Errorf("log_opt %q must be an absolute path: %q", key, value)
 		}
+	case LogOptMaxSize:
+		if _, err := ParseLogMaxSize(value); err != nil {
+			return fmt.Errorf("log_opt %q: %w", key, err)
+		}
+	case LogOptMaxFile:
+		if _, err := ParseLogMaxFile(value); err != nil {
+			return fmt.Errorf("log_opt %q: %w", key, err)
+		}
 	}
 	return nil
+}
+
+// ParseLogMaxSize parses a max-size log-opt value into a non-negative
+// byte count. It accepts the inputs supported by
+// dustin/go-humanize.ParseBytes — bare integers ("1024"), SI suffixes
+// ("10mb", "10 MB"), and IEC suffixes ("10mib"). The empty string and
+// "0" both mean "no limit" and return 0 with no error.
+func ParseLogMaxSize(value string) (int64, error) {
+	if value == "" {
+		return 0, nil
+	}
+	n, err := humanize.ParseBytes(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid size %q: %w", value, err)
+	}
+	if n > math.MaxInt64 {
+		return 0, fmt.Errorf("size %q overflows int64", value)
+	}
+	return int64(n), nil
+}
+
+// ParseLogMaxFile parses a max-file log-opt value into a positive file
+// count. The empty string and "0" both mean "unset" and return 0;
+// non-empty values must be a positive integer.
+func ParseLogMaxFile(value string) (int, error) {
+	if value == "" || value == "0" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid count %q: %w", value, err)
+	}
+	if n < 1 {
+		return 0, fmt.Errorf("count %q must be >= 1", value)
+	}
+	return n, nil
 }
 
 // CommandConfigJSON is the canonical command configuration stored in CommandConfig.JSON.
