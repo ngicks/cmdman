@@ -202,4 +202,5 @@ func TestConfigJSONMaterialization(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, got.Argv[0], "/bin/echo")
 	assert.Equal(t, got.Dir, "/tmp")
+	assert.Equal(t, got.Tty, false)
 }

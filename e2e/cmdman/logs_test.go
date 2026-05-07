@@ -83,6 +83,19 @@ var k8sFileLineRE = regexp.MustCompile(
 	`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{9}(?:Z|[+-]\d{2}:\d{2}) stdout [FP] `,
 )
 
+var k8sFileStderrLineRE = regexp.MustCompile(
+	`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{9}(?:Z|[+-]\d{2}:\d{2}) stderr [FP] `,
+)
+
+func hasMatchingLogLine(text string, re *regexp.Regexp, content string) bool {
+	for line := range strings.SplitSeq(strings.TrimRight(text, "\n"), "\n") {
+		if re.MatchString(line) && strings.Contains(line, content) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestLogDriver_K8sFileWritesLogToCommandDir(t *testing.T) {
 	t.Parallel()
 	ctx := testContext(t)
@@ -131,6 +144,56 @@ func TestLogDriver_K8sFileWritesLogToCommandDir(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "k8s-driver-line-B") {
 		t.Errorf("expected 'k8s-driver-line-B' in log file, got:\n%s", data)
+	}
+}
+
+func TestRun_DefaultPipeModeSplitsStdoutAndStderrLogs(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	env.run(ctx, "run", "-n", "pipe-split", "--", "/bin/sh", "-c",
+		"printf 'pipe-out\\n'; printf 'pipe-err\\n' >&2")
+	t.Cleanup(func() { env.cleanupCommand(ctx, "pipe-split") })
+	env.waitForState(ctx, "pipe-split", "exited", defaultTimeout)
+
+	waitUntil(t, defaultTimeout, func() bool {
+		stdout, stderr, err := env.exec(ctx, "logs", "pipe-split")
+		return err == nil &&
+			strings.Contains(stdout, "pipe-out") &&
+			strings.Contains(stderr, "pipe-err")
+	}, "pipe-split logs did not expose both streams")
+
+	stdout, stderr, err := env.exec(ctx, "logs", "pipe-split")
+	if err != nil {
+		t.Fatalf("logs failed: %v", err)
+	}
+	if !strings.Contains(stdout, "pipe-out") {
+		t.Errorf("expected stdout log output, got stdout=%q stderr=%q", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "pipe-err") {
+		t.Errorf("expected stderr log output, got stdout=%q stderr=%q", stdout, stderr)
+	}
+
+	info := env.inspectJSON(ctx, "pipe-split")
+	hexID, _ := info["id"].(string)
+	if hexID == "" {
+		t.Fatalf("inspect returned empty id; raw=%v", info)
+	}
+	logPath := filepath.Join(env.dataHome, "commands", hexID, "console.log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "pipe-out") || !strings.Contains(text, "pipe-err") {
+		t.Fatalf("expected both streams in raw log, got:\n%s", text)
+	}
+	if !hasMatchingLogLine(text, k8sFileLineRE, "pipe-out") {
+		t.Errorf("missing stdout-tagged pipe-out entry:\n%s", text)
+	}
+	if !hasMatchingLogLine(text, k8sFileStderrLineRE, "pipe-err") {
+		t.Errorf("missing stderr-tagged pipe-err entry:\n%s", text)
 	}
 }
 
@@ -355,9 +418,13 @@ func TestLogOpt_MaxFileRotatesArchives(t *testing.T) {
 	logPath := filepath.Join(env.dataHome, "commands", hexID, "console.log")
 
 	waitUntil(t, 2*time.Second, func() bool {
-		_, err := os.Stat(logPath + ".1")
-		return err == nil
-	}, "expected .1 archive at %s", logPath+".1")
+		for _, suffix := range []string{".1", ".2"} {
+			if _, err := os.Stat(logPath + suffix); err != nil {
+				return false
+			}
+		}
+		return true
+	}, "expected .1 and .2 archives at %s", logPath)
 
 	// .1 and .2 must be present, .3 must not.
 	for _, suffix := range []string{".1", ".2"} {

@@ -38,10 +38,11 @@ type Monitor struct {
 	stateJSON *cmdstore.CommandStateJSON
 
 	ptmx    *os.File
+	stdin   io.WriteCloser
+	stdinMu sync.Mutex
 	cmd     *exec.Cmd
 	fanout  *fanout
 	ring    *ringBuffer
-	stdinCh chan []byte
 
 	grpcServer *grpc.Server
 	sockPath   string
@@ -69,7 +70,6 @@ func RunMonitor(ctx context.Context, id string, cfg CmdmanConfig, logger *slog.L
 		Config:     cfg,
 		Logger:     logger,
 		fanout:     newFanout(),
-		stdinCh:    make(chan []byte, 64),
 	}
 
 	st, err := cmdstore.OpenStore(dbPath, true)
@@ -233,30 +233,30 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	if err != nil {
 		return -1, fmt.Errorf("open log writer: %w", err)
 	}
-	stdoutLogWriter := logdriver.NewStreamWriter(logWriter, logdriver.StreamStdout)
 	defer func() {
 		if cerr := logWriter.Close(); cerr != nil {
 			m.Logger.Warn("close log writer", slog.String("error", cerr.Error()))
 		}
 	}()
 
+	if m.cfg.Tty {
+		return m.runOnceTty(cmd, logWriter)
+	}
+	return m.runOncePipes(cmd, logWriter)
+}
+
+func (m *Monitor) runOnceTty(cmd *exec.Cmd, logWriter logdriver.Writer) (int, error) {
+	stdoutLogWriter := logdriver.NewStreamWriter(logWriter, logdriver.StreamStdout)
+
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		return -1, fmt.Errorf("pty start: %w", err)
 	}
 	m.ptmx = ptmx
+	m.stdin = ptmx
 	m.cmd = cmd
 
-	// Update state to running.
-	m.stateJSON.StartedAt = time.Now().UTC().Format(time.RFC3339)
-	if err := m.store.UpdateCommandState(
-		m.ID,
-		cmdstore.StateRunning,
-		nil,
-		m.stateJSON,
-	); err != nil {
-		m.Logger.Error("update state to running failed", slog.String("error", err.Error()))
-	}
+	m.setRunning()
 
 	// PTY read goroutine: read -> ring buffer + log file + fanout.
 	var wg sync.WaitGroup
@@ -278,28 +278,13 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 		}
 	})
 
-	// PTY write goroutine: stdin channel -> PTY.
-	done := make(chan struct{})
-	wg.Go(func() {
-		for {
-			select {
-			case data := <-m.stdinCh:
-				if _, err := ptmx.Write(data); err != nil {
-					return
-				}
-			case <-done:
-				return
-			}
-		}
-	})
-
 	// Wait for command exit.
 	err = cmd.Wait()
 	ptmx.Close()
 	m.ptmx = nil
+	m.stdin = nil
 	m.cmd = nil
 
-	close(done)
 	wg.Wait()
 
 	if err != nil {
@@ -309,6 +294,87 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 		return -1, err
 	}
 	return 0, nil
+}
+
+func (m *Monitor) runOncePipes(cmd *exec.Cmd, logWriter logdriver.Writer) (int, error) {
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return -1, fmt.Errorf("stdin pipe: %w", err)
+	}
+
+	lockedLogWriter := &lockedLogWriter{w: logWriter}
+	cmd.Stdout = &monitorOutputWriter{
+		monitor: m,
+		log:     logdriver.NewStreamWriter(lockedLogWriter, logdriver.StreamStdout),
+	}
+	cmd.Stderr = &monitorOutputWriter{
+		monitor: m,
+		log:     logdriver.NewStreamWriter(lockedLogWriter, logdriver.StreamStderr),
+	}
+
+	if err := cmd.Start(); err != nil {
+		return -1, fmt.Errorf("start command: %w", err)
+	}
+	m.stdin = stdin
+	m.cmd = cmd
+	m.setRunning()
+
+	err = cmd.Wait()
+	_ = stdin.Close()
+	m.stdin = nil
+	m.cmd = nil
+
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return exitErr.ExitCode(), nil
+		}
+		return -1, err
+	}
+	return 0, nil
+}
+
+type monitorOutputWriter struct {
+	monitor *Monitor
+	log     io.Writer
+}
+
+func (w *monitorOutputWriter) Write(data []byte) (int, error) {
+	if len(data) == 0 {
+		return 0, nil
+	}
+	w.monitor.ring.Write(data)
+	if _, err := w.log.Write(data); err != nil {
+		w.monitor.Logger.Warn("log writer", slog.String("error", err.Error()))
+	}
+	w.monitor.fanout.Send(data)
+	return len(data), nil
+}
+
+func (m *Monitor) setRunning() {
+	m.stateJSON.StartedAt = time.Now().UTC().Format(time.RFC3339)
+	if err := m.store.UpdateCommandState(
+		m.ID,
+		cmdstore.StateRunning,
+		nil,
+		m.stateJSON,
+	); err != nil {
+		m.Logger.Error("update state to running failed", slog.String("error", err.Error()))
+	}
+}
+
+type lockedLogWriter struct {
+	mu sync.Mutex
+	w  logdriver.Writer
+}
+
+func (w *lockedLogWriter) WriteLogLine(line logdriver.LogLine) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.w.WriteLogLine(line)
+}
+
+func (w *lockedLogWriter) Close() error {
+	return nil
 }
 
 func (m *Monitor) setExited(exitCode int) {
@@ -334,20 +400,24 @@ func (m *Monitor) maybeAutoRemove() error {
 	return nil
 }
 
-// QueueStdin sends data to the monitor's stdin channel for the PTY.
+// QueueStdin sends data to the running command's stdin.
 func (m *Monitor) QueueStdin(ctx context.Context, data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
-	if m.ptmx == nil {
-		return fmt.Errorf("no pty")
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	select {
-	case m.stdinCh <- data:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	if m.stdin == nil {
+		return fmt.Errorf("no stdin")
 	}
+	m.stdinMu.Lock()
+	defer m.stdinMu.Unlock()
+	if m.stdin == nil {
+		return fmt.Errorf("no stdin")
+	}
+	_, err := m.stdin.Write(data)
+	return err
 }
 
 // Resize changes the PTY window size.

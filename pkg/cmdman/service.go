@@ -52,6 +52,7 @@ type CreateRequest struct {
 	RestartPolicy   store.RestartPolicy
 	StopSignal      string
 	AutoRemove      bool
+	Tty             bool
 	ScrollbackBytes int
 	LogDriver       store.LogDriver
 	LogOpts         map[string]string
@@ -234,6 +235,7 @@ func (s *Service) buildCommandConfig(req CreateRequest) *store.CommandConfigJSON
 		Env:             env,
 		RestartPolicy:   restartPolicy,
 		StopSignal:      stopSignal,
+		Tty:             req.Tty,
 		ScrollbackBytes: scrollbackBytes,
 		LogDriver:       logDriver,
 		LogOpts:         cloneStringMap(req.LogOpts),

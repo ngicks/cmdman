@@ -165,6 +165,8 @@ type CommandConfigJSON struct {
 	RestartPolicy RestartPolicy `json:"restart_policy"`
 	// StopSignal is the default signal used by stop when no override is provided.
 	StopSignal string `json:"stop_signal,omitempty"`
+	// Tty controls whether the command is attached to a pseudo-terminal.
+	Tty bool `json:"tty"`
 	// ScrollbackBytes is the scrollback buffer size in bytes.
 	ScrollbackBytes int `json:"scrollback_bytes"`
 	// LogDriver controls how command output is persisted to disk.

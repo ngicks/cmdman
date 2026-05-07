@@ -18,6 +18,7 @@ type createFlags struct {
 	Restart         string
 	StopSignal      string
 	Rm              bool
+	Tty             bool
 	ScrollbackBytes int
 	LogDriver       string
 	LogOpts         []string
@@ -37,6 +38,7 @@ func bindCreateFlags(cmd *cobra.Command, f *createFlags) {
 	)
 	flags.StringVar(&f.StopSignal, "stop-signal", store.DefaultStopSignal, "Default stop signal")
 	flags.BoolVar(&f.Rm, "rm", false, "Auto-remove on exit")
+	flags.BoolVarP(&f.Tty, "tty", "t", false, "Allocate a pseudo-TTY")
 	flags.IntVar(
 		&f.ScrollbackBytes,
 		"scrollback-bytes",
@@ -122,6 +124,7 @@ func doCreate(
 		RestartPolicy:   store.RestartPolicy(flags.Restart),
 		StopSignal:      flags.StopSignal,
 		AutoRemove:      flags.Rm,
+		Tty:             flags.Tty,
 		ScrollbackBytes: flags.ScrollbackBytes,
 		LogDriver:       store.LogDriver(flags.LogDriver),
 		LogOpts:         logOpts,
