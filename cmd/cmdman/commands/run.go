@@ -45,13 +45,13 @@ func runRun(
 		return err
 	}
 
-	displayName := id
-	if name != "" {
-		displayName = name
-	}
-	fmt.Fprintln(cmd.OutOrStdout(), displayName)
-
-	if attach {
+	if !attach {
+		displayName := id
+		if name != "" {
+			displayName = name
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), displayName)
+	} else {
 		svc, err := cmdmanService(rootCfg)
 		if err != nil {
 			return err
