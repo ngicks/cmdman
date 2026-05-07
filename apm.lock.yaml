@@ -1,6 +1,6 @@
 lockfile_version: '1'
-generated_at: '2026-05-06T02:52:52.938594+00:00'
-apm_version: 0.9.2
+generated_at: '2026-05-07T17:58:54.803510+00:00'
+apm_version: 0.12.4
 dependencies:
 - repo_url: ngicks/agents-package
   host: github.com
@@ -30,11 +30,13 @@ dependencies:
   content_hash: sha256:4e6be68d8e52e2f3e36aeda23f0b5b7369336e9c938ba087dd69528bcac67051
 - repo_url: ngicks/agents-package
   host: github.com
+  resolved_commit: 817461f86c0e611febc8b950a0c12867665e2af4
   virtual_path: instructions/base-env.instructions.md
   is_virtual: true
   content_hash: sha256:e8e2f850d9cb676f3e9dc7756563576bc3dca4aed77f162987d88b6a7a0d18c5
 - repo_url: ngicks/agents-package
   host: github.com
+  resolved_commit: 817461f86c0e611febc8b950a0c12867665e2af4
   virtual_path: instructions/go/go-basics.instructions.md
   is_virtual: true
   deployed_files:
@@ -44,6 +46,7 @@ dependencies:
   content_hash: sha256:3377a6fbb48ef1d8f562c62cc7b382d85c75964726c423ba14dde945bbb0bead
 - repo_url: ngicks/agents-package
   host: github.com
+  resolved_commit: 817461f86c0e611febc8b950a0c12867665e2af4
   virtual_path: instructions/go/go-design-preference.instructions.md
   is_virtual: true
   deployed_files:
@@ -74,4 +77,4 @@ dependencies:
 local_deployed_files:
 - .claude/rules/base.md
 local_deployed_file_hashes:
-  .claude/rules/base.md: sha256:e9caa57b35106ed599a19e6541991354b9a368c3c50cf9be5e8284a0606abff9
+  .claude/rules/base.md: sha256:254d4c66cc571ec4f58e45a4579619bc88a3423c42d19ad012fb1f1c11909433

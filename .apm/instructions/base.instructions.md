@@ -32,3 +32,4 @@ A simple shell command daemonizor written in Go which runs blocking commands in 
 ### Implementing functionality
 
 - Implement e2e tests if any existing test is not covering the case.
+- Don't think too much about backward compatibility, since the app was never actually deployed
