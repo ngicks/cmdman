@@ -24,7 +24,7 @@ func TestMonitorRunAndExit(t *testing.T) {
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
 
-	st, err := store.OpenStore(dbPath, true)
+	st, err := store.OpenStore(t.Context(), dbPath, true)
 	assert.NilError(t, err)
 	defer st.Close()
 
@@ -81,7 +81,7 @@ func TestMonitorNonZeroExit(t *testing.T) {
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
 
-	st, err := store.OpenStore(dbPath, true)
+	st, err := store.OpenStore(t.Context(), dbPath, true)
 	assert.NilError(t, err)
 	defer st.Close()
 
@@ -130,7 +130,7 @@ func TestMonitorAutoRemove(t *testing.T) {
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
 
-	st, err := store.OpenStore(dbPath, true)
+	st, err := store.OpenStore(t.Context(), dbPath, true)
 	assert.NilError(t, err)
 	defer st.Close()
 
@@ -182,7 +182,7 @@ func TestMonitorGracefulShutdown(t *testing.T) {
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
 
-	st, err := store.OpenStore(dbPath, true)
+	st, err := store.OpenStore(t.Context(), dbPath, true)
 	assert.NilError(t, err)
 	defer st.Close()
 

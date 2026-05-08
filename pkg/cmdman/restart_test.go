@@ -25,7 +25,7 @@ func TestRestartPolicyOnFailure(t *testing.T) {
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
 
-	st, err := store.OpenStore(dbPath, true)
+	st, err := store.OpenStore(t.Context(), dbPath, true)
 	assert.NilError(t, err)
 	defer st.Close()
 
@@ -96,7 +96,7 @@ func TestRestartPolicyAlways(t *testing.T) {
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
 
-	st, err := store.OpenStore(dbPath, true)
+	st, err := store.OpenStore(t.Context(), dbPath, true)
 	assert.NilError(t, err)
 	defer st.Close()
 

@@ -102,7 +102,7 @@ func TestServiceSendKeys(t *testing.T) {
 
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
-	st, err := store.OpenStore(dbPath, true)
+	st, err := store.OpenStore(t.Context(), dbPath, true)
 	assert.NilError(t, err)
 	defer st.Close()
 
@@ -149,11 +149,13 @@ func TestServiceSendKeys(t *testing.T) {
 	}
 
 	sessionSvc := NewService(appCfg)
+	defer sessionSvc.Close()
 	session, err := sessionSvc.OpenAttachSession(ctx, id)
 	assert.NilError(t, err)
 	defer session.Close()
 
 	sendSvc := NewService(appCfg)
+	defer sendSvc.Close()
 	assert.NilError(t, sendSvc.SendKeys(ctx, id, SendKeysRequest{
 		Keys: []string{"hello world", "Enter"},
 	}))

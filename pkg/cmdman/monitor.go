@@ -72,7 +72,7 @@ func RunMonitor(ctx context.Context, id string, cfg CmdmanConfig, logger *slog.L
 		fanout:     newFanout(),
 	}
 
-	st, err := cmdstore.OpenStore(dbPath, true)
+	st, err := cmdstore.OpenStore(ctx, dbPath, true)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}

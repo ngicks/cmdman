@@ -4,22 +4,31 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/store/internal/migrations"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // schemaVersion is the current schema version.
 // Bump this and add a corresponding entry to schemaMigrations for each schema change.
 const schemaVersion = 2
+
+const (
+	sqliteBusyTimeout       = 30 * time.Second
+	openStoreMaxAttempts    = 4
+	openStoreInitialBackoff = 100 * time.Millisecond
+)
 
 // Store provides access to the SQLite database for command management.
 type Store struct {
@@ -31,40 +40,56 @@ type Store struct {
 // for a fresh database or checks the schema version for an existing one,
 // returning an error if migration is needed. Pass validate=false for the
 // migrate command.
-func OpenStore(dbPath string, validate bool) (*Store, error) {
-	store, err := openStore(dbPath)
-	if err != nil {
-		return nil, err
-	}
-	if validate {
-		if err := validateDB(store.db); err != nil {
-			store.Close()
+func OpenStore(ctx context.Context, dbPath string, validate bool) (*Store, error) {
+	var lastErr error
+	for attempt := range openStoreMaxAttempts {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		store, err := openStore(ctx, dbPath)
+		if err == nil && validate {
+			if validateErr := validateDB(ctx, store.db); validateErr != nil {
+				store.Close()
+				err = validateErr
+			}
+		}
+		if err == nil {
+			return store, nil
+		}
+		if !isSQLiteBusyError(err) || attempt == openStoreMaxAttempts-1 {
+			return nil, err
+		}
+		lastErr = err
+		timer := time.NewTimer(openStoreInitialBackoff << attempt)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
-	return store, nil
+	return nil, lastErr
 }
 
-func openStore(dbPath string) (*Store, error) {
+func openStore(ctx context.Context, dbPath string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf("create db directory: %w", err)
 	}
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", sqliteDSN(dbPath))
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
-	if err := configureDB(db); err != nil {
+	if err := db.PingContext(ctx); err != nil {
 		db.Close()
-		return nil, err
+		return nil, fmt.Errorf("ping database: %w", err)
 	}
 	return &Store{db: db}, nil
 }
 
-func validateDB(db *sql.DB) error {
-	if err := initOrCheckSchema(db); err != nil {
+func validateDB(ctx context.Context, db *sql.DB) error {
+	if err := initOrCheckSchema(ctx, db); err != nil {
 		return err
 	}
-	if err := verifyJSONSupport(db); err != nil {
+	if err := verifyJSONSupport(ctx, db); err != nil {
 		return err
 	}
 	return nil
@@ -80,24 +105,36 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-func configureDB(db *sql.DB) error {
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA busy_timeout=5000",
-		"PRAGMA foreign_keys=ON",
+func sqliteDSN(dbPath string) string {
+	u := url.URL{
+		Scheme: "file",
+		Path:   dbPath,
 	}
-	for _, p := range pragmas {
-		if _, err := db.Exec(p); err != nil {
-			return fmt.Errorf("exec %q: %w", p, err)
-		}
+	q := u.Query()
+	q.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", sqliteBusyTimeout.Milliseconds()))
+	q.Add("_pragma", "journal_mode(WAL)")
+	q.Add("_pragma", "foreign_keys(ON)")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func isSQLiteBusyError(err error) bool {
+	sqliteErr, ok := errors.AsType[*sqlite.Error](err)
+	if !ok {
+		return false
 	}
-	return nil
+	switch sqliteErr.Code() & 0xff {
+	case sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED:
+		return true
+	default:
+		return false
+	}
 }
 
 // initOrCheckSchema initializes the schema for a fresh DB or checks the
 // schema version for an existing DB. Returns an error if migration is needed.
-func initOrCheckSchema(db *sql.DB) error {
-	exists, err := dbConfigExists(db)
+func initOrCheckSchema(ctx context.Context, db *sql.DB) error {
+	exists, err := dbConfigExists(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -105,14 +142,16 @@ func initOrCheckSchema(db *sql.DB) error {
 		// Fresh database or pre-DBConfig database.
 		// Check if CommandConfig table exists (pre-DBConfig v1 database).
 		var check int
-		err := db.QueryRow(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='CommandConfig'`).
-			Scan(&check)
+		err := db.QueryRowContext(
+			ctx,
+			`SELECT 1 FROM sqlite_master WHERE type='table' AND name='CommandConfig'`,
+		).Scan(&check)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("checking existing tables: %w", err)
 		}
 		if errors.Is(err, sql.ErrNoRows) || check != 1 {
 			// Truly fresh database — create everything at current version.
-			return createSchema(db)
+			return createSchema(ctx, db)
 		}
 		// Pre-DBConfig database (v1) — needs migration.
 		return fmt.Errorf(
@@ -120,7 +159,7 @@ func initOrCheckSchema(db *sql.DB) error {
 		)
 	}
 
-	ver, err := readSchemaVersion(db)
+	ver, err := readSchemaVersion(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -142,12 +181,12 @@ func initOrCheckSchema(db *sql.DB) error {
 }
 
 // Migrate runs all pending schema migrations.
-func (s *Store) Migrate() error {
-	return runMigrations(s.db)
+func (s *Store) Migrate(ctx context.Context) error {
+	return runMigrations(ctx, s.db)
 }
 
-func runMigrations(db *sql.DB) error {
-	exists, err := dbConfigExists(db)
+func runMigrations(ctx context.Context, db *sql.DB) error {
+	exists, err := dbConfigExists(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -155,29 +194,34 @@ func runMigrations(db *sql.DB) error {
 	if !exists {
 		// Check if this is a pre-DBConfig database or truly fresh.
 		var check int
-		err := db.QueryRow(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='CommandConfig'`).
-			Scan(&check)
+		err := db.QueryRowContext(
+			ctx,
+			`SELECT 1 FROM sqlite_master WHERE type='table' AND name='CommandConfig'`,
+		).Scan(&check)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("checking existing tables: %w", err)
 		}
 		if errors.Is(err, sql.ErrNoRows) || check != 1 {
 			// Fresh database — create everything.
-			return createSchema(db)
+			return createSchema(ctx, db)
 		}
 		// Pre-DBConfig database. Create DBConfig at version 1, then migrate.
-		if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS DBConfig (
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS DBConfig (
 			ID            INTEGER PRIMARY KEY NOT NULL,
 			SchemaVersion INTEGER NOT NULL,
 			CHECK (ID IN (1))
 		)`); err != nil {
 			return fmt.Errorf("create DBConfig table: %w", err)
 		}
-		if _, err := db.Exec(`INSERT INTO DBConfig (ID, SchemaVersion) VALUES (1, 1)`); err != nil {
+		if _, err := db.ExecContext(
+			ctx,
+			`INSERT INTO DBConfig (ID, SchemaVersion) VALUES (1, 1)`,
+		); err != nil {
 			return fmt.Errorf("insert initial DBConfig: %w", err)
 		}
 	}
 
-	ver, err := readSchemaVersion(db)
+	ver, err := readSchemaVersion(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -194,11 +238,14 @@ func runMigrations(db *sql.DB) error {
 
 	// Run migrations one version at a time.
 	for v := ver + 1; v <= schemaVersion; v++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		migrateFn, ok := migrations.SchemaMigrations[v]
 		if !ok {
 			return fmt.Errorf("no migration function for version %d", v)
 		}
-		tx, err := db.Begin()
+		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin migration to v%d: %w", v, err)
 		}
@@ -206,7 +253,11 @@ func runMigrations(db *sql.DB) error {
 			tx.Rollback()
 			return fmt.Errorf("migration to v%d: %w", v, err)
 		}
-		if _, err := tx.Exec(`UPDATE DBConfig SET SchemaVersion = ? WHERE ID = 1`, v); err != nil {
+		if _, err := tx.ExecContext(
+			ctx,
+			`UPDATE DBConfig SET SchemaVersion = ? WHERE ID = 1`,
+			v,
+		); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("update schema version to %d: %w", v, err)
 		}
@@ -217,10 +268,12 @@ func runMigrations(db *sql.DB) error {
 	return nil
 }
 
-func dbConfigExists(db *sql.DB) (bool, error) {
+func dbConfigExists(ctx context.Context, db *sql.DB) (bool, error) {
 	var check int
-	err := db.QueryRow(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='DBConfig'`).
-		Scan(&check)
+	err := db.QueryRowContext(
+		ctx,
+		`SELECT 1 FROM sqlite_master WHERE type='table' AND name='DBConfig'`,
+	).Scan(&check)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -230,9 +283,9 @@ func dbConfigExists(db *sql.DB) (bool, error) {
 	return check == 1, nil
 }
 
-func readSchemaVersion(db *sql.DB) (int, error) {
+func readSchemaVersion(ctx context.Context, db *sql.DB) (int, error) {
 	var ver int
-	err := db.QueryRow(`SELECT SchemaVersion FROM DBConfig WHERE ID = 1`).Scan(&ver)
+	err := db.QueryRowContext(ctx, `SELECT SchemaVersion FROM DBConfig WHERE ID = 1`).Scan(&ver)
 	if err != nil {
 		return 0, fmt.Errorf("read schema version: %w", err)
 	}
@@ -243,7 +296,7 @@ func readSchemaVersion(db *sql.DB) (int, error) {
 }
 
 // createSchema creates all tables at the current schema version for a fresh database.
-func createSchema(db *sql.DB) error {
+func createSchema(ctx context.Context, db *sql.DB) error {
 	schema := `
 CREATE TABLE IF NOT EXISTS DBConfig (
     ID            INTEGER PRIMARY KEY NOT NULL,
@@ -283,11 +336,12 @@ CREATE TABLE IF NOT EXISTS CommandExitCode (
 
 CREATE INDEX IF NOT EXISTS idx_command_exit_code_id_ts ON CommandExitCode(ID, Timestamp);
 `
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("create schema: %w", err)
 	}
 	// Insert DBConfig row at current schema version.
-	if _, err := db.Exec(
+	if _, err := db.ExecContext(
+		ctx,
 		`INSERT OR IGNORE INTO DBConfig (ID, SchemaVersion) VALUES (1, ?)`,
 		schemaVersion,
 	); err != nil {
@@ -296,9 +350,9 @@ CREATE INDEX IF NOT EXISTS idx_command_exit_code_id_ts ON CommandExitCode(ID, Ti
 	return nil
 }
 
-func verifyJSONSupport(db *sql.DB) error {
+func verifyJSONSupport(ctx context.Context, db *sql.DB) error {
 	var result string
-	err := db.QueryRow(`SELECT json_extract('{"a":"b"}', '$.a')`).Scan(&result)
+	err := db.QueryRowContext(ctx, `SELECT json_extract('{"a":"b"}', '$.a')`).Scan(&result)
 	if err != nil {
 		return fmt.Errorf("SQLite JSON support unavailable: %w", err)
 	}

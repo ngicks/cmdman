@@ -154,7 +154,7 @@ type LiveStatusInfo struct {
 	PID      int32  `json:"pid"`
 }
 
-func (s *Service) Create(_ context.Context, req CreateRequest) (*CreateResult, error) {
+func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult, error) {
 	cfg := s.buildCommandConfig(req)
 	if err := cfg.ValidateCreate(); err != nil {
 		return nil, err
@@ -170,7 +170,7 @@ func (s *Service) Create(_ context.Context, req CreateRequest) (*CreateResult, e
 		return nil, err
 	}
 
-	st, err := s.openStore(true)
+	st, err := s.openStore(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
@@ -244,8 +244,8 @@ func (s *Service) buildCommandConfig(req CreateRequest) *store.CommandConfigJSON
 	}
 }
 
-func (s *Service) Start(_ context.Context, idOrName string) error {
-	st, err := s.openStore(true)
+func (s *Service) Start(ctx context.Context, idOrName string) error {
+	st, err := s.openStore(ctx, true)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -290,8 +290,8 @@ func (s *Service) Start(_ context.Context, idOrName string) error {
 	return nil
 }
 
-func (s *Service) ResolveMonitor(_ context.Context, idOrName string) (*MonitorEndpoint, error) {
-	st, err := s.openStore(true)
+func (s *Service) ResolveMonitor(ctx context.Context, idOrName string) (*MonitorEndpoint, error) {
+	st, err := s.openStore(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
@@ -347,8 +347,8 @@ func (s *Service) OpenAttachSession(
 	}, nil
 }
 
-func (s *Service) List(_ context.Context, req ListRequest) ([]store.CommandEntry, error) {
-	st, err := s.openStore(true)
+func (s *Service) List(ctx context.Context, req ListRequest) ([]store.CommandEntry, error) {
+	st, err := s.openStore(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
@@ -366,7 +366,7 @@ func (s *Service) List(_ context.Context, req ListRequest) ([]store.CommandEntry
 }
 
 func (s *Service) Inspect(ctx context.Context, idOrName string) (*InspectOutput, error) {
-	st, err := s.openStore(true)
+	st, err := s.openStore(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
@@ -402,7 +402,7 @@ func (s *Service) Inspect(ctx context.Context, idOrName string) (*InspectOutput,
 }
 
 func (s *Service) Signal(ctx context.Context, idOrName string, sig int32) error {
-	st, err := s.openStore(true)
+	st, err := s.openStore(ctx, true)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -419,7 +419,7 @@ func (s *Service) Signal(ctx context.Context, idOrName string, sig int32) error 
 }
 
 func (s *Service) Stop(ctx context.Context, req StopRequest) ([]CommandActionResult, error) {
-	st, err := s.openStore(true)
+	st, err := s.openStore(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
@@ -488,7 +488,7 @@ func (s *Service) stopTarget(
 }
 
 func (s *Service) Remove(ctx context.Context, req RemoveRequest) ([]CommandActionResult, error) {
-	st, err := s.openStore(true)
+	st, err := s.openStore(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
@@ -514,7 +514,7 @@ func (s *Service) Remove(ctx context.Context, req RemoveRequest) ([]CommandActio
 // until ctx is cancelled. The monitor is not contacted; logs remain
 // readable after the command exits.
 func (s *Service) Logs(ctx context.Context, req LogsRequest) (logdriver.Reader, error) {
-	st, err := s.openStore(true)
+	st, err := s.openStore(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
@@ -545,7 +545,7 @@ func (s *Service) Wait(ctx context.Context, req WaitRequest) ([]WaitResult, erro
 		interval = 250 * time.Millisecond
 	}
 
-	st, err := s.openStore(true)
+	st, err := s.openStore(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
@@ -614,20 +614,19 @@ func waitForCondition(
 	}
 }
 
-func (s *Service) Migrate(_ context.Context) error {
-	st, err := s.openStore(false)
+func (s *Service) Migrate(ctx context.Context) error {
+	st, err := s.openStore(ctx, false)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
-
-	if err := st.Migrate(); err != nil {
+	if err := st.Migrate(ctx); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
 	return nil
 }
 
-func (s *Service) openStore(validate bool) (*store.Store, error) {
+func (s *Service) openStore(ctx context.Context, validate bool) (*store.Store, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.store != nil {
@@ -637,7 +636,7 @@ func (s *Service) openStore(validate bool) (*store.Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.store, err = store.OpenStore(dbPath, validate)
+	s.store, err = store.OpenStore(ctx, dbPath, validate)
 	return s.store, err
 }
 
