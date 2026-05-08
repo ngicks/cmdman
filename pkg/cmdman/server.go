@@ -16,17 +16,17 @@ type monitorServer struct {
 }
 
 func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) error {
-	// Send scrollback first.
+	s.monitor.outputMu.Lock()
+	ch, unsub := s.monitor.fanout.Subscribe()
 	scrollback := s.monitor.ring.Bytes()
+	s.monitor.outputMu.Unlock()
+	defer unsub()
+
 	if len(scrollback) > 0 {
 		if err := stream.Send(&pb.AttachResponse{Stdout: scrollback}); err != nil {
 			return err
 		}
 	}
-
-	// Subscribe to live output.
-	ch, unsub := s.monitor.fanout.Subscribe()
-	defer unsub()
 
 	// Read stdin from client in a goroutine.
 	errCh := make(chan error, 1)
@@ -85,8 +85,20 @@ func (s *monitorServer) Logs(
 	req *pb.LogsRequest,
 	stream pb.CommandMonitorService_LogsServer,
 ) error {
-	// Send scrollback.
+	var (
+		ch    <-chan []byte
+		unsub func()
+	)
+	if req.Follow {
+		s.monitor.outputMu.Lock()
+		ch, unsub = s.monitor.fanout.Subscribe()
+	}
 	scrollback := s.monitor.ring.Bytes()
+	if req.Follow {
+		s.monitor.outputMu.Unlock()
+		defer unsub()
+	}
+
 	if len(scrollback) > 0 {
 		if err := stream.Send(&pb.LogsResponse{Data: scrollback}); err != nil {
 			return err
@@ -96,10 +108,6 @@ func (s *monitorServer) Logs(
 	if !req.Follow {
 		return nil
 	}
-
-	// Follow live output.
-	ch, unsub := s.monitor.fanout.Subscribe()
-	defer unsub()
 
 	for {
 		select {

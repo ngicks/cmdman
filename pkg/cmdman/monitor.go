@@ -37,12 +37,13 @@ type Monitor struct {
 	cfg       *cmdstore.CommandConfigJSON
 	stateJSON *cmdstore.CommandStateJSON
 
-	ptmx    *os.File
-	stdin   io.WriteCloser
-	stdinMu sync.Mutex
-	cmd     *exec.Cmd
-	fanout  *fanout
-	ring    *ringBuffer
+	ptmx     *os.File
+	stdin    io.WriteCloser
+	stdinMu  sync.Mutex
+	cmd      *exec.Cmd
+	fanout   *fanout
+	ring     *ringBuffer
+	outputMu sync.Mutex
 
 	grpcServer *grpc.Server
 	sockPath   string
@@ -342,6 +343,9 @@ func (w *monitorOutputWriter) Write(data []byte) (int, error) {
 	if len(data) == 0 {
 		return 0, nil
 	}
+	w.monitor.outputMu.Lock()
+	defer w.monitor.outputMu.Unlock()
+
 	w.monitor.ring.Write(data)
 	if _, err := w.log.Write(data); err != nil {
 		w.monitor.Logger.Warn("log writer", slog.String("error", err.Error()))
