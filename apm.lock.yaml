@@ -1,10 +1,10 @@
 lockfile_version: '1'
-generated_at: '2026-05-07T17:58:54.803510+00:00'
+generated_at: '2026-05-08T11:27:31.216684+00:00'
 apm_version: 0.12.4
 dependencies:
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: b7abaae75569a2b1cbb479388f86da780bdc233b
+  resolved_commit: c6d54eb752d5e4ed6676de1137ef7d45e23456ad
   virtual_path: hooks/golangci-lint-fmt-after-edit
   is_virtual: true
   package_type: hook_package
@@ -17,7 +17,7 @@ dependencies:
   content_hash: sha256:2df09a9d0d9c5bf396e306a0e698aa4280f33add88070e1bbfca8eed78b324b3
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: b7abaae75569a2b1cbb479388f86da780bdc233b
+  resolved_commit: c6d54eb752d5e4ed6676de1137ef7d45e23456ad
   virtual_path: hooks/golangci-lint-run-after-edit
   is_virtual: true
   package_type: hook_package
@@ -30,13 +30,13 @@ dependencies:
   content_hash: sha256:4e6be68d8e52e2f3e36aeda23f0b5b7369336e9c938ba087dd69528bcac67051
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: 817461f86c0e611febc8b950a0c12867665e2af4
+  resolved_commit: c6d54eb752d5e4ed6676de1137ef7d45e23456ad
   virtual_path: instructions/base-env.instructions.md
   is_virtual: true
   content_hash: sha256:e8e2f850d9cb676f3e9dc7756563576bc3dca4aed77f162987d88b6a7a0d18c5
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: 817461f86c0e611febc8b950a0c12867665e2af4
+  resolved_commit: c6d54eb752d5e4ed6676de1137ef7d45e23456ad
   virtual_path: instructions/go/go-basics.instructions.md
   is_virtual: true
   deployed_files:
@@ -46,7 +46,7 @@ dependencies:
   content_hash: sha256:3377a6fbb48ef1d8f562c62cc7b382d85c75964726c423ba14dde945bbb0bead
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: 817461f86c0e611febc8b950a0c12867665e2af4
+  resolved_commit: c6d54eb752d5e4ed6676de1137ef7d45e23456ad
   virtual_path: instructions/go/go-design-preference.instructions.md
   is_virtual: true
   deployed_files:
@@ -56,7 +56,7 @@ dependencies:
   content_hash: sha256:08392ce26cee0ed77f6865678fe518f2e224c3706351936d7e59eed4b5e4d43b
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: b7abaae75569a2b1cbb479388f86da780bdc233b
+  resolved_commit: c6d54eb752d5e4ed6676de1137ef7d45e23456ad
   virtual_path: skills/go-check-outdated-patterns
   is_virtual: true
   package_type: claude_skill
@@ -66,14 +66,24 @@ dependencies:
   content_hash: sha256:685001bfd8f313b73fd9534494c06dde40f1d596c25afc2310a4c4ee9f4f92ed
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: b7abaae75569a2b1cbb479388f86da780bdc233b
+  resolved_commit: c6d54eb752d5e4ed6676de1137ef7d45e23456ad
   virtual_path: skills/go-edit-cobra
   is_virtual: true
   package_type: claude_skill
   deployed_files:
   - .agents/skills/go-edit-cobra
   - .claude/skills/go-edit-cobra
-  content_hash: sha256:e19fc9ad8c6040b722aba62061c9382f7f7321ad9c19ba4997f67e6e151d453f
+  content_hash: sha256:b8a896506b43fc07517f4d8706d059964ffe56a61b140e1aeb0263ec867a17c7
+- repo_url: ngicks/agents-package
+  host: github.com
+  resolved_commit: c6d54eb752d5e4ed6676de1137ef7d45e23456ad
+  virtual_path: skills/go-review-checklist
+  is_virtual: true
+  package_type: claude_skill
+  deployed_files:
+  - .agents/skills/go-review-checklist
+  - .claude/skills/go-review-checklist
+  content_hash: sha256:803eafe81d54641d0d543e1fdd9b84be15804dc7045eed7f36764d142c7ad641
 local_deployed_files:
 - .claude/rules/base.md
 local_deployed_file_hashes:
