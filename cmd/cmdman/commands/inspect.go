@@ -36,6 +36,8 @@ func runInspect(
 	if err != nil {
 		return err
 	}
+	defer svc.Close()
+
 	out, err := svc.Inspect(cmd.Context(), args[0])
 	if err != nil {
 		return err

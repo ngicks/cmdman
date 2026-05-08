@@ -48,6 +48,7 @@ func runAttach(
 	if err != nil {
 		return err
 	}
+	defer svc.Close()
 
 	attachCtx, cancelAttach := context.WithCancel(cmd.Context())
 	defer cancelAttach()

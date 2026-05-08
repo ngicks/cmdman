@@ -105,6 +105,7 @@ func doCreate(
 	if err != nil {
 		return "", "", err
 	}
+	defer svc.Close()
 
 	labels, err := parseLabels(flags.Label)
 	if err != nil {

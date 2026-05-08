@@ -56,6 +56,8 @@ func runRun(
 		if err != nil {
 			return err
 		}
+		defer svc.Close()
+
 		endpoint, err := svc.ResolveMonitor(cmd.Context(), id)
 		if err != nil {
 			return err

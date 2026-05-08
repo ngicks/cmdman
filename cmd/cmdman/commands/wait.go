@@ -48,6 +48,7 @@ func runWait(
 	if err != nil {
 		return err
 	}
+	defer svc.Close()
 
 	results, err := svc.Wait(cmd.Context(), cmdman.WaitRequest{
 		Targets:   args,

@@ -45,6 +45,7 @@ func runRm(
 	if err != nil {
 		return err
 	}
+	defer svc.Close()
 
 	results, err := svc.Remove(cmd.Context(), cmdman.RemoveRequest{
 		Targets: args,

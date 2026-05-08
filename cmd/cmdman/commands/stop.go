@@ -49,6 +49,7 @@ func runStop(
 	if err != nil {
 		return err
 	}
+	defer svc.Close()
 
 	results, err := svc.Stop(cmd.Context(), cmdman.StopRequest{
 		Targets: args,

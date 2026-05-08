@@ -29,5 +29,7 @@ func doStart(cmd *cobra.Command, idOrName string, rootCfg *cmdman.CmdmanConfig) 
 	if err != nil {
 		return err
 	}
+	defer svc.Close()
+
 	return svc.Start(cmd.Context(), idOrName)
 }

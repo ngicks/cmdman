@@ -42,6 +42,7 @@ func runSignal(
 	if err != nil {
 		return err
 	}
+	defer svc.Close()
 
 	for _, target := range args {
 		if err := svc.Signal(cmd.Context(), target, sig); err != nil {

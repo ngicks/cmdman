@@ -26,6 +26,8 @@ func runMigrate(cmd *cobra.Command, _ []string, rootCfg *cmdman.CmdmanConfig) er
 	if err != nil {
 		return err
 	}
+	defer svc.Close()
+
 	if err := svc.Migrate(cmd.Context()); err != nil {
 		return err
 	}

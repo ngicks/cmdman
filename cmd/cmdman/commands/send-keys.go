@@ -43,6 +43,7 @@ func runSendKeys(
 	if err != nil {
 		return err
 	}
+	defer svc.Close()
 
 	return svc.SendKeys(cmd.Context(), args[0], cmdman.SendKeysRequest{
 		Keys:        args[1:],

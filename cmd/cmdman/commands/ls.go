@@ -50,6 +50,8 @@ func runLs(
 	if err != nil {
 		return err
 	}
+	defer svc.Close()
+
 	entries, err := svc.List(cmd.Context(), cmdman.ListRequest{
 		AllStates: allStates,
 		Labels:    labels,

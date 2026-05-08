@@ -39,6 +39,18 @@ func NewService(cfg CmdmanConfig) *Service {
 	return &Service{cfg: cfg}
 }
 
+// Close releases resources owned by the service.
+func (s *Service) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.store == nil {
+		return nil
+	}
+	err := s.store.Close()
+	s.store = nil
+	return err
+}
+
 func (s *Service) Config() CmdmanConfig {
 	return s.cfg
 }
@@ -174,8 +186,6 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	defer st.Close()
-
 	if err := st.InsertCommandConfig(id, req.Name, cfg); err != nil {
 		return nil, fmt.Errorf("insert config: %w", err)
 	}
@@ -249,8 +259,6 @@ func (s *Service) Start(ctx context.Context, idOrName string) error {
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer st.Close()
-
 	id, _, cfg, err := st.GetCommandConfig(idOrName)
 	if err != nil {
 		return fmt.Errorf("get command config: %w", err)
@@ -295,8 +303,6 @@ func (s *Service) ResolveMonitor(ctx context.Context, idOrName string) (*Monitor
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	defer st.Close()
-
 	id, name, _, err := st.GetCommandConfig(idOrName)
 	if err != nil {
 		return nil, fmt.Errorf("resolve command: %w", err)
@@ -352,8 +358,6 @@ func (s *Service) List(ctx context.Context, req ListRequest) ([]store.CommandEnt
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	defer st.Close()
-
 	if err := CleanStaleEntries(st, s.cfg); err != nil {
 		return nil, fmt.Errorf("clean stale entries: %w", err)
 	}
@@ -370,8 +374,6 @@ func (s *Service) Inspect(ctx context.Context, idOrName string) (*InspectOutput,
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	defer st.Close()
-
 	id, name, cfg, err := st.GetCommandConfig(idOrName)
 	if err != nil {
 		return nil, fmt.Errorf("resolve command: %w", err)
@@ -406,8 +408,6 @@ func (s *Service) Signal(ctx context.Context, idOrName string, sig int32) error 
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer st.Close()
-
 	id, err := st.ResolveID(idOrName)
 	if err != nil {
 		return fmt.Errorf("resolve command: %w", err)
@@ -423,8 +423,6 @@ func (s *Service) Stop(ctx context.Context, req StopRequest) ([]CommandActionRes
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	defer st.Close()
-
 	ids, err := resolveTargets(st, req.Targets, nil)
 	if err != nil {
 		return nil, err
@@ -492,8 +490,6 @@ func (s *Service) Remove(ctx context.Context, req RemoveRequest) ([]CommandActio
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	defer st.Close()
-
 	ids, err := resolveTargets(st, req.Targets, req.Labels)
 	if err != nil {
 		return nil, err
@@ -518,8 +514,6 @@ func (s *Service) Logs(ctx context.Context, req LogsRequest) (logdriver.Reader, 
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	defer st.Close()
-
 	_, _, cfg, err := st.GetCommandConfig(req.IDOrName)
 	if err != nil {
 		return nil, fmt.Errorf("resolve command: %w", err)
@@ -549,8 +543,6 @@ func (s *Service) Wait(ctx context.Context, req WaitRequest) ([]WaitResult, erro
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	defer st.Close()
-
 	results := make([]WaitResult, 0, len(req.Targets))
 	for _, target := range req.Targets {
 		id, err := st.ResolveID(target)
@@ -619,7 +611,6 @@ func (s *Service) Migrate(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer st.Close()
 	if err := st.Migrate(ctx); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}

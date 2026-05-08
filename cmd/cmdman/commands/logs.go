@@ -30,6 +30,8 @@ func runLogs(cmd *cobra.Command, args []string, rootCfg *cmdman.CmdmanConfig, fo
 	if err != nil {
 		return err
 	}
+	defer svc.Close()
+
 	r, err := svc.Logs(cmd.Context(), cmdman.LogsRequest{
 		IDOrName: args[0],
 		Follow:   follow,
