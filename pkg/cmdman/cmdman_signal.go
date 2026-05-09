@@ -28,10 +28,10 @@ func (s *Service) Signal(ctx context.Context, idOrName string, sig int32) error 
 func signalOne(ctx context.Context, st *store.Store, id string, sig int32) error {
 	_, _, stateJSON, err := st.GetCommandState(id)
 	if err != nil {
-		return err
+		return fmt.Errorf("signal command %s: %w", id, err)
 	}
 	if stateJSON.SocketPath == "" {
-		return fmt.Errorf("no socket path")
+		return fmt.Errorf("signal command %s: no socket path", id)
 	}
 
 	conn, err := grpc.NewClient(
@@ -39,11 +39,13 @@ func signalOne(ctx context.Context, st *store.Store, id string, sig int32) error
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("signal command %s: %w", id, err)
 	}
 	defer conn.Close()
 
 	client := cmdmanv1pb.NewCommandMonitorServiceClient(conn)
-	_, err = client.Signal(ctx, &cmdmanv1pb.SignalRequest{Signal: sig})
-	return err
+	if _, err := client.Signal(ctx, &cmdmanv1pb.SignalRequest{Signal: sig}); err != nil {
+		return fmt.Errorf("signal command %s: %w", id, err)
+	}
+	return nil
 }

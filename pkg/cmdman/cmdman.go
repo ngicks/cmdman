@@ -9,7 +9,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"maps"
 	"sync"
 	"time"
 
@@ -194,15 +193,6 @@ func resolveTargets(st *store.Store, args []string, labels map[string]string) ([
 		return nil, fmt.Errorf("no commands specified")
 	}
 	return ids, nil
-}
-
-func cloneStringMap(src map[string]string) map[string]string {
-	if len(src) == 0 {
-		return nil
-	}
-	dst := make(map[string]string, len(src))
-	maps.Copy(dst, src)
-	return dst
 }
 
 func generateID() string {

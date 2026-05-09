@@ -3,6 +3,7 @@ package cmdman
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
@@ -89,8 +90,8 @@ func (s *Service) buildCommandConfig(req CreateRequest) *store.CommandConfigJSON
 		Tty:             req.Tty,
 		ScrollbackBytes: scrollbackBytes,
 		LogDriver:       logDriver,
-		LogOpts:         cloneStringMap(req.LogOpts),
-		Labels:          cloneStringMap(req.Labels),
+		LogOpts:         maps.Clone(req.LogOpts),
+		Labels:          maps.Clone(req.Labels),
 		Annotations:     annotations,
 	}
 }

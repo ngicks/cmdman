@@ -31,13 +31,13 @@ func (s *Service) Stop(ctx context.Context, req StopRequest) ([]CommandActionRes
 	for _, id := range ids {
 		results = append(results, CommandActionResult{
 			ID:  id,
-			Err: s.stopTarget(ctx, st, id, req.Signal, timeout),
+			Err: stopTarget(ctx, st, id, req.Signal, timeout),
 		})
 	}
 	return results, nil
 }
 
-func (s *Service) stopTarget(
+func stopTarget(
 	ctx context.Context,
 	st *store.Store,
 	id string,
