@@ -5,9 +5,28 @@ import (
 	"fmt"
 
 	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
+
+// InspectOutput is the merged command definition, state, and history.
+type InspectOutput struct {
+	ID          string                   `json:"id"`
+	Name        string                   `json:"name,omitempty"`
+	Config      *store.CommandConfigJSON `json:"config"`
+	State       string                   `json:"state"`
+	ExitCode    *int                     `json:"exit_code,omitempty"`
+	StateJSON   *store.CommandStateJSON  `json:"state_detail"`
+	ExitHistory []store.ExitRecord       `json:"exit_history,omitempty"`
+	ConfigPath  string                   `json:"config_path,omitempty"`
+	LiveStatus  *LiveStatusInfo          `json:"live_status,omitempty"`
+}
+
+// LiveStatusInfo is the live status from the monitor gRPC Status RPC.
+type LiveStatusInfo struct {
+	State    string `json:"state"`
+	ExitCode int32  `json:"exit_code"`
+	PID      int32  `json:"pid"`
+}
 
 func (s *Service) Inspect(ctx context.Context, idOrName string) (*InspectOutput, error) {
 	st, err := s.openStore(ctx, true)
@@ -36,18 +55,15 @@ func (s *Service) Inspect(ctx context.Context, idOrName string) (*InspectOutput,
 	}
 
 	if stateJSON.SocketPath != "" {
-		if live := getLiveStatus(ctx, stateJSON.SocketPath); live != nil {
+		if live := s.getLiveStatus(ctx, id); live != nil {
 			out.LiveStatus = live
 		}
 	}
 	return out, nil
 }
 
-func getLiveStatus(ctx context.Context, sockPath string) *LiveStatusInfo {
-	conn, err := grpc.NewClient(
-		"unix://"+sockPath,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+func (s *Service) getLiveStatus(ctx context.Context, id string) *LiveStatusInfo {
+	conn, err := s.connectMonitorByName(ctx, id)
 	if err != nil {
 		return nil
 	}

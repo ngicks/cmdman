@@ -9,7 +9,19 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
-func (s *Service) Remove(ctx context.Context, req RemoveRequest) ([]CommandActionResult, error) {
+// RemoveRequest defines a remove operation across explicit targets and/or labels.
+type RemoveRequest struct {
+	Targets []string
+	Labels  map[string]string
+	Force   bool
+}
+
+type RemoveResult struct {
+	ID  string
+	Err error
+}
+
+func (s *Service) Remove(ctx context.Context, req RemoveRequest) ([]RemoveResult, error) {
 	st, err := s.openStore(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
@@ -19,9 +31,9 @@ func (s *Service) Remove(ctx context.Context, req RemoveRequest) ([]CommandActio
 		return nil, err
 	}
 
-	results := make([]CommandActionResult, 0, len(ids))
+	results := make([]RemoveResult, 0, len(ids))
 	for _, id := range ids {
-		results = append(results, CommandActionResult{
+		results = append(results, RemoveResult{
 			ID:  id,
 			Err: rmOne(ctx, s.cfg, st, id, req.Force),
 		})

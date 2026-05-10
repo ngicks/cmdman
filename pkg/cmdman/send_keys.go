@@ -8,9 +8,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
 	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 )
 
@@ -304,17 +301,9 @@ func (s *Service) SendKeys(ctx context.Context, idOrName string, req SendKeysReq
 		return nil
 	}
 
-	endpoint, err := s.ResolveMonitor(ctx, idOrName)
+	conn, err := s.connectMonitorByName(ctx, idOrName)
 	if err != nil {
 		return err
-	}
-
-	conn, err := grpc.NewClient(
-		"unix://"+endpoint.SocketPath,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		return fmt.Errorf("connect to monitor: %w", err)
 	}
 	defer conn.Close()
 

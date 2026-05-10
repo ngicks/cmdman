@@ -10,6 +10,36 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
+// WaitRequest defines a wait operation across explicit targets.
+type WaitRequest struct {
+	Targets   []string
+	Condition string
+	Interval  time.Duration
+	Ignore    bool
+}
+
+// WaitResult reports per-command outcome of a Wait operation.
+// ExitCode is nil when the command has not exited (e.g. when waiting for a
+// non-terminal condition such as "running") or when the command has been
+// removed from the store before any exit code was recorded.
+type WaitResult struct {
+	ID       string
+	ExitCode *int
+	Err      error
+}
+
+// Wait conditions accepted by Service.Wait. "stopped" is satisfied by either
+// "exited" or "failed" states; the rest match the corresponding state
+// verbatim.
+const (
+	WaitConditionStopped  = "stopped"
+	WaitConditionCreated  = "created"
+	WaitConditionStarting = "starting"
+	WaitConditionRunning  = "running"
+	WaitConditionExited   = "exited"
+	WaitConditionFailed   = "failed"
+)
+
 // Wait blocks until each target reaches req.Condition (default "stopped",
 // matching either StateExited or StateFailed), then returns one WaitResult
 // per target in argument order. A target removed from the store while we

@@ -7,6 +7,12 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
+// ListRequest defines list filtering.
+type ListRequest struct {
+	AllStates bool
+	Labels    map[string]string
+}
+
 func (s *Service) List(ctx context.Context, req ListRequest) ([]store.CommandEntry, error) {
 	st, err := s.openStore(ctx, true)
 	if err != nil {

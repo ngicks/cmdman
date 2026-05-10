@@ -7,6 +7,12 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 )
 
+// LogsRequest defines a log read operation.
+type LogsRequest struct {
+	IDOrName string
+	Follow   bool
+}
+
 // Logs opens a structured reader for the persisted command output for
 // req.IDOrName. With Follow=true, the reader tails the on-disk log file
 // until ctx is cancelled. The monitor is not contacted; logs remain

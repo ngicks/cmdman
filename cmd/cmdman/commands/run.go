@@ -58,11 +58,11 @@ func runRun(
 		}
 		defer svc.Close()
 
-		endpoint, err := svc.ResolveMonitor(cmd.Context(), id)
+		status, err := svc.Inspect(cmd.Context(), id)
 		if err != nil {
 			return err
 		}
-		if endpoint.SocketPath != "" {
+		if status.StateJSON.SocketPath != "" {
 			return runAttach(cmd, []string{id}, rootCfg, attachFlags{
 				DetachKeys: "ctrl-p,ctrl-q",
 				SigProxy:   true,

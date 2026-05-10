@@ -9,11 +9,21 @@ import (
 
 	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
-func (s *Service) Stop(ctx context.Context, req StopRequest) ([]CommandActionResult, error) {
+// StopRequest defines a stop operation across explicit targets and/or labels.
+type StopRequest struct {
+	Targets []string
+	Signal  string
+	Timeout time.Duration
+}
+
+type StopResult struct {
+	ID  string
+	Err error
+}
+
+func (s *Service) Stop(ctx context.Context, req StopRequest) ([]StopResult, error) {
 	st, err := s.openStore(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
@@ -27,17 +37,17 @@ func (s *Service) Stop(ctx context.Context, req StopRequest) ([]CommandActionRes
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
-	results := make([]CommandActionResult, 0, len(ids))
+	results := make([]StopResult, 0, len(ids))
 	for _, id := range ids {
-		results = append(results, CommandActionResult{
+		results = append(results, StopResult{
 			ID:  id,
-			Err: stopTarget(ctx, st, id, req.Signal, timeout),
+			Err: s.stop(ctx, st, id, req.Signal, timeout),
 		})
 	}
 	return results, nil
 }
 
-func stopTarget(
+func (s *Service) stop(
 	ctx context.Context,
 	st *store.Store,
 	id string,
@@ -61,7 +71,7 @@ func stopTarget(
 		return err
 	}
 
-	if err := stopOne(ctx, st, id, sig); err != nil {
+	if err := s.sendStop(ctx, st, id, sig); err != nil {
 		return err
 	}
 	if err := waitForStopped(ctx, st, id, timeout); err == nil {
@@ -71,7 +81,7 @@ func stopTarget(
 	}
 
 	killSig, _, _ := store.ParseSignal("SIGKILL")
-	if err := stopOne(ctx, st, id, killSig); err != nil {
+	if err := s.sendStop(ctx, st, id, killSig); err != nil {
 		return fmt.Errorf("timeout waiting for stop, and SIGKILL failed: %w", err)
 	}
 	if err := waitForStopped(ctx, st, id, timeout); err != nil {
@@ -80,21 +90,15 @@ func stopTarget(
 	return nil
 }
 
-func stopOne(ctx context.Context, st *store.Store, id string, sig int32) error {
+func (s *Service) sendStop(ctx context.Context, st *store.Store, id string, sig int32) error {
 	_, _, stateJSON, err := st.GetCommandState(id)
 	if err != nil {
 		return err
 	}
-	if stateJSON.SocketPath == "" {
-		return fmt.Errorf("no socket path")
-	}
 
-	conn, err := grpc.NewClient(
-		"unix://"+stateJSON.SocketPath,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	conn, err := s.connectMonitor(ctx, stateJSON)
 	if err != nil {
-		return err
+		return fmt.Errorf("%q: %w", id, err)
 	}
 	defer conn.Close()
 

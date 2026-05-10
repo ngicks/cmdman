@@ -10,9 +10,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
-	"time"
 
+	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type Service struct {
@@ -29,131 +31,18 @@ func NewService(cfg CmdmanConfig) *Service {
 	return &Service{cfg: cfg}
 }
 
-// Close releases resources owned by the service.
-func (s *Service) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.store == nil {
-		return nil
-	}
-	err := s.store.Close()
-	s.store = nil
-	return err
-}
-
 func (s *Service) Config() CmdmanConfig {
 	return s.cfg
 }
 
-// CreateRequest defines a command creation request.
-type CreateRequest struct {
-	Name            string
-	Dir             string
-	Env             []string
-	Labels          map[string]string
-	RestartPolicy   store.RestartPolicy
-	StopSignal      string
-	AutoRemove      bool
-	Tty             bool
-	ScrollbackBytes int
-	LogDriver       store.LogDriver
-	LogOpts         map[string]string
-	Argv            []string
-}
-
-// CreateResult is the result of creating a command record.
-type CreateResult struct {
-	ID   string
-	Name string
-}
-
-// ListRequest defines list filtering.
-type ListRequest struct {
-	AllStates bool
-	Labels    map[string]string
-}
-
-// StopRequest defines a stop operation across explicit targets and/or labels.
-type StopRequest struct {
-	Targets []string
-	Signal  string
-	Timeout time.Duration
-}
-
-// RemoveRequest defines a remove operation across explicit targets and/or labels.
-type RemoveRequest struct {
-	Targets []string
-	Labels  map[string]string
-	Force   bool
-}
-
-// LogsRequest defines a log read operation.
-type LogsRequest struct {
-	IDOrName string
-	Follow   bool
-}
-
-// WaitRequest defines a wait operation across explicit targets.
-type WaitRequest struct {
-	Targets   []string
-	Condition string
-	Interval  time.Duration
-	Ignore    bool
-}
-
-// WaitResult reports per-command outcome of a Wait operation.
-// ExitCode is nil when the command has not exited (e.g. when waiting for a
-// non-terminal condition such as "running") or when the command has been
-// removed from the store before any exit code was recorded.
-type WaitResult struct {
-	ID       string
-	ExitCode *int
-	Err      error
-}
-
-// Wait conditions accepted by Service.Wait. "stopped" is satisfied by either
-// "exited" or "failed" states; the rest match the corresponding state
-// verbatim.
-const (
-	WaitConditionStopped  = "stopped"
-	WaitConditionCreated  = "created"
-	WaitConditionStarting = "starting"
-	WaitConditionRunning  = "running"
-	WaitConditionExited   = "exited"
-	WaitConditionFailed   = "failed"
-)
-
-// CommandActionResult reports per-command outcome for bulk operations.
-type CommandActionResult struct {
-	ID  string
-	Err error
-}
-
-// MonitorEndpoint identifies the live monitor for a command.
-type MonitorEndpoint struct {
-	ID         string
-	Name       string
-	SocketPath string
-}
-
-// InspectOutput is the merged command definition, state, and history.
-type InspectOutput struct {
-	ID          string                   `json:"id"`
-	Name        string                   `json:"name,omitempty"`
-	Config      *store.CommandConfigJSON `json:"config"`
-	State       string                   `json:"state"`
-	ExitCode    *int                     `json:"exit_code,omitempty"`
-	StateJSON   *store.CommandStateJSON  `json:"state_detail"`
-	ExitHistory []store.ExitRecord       `json:"exit_history,omitempty"`
-	ConfigPath  string                   `json:"config_path,omitempty"`
-	LiveStatus  *LiveStatusInfo          `json:"live_status,omitempty"`
-}
-
-// LiveStatusInfo is the live status from the monitor gRPC Status RPC.
-type LiveStatusInfo struct {
-	State    string `json:"state"`
-	ExitCode int32  `json:"exit_code"`
-	PID      int32  `json:"pid"`
+// Close releases resources owned by the service.
+func (s *Service) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.closeStoreNoLock(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Service) openStore(ctx context.Context, validate bool) (*store.Store, error) {
@@ -168,6 +57,89 @@ func (s *Service) openStore(ctx context.Context, validate bool) (*store.Store, e
 	}
 	s.store, err = store.OpenStore(ctx, dbPath, validate)
 	return s.store, err
+}
+
+func (s *Service) closeStoreNoLock() error {
+	if s.store == nil {
+		return nil
+	}
+	err := s.store.Close()
+	s.store = nil
+	return err
+}
+
+func (s *Service) OpenAttachSession(
+	ctx context.Context,
+	idOrName string,
+) (*Session, error) {
+	conn, err := s.connectMonitorByName(ctx, idOrName)
+	if err != nil {
+		return nil, err
+	}
+
+	client := cmdmanv1pb.NewCommandMonitorServiceClient(conn)
+	stream, err := client.Attach(ctx)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("attach: %w", err)
+	}
+
+	return &Session{
+		conn:   conn,
+		client: client,
+		stream: stream,
+	}, nil
+}
+
+func (s *Service) connectMonitorByName(
+	ctx context.Context,
+	idOrName string,
+) (*grpc.ClientConn, error) {
+	st, err := s.openStore(ctx, true)
+	if err != nil {
+		return nil, fmt.Errorf("open store: %w", err)
+	}
+	id, _, _, err := st.GetCommandConfig(idOrName)
+	if err != nil {
+		return nil, fmt.Errorf("resolve command: %w", err)
+	}
+	_, _, stateJSON, err := st.GetCommandState(id)
+	if err != nil {
+		return nil, fmt.Errorf("get state: %w", err)
+	}
+
+	conn, err := s.connectMonitor(ctx, stateJSON)
+	if err != nil {
+		if idOrName != id {
+			return nil, fmt.Errorf("%q(%q): %w", idOrName, id, err)
+		}
+		return nil, fmt.Errorf("%q: %w", id, err)
+	}
+
+	return conn, nil
+}
+
+func (s *Service) connectMonitor(
+	_ context.Context,
+	state *store.CommandStateJSON,
+) (conn *grpc.ClientConn, err error) {
+	// Hide transport details because we may add other transports later
+
+	if state.SocketPath == "" {
+		return nil, fmt.Errorf("no socket path for command")
+	}
+
+	conn, err = grpc.NewClient(
+		"unix://"+state.SocketPath,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("connect to monitor: %w", err)
+	}
+
+	// store conn
+
+	return conn, nil
 }
 
 func resolveTargets(st *store.Store, args []string, labels map[string]string) ([]string, error) {

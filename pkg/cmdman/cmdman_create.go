@@ -8,6 +8,28 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
+// CreateRequest defines a command creation request.
+type CreateRequest struct {
+	Name            string
+	Dir             string
+	Env             []string
+	Labels          map[string]string
+	RestartPolicy   store.RestartPolicy
+	StopSignal      string
+	AutoRemove      bool
+	Tty             bool
+	ScrollbackBytes int
+	LogDriver       store.LogDriver
+	LogOpts         map[string]string
+	Argv            []string
+}
+
+// CreateResult is the result of creating a command record.
+type CreateResult struct {
+	ID   string
+	Name string
+}
+
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult, error) {
 	cfg := s.buildCommandConfig(req)
 	if err := cfg.ValidateCreate(); err != nil {
