@@ -2,6 +2,7 @@ package cmdman
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -33,9 +35,13 @@ type Monitor struct {
 	Config     CmdmanConfig
 	Logger     *slog.Logger
 
+	cleanUp []func() error
+
 	store     *cmdstore.Store
 	cfg       *cmdstore.CommandConfigJSON
 	stateJSON *cmdstore.CommandStateJSON
+
+	lis net.Listener
 
 	ptmx     *os.File
 	stdin    io.WriteCloser
@@ -55,41 +61,121 @@ type Monitor struct {
 // RunMonitor is the main entry point for the monitor process.
 // It reads config, starts the command, and serves gRPC until the command exits.
 func RunMonitor(ctx context.Context, id string, cfg CmdmanConfig, logger *slog.Logger) error {
-	commandDir, err := cfg.CommandDir(id)
+	m, err := newMonitor(ctx, id, cfg, logger)
 	if err != nil {
 		return err
 	}
-	dbPath, err := cfg.DBPath()
-	if err != nil {
+	defer m.Close()
+
+	if err := m.init(); err != nil {
 		return err
 	}
 
-	m := &Monitor{
+	if err := m.listen(); err != nil {
+		return err
+	}
+
+	return m.start(ctx)
+}
+
+func newMonitor(
+	ctx context.Context,
+	id string,
+	cfg CmdmanConfig,
+	logger *slog.Logger,
+) (*Monitor, error) {
+	commandDir, err := cfg.CommandDir(id)
+	if err != nil {
+		return nil, err
+	}
+
+	dbPath, err := cfg.DBPath()
+	if err != nil {
+		return nil, err
+	}
+
+	st, err := cmdstore.OpenStore(ctx, dbPath, true)
+	if err != nil {
+		return nil, fmt.Errorf("open store: %w", err)
+	}
+
+	commandCfg, err := cmdstore.ReadCommandConfig(commandDir)
+	if err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+
+	return &Monitor{
 		ID:         id,
 		CommandDir: commandDir,
 		DBPath:     dbPath,
 		Config:     cfg,
 		Logger:     logger,
 		fanout:     newFanout(),
+		store:      st,
+		cfg:        commandCfg,
+		ring:       newRingBuffer(commandCfg.ScrollbackBytes),
+		stateJSON: &cmdstore.CommandStateJSON{
+			MonitorPID: os.Getpid(),
+		},
+		cleanUp: []func() error{
+			st.Close,
+		},
+	}, nil
+}
+
+func (m *Monitor) Close() error {
+	var errs []error
+	for _, c := range slices.Backward(m.cleanUp) {
+		err := c()
+		if err != nil {
+			errs = append(errs, err)
+		}
 	}
 
-	st, err := cmdstore.OpenStore(ctx, dbPath, true)
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+
+	return nil
+}
+
+func (m *Monitor) init() (err error) {
+	var cleanUp []func() error
+	defer func() {
+		if err != nil {
+			for _, c := range slices.Backward(cleanUp) {
+				c()
+			}
+		}
+	}()
+
+	// lock pid first
+	pidPath, err := m.Config.MonitorPIDPath(m.ID)
 	if err != nil {
-		return fmt.Errorf("open store: %w", err)
+		return err
 	}
-	defer st.Close()
-	m.store = st
-
-	commandCfg, err := cmdstore.ReadCommandConfig(commandDir)
+	if err := os.MkdirAll(filepath.Dir(pidPath), 0o700); err != nil {
+		return fmt.Errorf("create runtime dir: %w", err)
+	}
+	f, err := os.OpenFile(pidPath, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
-		return fmt.Errorf("read config: %w", err)
+		return err
 	}
-	m.cfg = commandCfg
-	m.ring = newRingBuffer(commandCfg.ScrollbackBytes)
-	m.stateJSON = &cmdstore.CommandStateJSON{}
+	cleanUp = append(
+		cleanUp,
+		f.Close,
+	)
 
-	// Update state to starting.
-	m.stateJSON.MonitorPID = os.Getpid()
+	if err := flock_trylock(f); err != nil {
+		return fmt.Errorf("lock pid file %q: %w", pidPath, err)
+	}
+	cleanUp = append(
+		cleanUp,
+		func() error { return flock_unlock(f) },
+		func() error { return os.Remove(pidPath) },
+	)
+
 	if err := m.store.UpdateCommandState(
 		m.ID,
 		cmdstore.StateStarting,
@@ -99,25 +185,15 @@ func RunMonitor(ctx context.Context, id string, cfg CmdmanConfig, logger *slog.L
 		return fmt.Errorf("update state to starting: %w", err)
 	}
 
-	// Create runtime directory and PID file.
-	runtimeDir, err := m.Config.MonitorRuntimeDir(id)
-	if err != nil {
+	if err := f.Truncate(0); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
-		return fmt.Errorf("create runtime dir: %w", err)
-	}
-	pidPath, err := m.Config.MonitorPIDPath(id)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
+	if _, err := f.Write([]byte(strconv.Itoa(os.Getpid()))); err != nil {
 		return fmt.Errorf("write pid file: %w", err)
 	}
-	defer os.Remove(pidPath)
 
 	// Start gRPC server.
-	m.sockPath, err = m.Config.MonitorSocketPath(id)
+	m.sockPath, err = m.Config.MonitorSocketPath(m.ID)
 	if err != nil {
 		return err
 	}
@@ -131,18 +207,37 @@ func RunMonitor(ctx context.Context, id string, cfg CmdmanConfig, logger *slog.L
 		return fmt.Errorf("update state with socket: %w", err)
 	}
 
+	m.cleanUp = append(m.cleanUp, cleanUp...)
+
+	return nil
+}
+
+func (m *Monitor) listen() error {
 	lis, err := listenMonitorSocket(m.sockPath)
 	if err != nil {
 		return fmt.Errorf("listen socket: %w", err)
 	}
-	defer os.Remove(m.sockPath)
-	defer lis.Close()
+	m.lis = lis
 
+	m.cleanUp = append(
+		m.cleanUp,
+		func() error {
+			return os.Remove(m.sockPath)
+		},
+		func() error {
+			return m.lis.Close()
+		},
+	)
+
+	return nil
+}
+
+func (m *Monitor) start(ctx context.Context) error {
 	m.grpcServer = grpc.NewServer()
 	pb.RegisterCommandMonitorServiceServer(m.grpcServer, &monitorServer{monitor: m})
 
 	go func() {
-		if err := m.grpcServer.Serve(lis); err != nil {
+		if err := m.grpcServer.Serve(m.lis); err != nil {
 			m.Logger.Error("grpc serve error", slog.String("error", err.Error()))
 		}
 	}()
@@ -155,8 +250,13 @@ func RunMonitor(ctx context.Context, id string, cfg CmdmanConfig, logger *slog.L
 	return m.runLoop(sigCtx)
 }
 
-func (m *Monitor) runLoop(ctx context.Context) error {
-	for {
+func (m *Monitor) runLoop(ctx context.Context) (err error) {
+	org := m.stateJSON.RestartCount
+	for ; ; m.stateJSON.RestartCount++ {
+		if m.stateJSON.RestartCount > org {
+			m.Logger.Info("restarting command", slog.Int("restart_count", m.stateJSON.RestartCount))
+		}
+
 		// Re-read config on each restart iteration.
 		cfg, err := cmdstore.ReadCommandConfig(m.CommandDir)
 		if err != nil {
@@ -176,41 +276,24 @@ func (m *Monitor) runLoop(ctx context.Context) error {
 		}
 
 		// Record exit.
-		ec := exitCode
 		m.stateJSON.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 		_ = m.store.InsertCommandExitCode(m.ID, exitCode)
 
 		// Check restart policy.
 		switch m.cfg.RestartPolicy {
 		case cmdstore.RestartPolicyNo:
-			m.setExited(ec)
-			return m.maybeAutoRemove()
 		case cmdstore.RestartPolicyOnFailure:
-			if exitCode == 0 {
-				m.setExited(ec)
-				return m.maybeAutoRemove()
+			if exitCode != 0 && !m.stopRequested.Load() && ctx.Err() == nil {
+				continue
 			}
 		case cmdstore.RestartPolicyAlways:
-			// Continue loop unless context cancelled.
-		default:
-			m.setExited(ec)
-			return m.maybeAutoRemove()
+			if !m.stopRequested.Load() && ctx.Err() == nil {
+				continue
+			}
 		}
 
-		// Check if stop was requested or context was cancelled.
-		if m.stopRequested.Load() {
-			m.setExited(ec)
-			return m.maybeAutoRemove()
-		}
-		select {
-		case <-ctx.Done():
-			m.setExited(ec)
-			return m.maybeAutoRemove()
-		default:
-		}
-
-		m.stateJSON.RestartCount++
-		m.Logger.Info("restarting command", slog.Int("restart_count", m.stateJSON.RestartCount))
+		m.setExited(exitCode)
+		return m.maybeAutoRemove()
 	}
 }
 
@@ -382,8 +465,7 @@ func (w *lockedLogWriter) Close() error {
 }
 
 func (m *Monitor) setExited(exitCode int) {
-	ec := exitCode
-	_ = m.store.UpdateCommandState(m.ID, cmdstore.StateExited, &ec, m.stateJSON)
+	_ = m.store.UpdateCommandState(m.ID, cmdstore.StateExited, &exitCode, m.stateJSON)
 }
 
 func (m *Monitor) setFailed(errMsg string) {
@@ -511,10 +593,3 @@ func CleanStaleEntries(st *cmdstore.Store, cfg CmdmanConfig) error {
 	}
 	return nil
 }
-
-// listenMonitorSocket is already defined above, but we need a helper for the gRPC part.
-// Using the existing listenUnixDomainSocket pattern from pkg/cmdman/server.go.
-var _ io.Closer = (*Monitor)(nil) // ensure Monitor satisfies io.Closer if needed
-
-// Close is not needed as cleanup happens in RunMonitor defers.
-func (m *Monitor) Close() error { return nil }
