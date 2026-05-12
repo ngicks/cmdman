@@ -16,6 +16,26 @@ import (
 	cmdstore "github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
+// RunMonitor is the main entry point for the monitor process.
+// It reads config, starts the command, and serves gRPC until the command exits.
+func RunMonitor(ctx context.Context, id string, cfg CmdmanConfig, logger *slog.Logger) error {
+	m, err := newMonitor(ctx, id, cfg, logger)
+	if err != nil {
+		return err
+	}
+	defer m.Close()
+
+	if err := m.init(); err != nil {
+		return err
+	}
+
+	if err := m.listen(); err != nil {
+		return err
+	}
+
+	return m.start(ctx)
+}
+
 func (m *Monitor) runLoop(ctx context.Context) (err error) {
 	org := m.stateJSON.RestartCount
 	for ; ; m.stateJSON.RestartCount++ {
@@ -110,9 +130,9 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 
 	var waitFn func()
 	if m.cfg.Tty {
-		waitFn, err = m.pipeIoTty(cmd, logWriter)
+		waitFn, err = m.writeTty(cmd, logWriter)
 	} else {
-		waitFn, err = m.pipeIoPipe(cmd, logWriter)
+		waitFn, err = m.wirePipe(cmd, logWriter)
 	}
 
 	if err != nil {
@@ -140,7 +160,7 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	return 0, nil
 }
 
-func (m *Monitor) pipeIoTty(cmd *exec.Cmd, logWriter logdriver.Writer) (func(), error) {
+func (m *Monitor) writeTty(cmd *exec.Cmd, logWriter logdriver.Writer) (func(), error) {
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("pty start: %w", err)
@@ -158,11 +178,7 @@ func (m *Monitor) pipeIoTty(cmd *exec.Cmd, logWriter logdriver.Writer) (func(), 
 			n, err := ptmx.Read(buf)
 			if n > 0 {
 				data := buf[:n]
-				m.ring.Write(data)
-				if _, werr := stdoutLogWriter.Write(data); werr != nil {
-					m.Logger.Warn("log writer", slog.String("error", werr.Error()))
-				}
-				m.fanout.Send(data)
+				m.logCommandOutput(stdoutLogWriter, data)
 			}
 			if err != nil {
 				return
@@ -176,30 +192,43 @@ func (m *Monitor) pipeIoTty(cmd *exec.Cmd, logWriter logdriver.Writer) (func(), 
 	}, nil
 }
 
-func (m *Monitor) pipeIoPipe(cmd *exec.Cmd, logWriter logdriver.Writer) (func(), error) {
+func (m *Monitor) wirePipe(cmd *exec.Cmd, logWriter logdriver.Writer) (func(), error) {
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdin pipe: %w", err)
 	}
 	m.stdin = stdin
 
-	lockedLogWriter := &lockedLogWriter{w: logWriter}
 	cmd.Stdout = &monitorOutputWriter{
 		monitor: m,
-		log:     logdriver.NewStreamWriter(lockedLogWriter, logdriver.StreamStdout),
+		log:     logdriver.NewStreamWriter(logWriter, logdriver.StreamStdout),
 	}
 	cmd.Stderr = &monitorOutputWriter{
 		monitor: m,
-		log:     logdriver.NewStreamWriter(lockedLogWriter, logdriver.StreamStderr),
+		log:     logdriver.NewStreamWriter(logWriter, logdriver.StreamStderr),
 	}
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start command: %w", err)
 	}
+
 	m.stdin = stdin
 	m.cmd = cmd
 
 	return func() {}, nil
+}
+
+func (m *Monitor) logCommandOutput(w io.Writer, data []byte) {
+	if len(data) == 0 {
+		return
+	}
+	m.outputMu.Lock()
+	defer m.outputMu.Unlock()
+	m.ring.Write(data)
+	if _, werr := w.Write(data); werr != nil {
+		m.Logger.Warn("log writer", slog.String("error", werr.Error()))
+	}
+	m.fanout.Send(data)
 }
 
 type monitorOutputWriter struct {
@@ -208,16 +237,6 @@ type monitorOutputWriter struct {
 }
 
 func (w *monitorOutputWriter) Write(data []byte) (int, error) {
-	if len(data) == 0 {
-		return 0, nil
-	}
-	w.monitor.outputMu.Lock()
-	defer w.monitor.outputMu.Unlock()
-
-	w.monitor.ring.Write(data)
-	if _, err := w.log.Write(data); err != nil {
-		w.monitor.Logger.Warn("log writer", slog.String("error", err.Error()))
-	}
-	w.monitor.fanout.Send(data)
+	w.monitor.logCommandOutput(w.log, data)
 	return len(data), nil
 }

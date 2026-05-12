@@ -22,7 +22,6 @@ import (
 	"google.golang.org/grpc"
 
 	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
-	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	cmdstore "github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -55,26 +54,6 @@ type Monitor struct {
 
 	// stopRequested is set by the Signal RPC to prevent restarts.
 	stopRequested atomic.Bool
-}
-
-// RunMonitor is the main entry point for the monitor process.
-// It reads config, starts the command, and serves gRPC until the command exits.
-func RunMonitor(ctx context.Context, id string, cfg CmdmanConfig, logger *slog.Logger) error {
-	m, err := newMonitor(ctx, id, cfg, logger)
-	if err != nil {
-		return err
-	}
-	defer m.Close()
-
-	if err := m.init(); err != nil {
-		return err
-	}
-
-	if err := m.listen(); err != nil {
-		return err
-	}
-
-	return m.start(ctx)
 }
 
 func newMonitor(
@@ -261,21 +240,6 @@ func (m *Monitor) setRunning() {
 	}
 }
 
-type lockedLogWriter struct {
-	mu sync.Mutex
-	w  logdriver.Writer
-}
-
-func (w *lockedLogWriter) WriteLogLine(line logdriver.LogLine) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.w.WriteLogLine(line)
-}
-
-func (w *lockedLogWriter) Close() error {
-	return nil
-}
-
 func (m *Monitor) setExited(exitCode int) {
 	_ = m.store.UpdateCommandState(m.ID, cmdstore.StateExited, &exitCode, m.stateJSON)
 }
@@ -363,45 +327,4 @@ func listenMonitorSocket(sockPath string) (net.Listener, error) {
 	}
 	_ = os.Remove(sockPath)
 	return net.Listen("unix", sockPath)
-}
-
-// CheckMonitorAlive checks if a monitor process is still alive by PID.
-func CheckMonitorAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	err = process.Signal(syscall.Signal(0))
-	return err == nil
-}
-
-// CleanStaleEntries checks for stale monitors and marks them as failed.
-func CleanStaleEntries(st *cmdstore.Store, cfg CmdmanConfig) error {
-	entries, err := st.ListCommands(true, nil)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if e.State != cmdstore.StateStarting && e.State != cmdstore.StateRunning {
-			continue
-		}
-		if e.StateJSON.MonitorPID > 0 && !CheckMonitorAlive(e.StateJSON.MonitorPID) {
-			e.StateJSON.Error = "monitor died unexpectedly"
-			_ = st.UpdateCommandState(e.ID, cmdstore.StateFailed, nil, e.StateJSON)
-
-			// Auto-remove if requested.
-			if e.ConfigJSON.Annotations[cmdstore.AnnotationAutoRemove] == "true" {
-				_ = st.DeleteCommand(e.ID)
-				_ = os.RemoveAll(e.ConfigJSON.CommandDir)
-				runtimeDir, err := cfg.MonitorRuntimeDir(e.ID)
-				if err == nil {
-					_ = os.RemoveAll(runtimeDir)
-				}
-			}
-		}
-	}
-	return nil
 }
