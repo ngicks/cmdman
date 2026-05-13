@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 	"time"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
@@ -29,21 +28,11 @@ func SpawnMonitor(cfg CmdmanConfig, id string) (*os.Process, error) {
 		"--id", id,
 	)
 
-	// Detach: new session, redirect stdio away from terminal.
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true,
-	}
-
-	// Redirect stdin/stdout/stderr to /dev/null.
-	devNull, err := os.Open(os.DevNull)
+	clean, err := detachProcess(cmd)
 	if err != nil {
-		return nil, fmt.Errorf("open /dev/null: %w", err)
+		return nil, err
 	}
-	defer devNull.Close()
-
-	cmd.Stdin = devNull
-	cmd.Stdout = devNull
-	cmd.Stderr = devNull
+	defer clean()
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start monitor: %w", err)

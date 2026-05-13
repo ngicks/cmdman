@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/creack/pty/v2"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	cmdstore "github.com/ngicks/cmdman/pkg/cmdman/store"
 )
@@ -161,7 +160,7 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 }
 
 func (m *Monitor) writeTty(cmd *exec.Cmd, logWriter logdriver.Writer) (func(), error) {
-	ptmx, err := pty.Start(cmd)
+	ptmx, err := startTty(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("pty start: %w", err)
 	}
