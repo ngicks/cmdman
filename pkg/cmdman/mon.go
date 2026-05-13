@@ -45,7 +45,7 @@ type Monitor struct {
 	stdin    io.WriteCloser
 	stdinMu  sync.Mutex
 	cmd      *exec.Cmd
-	fanout   *fanout
+	fanout   *spmcPipe
 	ring     *ringBuffer
 	outputMu sync.Mutex
 

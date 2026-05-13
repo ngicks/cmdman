@@ -3,6 +3,7 @@ package cmdman
 import (
 	"context"
 	"io"
+	"sync"
 	"syscall"
 	"time"
 
@@ -15,11 +16,16 @@ type monitorServer struct {
 	monitor *Monitor
 }
 
+func (m *Monitor) readMonitorOut() (scrollback []byte, live <-chan []byte, unsub func()) {
+	m.outputMu.Lock()
+	defer m.outputMu.Unlock()
+	live, unsub = m.fanout.Subscribe()
+	scrollback = m.ring.Bytes()
+	return
+}
+
 func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) error {
-	s.monitor.outputMu.Lock()
-	ch, unsub := s.monitor.fanout.Subscribe()
-	scrollback := s.monitor.ring.Bytes()
-	s.monitor.outputMu.Unlock()
+	scrollback, ch, unsub := s.monitor.readMonitorOut()
 	defer unsub()
 
 	if len(scrollback) > 0 {
@@ -28,9 +34,11 @@ func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) err
 		}
 	}
 
-	// Read stdin from client in a goroutine.
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
 	errCh := make(chan error, 1)
-	go func() {
+	wg.Go(func() {
 		for {
 			msg, err := stream.Recv()
 			if err != nil {
@@ -50,7 +58,7 @@ func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) err
 				)
 			}
 		}
-	}()
+	})
 
 	// Send live output to client.
 	ticker := time.NewTicker(100 * time.Millisecond)
