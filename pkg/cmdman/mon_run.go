@@ -3,7 +3,6 @@ package cmdman
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"maps"
 	"os/exec"
@@ -53,6 +52,7 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 		if err != nil {
 			// If context was cancelled, treat as graceful stop.
 			if ctx.Err() != nil {
+				m.outputBridge.Close()
 				m.setExited(-1)
 				return nil
 			}
@@ -77,6 +77,7 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 			}
 		}
 
+		m.outputBridge.Close()
 		m.setExited(exitCode)
 		return m.maybeAutoRemove()
 	}
@@ -99,11 +100,14 @@ func (m *Monitor) wireUpCmd(ctx context.Context) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
-func (m *Monitor) logWriter() (logdriver.Writer, error) {
-	opts := make(logdriver.Options, len(m.cfg.LogOpts)+1)
-	maps.Copy(opts, m.cfg.LogOpts)
-	opts[cmdstore.LogOptPath] = m.cfg.LogPath()
-	logWriter, err := logdriver.New(m.cfg.LogDriver, opts)
+func (m *Monitor) openLogWriter(ctx context.Context) (logdriver.Writer, error) {
+	opts := maps.Clone(m.cfg.LogOpts)
+	logWriter, err := logdriver.NewWriter(
+		ctx,
+		string(m.cfg.LogDriver),
+		m.cfg.CommandDir,
+		opts,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("open log writer: %w", err)
 	}
@@ -116,7 +120,7 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 		return -1, err
 	}
 
-	logWriter, err := m.logWriter()
+	logWriter, err := m.openLogWriter(ctx)
 	if err != nil {
 		return -1, err
 	}
@@ -126,12 +130,22 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 			m.Logger.Warn("close log writer", slog.String("error", cerr.Error()))
 		}
 	}()
+	m.outputMu.Lock()
+	m.logWriter = logWriter
+	m.outputMu.Unlock()
+	defer func() {
+		m.outputMu.Lock()
+		if m.logWriter == logWriter {
+			m.logWriter = nil
+		}
+		m.outputMu.Unlock()
+	}()
 
 	var waitFn func()
 	if m.cfg.Tty {
-		waitFn, err = m.writeTty(cmd, logWriter)
+		waitFn, err = m.writeTty(cmd)
 	} else {
-		waitFn, err = m.wirePipe(cmd, logWriter)
+		waitFn, err = m.wirePipe(cmd)
 	}
 
 	if err != nil {
@@ -159,7 +173,7 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	return 0, nil
 }
 
-func (m *Monitor) writeTty(cmd *exec.Cmd, logWriter logdriver.Writer) (func(), error) {
+func (m *Monitor) writeTty(cmd *exec.Cmd) (func(), error) {
 	ptmx, err := startTty(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("pty start: %w", err)
@@ -169,15 +183,14 @@ func (m *Monitor) writeTty(cmd *exec.Cmd, logWriter logdriver.Writer) (func(), e
 
 	var wg sync.WaitGroup
 
-	stdoutLogWriter := logdriver.NewStreamWriter(logWriter, logdriver.StreamStdout)
-
 	wg.Go(func() {
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := ptmx.Read(buf)
 			if n > 0 {
-				data := buf[:n]
-				m.logCommandOutput(stdoutLogWriter, data)
+				data := make([]byte, n)
+				copy(data, buf[:n])
+				m.logCommandOutput(logdriver.StreamStdout, data)
 			}
 			if err != nil {
 				return
@@ -191,7 +204,7 @@ func (m *Monitor) writeTty(cmd *exec.Cmd, logWriter logdriver.Writer) (func(), e
 	}, nil
 }
 
-func (m *Monitor) wirePipe(cmd *exec.Cmd, logWriter logdriver.Writer) (func(), error) {
+func (m *Monitor) wirePipe(cmd *exec.Cmd) (func(), error) {
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdin pipe: %w", err)
@@ -200,11 +213,11 @@ func (m *Monitor) wirePipe(cmd *exec.Cmd, logWriter logdriver.Writer) (func(), e
 
 	cmd.Stdout = &monitorOutputWriter{
 		monitor: m,
-		log:     logdriver.NewStreamWriter(logWriter, logdriver.StreamStdout),
+		stream:  logdriver.StreamStdout,
 	}
 	cmd.Stderr = &monitorOutputWriter{
 		monitor: m,
-		log:     logdriver.NewStreamWriter(logWriter, logdriver.StreamStderr),
+		stream:  logdriver.StreamStderr,
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -217,25 +230,32 @@ func (m *Monitor) wirePipe(cmd *exec.Cmd, logWriter logdriver.Writer) (func(), e
 	return func() {}, nil
 }
 
-func (m *Monitor) logCommandOutput(w io.Writer, data []byte) {
+func (m *Monitor) logCommandOutput(stream logdriver.Stream, data []byte) {
 	if len(data) == 0 {
 		return
 	}
+	lines := logdriver.SplitLogLines(time.Now(), stream, data)
 	m.outputMu.Lock()
 	defer m.outputMu.Unlock()
 	m.ring.Write(data)
-	if _, werr := w.Write(data); werr != nil {
-		m.Logger.Warn("log writer", slog.String("error", werr.Error()))
+	for _, line := range lines {
+		if m.logWriter != nil {
+			if err := m.logWriter.WriteLogLine(line); err != nil {
+				m.Logger.Warn("log writer", slog.String("error", err.Error()))
+			}
+		}
+		m.outputBridge.Send(line)
 	}
-	m.fanout.Send(data)
 }
 
 type monitorOutputWriter struct {
 	monitor *Monitor
-	log     io.Writer
+	stream  logdriver.Stream
 }
 
 func (w *monitorOutputWriter) Write(data []byte) (int, error) {
-	w.monitor.logCommandOutput(w.log, data)
+	buf := make([]byte, len(data))
+	copy(buf, data)
+	w.monitor.logCommandOutput(w.stream, buf)
 	return len(data), nil
 }

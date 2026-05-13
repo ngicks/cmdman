@@ -1,27 +1,13 @@
-// Package logdriver writes command output to disk in the formats used
-// by upstream container runtimes. Currently it supports podman's
-// "k8s-file" format and a "none" driver that drops everything.
+// Package logdriver defines the public log driver API.
 package logdriver
 
 import (
-	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
+	"sync"
 	"time"
-
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
-)
-
-// K8sLogTimeFormat matches podman's libpod/logs.LogTimeFormat for
-// byte-level compatibility.
-const K8sLogTimeFormat = "2006-01-02T15:04:05.000000000Z07:00"
-
-const (
-	tagFull    = "F"
-	tagPartial = "P"
 )
 
 // Stream names the output stream a log line came from.
@@ -46,64 +32,158 @@ type Writer interface {
 	Close() error
 }
 
-// Reader returns structured log lines.
+// OffsetWriter exposes a driver-specific current write offset. The value is
+// opaque outside the concrete driver.
+type OffsetWriter interface {
+	CurrentOffset() any
+}
+
+// Record is one item emitted by a Reader. Err carries fatal read errors in
+// stream order; the reader closes its channel after emitting a terminal error.
+type Record struct {
+	Line   LogLine
+	Err    error
+	Offset any
+}
+
+// Reader returns structured log records over one channel.
 type Reader interface {
-	ReadLogLine() (LogLine, error)
+	Records() <-chan Record
 	Close() error
 }
 
-// Options is a driver-specific bag of raw KEY=VALUE strings, mirroring
-// the on-disk LogOpts vocabulary defined in the store package. Each
-// driver reads only the keys it understands and parses the values
-// itself; unrecognized keys are ignored, missing keys mean "use the
-// default."
-//
-// Keys recognized by built-in drivers:
-//
-//   - store.LogOptPath    — log file path; required by file-based
-//     drivers. Callers are expected to pre-resolve any default (the
-//     store package's CommandConfigJSON.LogPath does this).
-//   - store.LogOptMaxSize — k8s-file: cap in bytes for the active file;
-//     parsed via store.ParseLogMaxSize. Rotation triggers when a write
-//     would push the active file to or past this value.
-//   - store.LogOptMaxFile — k8s-file: total files kept (active +
-//     archives); parsed via store.ParseLogMaxFile. With <= 1 the active
-//     file is truncated in place instead of being rotated.
-//
-// New drivers can introduce their own keys without changing this type.
-type Options map[string]string
-
-// New constructs a Writer for the configured driver. The returned
-// Writer is owned by a single producer goroutine and is not safe for
-// concurrent calls. Drivers that do not retain output (currently
-// LogDriverNone) ignore opts.
-func New(driver store.LogDriver, opts Options) (Writer, error) {
-	switch driver {
-	case store.LogDriverNone:
-		return noopWriter{}, nil
-	case store.LogDriverK8sFile:
-		return newK8sFileWriterFromOpts(opts)
-	default:
-		return nil, fmt.Errorf("logdriver: unknown driver %q", driver)
-	}
+// Driver constructs log writers and readers for one storage format.
+type Driver interface {
+	NewWriter(ctx context.Context, dir string, opts map[string]string) (Writer, error)
+	NewReader(
+		ctx context.Context,
+		dir string,
+		opts map[string]string,
+		ro ReaderOption,
+	) (Reader, error)
 }
 
-func newK8sFileWriterFromOpts(opts Options) (*k8sFileWriter, error) {
-	maxSize, err := store.ParseLogMaxSize(opts[store.LogOptMaxSize])
-	if err != nil {
-		return nil, fmt.Errorf("logdriver: k8s-file: %s: %w", store.LogOptMaxSize, err)
+// Options is a driver-specific bag of raw KEY=VALUE strings. Each driver
+// reads only the keys it understands and parses the values itself.
+type Options map[string]string
+
+var (
+	driversMu sync.RWMutex
+	drivers   = map[string]Driver{}
+)
+
+func init() {
+	Register("none", noneDriver{})
+}
+
+// Register adds a log driver implementation by name.
+func Register(name string, d Driver) {
+	driversMu.Lock()
+	defer driversMu.Unlock()
+	if name == "" {
+		panic("logdriver: empty driver name")
 	}
-	maxFile, err := store.ParseLogMaxFile(opts[store.LogOptMaxFile])
-	if err != nil {
-		return nil, fmt.Errorf("logdriver: k8s-file: %s: %w", store.LogOptMaxFile, err)
+	if d == nil {
+		panic("logdriver: nil driver")
 	}
-	return newK8sFileWriter(opts[store.LogOptPath], maxSize, maxFile)
+	if _, ok := drivers[name]; ok {
+		panic(fmt.Sprintf("logdriver: driver %q already registered", name))
+	}
+	drivers[name] = d
+}
+
+func lookup(name string) (Driver, error) {
+	driversMu.RLock()
+	defer driversMu.RUnlock()
+	d, ok := drivers[name]
+	if !ok {
+		return nil, fmt.Errorf("logdriver: unknown driver %q", name)
+	}
+	return d, nil
+}
+
+// NewWriter constructs a Writer through the registered driver.
+func NewWriter(ctx context.Context, driver, dir string, opts map[string]string) (Writer, error) {
+	d, err := lookup(driver)
+	if err != nil {
+		return nil, err
+	}
+	return d.NewWriter(ctx, dir, opts)
+}
+
+// NewReader constructs a Reader through the registered driver.
+func NewReader(
+	ctx context.Context,
+	driver string,
+	dir string,
+	opts map[string]string,
+	ro ReaderOption,
+) (Reader, error) {
+	if err := ro.Validate(); err != nil {
+		return nil, err
+	}
+	d, err := lookup(driver)
+	if err != nil {
+		return nil, err
+	}
+	return d.NewReader(ctx, dir, opts, ro)
+}
+
+type noneDriver struct{}
+
+func (noneDriver) NewWriter(context.Context, string, map[string]string) (Writer, error) {
+	return noopWriter{}, nil
+}
+
+func (noneDriver) NewReader(
+	context.Context,
+	string,
+	map[string]string,
+	ReaderOption,
+) (Reader, error) {
+	// The none driver intentionally has no readable storage. Follow mode is
+	// handled by monitor live output in higher layers when supported.
+	return nil, fmt.Errorf("logdriver: driver %q does not retain logs", "none")
 }
 
 type noopWriter struct{}
 
 func (noopWriter) WriteLogLine(LogLine) error { return nil }
 func (noopWriter) Close() error               { return nil }
+
+// SplitLogLines splits a byte stream write into log-line chunks for a stream.
+// Chunks that end in '\n' are full lines; the final chunk without '\n' is
+// partial.
+func SplitLogLines(ts time.Time, stream Stream, p []byte) []LogLine {
+	var lines []LogLine
+	for len(p) > 0 {
+		nl := bytes.IndexByte(p, '\n')
+		var line []byte
+		var partial bool
+		if nl < 0 {
+			line = p
+			partial = true
+		} else {
+			line = p[:nl+1]
+		}
+		lines = append(lines, LogLine{
+			Time:    ts,
+			Stream:  stream,
+			Partial: partial,
+			Line:    line,
+		})
+		p = p[len(line):]
+	}
+	return lines
+}
+
+// SplitLogLines_LegacyShape preserves the pre-Stage-4 helper shape for tests
+// and adapters that fill Time and Stream separately.
+//
+// Deprecated: use SplitLogLines(ts, stream, p).
+func SplitLogLines_LegacyShape(p []byte) []LogLine {
+	return SplitLogLines(time.Time{}, "", p)
+}
 
 // NewStreamWriter adapts byte writes for a single stream into structured
 // log lines. It is useful for execution paths that already expose stdout
@@ -127,214 +207,16 @@ func (w *streamWriter) Write(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
-	ts := w.now()
 	consumed := 0
-	for len(p) > 0 {
-		nl := bytes.IndexByte(p, '\n')
-		var line []byte
-		var partial bool
-		if nl < 0 {
-			line = p
-			partial = true
-		} else {
-			line = p[:nl+1]
-		}
-		if err := w.w.WriteLogLine(LogLine{
-			Time:    ts,
-			Stream:  w.stream,
-			Partial: partial,
-			Line:    line,
-		}); err != nil {
+	for _, line := range SplitLogLines(w.now(), w.stream, p) {
+		if err := w.w.WriteLogLine(line); err != nil {
 			return consumed, err
 		}
-		consumed += len(line)
-		p = p[len(line):]
+		consumed += len(line.Line)
 	}
 	return consumed, nil
 }
 
 func (w *streamWriter) Close() error {
 	return nil
-}
-
-// k8sFileWriter writes podman's k8s-file format, where each entry is:
-//
-//	<timestamp> <stream> <F|P> <content>\n
-//
-// A line that ends with '\n' in the source is tagged "F" (full) and the
-// source newline serves as the entry terminator. A trailing chunk
-// without a newline is tagged "P" (partial) and we append our own '\n'
-// to terminate the entry.
-//
-// When maxSize is positive, the writer rotates before any entry whose
-// serialized form would push the active file's byte count to or past
-// the cap:
-//
-//   - With maxFile <= 1 the active file is truncated in place and old
-//     entries are dropped.
-//   - With maxFile >= 2 the rename chain "<path> -> <path>.1, .1 -> .2,
-//     ... .(N-2) -> .(N-1)" is shifted; .(N-1) is overwritten by the
-//     rename and effectively removed. A fresh active file is opened.
-//
-// Single entries larger than the cap are written in full after rotation,
-// matching podman's behavior.
-type k8sFileWriter struct {
-	f       *os.File
-	bw      *bufio.Writer
-	now     func() time.Time
-	path    string
-	maxSize int64
-	maxFile int
-	written int64
-}
-
-func newK8sFileWriter(path string, maxSize int64, maxFile int) (*k8sFileWriter, error) {
-	if path == "" {
-		return nil, fmt.Errorf("logdriver: k8s-file path is empty")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("logdriver: create log dir: %w", err)
-	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o640)
-	if err != nil {
-		return nil, fmt.Errorf("logdriver: open log file: %w", err)
-	}
-	stat, err := f.Stat()
-	if err != nil {
-		f.Close()
-		return nil, fmt.Errorf("logdriver: stat log file: %w", err)
-	}
-	return &k8sFileWriter{
-		f:       f,
-		bw:      bufio.NewWriter(f),
-		now:     time.Now,
-		path:    path,
-		maxSize: maxSize,
-		maxFile: maxFile,
-		written: stat.Size(),
-	}, nil
-}
-
-func (w *k8sFileWriter) WriteLogLine(line LogLine) error {
-	if len(line.Line) == 0 {
-		return nil
-	}
-	ts := line.Time
-	if ts.IsZero() {
-		ts = w.now()
-	}
-	stream := line.Stream
-	if stream == "" {
-		stream = StreamStdout
-	}
-	tag := tagFull
-	if line.Partial {
-		tag = tagPartial
-	}
-
-	tsText := ts.Format(K8sLogTimeFormat)
-	entrySize := int64(len(tsText) + 1 + len(stream) + 1 + len(tag) + 1 + len(line.Line))
-	if line.Partial {
-		entrySize++
-	}
-
-	if w.maxSize > 0 && w.written+entrySize >= w.maxSize {
-		if err := w.rotate(); err != nil {
-			return err
-		}
-	}
-
-	if _, err := w.bw.WriteString(tsText); err != nil {
-		return err
-	}
-	if err := w.bw.WriteByte(' '); err != nil {
-		return err
-	}
-	if _, err := w.bw.WriteString(string(stream)); err != nil {
-		return err
-	}
-	if err := w.bw.WriteByte(' '); err != nil {
-		return err
-	}
-	if _, err := w.bw.WriteString(tag); err != nil {
-		return err
-	}
-	if err := w.bw.WriteByte(' '); err != nil {
-		return err
-	}
-	if _, err := w.bw.Write(line.Line); err != nil {
-		return err
-	}
-	if line.Partial {
-		if err := w.bw.WriteByte('\n'); err != nil {
-			return err
-		}
-	}
-	w.written += entrySize
-	return w.bw.Flush()
-}
-
-// Write preserves byte-stream compatibility for package-local tests and
-// adapters. New callers should use WriteLogLine or NewStreamWriter.
-func (w *k8sFileWriter) Write(p []byte) (int, error) {
-	sw := &streamWriter{
-		w:      w,
-		stream: StreamStdout,
-		now:    w.now,
-	}
-	return sw.Write(p)
-}
-
-// rotate flushes any buffered output, then either truncates the active
-// file in place (maxFile <= 1) or shifts the archive chain by one slot
-// and opens a fresh active file (maxFile >= 2). The shift overwrites
-// the would-be-(maxFile)th archive, effectively dropping the oldest
-// retained entries.
-func (w *k8sFileWriter) rotate() error {
-	if err := w.bw.Flush(); err != nil {
-		return fmt.Errorf("logdriver: flush before rotate: %w", err)
-	}
-	if w.maxFile <= 1 {
-		if err := w.f.Truncate(0); err != nil {
-			return fmt.Errorf("logdriver: truncate log file: %w", err)
-		}
-		w.written = 0
-		return nil
-	}
-	if err := w.f.Close(); err != nil {
-		return fmt.Errorf("logdriver: close before rotate: %w", err)
-	}
-	w.f = nil
-	for i := w.maxFile - 2; i >= 0; i-- {
-		src := w.path
-		if i > 0 {
-			src = fmt.Sprintf("%s.%d", w.path, i)
-		}
-		dst := fmt.Sprintf("%s.%d", w.path, i+1)
-		if err := os.Rename(src, dst); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("logdriver: rotate %s -> %s: %w", src, dst, err)
-		}
-	}
-	f, err := os.OpenFile(w.path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o640)
-	if err != nil {
-		return fmt.Errorf("logdriver: reopen log file after rotate: %w", err)
-	}
-	w.f = f
-	w.bw.Reset(f)
-	w.written = 0
-	return nil
-}
-
-func (w *k8sFileWriter) Close() error {
-	if w.f == nil {
-		return nil
-	}
-	flushErr := w.bw.Flush()
-	closeErr := w.f.Close()
-	w.f = nil
-	w.bw = nil
-	if flushErr != nil {
-		return flushErr
-	}
-	return closeErr
 }

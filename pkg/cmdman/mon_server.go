@@ -2,13 +2,16 @@ package cmdman
 
 import (
 	"context"
+	"encoding"
 	"io"
 	"sync"
 	"syscall"
 	"time"
 
 	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
+	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type monitorServer struct {
@@ -16,10 +19,35 @@ type monitorServer struct {
 	monitor *Monitor
 }
 
-func (m *Monitor) readMonitorOut() (scrollback []byte, live <-chan []byte, unsub func()) {
+type SubscribeResult struct {
+	Records <-chan logdriver.LogLine
+	Unsub   func()
+	Offset  any
+}
+
+func (m *Monitor) Subscribe(context.Context) (SubscribeResult, error) {
 	m.outputMu.Lock()
 	defer m.outputMu.Unlock()
-	live, unsub = m.fanout.Subscribe()
+	records, unsub := m.outputBridge.Subscribe()
+	var offset any
+	if ow, ok := m.logWriter.(logdriver.OffsetWriter); ok {
+		offset = ow.CurrentOffset()
+	}
+	return SubscribeResult{
+		Records: records,
+		Unsub:   unsub,
+		Offset:  offset,
+	}, nil
+}
+
+func (m *Monitor) readMonitorOut() (
+	scrollback []byte,
+	live <-chan logdriver.LogLine,
+	unsub func(),
+) {
+	m.outputMu.Lock()
+	defer m.outputMu.Unlock()
+	live, unsub = m.outputBridge.Subscribe()
 	scrollback = m.ring.Bytes()
 	return
 }
@@ -66,10 +94,11 @@ func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) err
 
 	for {
 		select {
-		case data, ok := <-ch:
+		case line, ok := <-ch:
 			if !ok {
 				return nil
 			}
+			data := line.Line
 			if err := stream.Send(&pb.AttachResponse{Stdout: data}); err != nil {
 				return err
 			}
@@ -89,46 +118,83 @@ func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) err
 	}
 }
 
-func (s *monitorServer) Logs(
-	req *pb.LogsRequest,
-	stream pb.CommandMonitorService_LogsServer,
+func (s *monitorServer) Subscribe(
+	_ *pb.SubscribeRequest,
+	stream pb.CommandMonitorService_SubscribeServer,
 ) error {
-	var (
-		ch    <-chan []byte
-		unsub func()
-	)
-	if req.Follow {
-		s.monitor.outputMu.Lock()
-		ch, unsub = s.monitor.fanout.Subscribe()
+	sub, err := s.monitor.Subscribe(stream.Context())
+	if err != nil {
+		return err
 	}
-	scrollback := s.monitor.ring.Bytes()
-	if req.Follow {
-		s.monitor.outputMu.Unlock()
-		defer unsub()
+	defer sub.Unsub()
+
+	offsetBytes, err := marshalOffset(sub.Offset)
+	if err != nil {
+		return err
+	}
+	if err := stream.Send(&pb.SubscribeResponse{
+		Event: &pb.SubscribeResponse_Offset{
+			Offset: &pb.SubscribeOffset{
+				Driver: string(s.monitor.cfg.LogDriver),
+				Offset: offsetBytes,
+			},
+		},
+	}); err != nil {
+		return err
 	}
 
-	if len(scrollback) > 0 {
-		if err := stream.Send(&pb.LogsResponse{Data: scrollback}); err != nil {
-			return err
-		}
-	}
-
-	if !req.Follow {
-		return nil
-	}
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 
 	for {
 		select {
-		case data, ok := <-ch:
+		case line, ok := <-sub.Records:
 			if !ok {
 				return nil
 			}
-			if err := stream.Send(&pb.LogsResponse{Data: data}); err != nil {
+			if err := stream.Send(&pb.SubscribeResponse{
+				Event: &pb.SubscribeResponse_Line{Line: logLineToProto(line)},
+			}); err != nil {
 				return err
+			}
+		case <-ticker.C:
+			state, _, _ := s.monitor.GetState()
+			if state != store.StateStarting && state != store.StateRunning {
+				return nil
 			}
 		case <-stream.Context().Done():
 			return stream.Context().Err()
 		}
+	}
+}
+
+func marshalOffset(offset any) ([]byte, error) {
+	if offset == nil {
+		return nil, nil
+	}
+	if m, ok := offset.(encoding.BinaryMarshaler); ok {
+		return m.MarshalBinary()
+	}
+	return nil, nil
+}
+
+func logLineToProto(line logdriver.LogLine) *pb.LogLine {
+	return &pb.LogLine{
+		Time:    timestamppb.New(line.Time),
+		Stream:  protoLogStream(line.Stream),
+		Partial: line.Partial,
+		Line:    line.Line,
+	}
+}
+
+func protoLogStream(s logdriver.Stream) pb.LogStream {
+	switch s {
+	case logdriver.StreamStdout, "":
+		return pb.LogStream_LOG_STREAM_STDOUT
+	case logdriver.StreamStderr:
+		return pb.LogStream_LOG_STREAM_STDERR
+	default:
+		return pb.LogStream_LOG_STREAM_UNSPECIFIED
 	}
 }
 

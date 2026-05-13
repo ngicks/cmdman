@@ -2,51 +2,71 @@ package cmdman
 
 import "sync"
 
-// spmcPipe is single producer - multiple consumer pipe
-type spmcPipe struct {
+// spmcPipe is single producer - multiple consumer pipe.
+type spmcPipe[T any] struct {
 	mu          sync.Mutex
-	subscribers map[int]chan []byte
+	subscribers map[int]chan T
 	nextID      int
+	closed      bool
 }
 
-func newFanout() *spmcPipe {
-	return &spmcPipe{
-		subscribers: make(map[int]chan []byte),
+func newFanout[T any]() *spmcPipe[T] {
+	return &spmcPipe[T]{
+		subscribers: make(map[int]chan T),
 	}
 }
 
 // Subscribe adds a new subscriber and returns a channel and unsubscribe function.
-func (f *spmcPipe) Subscribe() (<-chan []byte, func()) {
+func (f *spmcPipe[T]) Subscribe() (<-chan T, func()) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	id := f.nextID
 	f.nextID++
-	ch := make(chan []byte, 64)
+	ch := make(chan T, 64)
+	if f.closed {
+		close(ch)
+		return ch, func() {}
+	}
 	f.subscribers[id] = ch
 
 	return ch, func() {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		delete(f.subscribers, id)
+		if _, ok := f.subscribers[id]; !ok {
+			return
+		}
 		close(ch)
+		delete(f.subscribers, id)
 	}
 }
 
 // Send sends data to all subscribers. Non-blocking: drops data for slow subscribers.
-func (f *spmcPipe) Send(data []byte) {
+func (f *spmcPipe[T]) Send(data T) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-
-	// Copy data so each subscriber gets an independent slice.
-	buf := make([]byte, len(data))
-	copy(buf, data)
+	if f.closed {
+		return
+	}
 
 	for _, ch := range f.subscribers {
 		select {
-		case ch <- buf:
+		case ch <- data:
 		default:
 			// Drop for slow subscriber.
 		}
+	}
+}
+
+func (f *spmcPipe[T]) Close() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return
+	}
+	f.closed = true
+	for id, ch := range f.subscribers {
+		close(ch)
+		delete(f.subscribers, id)
 	}
 }

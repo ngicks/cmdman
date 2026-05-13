@@ -20,7 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	CommandMonitorService_Attach_FullMethodName     = "/cmdman.v1.CommandMonitorService/Attach"
-	CommandMonitorService_Logs_FullMethodName       = "/cmdman.v1.CommandMonitorService/Logs"
+	CommandMonitorService_Subscribe_FullMethodName  = "/cmdman.v1.CommandMonitorService/Subscribe"
 	CommandMonitorService_WriteStdin_FullMethodName = "/cmdman.v1.CommandMonitorService/WriteStdin"
 	CommandMonitorService_Signal_FullMethodName     = "/cmdman.v1.CommandMonitorService/Signal"
 	CommandMonitorService_Stop_FullMethodName       = "/cmdman.v1.CommandMonitorService/Stop"
@@ -33,8 +33,8 @@ const (
 type CommandMonitorServiceClient interface {
 	// Bidirectional streaming — PTY I/O + control
 	Attach(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[AttachRequest, AttachResponse], error)
-	// Read scrollback buffer (non-interactive)
-	Logs(ctx context.Context, in *LogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogsResponse], error)
+	// Subscribe to live structured output records.
+	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SubscribeResponse], error)
 	// Write raw stdin bytes to the command PTY
 	WriteStdin(ctx context.Context, in *WriteStdinRequest, opts ...grpc.CallOption) (*WriteStdinResponse, error)
 	// Send signal to the command process
@@ -66,13 +66,13 @@ func (c *commandMonitorServiceClient) Attach(ctx context.Context, opts ...grpc.C
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type CommandMonitorService_AttachClient = grpc.BidiStreamingClient[AttachRequest, AttachResponse]
 
-func (c *commandMonitorServiceClient) Logs(ctx context.Context, in *LogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogsResponse], error) {
+func (c *commandMonitorServiceClient) Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SubscribeResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &CommandMonitorService_ServiceDesc.Streams[1], CommandMonitorService_Logs_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &CommandMonitorService_ServiceDesc.Streams[1], CommandMonitorService_Subscribe_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[LogsRequest, LogsResponse]{ClientStream: stream}
+	x := &grpc.GenericClientStream[SubscribeRequest, SubscribeResponse]{ClientStream: stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func (c *commandMonitorServiceClient) Logs(ctx context.Context, in *LogsRequest,
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type CommandMonitorService_LogsClient = grpc.ServerStreamingClient[LogsResponse]
+type CommandMonitorService_SubscribeClient = grpc.ServerStreamingClient[SubscribeResponse]
 
 func (c *commandMonitorServiceClient) WriteStdin(ctx context.Context, in *WriteStdinRequest, opts ...grpc.CallOption) (*WriteStdinResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -131,8 +131,8 @@ func (c *commandMonitorServiceClient) Status(ctx context.Context, in *StatusRequ
 type CommandMonitorServiceServer interface {
 	// Bidirectional streaming — PTY I/O + control
 	Attach(grpc.BidiStreamingServer[AttachRequest, AttachResponse]) error
-	// Read scrollback buffer (non-interactive)
-	Logs(*LogsRequest, grpc.ServerStreamingServer[LogsResponse]) error
+	// Subscribe to live structured output records.
+	Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[SubscribeResponse]) error
 	// Write raw stdin bytes to the command PTY
 	WriteStdin(context.Context, *WriteStdinRequest) (*WriteStdinResponse, error)
 	// Send signal to the command process
@@ -154,8 +154,8 @@ type UnimplementedCommandMonitorServiceServer struct{}
 func (UnimplementedCommandMonitorServiceServer) Attach(grpc.BidiStreamingServer[AttachRequest, AttachResponse]) error {
 	return status.Error(codes.Unimplemented, "method Attach not implemented")
 }
-func (UnimplementedCommandMonitorServiceServer) Logs(*LogsRequest, grpc.ServerStreamingServer[LogsResponse]) error {
-	return status.Error(codes.Unimplemented, "method Logs not implemented")
+func (UnimplementedCommandMonitorServiceServer) Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[SubscribeResponse]) error {
+	return status.Error(codes.Unimplemented, "method Subscribe not implemented")
 }
 func (UnimplementedCommandMonitorServiceServer) WriteStdin(context.Context, *WriteStdinRequest) (*WriteStdinResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method WriteStdin not implemented")
@@ -197,16 +197,16 @@ func _CommandMonitorService_Attach_Handler(srv interface{}, stream grpc.ServerSt
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type CommandMonitorService_AttachServer = grpc.BidiStreamingServer[AttachRequest, AttachResponse]
 
-func _CommandMonitorService_Logs_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(LogsRequest)
+func _CommandMonitorService_Subscribe_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SubscribeRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(CommandMonitorServiceServer).Logs(m, &grpc.GenericServerStream[LogsRequest, LogsResponse]{ServerStream: stream})
+	return srv.(CommandMonitorServiceServer).Subscribe(m, &grpc.GenericServerStream[SubscribeRequest, SubscribeResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type CommandMonitorService_LogsServer = grpc.ServerStreamingServer[LogsResponse]
+type CommandMonitorService_SubscribeServer = grpc.ServerStreamingServer[SubscribeResponse]
 
 func _CommandMonitorService_WriteStdin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(WriteStdinRequest)
@@ -312,8 +312,8 @@ var CommandMonitorService_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 		{
-			StreamName:    "Logs",
-			Handler:       _CommandMonitorService_Logs_Handler,
+			StreamName:    "Subscribe",
+			Handler:       _CommandMonitorService_Subscribe_Handler,
 			ServerStreams: true,
 		},
 	},

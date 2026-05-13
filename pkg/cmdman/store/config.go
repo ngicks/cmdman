@@ -10,14 +10,11 @@ import (
 	"strconv"
 
 	"github.com/dustin/go-humanize"
+	"github.com/ngicks/cmdman/pkg/cmdman/logdriver/k8sfile"
 )
 
 // ConfigFileName is the fixed name of the per-command configuration file.
 const ConfigFileName = "config.json"
-
-// LogFileName is the fixed name of the per-command log file when a file-
-// based log driver is in use.
-const LogFileName = "console.log"
 
 // RestartPolicy determines how the monitor handles command exits.
 type RestartPolicy string
@@ -197,7 +194,7 @@ func (c *CommandConfigJSON) LogPath() string {
 	if c.CommandDir == "" {
 		return ""
 	}
-	return filepath.Join(c.CommandDir, LogFileName)
+	return filepath.Join(c.CommandDir, k8sfile.DefaultLogFileName)
 }
 
 // Validate rejects incomplete command configs so runtime code can assume values are present.

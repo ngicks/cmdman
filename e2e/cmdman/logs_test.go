@@ -2,6 +2,7 @@ package cmdman_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -478,6 +479,161 @@ func TestLogs_FollowStreamsAppendedOutput(t *testing.T) {
 	}
 }
 
+func TestLogs_TailAfterRotation(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	id := env.run(ctx, "run", "-n", "logs-tail-rotation",
+		"--log-opt", "max-size=256",
+		"--log-opt", "max-file=3",
+		"--", "/bin/sh", "-c",
+		"i=1; while [ $i -le 60 ]; do printf 'tail-rotation-line-%02d\\n' \"$i\"; i=$((i+1)); done")
+	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
+	env.waitForState(ctx, "logs-tail-rotation", "exited", defaultTimeout)
+
+	stdout := env.run(ctx, "logs", "--tail", "5", "logs-tail-rotation")
+	got := splitNonEmptyLines(stdout)
+	if len(got) != 5 {
+		t.Fatalf("expected exactly 5 tail lines, got %d:\n%s", len(got), stdout)
+	}
+	for i := range 5 {
+		want := "tail-rotation-line-" + fmt.Sprintf("%02d", 56+i)
+		if got[i] != want {
+			t.Fatalf("tail line %d = %q, want %q; all lines=%v", i, got[i], want, got)
+		}
+	}
+}
+
+func TestLogs_SinceCrossesRotation(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	id := env.run(ctx, "run", "-n", "logs-since-rotation",
+		"--log-opt", "max-size=1024",
+		"--log-opt", "max-file=3",
+		"--", "/bin/sh", "-c", strings.Join([]string{
+			"echo since-before",
+			"sleep 0.5",
+			"i=1",
+			"while [ $i -le 40 ]; do",
+			"  printf 'since-after-%02d\\n' \"$i\"",
+			"  i=$((i+1))",
+			"done",
+		}, "\n"))
+	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
+
+	info := env.inspectJSON(ctx, "logs-since-rotation")
+	hexID, _ := info["id"].(string)
+	if hexID == "" {
+		t.Fatalf("inspect returned empty id; raw=%v", info)
+	}
+	logPath := filepath.Join(env.dataHome, "commands", hexID, "console.log")
+	waitForFileContent(t, logPath, "since-before", defaultTimeout)
+	t0 := time.Now().UTC()
+
+	env.waitForState(ctx, "logs-since-rotation", "exited", defaultTimeout)
+
+	stdout, stderr, err := env.exec(
+		ctx,
+		"logs",
+		"--since",
+		t0.Format(time.RFC3339Nano),
+		"logs-since-rotation",
+	)
+	if err != nil {
+		t.Fatalf("logs --since failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if strings.Contains(stdout, "since-before") {
+		t.Fatalf(
+			"logs --since included pre-t0 line; t0=%s output:\n%s",
+			t0.Format(time.RFC3339Nano),
+			stdout,
+		)
+	}
+	for _, want := range []string{"since-after-01", "since-after-40"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf(
+				"logs --since missing %q; t0=%s output:\n%s",
+				want,
+				t0.Format(time.RFC3339Nano),
+				stdout,
+			)
+		}
+	}
+}
+
+func TestLogs_FollowSeesStoredThenLive(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	id := env.run(ctx, "run", "-n", "follow-stored-live", "--", "/bin/sh", "-c",
+		"echo follow-A; sleep 0.5; echo follow-B; sleep 0.5; echo follow-C; sleep 60")
+	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
+	env.waitForState(ctx, "follow-stored-live", "running", defaultTimeout)
+
+	info := env.inspectJSON(ctx, "follow-stored-live")
+	hexID, _ := info["id"].(string)
+	if hexID == "" {
+		t.Fatalf("inspect returned empty id; raw=%v", info)
+	}
+	waitForFileContent(
+		t,
+		filepath.Join(env.dataHome, "commands", hexID, "console.log"),
+		"follow-A",
+		defaultTimeout,
+	)
+
+	followCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	stdout, _, _ := env.exec(followCtx, "logs", "-f", "follow-stored-live")
+
+	assertContainsInOrder(t, stdout, "follow-A", "follow-B", "follow-C")
+}
+
+func TestLogs_FollowPreservesStreamSplit(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	script := strings.Join([]string{
+		"echo split-out-1",
+		"sleep 0.2",
+		"echo split-err-1 >&2",
+		"sleep 0.2",
+		"echo split-out-2",
+		"sleep 0.2",
+		"echo split-err-2 >&2",
+		"sleep 60",
+	}, "\n")
+	id := env.run(ctx, "run", "-n", "follow-stream-split", "--", "/bin/sh", "-c", script)
+	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
+	env.waitForState(ctx, "follow-stream-split", "running", defaultTimeout)
+
+	followCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	stdout, stderr, _ := env.exec(followCtx, "logs", "-f", "follow-stream-split")
+
+	for _, want := range []string{"split-out-1", "split-out-2"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout missing %q; stdout=%q stderr=%q", want, stdout, stderr)
+		}
+		if strings.Contains(stderr, want) {
+			t.Errorf("stderr unexpectedly contains stdout line %q; stderr=%q", want, stderr)
+		}
+	}
+	for _, want := range []string{"split-err-1", "split-err-2"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr missing %q; stdout=%q stderr=%q", want, stdout, stderr)
+		}
+		if strings.Contains(stdout, want) {
+			t.Errorf("stdout unexpectedly contains stderr line %q; stdout=%q", want, stdout)
+		}
+	}
+}
+
 func TestLogs_NoneDriverErrors(t *testing.T) {
 	t.Parallel()
 	ctx := testContext(t)
@@ -509,5 +665,36 @@ func TestLogs_RespectsLogOptPath(t *testing.T) {
 	stdout := env.run(ctx, "logs", "logs-via-opt")
 	if !strings.Contains(stdout, "from-custom-path") {
 		t.Errorf("expected log content from %s, got:\n%s", customLog, stdout)
+	}
+}
+
+func splitNonEmptyLines(s string) []string {
+	var lines []string
+	for line := range strings.SplitSeq(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func waitForFileContent(t *testing.T, path string, want string, timeout time.Duration) {
+	t.Helper()
+	waitUntil(t, timeout, func() bool {
+		data, err := os.ReadFile(path)
+		return err == nil && strings.Contains(string(data), want)
+	}, "expected %q in %s", want, path)
+}
+
+func assertContainsInOrder(t *testing.T, text string, wants ...string) {
+	t.Helper()
+	pos := 0
+	for _, want := range wants {
+		idx := strings.Index(text[pos:], want)
+		if idx < 0 {
+			t.Fatalf("expected %q after byte %d in output:\n%s", want, pos, text)
+		}
+		pos += idx + len(want)
 	}
 }

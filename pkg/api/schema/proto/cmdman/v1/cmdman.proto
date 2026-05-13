@@ -2,12 +2,14 @@ syntax = "proto3";
 
 package cmdman.v1;
 
+import "google/protobuf/timestamp.proto";
+
 service CommandMonitorService {
   // Bidirectional streaming — PTY I/O + control
   rpc Attach(stream AttachRequest) returns (stream AttachResponse);
 
-  // Read scrollback buffer (non-interactive)
-  rpc Logs(LogsRequest) returns (stream LogsResponse);
+  // Subscribe to live structured output records.
+  rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
 
   // Write raw stdin bytes to the command PTY
   rpc WriteStdin(WriteStdinRequest) returns (WriteStdinResponse);
@@ -38,12 +40,31 @@ message ResizeEvent {
   uint32 cols = 2;
 }
 
-message LogsRequest {
-  bool follow = 1; // stream live output after scrollback
+enum LogStream {
+  LOG_STREAM_UNSPECIFIED = 0;
+  LOG_STREAM_STDOUT = 1;
+  LOG_STREAM_STDERR = 2;
 }
 
-message LogsResponse {
-  bytes data = 1;
+message LogLine {
+  google.protobuf.Timestamp time = 1;
+  LogStream stream = 2;
+  bool partial = 3;
+  bytes line = 4;
+}
+
+message SubscribeRequest {}
+
+message SubscribeResponse {
+  oneof event {
+    SubscribeOffset offset = 1;
+    LogLine line = 2;
+  }
+}
+
+message SubscribeOffset {
+  string driver = 1;
+  bytes offset = 2;
 }
 
 message WriteStdinRequest {

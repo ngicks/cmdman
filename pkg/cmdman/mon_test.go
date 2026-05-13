@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"gotest.tools/v3/assert"
 )
@@ -254,3 +255,49 @@ func TestStaleEntryCleanup(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, state, store.StateFailed)
 }
+
+func TestMonitorSubscribeCapturesOffsetAndLiveRecordsUnderLock(t *testing.T) {
+	m := &Monitor{
+		ring:         newRingBuffer(4096),
+		outputBridge: newFanout[logdriver.LogLine](),
+		logWriter:    testOffsetWriter{offset: "before"},
+	}
+
+	sub, err := m.Subscribe(t.Context())
+	assert.NilError(t, err)
+	defer sub.Unsub()
+	assert.Equal(t, sub.Offset, "before")
+
+	m.outputMu.Lock()
+	m.logWriter = testOffsetWriter{offset: "after"}
+	m.outputBridge.Send(logdriver.LogLine{
+		Stream: logdriver.StreamStdout,
+		Line:   []byte("live\n"),
+	})
+	m.outputMu.Unlock()
+
+	select {
+	case line := <-sub.Records:
+		assert.Equal(t, string(line.Line), "live\n")
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for live record")
+	}
+
+	sub2, err := m.Subscribe(t.Context())
+	assert.NilError(t, err)
+	defer sub2.Unsub()
+	assert.Equal(t, sub2.Offset, "after")
+	select {
+	case line := <-sub2.Records:
+		t.Fatalf("second subscriber unexpectedly received old line %q", line.Line)
+	default:
+	}
+}
+
+type testOffsetWriter struct {
+	offset any
+}
+
+func (w testOffsetWriter) WriteLogLine(logdriver.LogLine) error { return nil }
+func (w testOffsetWriter) Close() error                         { return nil }
+func (w testOffsetWriter) CurrentOffset() any                   { return w.offset }

@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc"
 
 	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
+	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	cmdstore "github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -41,13 +42,15 @@ type Monitor struct {
 
 	lis net.Listener
 
-	ptmx     *os.File
-	stdin    io.WriteCloser
-	stdinMu  sync.Mutex
-	cmd      *exec.Cmd
-	fanout   *spmcPipe
-	ring     *ringBuffer
-	outputMu sync.Mutex
+	ptmx    *os.File
+	stdin   io.WriteCloser
+	stdinMu sync.Mutex
+	cmd     *exec.Cmd
+	ring    *ringBuffer
+
+	outputMu     sync.Mutex
+	outputBridge *spmcPipe[logdriver.LogLine]
+	logWriter    logdriver.Writer
 
 	grpcServer *grpc.Server
 	sockPath   string
@@ -84,15 +87,15 @@ func newMonitor(
 	}
 
 	return &Monitor{
-		ID:         id,
-		CommandDir: commandDir,
-		DBPath:     dbPath,
-		Config:     cfg,
-		Logger:     logger,
-		fanout:     newFanout(),
-		store:      st,
-		cfg:        commandCfg,
-		ring:       newRingBuffer(commandCfg.ScrollbackBytes),
+		ID:           id,
+		CommandDir:   commandDir,
+		DBPath:       dbPath,
+		Config:       cfg,
+		Logger:       logger,
+		outputBridge: newFanout[logdriver.LogLine](),
+		store:        st,
+		cfg:          commandCfg,
+		ring:         newRingBuffer(commandCfg.ScrollbackBytes),
 		stateJSON: &cmdstore.CommandStateJSON{
 			MonitorPID: os.Getpid(),
 		},

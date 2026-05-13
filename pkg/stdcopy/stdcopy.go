@@ -1,4 +1,4 @@
-// Package stdcopy renders structured log lines back to stdout and stderr
+// Package stdcopy renders structured log records back to stdout and stderr
 // byte streams.
 package stdcopy
 
@@ -9,34 +9,34 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 )
 
-// Copy reads log lines from r and writes their bytes to stdout or stderr
-// based on each line's Stream. It stops cleanly at io.EOF.
-func Copy(stdout, stderr io.Writer, r logdriver.Reader) error {
+// Copy consumes records and writes each line's bytes to stdout or stderr
+// based on its Stream. It returns when the records channel is closed, when
+// a record carries a terminal error, or when a write fails.
+func Copy(stdout, stderr io.Writer, records <-chan logdriver.Record) error {
 	if stdout == nil {
 		return fmt.Errorf("stdcopy: stdout writer is nil")
 	}
 	if stderr == nil {
 		return fmt.Errorf("stdcopy: stderr writer is nil")
 	}
-	for {
-		line, err := r.ReadLogLine()
-		if err == io.EOF {
-			return nil
+	if records == nil {
+		return fmt.Errorf("stdcopy: records channel is nil")
+	}
+	for rec := range records {
+		if rec.Err != nil {
+			return rec.Err
 		}
-		if err != nil {
-			return err
-		}
-
 		w := stdout
-		switch line.Stream {
+		switch rec.Line.Stream {
 		case logdriver.StreamStdout, "":
 		case logdriver.StreamStderr:
 			w = stderr
 		default:
-			return fmt.Errorf("stdcopy: unknown log stream %q", line.Stream)
+			return fmt.Errorf("stdcopy: unknown log stream %q", rec.Line.Stream)
 		}
-		if _, err := w.Write(line.Line); err != nil {
+		if _, err := w.Write(rec.Line.Line); err != nil {
 			return err
 		}
 	}
+	return nil
 }
