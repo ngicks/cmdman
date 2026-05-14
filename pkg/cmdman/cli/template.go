@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"text/template"
@@ -25,6 +26,7 @@ var templateFuncMap = template.FuncMap{
 		}
 		return string(b)
 	},
+	"deref": deref,
 	"command": func(cfg *store.CommandConfigJSON) string {
 		if cfg == nil || len(cfg.Argv) == 0 {
 			return "-"
@@ -35,6 +37,20 @@ var templateFuncMap = template.FuncMap{
 		}
 		return s
 	},
+}
+
+func deref(v any) any {
+	if v == nil {
+		return nil
+	}
+	rv := reflect.ValueOf(v)
+	for rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return nil
+		}
+		rv = rv.Elem()
+	}
+	return rv.Interface()
 }
 
 // templateFuncList returns a comma-separated, sorted list of helper function

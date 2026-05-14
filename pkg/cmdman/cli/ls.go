@@ -13,7 +13,7 @@ import (
 const (
 	DefaultLsHeader    = "ID\tNAME\tSTATE\tEXIT CODE\tCOMMAND"
 	DefaultLsRowFormat = "{{slice .ID 0 12}}\t{{.Name}}\t{{.State}}\t" +
-		"{{if .ExitCode}}{{printf \"%d\" .ExitCode}}{{else}}-{{end}}\t" +
+		"{{if .ExitCode}}{{printf \"%d\" (deref .ExitCode)}}{{else}}-{{end}}\t" +
 		"{{command .ConfigJSON}}"
 )
 
