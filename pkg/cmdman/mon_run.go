@@ -7,7 +7,6 @@ import (
 	"maps"
 	"os/exec"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
@@ -90,12 +89,11 @@ func (m *Monitor) wireUpCmd(ctx context.Context) (*exec.Cmd, error) {
 	if len(cmd.Env) == 0 {
 		return nil, fmt.Errorf("command config env is empty")
 	}
-	// Cancel via signal, not process kill.
-	cmd.Cancel = func() error {
-		return cmd.Process.Signal(syscall.SIGTERM)
-	}
+	// Place the child in its own process group and route ctx cancellation
+	// through a group-wide signal so grandchildren (e.g. `sleep` under
+	// `sh -c "sleep 300"`) are reached too.
+	prepProcessAttrs(cmd, m.cfg.Tty)
 	cmd.WaitDelay = 10 * time.Second
-	cmd.SysProcAttr = &syscall.SysProcAttr{}
 
 	return cmd, nil
 }

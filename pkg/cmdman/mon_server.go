@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding"
 	"io"
-	"sync"
 	"syscall"
 	"time"
 
@@ -62,21 +61,32 @@ func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) err
 		}
 	}
 
-	var wg sync.WaitGroup
-	defer wg.Wait()
-
+	// The stdin/resize reader is registered on Monitor.wg, not joined
+	// in-handler: stream.Recv blocks until either the client sends a
+	// message or the gRPC framework cancels the stream context, and the
+	// framework only cancels the context after this handler returns. So
+	// joining the reader here would deadlock when the handler tries to
+	// exit because the command died (e.g. Ctrl-C). Monitor.wg lets the
+	// supervisor join all such per-request goroutines once GracefulStop
+	// has torn down the streams.
 	errCh := make(chan error, 1)
-	wg.Go(func() {
+	s.monitor.wg.Go(func() {
 		for {
 			msg, err := stream.Recv()
 			if err != nil {
-				errCh <- err
+				select {
+				case errCh <- err:
+				default:
+				}
 				return
 			}
 			switch input := msg.Input.(type) {
 			case *pb.AttachRequest_Stdin:
 				if err := s.monitor.QueueStdin(stream.Context(), input.Stdin); err != nil {
-					errCh <- err
+					select {
+					case errCh <- err:
+					default:
+					}
 					return
 				}
 			case *pb.AttachRequest_Resize:

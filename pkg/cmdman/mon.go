@@ -55,6 +55,13 @@ type Monitor struct {
 	grpcServer *grpc.Server
 	sockPath   string
 
+	// wg tracks per-request goroutines spawned by RPC handlers (e.g. the
+	// Attach stream-recv pump). RPC handlers that need to spawn a helper
+	// goroutine register it here instead of joining inside the handler.
+	// The supervisor waits on this group between GracefulStop (which is
+	// what unblocks gRPC Recv calls) and resource teardown.
+	wg sync.WaitGroup
+
 	// stopRequested is set by the Signal RPC to prevent restarts.
 	stopRequested atomic.Bool
 }
@@ -222,7 +229,15 @@ func (m *Monitor) start(ctx context.Context) error {
 			m.Logger.Error("grpc serve error", slog.String("error", err.Error()))
 		}
 	}()
-	defer m.grpcServer.GracefulStop()
+	defer func() {
+		// GracefulStop closes the listener and tears down active streams,
+		// which is what unblocks any goroutine still parked in
+		// stream.Recv() inside an RPC handler. Once that returns, every
+		// helper goroutine registered on m.wg can finish, so wait on it
+		// before any resource cleanup runs.
+		m.grpcServer.GracefulStop()
+		m.wg.Wait()
+	}()
 
 	// Handle SIGTERM for graceful shutdown.
 	sigCtx, sigStop := signal.NotifyContext(ctx, syscall.SIGTERM)
@@ -293,12 +308,13 @@ func (m *Monitor) Resize(rows, cols uint16) error {
 	return pty.Setsize(m.ptmx, &pty.Winsize{Rows: rows, Cols: cols})
 }
 
-// SignalProcess sends a raw signal to the running command.
+// SignalProcess sends a raw signal to the running command and any
+// descendants it has spawned within its process group.
 func (m *Monitor) SignalProcess(sig syscall.Signal) error {
 	if m.cmd == nil || m.cmd.Process == nil {
 		return fmt.Errorf("no running process")
 	}
-	return m.cmd.Process.Signal(sig)
+	return signalProcessGroup(m.cmd.Process.Pid, sig)
 }
 
 // StopProcess sends a signal to the running command and prevents restart.
