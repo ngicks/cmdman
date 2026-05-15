@@ -5,11 +5,9 @@ import (
 	"encoding"
 	"io"
 	"syscall"
-	"time"
 
 	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -18,13 +16,25 @@ type monitorServer struct {
 	monitor *Monitor
 }
 
-type SubscribeResult struct {
-	Records <-chan logdriver.LogLine
-	Unsub   func()
-	Offset  any
+type monitorSubscription struct {
+	Records      <-chan logdriver.LogLine
+	StateChanges <-chan monitorStateChange
+	unsubRecords func()
+	unsubState   func()
+	Offset       any
+	Scrollback   []byte
 }
 
-func (m *Monitor) Subscribe(context.Context) (SubscribeResult, error) {
+func (s monitorSubscription) Unsub() {
+	if s.unsubRecords != nil {
+		s.unsubRecords()
+	}
+	if s.unsubState != nil {
+		s.unsubState()
+	}
+}
+
+func (m *Monitor) subscribeOutput(scrollback bool) monitorSubscription {
 	m.outputMu.Lock()
 	defer m.outputMu.Unlock()
 	records, unsub := m.outputBridge.Subscribe()
@@ -32,31 +42,24 @@ func (m *Monitor) Subscribe(context.Context) (SubscribeResult, error) {
 	if ow, ok := m.logWriter.(logdriver.OffsetWriter); ok {
 		offset = ow.CurrentOffset()
 	}
-	return SubscribeResult{
-		Records: records,
-		Unsub:   unsub,
-		Offset:  offset,
-	}, nil
-}
-
-func (m *Monitor) readMonitorOut() (
-	scrollback []byte,
-	live <-chan logdriver.LogLine,
-	unsub func(),
-) {
-	m.outputMu.Lock()
-	defer m.outputMu.Unlock()
-	live, unsub = m.outputBridge.Subscribe()
-	scrollback = m.ring.Bytes()
-	return
+	sub := monitorSubscription{
+		Records:      records,
+		unsubRecords: unsub,
+		Offset:       offset,
+	}
+	if scrollback {
+		sub.Scrollback = m.ring.Bytes()
+	}
+	sub.StateChanges, sub.unsubState = m.subscribeStateChange()
+	return sub
 }
 
 func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) error {
-	scrollback, ch, unsub := s.monitor.readMonitorOut()
-	defer unsub()
+	sub := s.monitor.subscribeOutput(true)
+	defer sub.Unsub()
 
-	if len(scrollback) > 0 {
-		if err := stream.Send(&pb.AttachResponse{Stdout: scrollback}); err != nil {
+	if len(sub.Scrollback) > 0 {
+		if err := stream.Send(&pb.AttachResponse{Stdout: sub.Scrollback}); err != nil {
 			return err
 		}
 	}
@@ -98,13 +101,9 @@ func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) err
 		}
 	})
 
-	// Send live output to client.
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
 	for {
 		select {
-		case line, ok := <-ch:
+		case line, ok := <-sub.Records:
 			if !ok {
 				return nil
 			}
@@ -117,9 +116,11 @@ func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) err
 				return nil
 			}
 			return err
-		case <-ticker.C:
-			state, _, _ := s.monitor.GetState()
-			if state != store.StateStarting && state != store.StateRunning {
+		case state, ok := <-sub.StateChanges:
+			if !ok {
+				return nil
+			}
+			if !isMonitorActiveState(state.State) {
 				return nil
 			}
 		case <-stream.Context().Done():
@@ -132,10 +133,7 @@ func (s *monitorServer) Subscribe(
 	_ *pb.SubscribeRequest,
 	stream pb.CommandMonitorService_SubscribeServer,
 ) error {
-	sub, err := s.monitor.Subscribe(stream.Context())
-	if err != nil {
-		return err
-	}
+	sub := s.monitor.subscribeOutput(false)
 	defer sub.Unsub()
 
 	offsetBytes, err := marshalOffset(sub.Offset)
@@ -153,9 +151,6 @@ func (s *monitorServer) Subscribe(
 		return err
 	}
 
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
 	for {
 		select {
 		case line, ok := <-sub.Records:
@@ -167,9 +162,11 @@ func (s *monitorServer) Subscribe(
 			}); err != nil {
 				return err
 			}
-		case <-ticker.C:
-			state, _, _ := s.monitor.GetState()
-			if state != store.StateStarting && state != store.StateRunning {
+		case state, ok := <-sub.StateChanges:
+			if !ok {
+				return nil
+			}
+			if !isMonitorActiveState(state.State) {
 				return nil
 			}
 		case <-stream.Context().Done():

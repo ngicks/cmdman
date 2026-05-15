@@ -48,9 +48,10 @@ type Monitor struct {
 	cmd     *exec.Cmd
 	ring    *ringBuffer
 
-	outputMu     sync.Mutex
-	outputBridge *broadcaster[logdriver.LogLine]
-	logWriter    logdriver.Writer
+	outputMu          sync.Mutex
+	outputBridge      *broadcaster[logdriver.LogLine]
+	stateChangeBridge *broadcaster[monitorStateChange]
+	logWriter         logdriver.Writer
 
 	grpcServer *grpc.Server
 	sockPath   string
@@ -94,15 +95,16 @@ func newMonitor(
 	}
 
 	return &Monitor{
-		ID:           id,
-		CommandDir:   commandDir,
-		DBPath:       dbPath,
-		Config:       cfg,
-		Logger:       logger,
-		outputBridge: newBroadcaster[logdriver.LogLine](),
-		store:        st,
-		cfg:          commandCfg,
-		ring:         newRingBuffer(commandCfg.ScrollbackBytes),
+		ID:                id,
+		CommandDir:        commandDir,
+		DBPath:            dbPath,
+		Config:            cfg,
+		Logger:            logger,
+		outputBridge:      newBroadcaster[logdriver.LogLine](),
+		stateChangeBridge: newBroadcaster[monitorStateChange](),
+		store:             st,
+		cfg:               commandCfg,
+		ring:              newRingBuffer(commandCfg.ScrollbackBytes),
 		stateJSON: &cmdstore.CommandStateJSON{
 			MonitorPID: os.Getpid(),
 		},
@@ -246,6 +248,32 @@ func (m *Monitor) start(ctx context.Context) error {
 	return m.runLoop(sigCtx)
 }
 
+type monitorStateChange struct {
+	State    string
+	ExitCode int
+	Pid      int
+}
+
+func (m *Monitor) subscribeStateChange() (<-chan monitorStateChange, func()) {
+	return m.stateChangeBridge.Subscribe()
+}
+
+func (m *Monitor) publishStateChange(state string, exitCode int) {
+	pid := 0
+	if m.cmd != nil && m.cmd.Process != nil {
+		pid = m.cmd.Process.Pid
+	}
+	m.stateChangeBridge.Send(monitorStateChange{
+		State:    state,
+		ExitCode: exitCode,
+		Pid:      pid,
+	})
+}
+
+func isMonitorActiveState(state string) bool {
+	return state == cmdstore.StateStarting || state == cmdstore.StateRunning
+}
+
 func (m *Monitor) setRunning() {
 	m.stateJSON.StartedAt = time.Now().UTC().Format(time.RFC3339)
 	if err := m.store.UpdateCommandState(
@@ -256,15 +284,20 @@ func (m *Monitor) setRunning() {
 	); err != nil {
 		m.Logger.Error("update state to running failed", slog.String("error", err.Error()))
 	}
+	m.publishStateChange(cmdstore.StateRunning, 0)
 }
 
 func (m *Monitor) setExited(exitCode int) {
 	_ = m.store.UpdateCommandState(m.ID, cmdstore.StateExited, &exitCode, m.stateJSON)
+	m.publishStateChange(cmdstore.StateExited, exitCode)
+	m.stateChangeBridge.Close()
 }
 
 func (m *Monitor) setFailed(errMsg string) {
 	m.stateJSON.Error = errMsg
 	_ = m.store.UpdateCommandState(m.ID, cmdstore.StateFailed, nil, m.stateJSON)
+	m.publishStateChange(cmdstore.StateFailed, 0)
+	m.stateChangeBridge.Close()
 }
 
 func (m *Monitor) maybeAutoRemove() error {

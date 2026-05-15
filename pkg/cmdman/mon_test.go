@@ -258,13 +258,13 @@ func TestStaleEntryCleanup(t *testing.T) {
 
 func TestMonitorSubscribeCapturesOffsetAndLiveRecordsUnderLock(t *testing.T) {
 	m := &Monitor{
-		ring:         newRingBuffer(4096),
-		outputBridge: newBroadcaster[logdriver.LogLine](),
-		logWriter:    testOffsetWriter{offset: "before"},
+		ring:              newRingBuffer(4096),
+		outputBridge:      newBroadcaster[logdriver.LogLine](),
+		stateChangeBridge: newBroadcaster[monitorStateChange](),
+		logWriter:         testOffsetWriter{offset: "before"},
 	}
 
-	sub, err := m.Subscribe(t.Context())
-	assert.NilError(t, err)
+	sub := m.subscribeOutput(false)
 	defer sub.Unsub()
 	assert.Equal(t, sub.Offset, "before")
 
@@ -283,14 +283,60 @@ func TestMonitorSubscribeCapturesOffsetAndLiveRecordsUnderLock(t *testing.T) {
 		t.Fatal("timed out waiting for live record")
 	}
 
-	sub2, err := m.Subscribe(t.Context())
-	assert.NilError(t, err)
+	sub2 := m.subscribeOutput(false)
 	defer sub2.Unsub()
 	assert.Equal(t, sub2.Offset, "after")
 	select {
 	case line := <-sub2.Records:
 		t.Fatalf("second subscriber unexpectedly received old line %q", line.Line)
 	default:
+	}
+}
+
+func TestMonitorStateChangeBroadcastsTerminalStateAndCloses(t *testing.T) {
+	st := testStore(t)
+	id := "state-change"
+	assert.NilError(t, st.InsertCommandConfig(id, "", &store.CommandConfigJSON{
+		Argv:       []string{"/bin/true"},
+		Dir:        t.TempDir(),
+		Env:        testEnv(),
+		CommandDir: t.TempDir(),
+	}))
+	assert.NilError(t, st.InsertCommandState(id, store.StateRunning, &store.CommandStateJSON{}))
+
+	m := &Monitor{
+		ID:                id,
+		store:             st,
+		stateJSON:         &store.CommandStateJSON{},
+		stateChangeBridge: newBroadcaster[monitorStateChange](),
+	}
+	ch, unsub := m.subscribeStateChange()
+	defer unsub()
+
+	m.setExited(7)
+
+	select {
+	case state, ok := <-ch:
+		assert.Assert(t, ok)
+		assert.Equal(t, state.State, store.StateExited)
+		assert.Equal(t, state.ExitCode, 7)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for exited state change")
+	}
+	select {
+	case _, ok := <-ch:
+		assert.Assert(t, !ok)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for state change close")
+	}
+
+	lateCh, lateUnsub := m.subscribeStateChange()
+	defer lateUnsub()
+	select {
+	case _, ok := <-lateCh:
+		assert.Assert(t, !ok)
+	case <-time.After(time.Second):
+		t.Fatal("late subscriber blocked on closed state bridge")
 	}
 }
 
