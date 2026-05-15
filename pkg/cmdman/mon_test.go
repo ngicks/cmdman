@@ -259,7 +259,7 @@ func TestStaleEntryCleanup(t *testing.T) {
 func TestMonitorSubscribeCapturesOffsetAndLiveRecordsUnderLock(t *testing.T) {
 	m := &Monitor{
 		ring:         newRingBuffer(4096),
-		outputBridge: newFanout[logdriver.LogLine](),
+		outputBridge: newBroadcaster[logdriver.LogLine](),
 		logWriter:    testOffsetWriter{offset: "before"},
 	}
 

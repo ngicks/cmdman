@@ -49,7 +49,7 @@ type Monitor struct {
 	ring    *ringBuffer
 
 	outputMu     sync.Mutex
-	outputBridge *spmcPipe[logdriver.LogLine]
+	outputBridge *broadcaster[logdriver.LogLine]
 	logWriter    logdriver.Writer
 
 	grpcServer *grpc.Server
@@ -99,7 +99,7 @@ func newMonitor(
 		DBPath:       dbPath,
 		Config:       cfg,
 		Logger:       logger,
-		outputBridge: newFanout[logdriver.LogLine](),
+		outputBridge: newBroadcaster[logdriver.LogLine](),
 		store:        st,
 		cfg:          commandCfg,
 		ring:         newRingBuffer(commandCfg.ScrollbackBytes),

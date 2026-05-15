@@ -2,22 +2,22 @@ package cmdman
 
 import "sync"
 
-// spmcPipe is single producer - multiple consumer pipe.
-type spmcPipe[T any] struct {
+// broadcaster is single producer - multiple consumer broadcaster.
+type broadcaster[T any] struct {
 	mu          sync.Mutex
 	subscribers map[int]chan T
 	nextID      int
 	closed      bool
 }
 
-func newFanout[T any]() *spmcPipe[T] {
-	return &spmcPipe[T]{
+func newBroadcaster[T any]() *broadcaster[T] {
+	return &broadcaster[T]{
 		subscribers: make(map[int]chan T),
 	}
 }
 
 // Subscribe adds a new subscriber and returns a channel and unsubscribe function.
-func (f *spmcPipe[T]) Subscribe() (<-chan T, func()) {
+func (f *broadcaster[T]) Subscribe() (<-chan T, func()) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -42,7 +42,7 @@ func (f *spmcPipe[T]) Subscribe() (<-chan T, func()) {
 }
 
 // Send sends data to all subscribers. Non-blocking: drops data for slow subscribers.
-func (f *spmcPipe[T]) Send(data T) {
+func (f *broadcaster[T]) Send(data T) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.closed {
@@ -58,7 +58,7 @@ func (f *spmcPipe[T]) Send(data T) {
 	}
 }
 
-func (f *spmcPipe[T]) Close() {
+func (f *broadcaster[T]) Close() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.closed {
