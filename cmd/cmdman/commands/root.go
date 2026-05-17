@@ -23,8 +23,9 @@ func Execute(ctx context.Context) error {
 
 func rootCmd() *cobra.Command {
 	var (
-		logConfig  *loggerfactory.Config
-		rootConfig cmdman.CmdmanConfig
+		logConfig   *loggerfactory.Config
+		rootConfig  cmdman.CmdmanConfig
+		flagVersion bool
 	)
 
 	cmd := &cobra.Command{
@@ -44,14 +45,22 @@ It simply starts a monitor process and the monitor damonizes itself and starts s
 			slog.SetDefault(logger)
 			cmd.SetContext(contextkey.WithSlogLogger(cmd.Context(), logger))
 		},
-		RunE: runRoot,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if flagVersion {
+				return runVersion(cmd, args)
+			}
+			return runRoot(cmd, args)
+		},
 	}
 
 	logConfig = loggerfactory.RegisterFlags(cmd)
+	cmd.Flags().BoolVar(&flagVersion, "version", false, "alias for the version subcommand")
 
 	flags := cmd.PersistentFlags()
 	flags.StringVar(&rootConfig.DataDir, "data-dir", "", "Cmdman data directory")
 	flags.StringVar(&rootConfig.RuntimeDir, "runtime-dir", "", "Cmdman runtime directory")
+
+	versionCmd(cmd)
 
 	attachCmd(cmd, &rootConfig)
 	createCmd(cmd, &rootConfig)
@@ -71,6 +80,6 @@ It simply starts a monitor process and the monitor damonizes itself and starts s
 	return cmd
 }
 
-func runRoot(cmd *cobra.Command, args []string) error {
+func runRoot(cmd *cobra.Command, _ []string) error {
 	return cmd.Help()
 }

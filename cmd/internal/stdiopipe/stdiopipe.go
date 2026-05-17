@@ -1,4 +1,12 @@
-// Package stdiopipe provides a cancellable reader backed by os.Stdin.
+// Package stdiopipe provides cancellable readers and writers backed by
+// [os.Stdin], [os.Stdout], and [os.Stderr] via [io.Pipe].
+//
+// Read calls on [os.Stdin] and Write calls on [os.Stdout] / [os.Stderr] cannot
+// be unblocked by closing the underlying file. This package layers an
+// [io.Pipe] in front so the returned end can be closed when a context is
+// cancelled, unblocking pending I/O.
+//
+// Each function may be called at most once per process; a second call panics.
 package stdiopipe
 
 import (
