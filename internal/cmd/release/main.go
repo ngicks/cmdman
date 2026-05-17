@@ -6,13 +6,11 @@
 //
 // Workflow:
 //  1. Validate the inputs and ensure the working tree is clean.
-//  2. Rewrite pkg/<name>/version.go to the release version, commit, tag.
+//  2. Rewrite pkg/<name>/version.go to the release version, commit
+//     ("🔖: release <tag>"), tag.
 //  3. Rewrite the same file to the next development version (suffix
-//     "-devel"), commit.
-//  4. Print the git push invocation needed to publish the release.
-//
-// The tool does NOT push. Review the local commits and tag, then run the
-// printed command.
+//     "-devel"), commit ("👷: start <tag> development cycle").
+//  4. Push the branch and the new tag to origin.
 //
 // The version file is auto-detected by globbing pkg/*/version.go (must
 // match exactly one). Pass -file <path> to override.
@@ -139,7 +137,7 @@ func run(release, nextDev, versionFile string) error {
 	if err := git("add", "--", versionFile); err != nil {
 		return err
 	}
-	if err := git("commit", "-m", "release: "+release); err != nil {
+	if err := git("commit", "-m", "🔖: release "+release); err != nil {
 		return err
 	}
 	if err := git("tag", "-a", release, "-m", release); err != nil {
@@ -152,12 +150,19 @@ func run(release, nextDev, versionFile string) error {
 	if err := git("add", "--", versionFile); err != nil {
 		return err
 	}
-	if err := git("commit", "-m", "start "+nextDev+" development cycle"); err != nil {
+	if err := git("commit", "-m", "👷: start "+nextDev+" development cycle"); err != nil {
+		return err
+	}
+
+	if err := git("push"); err != nil {
+		return err
+	}
+	if err := git("push", "origin", release); err != nil {
 		return err
 	}
 
 	fmt.Printf(
-		"released %s; bumped to %s.\n\npush with:\n  git push && git push origin %s\n",
+		"released %s; bumped to %s; pushed branch and tag %s to origin.\n",
 		release,
 		nextDev,
 		release,
