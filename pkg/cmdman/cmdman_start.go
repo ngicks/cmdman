@@ -27,14 +27,15 @@ func (s *Service) Start(ctx context.Context, idOrName string) error {
 		return fmt.Errorf("get command state: %w", err)
 	}
 	switch state {
-	case store.StateCreated, store.StateExited:
+	case store.StateCreated, store.StateExited, store.StateFailed:
 	default:
 		return fmt.Errorf(
-			"command %s is in state %q, must be %q or %q",
+			"command %s is in state %q, must be %q, %q, or %q",
 			idOrName,
 			state,
 			store.StateCreated,
 			store.StateExited,
+			store.StateFailed,
 		)
 	}
 
