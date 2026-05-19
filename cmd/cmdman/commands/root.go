@@ -64,6 +64,7 @@ It simply starts a monitor process and the monitor damonizes itself and starts s
 
 	attachCmd(cmd, &rootConfig)
 	createCmd(cmd, &rootConfig)
+	eventsCmd(cmd, &rootConfig)
 	inspectCmd(cmd, &rootConfig)
 	logsCmd(cmd, &rootConfig)
 	lsCmd(cmd, &rootConfig)

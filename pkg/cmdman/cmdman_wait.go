@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -75,7 +76,7 @@ func (s *Service) Wait(ctx context.Context, req WaitRequest) ([]WaitResult, erro
 			})
 			continue
 		}
-		exitCode, err := waitForCondition(ctx, st, id, condition, interval)
+		exitCode, err := s.waitForCondition(ctx, st, id, condition, interval)
 		results = append(results, WaitResult{ID: id, ExitCode: exitCode, Err: err})
 	}
 	return results, nil
@@ -97,12 +98,29 @@ func matchesWaitCondition(state, condition string) bool {
 	return state == condition
 }
 
-func waitForCondition(
+// waitForCondition blocks until id reaches condition. It combines an
+// event-log subscription (for prompt wake-ups when the monitor publishes
+// a state-change event) with periodic polling of CommandState (as a
+// fallback when the event log is missing or the publisher is slow).
+func (s *Service) waitForCondition(
 	ctx context.Context,
 	st *store.Store,
 	id, condition string,
 	interval time.Duration,
 ) (*int, error) {
+	// Subscribe to events filtered by id BEFORE the first state read so
+	// we don't miss an event that fires between the initial read and the
+	// subscription opening.
+	var events <-chan eventlog.Record
+	if sub, err := s.Events(ctx, EventsRequest{
+		Follow:   true,
+		IDFilter: []string{id},
+		FromEnd:  true,
+	}); err == nil {
+		defer sub.Close()
+		events = sub.Records()
+	}
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -121,6 +139,10 @@ func waitForCondition(
 		case <-ctx.Done():
 			return exitCode, ctx.Err()
 		case <-ticker.C:
+		case _, ok := <-events:
+			if !ok {
+				events = nil
+			}
 		}
 	}
 }

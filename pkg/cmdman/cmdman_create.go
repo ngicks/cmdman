@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -59,6 +61,14 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 	if err := st.InsertCommandState(id, store.StateCreated, &store.CommandStateJSON{}); err != nil {
 		return nil, fmt.Errorf("insert state: %w", err)
 	}
+
+	s.emitEvent(eventlog.Event{
+		Time:  time.Now().UTC(),
+		Type:  eventlog.EventTypeCreate,
+		ID:    id,
+		Name:  req.Name,
+		State: store.StateCreated,
+	})
 
 	return &CreateResult{ID: id, Name: req.Name}, nil
 }

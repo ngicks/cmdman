@@ -8,6 +8,7 @@ import (
 	"time"
 
 	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
+	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -70,6 +71,15 @@ func (s *Service) stop(
 	if err != nil {
 		return err
 	}
+
+	s.emitEvent(eventlog.Event{
+		Time: time.Now().UTC(),
+		Type: eventlog.EventTypeStop,
+		ID:   id,
+		Attrs: map[string]string{
+			"signal": fmt.Sprintf("%d", sig),
+		},
+	})
 
 	if err := s.sendStop(ctx, st, id, sig); err != nil {
 		return err

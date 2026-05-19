@@ -9,9 +9,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
+	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -23,12 +25,53 @@ type Service struct {
 	mu sync.Mutex
 	// mutex guarded fields
 	// No direct access
-	store *store.Store
+	store   *store.Store
+	evtLog  *eventlog.Writer
+	evtLogE error
 }
 
 // NewService constructs a Service from an already-normalized config.
 func NewService(cfg CmdmanConfig) *Service {
 	return &Service{cfg: cfg}
+}
+
+// eventLog lazily opens (and caches) the process-wide event log writer.
+// Errors are remembered so a missing/un-writable log doesn't repeatedly
+// surface in every operation, but emitEvent will only log and continue.
+func (s *Service) eventLog() (*eventlog.Writer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.evtLog != nil {
+		return s.evtLog, nil
+	}
+	if s.evtLogE != nil {
+		return nil, s.evtLogE
+	}
+	path, err := s.cfg.EventLogPath()
+	if err != nil {
+		s.evtLogE = err
+		return nil, err
+	}
+	w, err := eventlog.NewWriter(path)
+	if err != nil {
+		s.evtLogE = err
+		return nil, err
+	}
+	s.evtLog = w
+	return w, nil
+}
+
+// emitEvent appends an event best-effort. Failures are logged but do not
+// fail the calling operation.
+func (s *Service) emitEvent(e eventlog.Event) {
+	w, err := s.eventLog()
+	if err != nil {
+		slog.Default().Warn("eventlog: open writer", "error", err)
+		return
+	}
+	if err := w.Append(e); err != nil {
+		slog.Default().Warn("eventlog: append", "type", e.Type, "id", e.ID, "error", err)
+	}
 }
 
 func (s *Service) Config() CmdmanConfig {
