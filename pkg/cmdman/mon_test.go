@@ -2,6 +2,8 @@ package cmdman
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"log/slog"
 	"os"
 	"testing"
@@ -167,7 +169,7 @@ func TestMonitorAutoRemove(t *testing.T) {
 
 	// Command dir should be removed.
 	_, err = os.Stat(commandDir)
-	assert.Assert(t, os.IsNotExist(err), "command dir should be removed")
+	assert.Assert(t, errors.Is(err, fs.ErrNotExist), "command dir should be removed")
 }
 
 func TestMonitorGracefulShutdown(t *testing.T) {

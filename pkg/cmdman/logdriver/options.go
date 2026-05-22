@@ -27,29 +27,3 @@ func (ro ReaderOption) Validate() error {
 	}
 	return nil
 }
-
-// ParseLogTime parses a CLI-facing log timestamp.
-func ParseLogTime(value string, now func() time.Time) (time.Time, error) {
-	if value == "" {
-		return time.Time{}, nil
-	}
-	if value == "now" {
-		if now == nil {
-			return time.Time{}, fmt.Errorf("logdriver: now function is nil")
-		}
-		return now().UTC(), nil
-	}
-	if ts, err := time.Parse(time.RFC3339Nano, value); err == nil {
-		return ts, nil
-	}
-	if ts, err := time.Parse(time.RFC3339, value); err == nil {
-		return ts, nil
-	}
-	return time.Time{}, fmt.Errorf(
-		"logdriver: parse log time %q: expected %q, %q, or %q",
-		value,
-		"now",
-		time.RFC3339Nano,
-		time.RFC3339,
-	)
-}

@@ -5,7 +5,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -249,7 +251,7 @@ func (w *Writer) rotate() error {
 			return fmt.Errorf("logdriver: close before rotate: %w", err)
 		}
 		w.f = nil
-		if err := os.Remove(w.path); err != nil && !os.IsNotExist(err) {
+		if err := os.Remove(w.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("logdriver: remove log file before rotate: %w", err)
 		}
 		f, err := os.OpenFile(w.path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o640)
@@ -271,7 +273,7 @@ func (w *Writer) rotate() error {
 			src = fmt.Sprintf("%s.%d", w.path, i)
 		}
 		dst := fmt.Sprintf("%s.%d", w.path, i+1)
-		if err := os.Rename(src, dst); err != nil && !os.IsNotExist(err) {
+		if err := os.Rename(src, dst); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("logdriver: rotate %s -> %s: %w", src, dst, err)
 		}
 	}

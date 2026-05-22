@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -30,6 +31,11 @@ type CmdmanConfig struct {
 	DefaultEnvironment     []string        `json:"-"`
 	DefaultScrollbackBytes int             `json:"defaultScrollbackBytes,omitzero"`
 	DefaultLogDriver       store.LogDriver `json:"defaultLogDriver,omitzero"`
+	// EventWatcherKind selects the backend used by event-log subscribers
+	// (the `events` subcommand and any caller of Service.Events). Valid
+	// values are "inotify" (linux only) and "poll". When empty, the
+	// default is "inotify" on linux and "poll" elsewhere.
+	EventWatcherKind eventlog.WatcherKind `json:"eventWatcherKind,omitzero"`
 }
 
 // WithDefaults fills empty fields using the configured precedence and
@@ -97,6 +103,13 @@ func (c CmdmanConfig) WithDefaults() (CmdmanConfig, error) {
 		c.DefaultLogDriver = store.DefaultLogDriver
 	}
 
+	if c.EventWatcherKind == "" {
+		c.EventWatcherKind = fileCfg.EventWatcherKind
+	}
+	if c.EventWatcherKind == "" {
+		c.EventWatcherKind = defaultEventWatcherKind()
+	}
+
 	if err := c.Validate(); err != nil {
 		return CmdmanConfig{}, err
 	}
@@ -124,8 +137,22 @@ func (c CmdmanConfig) Validate() error {
 			"cmdman config: invalid default log driver %q",
 			c.DefaultLogDriver,
 		)
+	case !eventlog.IsWatcherKind(string(c.EventWatcherKind)):
+		return fmt.Errorf(
+			"cmdman config: invalid event watcher kind %q",
+			c.EventWatcherKind,
+		)
 	}
 	return nil
+}
+
+// EventLogPath returns the configured event log file path. It lives next
+// to the SQLite database.
+func (c CmdmanConfig) EventLogPath() (string, error) {
+	if c.DataDir == "" {
+		return "", errors.New("cmdman config: data dir is empty")
+	}
+	return filepath.Join(c.DataDir, "events.log"), nil
 }
 
 // DBPath returns the configured SQLite database path.

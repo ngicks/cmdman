@@ -9,7 +9,7 @@ import (
 	"github.com/ngicks/cmdman/cmd/internal/stdiopipe"
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/cli"
-	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
+	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
 func logsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
@@ -60,11 +60,11 @@ func runLogs(
 	}
 	defer svc.Close()
 
-	since, err := logdriver.ParseLogTime(sinceFlag, time.Now)
+	since, err := hrstr.ParseTime(sinceFlag, time.Now)
 	if err != nil {
 		return fmt.Errorf("parse --since: %w", err)
 	}
-	until, err := logdriver.ParseLogTime(untilFlag, time.Now)
+	until, err := hrstr.ParseTime(untilFlag, time.Now)
 	if err != nil {
 		return fmt.Errorf("parse --until: %w", err)
 	}

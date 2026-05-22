@@ -8,6 +8,7 @@ require (
 	github.com/moby/term v0.5.2
 	github.com/ngicks/go-common/contextkey v0.2.0
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/sync v0.19.0
 	golang.org/x/sys v0.42.0
 	google.golang.org/grpc v1.78.0
 	google.golang.org/protobuf v1.36.11

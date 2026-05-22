@@ -1,6 +1,8 @@
 package k8sfile
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -176,7 +178,7 @@ func TestK8sFileWriter_TruncatesAtMaxSizeWithoutArchives(t *testing.T) {
 	assert.Equal(t, string(got), want)
 
 	_, err = os.Stat(path + ".1")
-	assert.Assert(t, os.IsNotExist(err), "expected no .1 archive with maxFile=1")
+	assert.Assert(t, errors.Is(err, fs.ErrNotExist), "expected no .1 archive with maxFile=1")
 }
 
 func TestK8sFileWriter_HonorsExistingFileSize(t *testing.T) {
@@ -243,7 +245,7 @@ func TestK8sFileWriter_RotatesArchiveChain(t *testing.T) {
 			"expected %q in %s, got %q", want, name, string(data))
 	}
 	_, err = os.Stat(path + ".3")
-	assert.Assert(t, os.IsNotExist(err), "expected no .3 archive with maxFile=3")
+	assert.Assert(t, errors.Is(err, fs.ErrNotExist), "expected no .3 archive with maxFile=3")
 }
 
 func TestK8sFileWriter_RotateWithEmptyArchiveSlots(t *testing.T) {
@@ -267,7 +269,7 @@ func TestK8sFileWriter_RotateWithEmptyArchiveSlots(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Assert(t, strings.Contains(string(one), "line1"))
 	_, err = os.Stat(path + ".2")
-	assert.Assert(t, os.IsNotExist(err))
+	assert.Assert(t, errors.Is(err, fs.ErrNotExist))
 }
 
 func TestK8sFileWriter_ZeroMaxSizeMeansUnlimited(t *testing.T) {

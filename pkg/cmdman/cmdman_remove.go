@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -33,10 +35,18 @@ func (s *Service) Remove(ctx context.Context, req RemoveRequest) ([]RemoveResult
 
 	results := make([]RemoveResult, 0, len(ids))
 	for _, id := range ids {
+		err := rmOne(ctx, s.cfg, st, id, req.Force)
 		results = append(results, RemoveResult{
 			ID:  id,
-			Err: rmOne(ctx, s.cfg, st, id, req.Force),
+			Err: err,
 		})
+		if err == nil {
+			s.emitEvent(eventlog.Event{
+				Time: time.Now().UTC(),
+				Type: eventlog.EventTypeRemove,
+				ID:   id,
+			})
+		}
 	}
 	return results, nil
 }

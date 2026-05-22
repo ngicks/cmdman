@@ -3,8 +3,10 @@ package cmdman
 import (
 	"context"
 	"fmt"
+	"time"
 
 	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
+	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
 	"google.golang.org/grpc"
 )
 
@@ -24,6 +26,15 @@ func (s *Service) Signal(ctx context.Context, idOrName string, sig int32) error 
 	); err != nil {
 		return fmt.Errorf("signal command %s: %w", idOrName, err)
 	}
+
+	s.emitEvent(eventlog.Event{
+		Time: time.Now().UTC(),
+		Type: eventlog.EventTypeSignal,
+		ID:   idOrName,
+		Attrs: map[string]string{
+			"signal": fmt.Sprintf("%d", sig),
+		},
+	})
 
 	return nil
 }

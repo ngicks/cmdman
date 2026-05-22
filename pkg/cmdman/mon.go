@@ -22,6 +22,8 @@ import (
 	"google.golang.org/grpc"
 
 	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
+	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
+	"github.com/ngicks/cmdman/pkg/cmdman/internal/flock"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	cmdstore "github.com/ngicks/cmdman/pkg/cmdman/store"
 )
@@ -39,6 +41,7 @@ type Monitor struct {
 	store     *cmdstore.Store
 	cfg       *cmdstore.CommandConfigJSON
 	stateJSON *cmdstore.CommandStateJSON
+	evtLog    *eventlog.Writer
 
 	lis net.Listener
 
@@ -94,6 +97,17 @@ func newMonitor(
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 
+	var evtLog *eventlog.Writer
+	if eventPath, err := cfg.EventLogPath(); err == nil {
+		if w, werr := eventlog.NewWriter(eventPath); werr == nil {
+			evtLog = w
+		} else {
+			logger.Warn("eventlog: open writer", slog.String("error", werr.Error()))
+		}
+	} else {
+		logger.Warn("eventlog: resolve path", slog.String("error", err.Error()))
+	}
+
 	return &Monitor{
 		ID:                id,
 		CommandDir:        commandDir,
@@ -104,6 +118,7 @@ func newMonitor(
 		stateChangeBridge: newBroadcaster[monitorStateChange](),
 		store:             st,
 		cfg:               commandCfg,
+		evtLog:            evtLog,
 		ring:              newRingBuffer(commandCfg.ScrollbackBytes),
 		stateJSON: &cmdstore.CommandStateJSON{
 			MonitorPID: os.Getpid(),
@@ -112,6 +127,20 @@ func newMonitor(
 			st.Close,
 		},
 	}, nil
+}
+
+// emitEvent appends an event from the monitor side, best-effort.
+func (m *Monitor) emitEvent(e eventlog.Event) {
+	if m.evtLog == nil {
+		return
+	}
+	if err := m.evtLog.Append(e); err != nil {
+		m.Logger.Warn("eventlog: append",
+			slog.String("type", string(e.Type)),
+			slog.String("id", e.ID),
+			slog.String("error", err.Error()),
+		)
+	}
 }
 
 func (m *Monitor) Close() error {
@@ -157,12 +186,12 @@ func (m *Monitor) init() (err error) {
 		f.Close,
 	)
 
-	if err := flock_trylock(f); err != nil {
+	if err := flock.TryLockExclusive(f); err != nil {
 		return fmt.Errorf("lock pid file %q: %w", pidPath, err)
 	}
 	cleanUp = append(
 		cleanUp,
-		func() error { return flock_unlock(f) },
+		func() error { return flock.Unlock(f) },
 		func() error { return os.Remove(pidPath) },
 	)
 
@@ -276,6 +305,14 @@ func isMonitorActiveState(state string) bool {
 
 func (m *Monitor) setRunning() {
 	m.stateJSON.StartedAt = time.Now().UTC().Format(time.RFC3339)
+	// Append the event before flipping the DB state so observers polling
+	// state cannot see "running" without the corresponding event on disk.
+	m.emitEvent(eventlog.Event{
+		Time:  time.Now().UTC(),
+		Type:  eventlog.EventTypeRunning,
+		ID:    m.ID,
+		State: cmdstore.StateRunning,
+	})
 	if err := m.store.UpdateCommandState(
 		m.ID,
 		cmdstore.StateRunning,
@@ -288,6 +325,17 @@ func (m *Monitor) setRunning() {
 }
 
 func (m *Monitor) setExited(exitCode int) {
+	ec := exitCode
+	// Append the exit event before flipping the DB state so observers
+	// that wait for state="exited" are guaranteed to find the event on
+	// disk, not racing with a still-in-flight Append.
+	m.emitEvent(eventlog.Event{
+		Time:     time.Now().UTC(),
+		Type:     eventlog.EventTypeExit,
+		ID:       m.ID,
+		State:    cmdstore.StateExited,
+		ExitCode: &ec,
+	})
 	_ = m.store.UpdateCommandState(m.ID, cmdstore.StateExited, &exitCode, m.stateJSON)
 	m.publishStateChange(cmdstore.StateExited, exitCode)
 	m.stateChangeBridge.Close()
@@ -295,6 +343,14 @@ func (m *Monitor) setExited(exitCode int) {
 
 func (m *Monitor) setFailed(errMsg string) {
 	m.stateJSON.Error = errMsg
+	// Same ordering rationale as setExited/setRunning.
+	m.emitEvent(eventlog.Event{
+		Time:  time.Now().UTC(),
+		Type:  eventlog.EventTypeFail,
+		ID:    m.ID,
+		State: cmdstore.StateFailed,
+		Error: errMsg,
+	})
 	_ = m.store.UpdateCommandState(m.ID, cmdstore.StateFailed, nil, m.stateJSON)
 	m.publishStateChange(cmdstore.StateFailed, 0)
 	m.stateChangeBridge.Close()

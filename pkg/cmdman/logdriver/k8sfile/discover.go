@@ -2,8 +2,10 @@ package k8sfile
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"slices"
 	"time"
@@ -34,7 +36,7 @@ func discoverFiles(path string, maxFile int) ([]fileSpan, error) {
 			archivePath := fmt.Sprintf("%s.%d", path, i)
 			span, err := openSpan(archivePath)
 			if err != nil {
-				if os.IsNotExist(err) {
+				if errors.Is(err, fs.ErrNotExist) {
 					break
 				}
 				closeSpans(spans)

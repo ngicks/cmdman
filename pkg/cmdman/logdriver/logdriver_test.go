@@ -1,6 +1,8 @@
 package logdriver_test
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +25,7 @@ func TestNew_Dispatch(t *testing.T) {
 	assert.NilError(t, err)
 	assert.NilError(t, w.Close())
 	_, statErr := os.Stat(path)
-	assert.Assert(t, os.IsNotExist(statErr), "none driver must not create a file")
+	assert.Assert(t, errors.Is(statErr, fs.ErrNotExist), "none driver must not create a file")
 
 	w2, err := logdriver.NewWriter(t.Context(), "k8s-file", dir, map[string]string{"path": path})
 	assert.NilError(t, err)

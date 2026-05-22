@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	cmdstore "github.com/ngicks/cmdman/pkg/cmdman/store"
 )
@@ -38,6 +39,21 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 	for ; ; m.stateJSON.RestartCount++ {
 		if m.stateJSON.RestartCount > org {
 			m.Logger.Info("restarting command", slog.Int("restart_count", m.stateJSON.RestartCount))
+			m.emitEvent(eventlog.Event{
+				Time: time.Now().UTC(),
+				Type: eventlog.EventTypeRestart,
+				ID:   m.ID,
+				Attrs: map[string]string{
+					"restart_count": fmt.Sprintf("%d", m.stateJSON.RestartCount),
+				},
+			})
+		} else {
+			m.emitEvent(eventlog.Event{
+				Time:  time.Now().UTC(),
+				Type:  eventlog.EventTypeStart,
+				ID:    m.ID,
+				State: cmdstore.StateStarting,
+			})
 		}
 
 		// Re-read config on each restart iteration.

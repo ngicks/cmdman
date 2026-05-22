@@ -49,25 +49,3 @@ func TestReaderOptionValidate(t *testing.T) {
 	}
 }
 
-func TestParseLogTime(t *testing.T) {
-	now := time.Date(2023, 8, 7, 19, 56, 34, 123, time.FixedZone("test", 9*60*60))
-
-	zero, err := logdriver.ParseLogTime("", func() time.Time { return now })
-	assert.NilError(t, err)
-	assert.Assert(t, zero.IsZero())
-
-	gotNow, err := logdriver.ParseLogTime("now", func() time.Time { return now })
-	assert.NilError(t, err)
-	assert.Equal(t, gotNow, now.UTC())
-
-	gotNano, err := logdriver.ParseLogTime("2023-08-07T19:56:34.123456789Z", nil)
-	assert.NilError(t, err)
-	assert.Equal(t, gotNano.Nanosecond(), 123456789)
-
-	got, err := logdriver.ParseLogTime("2023-08-07T19:56:34Z", nil)
-	assert.NilError(t, err)
-	assert.Equal(t, got, time.Date(2023, 8, 7, 19, 56, 34, 0, time.UTC))
-
-	_, err = logdriver.ParseLogTime("not-time", nil)
-	assert.ErrorContains(t, err, "parse log time")
-}

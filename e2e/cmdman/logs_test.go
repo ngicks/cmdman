@@ -2,7 +2,9 @@ package cmdman_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -218,7 +220,7 @@ func TestLogDriver_NoneDoesNotCreateLogFile(t *testing.T) {
 		t.Fatalf("inspect returned empty id; raw=%v", info)
 	}
 	logPath := filepath.Join(env.dataHome, "commands", hexID, "console.log")
-	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+	if _, err := os.Stat(logPath); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("expected no log file at %s, got err=%v", logPath, err)
 	}
 
@@ -280,7 +282,7 @@ func TestLogOpt_PathOverridesDefaultLocation(t *testing.T) {
 	info := env.inspectJSON(ctx, "log-opt-path")
 	hexID, _ := info["id"].(string)
 	defaultPath := filepath.Join(env.dataHome, "commands", hexID, "console.log")
-	if _, err := os.Stat(defaultPath); !os.IsNotExist(err) {
+	if _, err := os.Stat(defaultPath); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf(
 			"default log path %s should not exist when path opt is set; err=%v",
 			defaultPath,
@@ -433,7 +435,7 @@ func TestLogOpt_MaxFileRotatesArchives(t *testing.T) {
 			t.Errorf("expected archive %s, got err=%v", logPath+suffix, err)
 		}
 	}
-	if _, err := os.Stat(logPath + ".3"); !os.IsNotExist(err) {
+	if _, err := os.Stat(logPath + ".3"); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("expected no %s archive (max-file=3), got err=%v", logPath+".3", err)
 	}
 
