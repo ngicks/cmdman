@@ -35,9 +35,15 @@ func logsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		&flagSince,
 		"since",
 		"",
-		`Show logs since timestamp ("now" or RFC3339; e.g. 2026-01-02T15:04:05Z)`,
+		`Show logs since timestamp ("now", RFC3339 like 2026-01-02T15:04:05Z,`+
+			` or a Go duration offset from now like -5m)`,
 	)
-	cmd.Flags().StringVar(&flagUntil, "until", "", `Show logs until timestamp ("now" or RFC3339)`)
+	cmd.Flags().StringVar(
+		&flagUntil,
+		"until",
+		"",
+		`Show logs until timestamp ("now", RFC3339, or a Go duration offset from now like -5m)`,
+	)
 	cmd.Flags().IntVar(&flagHead, "head", 0, "Show at most N first log lines (0 = unlimited)")
 	cmd.Flags().IntVar(&flagTail, "tail", 0, "Show at most N last log lines (0 = unlimited)")
 

@@ -32,4 +32,23 @@ func TestParseTime(t *testing.T) {
 
 	_, err = hrstr.ParseTime("now", nil)
 	assert.ErrorContains(t, err, "now function is nil")
+
+	gotFuture, err := hrstr.ParseTime("5m", func() time.Time { return now })
+	assert.NilError(t, err)
+	assert.Equal(t, gotFuture, now.UTC().Add(5*time.Minute))
+
+	gotCompound, err := hrstr.ParseTime("1h30m", func() time.Time { return now })
+	assert.NilError(t, err)
+	assert.Equal(t, gotCompound, now.UTC().Add(time.Hour+30*time.Minute))
+
+	gotPast, err := hrstr.ParseTime("-5m", func() time.Time { return now })
+	assert.NilError(t, err)
+	assert.Equal(t, gotPast, now.UTC().Add(-5*time.Minute))
+
+	gotZeroDur, err := hrstr.ParseTime("0s", func() time.Time { return now })
+	assert.NilError(t, err)
+	assert.Equal(t, gotZeroDur, now.UTC())
+
+	_, err = hrstr.ParseTime("5m", nil)
+	assert.ErrorContains(t, err, "now function is nil")
 }

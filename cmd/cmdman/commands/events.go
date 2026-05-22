@@ -39,10 +39,12 @@ func eventsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	cmd.Flags().BoolVar(&flagNoFollow, "no-follow", false,
 		"Read existing entries and exit instead of tailing new events")
 	cmd.Flags().StringVar(&flagSince, "since", "",
-		`Show events since timestamp ("now" or RFC3339);`+
-			` when tailing, omitting both --since and --until skips historical entries`)
+		`Show events since timestamp ("now", RFC3339, or a Go duration offset`+
+			` from now like -5m); when tailing, omitting both --since and`+
+			` --until skips historical entries`)
 	cmd.Flags().StringVar(&flagUntil, "until", "",
-		`Show events until timestamp ("now" or RFC3339)`)
+		`Show events until timestamp ("now", RFC3339, or a Go duration offset`+
+			` from now like -5m)`)
 	cmd.Flags().StringSliceVar(&flagIDs, "id", nil,
 		"Filter by command ID (repeatable)")
 	cmd.Flags().StringSliceVar(&flagTypes, "type", nil,
