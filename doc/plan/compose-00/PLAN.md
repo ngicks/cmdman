@@ -39,6 +39,7 @@ Initial subcommands:
 - `cmdman compose create`
 - `cmdman compose start`
 - `cmdman compose stop`
+- `cmdman compose restart`
 - `cmdman compose logs`
 - `cmdman compose signal`
 - `cmdman compose wait`
@@ -75,6 +76,7 @@ Proposed command-specific target model:
 | `up` | yes | commands in YAML |
 | `start` | no, when `--project-name` is set | commands in YAML when loaded; otherwise all project-labeled commands |
 | `stop` | no, when `--project-name` is set | all project-labeled commands |
+| `restart` | no, when `--project-name` is set | all project-labeled commands |
 | `down` | no, when `--project-name` is set | all project-labeled commands |
 | `logs` | no, when `--project-name` is set | all project-labeled commands |
 | `signal` | no, when `--project-name` is set | all project-labeled commands |
@@ -105,13 +107,12 @@ type Command struct {
 	// Direct interpretation of cmdman create inputs.
 	Name            string
 	Dir             string
-	Args            []string // YAML may allow either []string or string.
+	Args            []string
 	Env             []string
 	EnvFile         []EnvFileSpec
 	Labels          map[string]string
 	RestartPolicy   string
 	StopSignal      string
-	AutoRemove      bool
 	Tty             bool
 	ScrollbackBytes int
 	LogDriver       string
@@ -145,7 +146,10 @@ work_dir: .
 commands:
   api:
     dir: .
-    args: go run ./cmd/api
+    args:
+      - go
+      - run
+      - ./cmd/api
     env:
       - PORT=8080
     env_file:
@@ -193,7 +197,6 @@ Mapping to the current create surface:
 | `labels` | `--label`, `CreateRequest.Labels` |
 | `restart_policy` | `--restart`, `CreateRequest.RestartPolicy` |
 | `stop_signal` | `--stop-signal`, `CreateRequest.StopSignal` |
-| `auto_remove` | `--rm`, `CreateRequest.AutoRemove` |
 | `tty` | `--tty`, `CreateRequest.Tty` |
 | `scrollback_bytes` | `--scrollback-bytes`, `CreateRequest.ScrollbackBytes` |
 | `log_driver` | `--log-driver`, `CreateRequest.LogDriver` |
@@ -203,6 +206,12 @@ Compose-specific fields:
 
 - `env_file`: load environment entries before building `CreateRequest.Env`.
 - `after`: dependency metadata used by compose scheduling.
+
+Rejected fields:
+
+- `auto_remove` (`--rm` / `CreateRequest.AutoRemove`): rejected during
+  normalization with a clear error. Compose owns lifecycle, and a self-removing
+  command would lose its compose ownership labels along with itself.
 
 Path resolution rule:
 
@@ -245,8 +254,8 @@ Normalization should:
 - choose the effective project name;
 - normalize command names;
 - resolve all relative path fields against the effective work directory;
-- normalize `args` when supplied as a string;
-- load and merge env files;
+- reject `auto_remove: true`;
+- load env files and apply interpolation as described below;
 - merge user labels with reserved compose labels;
 - expand `after` map keys into `AfterSpec.Name`;
 - apply defaults, including `EnvFileSpec.Required = true` and
@@ -256,19 +265,51 @@ Normalization should:
   should resolve through the existing service/config defaults wherever possible;
 - build stable labels and per-command hashes.
 
-For string `args`, use `go-shellwords` or an equivalent shellwords parser to:
+### Work directory default
 
-- shell-unquote;
-- split into argv.
+When neither `--workdir` nor YAML `work_dir` is set, the effective `WorkDir`
+is the process current working directory at invocation time. The directory
+containing the compose file is never an implicit fallback.
 
-MVP proposal: do not implement interpolation in the first version. Parse string
-`args` with shellwords for quoting only. Treat `env`, `env_file.path`,
-`work_dir`, and path-valued log options literally except for path resolution.
-This keeps the initial model deterministic and avoids inventing a partial
-Compose-compatible interpolation language.
+### env_file loading
 
-Future interpolation can be added as an explicit second step with documented
-sources and escaping rules.
+Use `github.com/compose-spec/compose-go/v2/dotenv` for parsing:
+
+- `dotenv.ParseWithLookup(r io.Reader, lookup func(string) (string, bool))`
+  for each env file.
+- The lookup function provides the values visible to interpolation inside the
+  env file (see below).
+- `dotenv.Read` errors on missing files. For `EnvFileSpec.Required = false`,
+  stat the path first and skip if it does not exist.
+
+Per-command env resolution order (later layers can reference earlier layers):
+
+1. OS environment (base layer).
+2. env_file entries, applied in list order. Each file's interpolation lookup
+   sees OS env plus any keys set by previously-loaded env_files in the same
+   command. Last write wins per key.
+3. `env:` entries, applied in list order. Interpolation lookup sees OS env plus
+   the merged env_file results. `env:` overrides env_file values on key
+   conflicts.
+4. `args:` interpolation lookup sees the final per-command env (OS + env_file +
+   env).
+
+### Interpolation
+
+`args` values, `env` values, and env_file values support Docker
+Compose-compatible interpolation:
+
+- `${VAR}` — substitute the value, or empty string if unset.
+- `${VAR:-default}` — substitute the value if set and non-empty, otherwise
+  the literal default.
+- `${VAR:?error}` — substitute the value if set and non-empty, otherwise fail
+  normalization with the given error.
+
+Use the interpolation/template subpackage from
+`github.com/compose-spec/compose-go/v2` so behavior matches Docker Compose
+exactly. Path-valued log options, `work_dir`, `env_file.path`, and other
+non-string-list fields are not interpolated; they are taken literally except
+for path resolution against the effective `WorkDir`.
 
 ## Project name precedence
 
@@ -301,7 +342,7 @@ Proposed reserved labels:
 
 - `cmdman.compose.project=<project>`
 - `cmdman.compose.command=<command-name>`
-- `cmdman.compose.config-hash=<hash>`
+- `cmdman.compose.config-hash=sha256:<64-hex-chars>`
 - `cmdman.compose.version=1`
 - `cmdman.compose.workdir=<absolute-workdir>`
 - `cmdman.compose.file=<absolute-compose-file>`
@@ -310,8 +351,9 @@ Users should be allowed to add their own labels later if the base cmdman command
 model supports it. Reserved compose labels should be owned by compose.
 
 If a user-provided label uses the `cmdman.compose.` prefix, normalization should
-reject it. Compose should not silently overwrite user labels because that makes
-hashing and reconciliation harder to explain.
+reject it. The prefix check is case-sensitive: only the literal lowercase
+`cmdman.compose.` prefix is reserved. Compose should not silently overwrite
+user labels because that makes hashing and reconciliation harder to explain.
 
 ## Hashing and diffing
 
@@ -325,11 +367,9 @@ behavior. Candidate fields:
 - command name;
 - normalized argv;
 - resolved work directory;
-- effective env values;
-- env file content or env file resolved result;
+- effective env values (after env_file merge);
 - restart policy;
 - stop signal;
-- auto-remove setting;
 - TTY setting;
 - scrollback bytes;
 - log driver and log options;
@@ -356,8 +396,10 @@ Hashing implementation should:
 - build a small canonical struct instead of hashing `store.CommandConfigJSON`
   directly, because `CommandDir` and generated labels should be excluded;
 - sort map keys and env entries deterministically before marshaling;
-- hash canonical JSON with SHA-256 and store a short but collision-resistant
-  hex prefix, for example 16 or 24 bytes of hex;
+- hash canonical JSON with SHA-256 and store the full digest as an
+  algorithm-prefixed string: `sha256:<64-hex-chars>`. The prefix makes the
+  length self-describing, so no truncation is applied and future algorithms
+  (e.g. `sha512:`) extend the same scheme without breaking parsers;
 - include compose scheduling fields only when they affect the command's
   runtime or start behavior. For MVP, include `after` in the hash so changing
   dependencies is visible to reconciliation, even if the stored cmdman config is
@@ -371,7 +413,8 @@ Supported conditions:
 
 - `completed`: dependency has completed, regardless of exit status. Default.
 - `started`: dependency has been started.
-- `completed_successfully`: dependency has completed with success.
+- `completed_successfully`: dependency has completed with recorded exit code
+  `0`. An absent exit code is treated as not satisfied.
 
 Current recommendations:
 
@@ -388,13 +431,10 @@ Current recommendations:
   `completed` and `completed_successfully` may pass based on current stored
   state and exit code. This makes repeated `up worker` usable after a one-shot
   setup command has already completed.
-- if `completed_successfully` observes an absent exit code, treat it as not
-  satisfied rather than success.
 
-Scheduling should use a DAG. Commands whose dependencies are satisfied can be
-started concurrently, but an MVP can start them serially in topological order if
-that is simpler. Do not hand-wire goroutines and channels for graph execution;
-use `errgroup` if concurrent start/wait is added.
+Scheduling uses a DAG. Commands whose dependencies are satisfied are started
+concurrently using `golang.org/x/sync/errgroup`. Cycles are rejected during
+normalization. Do not hand-wire goroutines and channels for graph execution.
 
 ## Lifecycle semantics
 
@@ -426,29 +466,52 @@ use `errgroup` if concurrent start/wait is added.
 - report changed running commands unless a future force flag is added;
 - start desired commands;
 - warn about orphans;
-- remove orphans when `--remove-orphan` is set.
+- remove orphans when `--remove-orphan` is set;
+- detached by default: does not follow logs or block on running commands.
+  A future `--attach`/`--follow` flag can opt into Docker-Compose-style
+  attached behavior.
 
 `compose stop`:
 
 - stop all commands with the compose project label.
 
+`compose restart`:
+
+- stop then start all commands with the compose project label;
+- when a compose file is loaded, restart in dependency order;
+- optional command-name filters select a subset.
+
 `compose down`:
 
 - stop all commands with the compose project label;
-- remove them afterward, matching user expectation from Docker Compose.
+- remove them afterward, matching user expectation from Docker Compose;
+- because selection is by project label, `down` implicitly removes orphans
+  too. This is intentional: `down` is the destructive whole-project teardown,
+  unlike the opt-in `--remove-orphan` on `create`/`up`.
 
 `down` should attempt graceful stop first, then remove stopped commands. It
 should not force-remove commands that failed to stop unless a `--force` flag is
 added. If some commands fail, return a non-zero error after reporting per-command
 failures.
 
+### Empty project target
+
+For subcommands that do not require a compose file (`stop`, `restart`, `down`,
+`logs`, `signal`, `wait`), if the resolved project name matches no
+project-labeled commands, exit 0 and emit a structured log event describing
+the situation (project name, attempted operation). This keeps idempotent
+scripting natural while still surfacing typos and empty projects through the
+existing root persistent log flags.
+
 `compose logs`:
 
 - show logs for all commands with the compose project label by default;
 - optionally support command-name filters;
-- reuse existing cmdman log behavior where possible.
-- prefix output with compose command names when more than one command is
-  selected, because existing `cmdman logs` streams one command at a time.
+- reuse existing cmdman log behavior per command;
+- when `--follow=false`, merge per-command log streams by timestamp using
+  `hiter.MergeFunc` for deterministic, time-ordered output;
+- when `--follow=true`, run per-command readers concurrently with `errgroup`
+  and tag each line with a `[<command-name>] ` prefix as it arrives.
 
 `compose signal`:
 
@@ -470,8 +533,14 @@ Current service gaps to account for:
   explicit targets.
 - compose can initially resolve project labels through `List(AllStates: true)`
   and pass concrete IDs to target-only services.
-- multi-command logs need a compose-specific service helper or a CLI
-  aggregator that opens one `Logs` reader per resolved ID.
+- multi-command logs need a compose-specific aggregator that opens one `Logs`
+  reader per resolved ID:
+  - `--follow=false`: convert each command's log stream to an iterator and
+    merge by timestamp using `github.com/ngicks/go-iterator-helper/hiter.MergeFunc`.
+    Output is deterministic and time-ordered across commands.
+  - `--follow=true`: run readers concurrently (errgroup), prefix each line
+    with `[<command-name>] ` and write as it arrives. Cross-command order is
+    not stabilized because future log lines are unknown at write time.
 
 ## Orphans
 
@@ -489,11 +558,11 @@ With `--remove-orphan`:
 
 - `create` and `up` remove orphan commands.
 
-Current recommendation: `--remove-orphan` should remove only commands that can
-be removed without force. If an orphan is running, report it and leave it in
-place. A later `--force-remove-orphan` flag can opt into killing running
-orphans, but the default convergence path should not unexpectedly terminate
-processes that disappeared from YAML.
+In v1, `--remove-orphan` removes only commands that can be removed without
+force. Running orphans are reported (structured log event) and left in place.
+No `--force-remove-orphan` flag is added in the first release; default
+convergence must not unexpectedly terminate processes that disappeared from
+YAML.
 
 `down` is different: it is explicitly destructive for the whole project and
 should stop then remove project commands.
@@ -535,9 +604,17 @@ lookup identity is:
 - `cmdman.compose.project=<project>`
 - `cmdman.compose.command=<compose-command-name>`
 
-The actual cmdman command name should be deterministic and human-readable. Use
-`<project>_<command>` by default. If that name already exists without matching
-compose ownership labels, fail with a conflict error rather than taking it over.
+The actual cmdman command name is deterministic and human-readable:
+`<project>-<command>`. Both project and command names may contain `-`, so the
+generated form is not guaranteed to be uniquely decomposable into its source
+components. Stable identity is the label pair
+(`cmdman.compose.project`, `cmdman.compose.command`), not the generated name.
+
+Name collisions — whether against a non-compose command or against another
+compose project that happens to produce the same generated name — surface as
+duplicate-name errors from the cmdman store. Compose wraps these errors with
+the project and command context on both sides so users can identify the
+conflict without inspecting labels manually.
 
 For changed commands:
 
@@ -582,40 +659,73 @@ and future filesystem-adjacent features.
 
 Unit tests:
 
-- YAML parsing for string and list `args`;
+- YAML parsing for the `[]string` `args` form;
+- rejection of `auto_remove: true`;
 - env file defaults and required/missing behavior;
+- env_file / env / args interpolation, including `${VAR}`, `${VAR:-default}`,
+  and `${VAR:?error}`;
+- env layering order (OS env → env_file → env: → args);
 - project name precedence;
+- WorkDir default fallback to process CWD;
 - dependency normalization and cycle rejection;
-- stable hash behavior;
+- stable hash behavior; `sha256:` prefix and full digest stored;
 - orphan detection;
-- reconciliation plan generation.
+- reconciliation plan generation;
+- generated-name collision error wrapping.
 
 E2E tests:
 
 - `compose create` creates flat commands with labels;
-- `compose up` is idempotent;
+- `compose up` is idempotent and stays detached;
 - changing one command changes only that command's hash;
-- orphan warning appears by default;
-- `--remove-orphan` removes orphans;
-- `stop`, `logs`, `signal`, and `wait` select commands by project label.
+- orphan warning appears by default; running orphans are skipped, not killed;
+- `--remove-orphan` removes stopped orphans;
+- `stop`, `restart`, `logs`, `signal`, and `wait` select commands by project
+  label;
+- `compose down` removes all project-labeled commands including orphans;
+- empty project target on `stop`/`restart`/`down`/`logs`/`signal`/`wait` exits
+  0 and emits a structured log event;
+- `compose logs --follow=false` produces time-merged output across commands;
+- `compose logs --follow=true` tags each line with its command name.
 
 Implementation can land in slices:
 
 1. parsing/normalization/hash/plan unit tests with no CLI;
 2. `compose create` and `compose up` for create/start happy paths;
 3. orphan detection and `--remove-orphan`;
-4. `stop` and `down`;
+4. `stop`, `restart`, and `down`;
 5. `logs`, `signal`, and `wait`;
-6. dependency scheduling.
+6. dependency scheduling with `errgroup`.
 
-## Questions for the next discussion
+## Resolved decisions
 
-1. Should `compose up` attach/follow logs by default, or only create and start?
-2. Should project-scoped `logs` multiplex streams concurrently, or print one
-   command's buffered logs at a time in stable order when `--follow` is false?
-3. Is `<project>_<command>` the desired generated cmdman name, or should compose
-   use `<project>-<command>`?
-4. Should `--remove-orphan` grow a force option in the first release, or should
-   running orphan removal wait until users ask for it?
-5. Should dependency scheduling be included in the first `up` implementation, or
-   should `after` be parsed/validated but initially rejected as unsupported?
+These items were open in earlier drafts and have since been settled. The
+behavior is described in the relevant section above; this list exists as a
+quick index.
+
+1. **`compose up` default mode** — detached (create + start, no follow). A
+   future `--attach`/`--follow` flag can opt in.
+2. **`compose logs` multiplexing** — `--follow=false` merges by timestamp via
+   `hiter.MergeFunc`; `--follow=true` runs concurrent readers and tags lines
+   with the command name.
+3. **Generated cmdman name** — `<project>-<command>`. Hyphens allowed in both
+   components. Cross-project collisions surface via the cmdman store's
+   duplicate-name rejection; compose wraps the error.
+4. **`--remove-orphan` force option** — not in v1. Running orphans are
+   reported and skipped.
+5. **Dependency scheduling in first `up`** — full DAG with `errgroup`
+   concurrency in v1.
+6. **WorkDir default** — process CWD when neither `--workdir` nor YAML
+   `work_dir` is set.
+7. **`args` YAML form** — `[]string` only.
+8. **`auto_remove`** — rejected during normalization.
+9. **Interpolation** — `${VAR}` / `${VAR:-default}` / `${VAR:?error}` via
+   compose-spec/compose-go in `args`, `env`, and env_file values, with layered
+   OS → env_file → env lookup.
+10. **env_file parser** — `compose-spec/compose-go/v2/dotenv` with
+    `ParseWithLookup`.
+11. **Hash format** — `sha256:<full-hex-digest>`, algorithm-prefixed.
+12. **`compose restart`** — included in MVP.
+13. **Concurrent compose operations** — no locking, matching Docker Compose.
+14. **Multi-file `-f` stacking** — not supported.
+15. **Empty project targets** — exit 0 with a structured log event.
