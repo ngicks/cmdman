@@ -30,6 +30,16 @@ Do not port these Docker Compose commands or behaviors:
 
 Do not try to accept Docker Compose YAML. The config format is cmdman-native.
 
+No environment-variable-based project name override. Docker Compose's
+`COMPOSE_PROJECT_NAME` (and equivalent vars) are not consulted; project name
+comes only from `--project-name` or top-level YAML `name:`.
+
+Interactive attach (terminal multiplexing, foregrounding a command's PTY,
+passphrase prompts at compose start) is out of scope for MVP. Commands declared
+with `tty: true` are still created with a PTY, but compose itself does not
+attach the user's terminal. A future `compose attach <command>` subcommand or
+`pkg/mux`-based integration is the planned home for that UX.
+
 ## Command surface
 
 Initial subcommands:
@@ -76,15 +86,21 @@ Proposed command-specific target model:
 | `up` | yes | commands in YAML |
 | `start` | no, when `--project-name` is set | commands in YAML when loaded; otherwise all project-labeled commands |
 | `stop` | no, when `--project-name` is set | all project-labeled commands |
-| `restart` | no, when `--project-name` is set | all project-labeled commands |
+| `restart` | no, when `--project-name` is set | commands in YAML when loaded; otherwise all project-labeled commands |
 | `down` | no, when `--project-name` is set | all project-labeled commands |
 | `logs` | no, when `--project-name` is set | all project-labeled commands |
 | `signal` | no, when `--project-name` is set | all project-labeled commands |
 | `wait` | no, when `--project-name` is set | all project-labeled commands |
 
-For commands that do not require the YAML, project discovery still needs a
-project name. If neither `--project-name` nor a discoverable compose file is
-available, fail instead of guessing across all compose-managed commands.
+For commands that do not require the YAML, project discovery still needs both
+a project name and an effective WorkDir. The WorkDir is resolved with the same
+rules used during normalization: `--workdir`, then YAML `work_dir` when a file
+is loaded, then the process current working directory. The project name comes
+from `--project-name` or YAML `name:`. Queries run against the combined
+`cmdman.compose.workdir` + `cmdman.compose.project` labels, so the same project
+name in a different WorkDir is a different project and is never returned. If
+neither `--project-name` nor a discoverable compose file is available, fail
+instead of guessing across all compose-managed commands.
 
 ## Proposed YAML model
 
@@ -311,27 +327,75 @@ exactly. Path-valued log options, `work_dir`, `env_file.path`, and other
 non-string-list fields are not interpolated; they are taken literally except
 for path resolution against the effective `WorkDir`.
 
-## Project name precedence
+## Project identity
 
-Project/group name should be selected from all available sources with clear
-precedence.
+A compose-managed command is identified by three pieces:
 
-Proposed precedence:
+- **WorkDir hash**: first 12 hex chars of `sha256(canonical(effective WorkDir))`,
+  where `canonical(p)` is `filepath.Clean(filepath.Abs(p))`. Symlinks are
+  **not** resolved, so two paths that reach the same physical directory
+  through different symlinks produce different WorkDir hashes and different
+  project identities. Canonicalization is filesystem-free (no `EvalSymlinks`
+  call), so the workdir does not need to exist when the hash is computed.
+  Deterministic per canonical path; used to keep generated cmdman names
+  unique across WorkDirs without forcing the user to think about it.
+- **Project name**: required. Selected with the following precedence:
+  1. `--project-name` (CLI override)
+  2. top-level YAML `name`
 
-1. `--project-name`
-2. top-level YAML `name`
-3. base name of the compose work directory
-4. base name of the directory containing the compose YAML file
+  There is no default. If neither source provides a value, normalization fails
+  with a message asking for `--project-name` or a YAML `name:` entry.
+  `--project-name` always wins, which is how the same template YAML can be
+  instantiated multiple times in one WorkDir.
+- **Command name**: the YAML map key.
 
-Top-level `name` is included for three reasons:
+Generated cmdman name: `<workdir-hash>-<escaped-project>-<escaped-command>`.
+Escaping replaces every `-` in the project or command name with `--`. The
+workdir-hash is hex and never contains `-`, so the generated form is uniquely
+decomposable: scan left-to-right, treat any `-` followed by another `-` as a
+single literal `-` belonging to the current component, and treat a `-` not
+followed by another `-` as the component separator.
+
+Examples:
+
+- project `devsession`, command `claude`, workdir-hash `a3f9b2c1e8d4` →
+  `a3f9b2c1e8d4-devsession-claude`.
+- project `dev-session`, command `claude-cli`, workdir-hash `a3f9b2c1e8d4` →
+  `a3f9b2c1e8d4-dev--session-claude--cli`.
+- project `a-b`, command `c` and project `a`, command `b-c` produce distinct
+  generated names (`...-a--b-c` vs `...-a-b--c`), so the previously possible
+  alias is eliminated.
+
+Stable identity is the label triple:
+
+- `cmdman.compose.workdir=<absolute-workdir>`
+- `cmdman.compose.project=<project>`
+- `cmdman.compose.command=<command>`
+
+The workdir-hash appears in the stored cmdman command name (which the cmdman
+store enforces unique), but compose itself never queries by it. The canonical
+query key is the `cmdman.compose.workdir` label; reconciliation and lookups
+always use the labels, never parse the generated name.
+
+Top-level YAML `name` is the only YAML-level vocabulary for project naming:
 
 - Docker Compose users recognize `name`;
 - `project` can be confused with labels or workspace concepts;
-- `--project-name` can remain the CLI override without requiring a separate
+- `--project-name` remains the CLI override without requiring a separate
   YAML vocabulary.
 
 Project names should be validated with the same conservative rules as command
 names: non-empty, path-safe, and label-safe.
+
+### Multi-project per WorkDir
+
+A WorkDir may host multiple projects, provided each has a distinct project
+name. Compose enforces this at `create`/`up`: if a different compose-file
+path already owns
+`(cmdman.compose.workdir=<dir>, cmdman.compose.project=<name>)`, the second
+invocation fails with an error that names the conflicting compose file and
+suggests `--project-name` to disambiguate. This applies whether the duplicate
+name came from YAML `name:` or `--project-name`.
 
 ## Labels
 
@@ -346,6 +410,19 @@ Proposed reserved labels:
 - `cmdman.compose.version=1`
 - `cmdman.compose.workdir=<absolute-workdir>`
 - `cmdman.compose.file=<absolute-compose-file>`
+
+`cmdman.compose.workdir` is the canonical scoping label for project discovery.
+All subcommands that list, filter, or operate on a project query by the
+combination of `cmdman.compose.workdir` and `cmdman.compose.project` (plus
+`cmdman.compose.command` when filtering specific commands), rather than parsing
+the generated cmdman name. The 12-hex workdir-hash embedded in the generated
+name is derived from `cmdman.compose.workdir` on demand and is never stored
+separately.
+
+Throughout this document, "project-labeled commands" or "the compose project
+label" refers to the (workdir, project) pair: commands whose
+`cmdman.compose.workdir` **and** `cmdman.compose.project` labels both match the
+effective values. Compose never selects on `cmdman.compose.project` alone.
 
 Users should be allowed to add their own labels later if the base cmdman command
 model supports it. Reserved compose labels should be owned by compose.
@@ -438,6 +515,27 @@ normalization. Do not hand-wire goroutines and channels for graph execution.
 
 ## Lifecycle semantics
 
+### Failure handling
+
+Lifecycle operations that act on multiple commands (`up`/`start`, `stop`,
+`down`, `restart`, `signal`, `wait`, and `logs --follow=true`) aggregate
+per-command outcomes rather than fail-fast. Every command in the selected set
+is attempted; per-command failures are emitted as structured log events
+(project, command, operation, underlying error); the subcommand returns a
+non-zero exit code if any command failed, after the rest have been processed.
+
+For dependency-ordered operations (`up`/`start`, and the start phase of
+`restart` when a compose file is loaded), a command whose dependency cannot
+satisfy its `after` condition is skipped and reported, but the rest of the DAG
+continues. This preserves "do as much as possible" semantics across bulk
+operations.
+
+Within an `errgroup`, the per-command worker returns `nil` and accumulates its
+error into a separate sync-safe collection keyed by command name; the parent
+compose subcommand assembles the final aggregate error after `Wait()`.
+
+### Subcommands
+
 `compose create`:
 
 - parse and normalize config;
@@ -473,26 +571,50 @@ normalization. Do not hand-wire goroutines and channels for graph execution.
 
 `compose stop`:
 
-- stop all commands with the compose project label.
+- stop all commands with the compose project label;
+- when a compose file is loaded, stop in reverse dependency order (dependents
+  before dependencies); within each DAG layer, commands stop concurrently;
+- when no compose file is loaded, no DAG is available, so all selected
+  commands stop concurrently.
 
 `compose restart`:
 
-- stop then start all commands with the compose project label;
-- when a compose file is loaded, restart in dependency order;
+- when a compose file is loaded, stop YAML commands in reverse dependency
+  order, then start them in forward dependency order; within each DAG layer,
+  commands run concurrently. Orphans (project-labeled commands absent from
+  YAML) are skipped with a warning, consistent with `create`/`up` convergence
+  semantics;
+- when no compose file is loaded, restart all project-labeled commands; both
+  the stop and start phases run concurrently since no dependency graph is
+  available;
 - optional command-name filters select a subset.
 
 `compose down`:
 
-- stop all commands with the compose project label;
-- remove them afterward, matching user expectation from Docker Compose;
-- because selection is by project label, `down` implicitly removes orphans
-  too. This is intentional: `down` is the destructive whole-project teardown,
-  unlike the opt-in `--remove-orphan` on `create`/`up`.
+- stop all commands with the compose project label, then remove them, matching
+  user expectation from Docker Compose;
+- when a compose file is loaded, the stop phase walks the DAG in reverse
+  dependency order (dependents before dependencies); within each layer,
+  commands stop concurrently. The remove phase runs after stop completes and
+  does not need ordering. When no compose file is loaded, the stop phase is
+  fully concurrent;
+- because selection is by the (workdir, project) label pair, `down`
+  implicitly removes orphans of that pair too. This is intentional: `down` is
+  the destructive whole-project teardown, unlike the opt-in `--remove-orphan`
+  on `create`/`up`. Commands from another WorkDir that share the project name
+  are never touched.
 
-`down` should attempt graceful stop first, then remove stopped commands. It
-should not force-remove commands that failed to stop unless a `--force` flag is
-added. If some commands fail, return a non-zero error after reporting per-command
-failures.
+`down` reuses `cmdman.Service.Stop` for the stop step, which sends the
+configured stop signal and escalates to SIGKILL after the per-command stop
+timeout (inherited from cmdman service defaults; no compose-level override in
+MVP, and no `stop_timeout` YAML field). MVP `down` inherits this behavior:
+graceful first, hard kill on timeout. A future `--no-kill` flag (paired with
+either a gentle-stop service variant that returns an error on timeout instead
+of escalating, or a compose-level signal+wait wrapper that does not call
+`Stop`) can change this for callers that prefer to fail rather than escalate.
+Aggregate failure handling applies: commands that fail to stop or remove are
+reported per-command and `down` returns a non-zero exit after processing the
+remaining set.
 
 ### Empty project target
 
@@ -515,9 +637,12 @@ existing root persistent log flags.
 
 `compose signal`:
 
-- send a signal to all commands with the compose project label by default;
-- optionally support command-name filters;
-- reuse existing cmdman signal parsing.
+- requires `--signal <SIG>` (for example `--signal SIGTERM`, `--signal HUP`,
+  or a numeric value). There is no default — invoking without `--signal`
+  fails with a usage error;
+- by default sends the signal to all commands with the compose project label;
+- positional arguments are command-name filters that narrow the target set;
+- the `--signal` value is parsed by the existing cmdman signal parser.
 
 `compose wait`:
 
@@ -531,6 +656,11 @@ Current service gaps to account for:
 - `cmdman.Service.List` already accepts label selectors.
 - `cmdman.Service.Stop`, `Signal`, `Wait`, and `Logs` currently resolve only
   explicit targets.
+- `cmdman.Service.Stop` escalates to SIGKILL after the per-command stop
+  timeout. `compose down` and `compose stop` inherit this for MVP; a future
+  `--no-kill` flag requires either a new service variant that returns an
+  error on timeout instead of escalating, or a compose-level wrapper that
+  signals + waits without calling `Stop`.
 - compose can initially resolve project labels through `List(AllStates: true)`
   and pass concrete IDs to target-only services.
 - multi-command logs need a compose-specific aggregator that opens one `Logs`
@@ -546,9 +676,14 @@ Current service gaps to account for:
 
 An orphan is a command that:
 
+- has `cmdman.compose.workdir=<effective WorkDir>`;
 - has `cmdman.compose.project=<project>`;
 - has `cmdman.compose.command=<name>`;
 - is not present in the currently loaded compose YAML.
+
+Orphan detection is always scoped to the effective WorkDir. Commands from
+another WorkDir that happen to share the project name are not orphans of the
+current project and are never affected by `--remove-orphan`.
 
 Default behavior:
 
@@ -598,23 +733,32 @@ The `compose` package may depend on `pkg/cmdman` and `pkg/cmdman/store`.
 
 ## Reconciliation details
 
-Compose should reconcile by cmdman name only for commands it owns. The stable
-lookup identity is:
+Compose should reconcile by label only for commands it owns. The stable
+lookup identity is the label triple:
 
+- `cmdman.compose.workdir=<absolute-workdir>`
 - `cmdman.compose.project=<project>`
 - `cmdman.compose.command=<compose-command-name>`
 
-The actual cmdman command name is deterministic and human-readable:
-`<project>-<command>`. Both project and command names may contain `-`, so the
-generated form is not guaranteed to be uniquely decomposable into its source
-components. Stable identity is the label pair
-(`cmdman.compose.project`, `cmdman.compose.command`), not the generated name.
+The actual cmdman command name is deterministic:
+`<workdir-hash>-<escaped-project>-<escaped-command>`, where `<workdir-hash>` is
+the first 12 hex chars of `sha256(canonical(WorkDir))` (canonicalization
+defined under Project identity), and escaping replaces every `-` in the
+project or command name with `--`. Because the workdir-hash is hex (no `-`)
+and component dashes are always doubled, the generated form is uniquely
+decomposable. Stable identity is still the label triple, not the parsed name —
+compose never relies on splitting the generated name.
 
-Name collisions — whether against a non-compose command or against another
-compose project that happens to produce the same generated name — surface as
-duplicate-name errors from the cmdman store. Compose wraps these errors with
-the project and command context on both sides so users can identify the
-conflict without inspecting labels manually.
+Within-WorkDir project collisions are rejected up front: if a second
+`create`/`up` produces the same `(cmdman.compose.workdir, cmdman.compose.project)`
+pair as an existing project but originates from a different
+`cmdman.compose.file` path, reconciliation aborts with a duplicate-project
+error that names both compose files and suggests `--project-name`.
+
+Generated-name collisions (against a non-compose command, or any other
+unexpected duplicate) surface as duplicate-name errors from the cmdman store.
+Compose wraps these errors with project and command context on both sides so
+users can identify the conflict without inspecting labels manually.
 
 For changed commands:
 
@@ -633,7 +777,8 @@ Action ordering for `up`:
 2. list all existing commands in the project;
 3. detect conflicts, changed commands, missing commands, unchanged commands,
    and orphans;
-4. optionally remove stopped orphans;
+4. warn about orphans; if `--remove-orphan` is set, remove stopped orphans
+   (running orphans are still skipped with a structured log event);
 5. recreate changed stopped commands;
 6. create missing commands;
 7. start selected desired commands in dependency order.
@@ -665,8 +810,22 @@ Unit tests:
 - env_file / env / args interpolation, including `${VAR}`, `${VAR:-default}`,
   and `${VAR:?error}`;
 - env layering order (OS env → env_file → env: → args);
-- project name precedence;
+- project name precedence (`--project-name` overrides YAML `name:`);
+- mandatory project name: normalization rejects YAML without `name:` when
+  `--project-name` is also absent;
 - WorkDir default fallback to process CWD;
+- workdir-hash determinism: same canonical WorkDir always produces the same
+  12-hex prefix; different canonical paths produce different prefixes;
+- workdir canonicalization: `./a` and `a` (relative to the same CWD) hash to
+  the same prefix; symlinked aliases to the same physical directory hash to
+  **different** prefixes (no `EvalSymlinks`);
+- generated-name escaping: project and command names containing `-` are
+  escaped to `--` in the generated cmdman name; previously aliasing pairs
+  such as (project `a-b`, command `c`) and (project `a`, command `b-c`)
+  produce distinct generated names;
+- within-WorkDir collision rejection: a second `create`/`up` claiming the
+  same `(workdir, project)` from a different compose-file path fails with a
+  duplicate-project error naming both files;
 - dependency normalization and cycle rejection;
 - stable hash behavior; `sha256:` prefix and full digest stored;
 - orphan detection;
@@ -686,7 +845,14 @@ E2E tests:
 - empty project target on `stop`/`restart`/`down`/`logs`/`signal`/`wait` exits
   0 and emits a structured log event;
 - `compose logs --follow=false` produces time-merged output across commands;
-- `compose logs --follow=true` tags each line with its command name.
+- `compose logs --follow=true` tags each line with its command name;
+- aggregate-failure semantics: when one command in a multi-command operation
+  (e.g. `up`, `down`, `signal`) fails, the remaining commands are still
+  processed and the subcommand exits non-zero with per-command error events;
+- reverse-dep-order stop: with a YAML dependency chain `worker after api`,
+  `compose stop`/`down`/`restart` stops `worker` before `api`;
+- `compose signal` without `--signal` fails with a usage error; with
+  `--signal SIGHUP` delivers SIGHUP to all selected commands.
 
 Implementation can land in slices:
 
@@ -708,9 +874,13 @@ quick index.
 2. **`compose logs` multiplexing** — `--follow=false` merges by timestamp via
    `hiter.MergeFunc`; `--follow=true` runs concurrent readers and tags lines
    with the command name.
-3. **Generated cmdman name** — `<project>-<command>`. Hyphens allowed in both
-   components. Cross-project collisions surface via the cmdman store's
-   duplicate-name rejection; compose wraps the error.
+3. **Generated cmdman name** — `<workdir-hash>-<escaped-project>-<escaped-command>`,
+   where every `-` in the project or command name is escaped to `--`. The
+   workdir-hash is hex (no `-`), so the generated form is uniquely
+   decomposable; stable identity is still the label triple (see item 16).
+   Generated-name collisions can therefore only occur against non-compose
+   commands or other unexpected duplicates; compose wraps such errors with
+   project and command context.
 4. **`--remove-orphan` force option** — not in v1. Running orphans are
    reported and skipped.
 5. **Dependency scheduling in first `up`** — full DAG with `errgroup`
@@ -729,3 +899,42 @@ quick index.
 13. **Concurrent compose operations** — no locking, matching Docker Compose.
 14. **Multi-file `-f` stacking** — not supported.
 15. **Empty project targets** — exit 0 with a structured log event.
+16. **Project identity** — generated cmdman name is
+    `<workdir-hash>-<escaped-project>-<escaped-command>`, with every `-` in
+    the project or command name escaped to `--`. WorkDir-hash is the first 12
+    hex chars of `sha256(canonical(WorkDir))`, where `canonical(p)` is
+    `filepath.Clean(filepath.Abs(p))` (no symlink resolution). The generated
+    form is uniquely decomposable, but stable identity is still the label
+    triple (`cmdman.compose.workdir`, `cmdman.compose.project`,
+    `cmdman.compose.command`); queries use the labels, not the generated name.
+17. **Project name** — mandatory. `--project-name` overrides YAML `name:`.
+    Normalization fails when neither is set. No name is derived from WorkDir
+    or compose-file path.
+18. **Within-WorkDir project collisions** — a second `create`/`up` claiming
+    an existing `(workdir, project)` from a different compose file is
+    rejected with an error naming both compose files.
+19. **Interactive attach** — post-MVP. Commands with `tty: true` run
+    detached in MVP; the user attaches out-of-band. A future
+    `compose attach` subcommand or `pkg/mux` integration owns the
+    interactive UX (nvim, passphrase prompts, REPL sessions).
+20. **`down` stop semantics** — MVP reuses `cmdman.Service.Stop`, which
+    escalates to SIGKILL after the configured stop timeout. A future
+    `--no-kill` flag and corresponding gentle-stop service variant can
+    replace the escalation with an error.
+21. **Failure handling in parallel lifecycle ops** — aggregate-and-continue.
+    Every command in the selected set is attempted; per-command errors are
+    emitted as structured log events; the subcommand returns a non-zero exit
+    only after the remaining set has been processed. Applies to `up`/`start`,
+    `stop`, `down`, `restart`, `signal`, `wait`, and `logs --follow=true`.
+22. **WorkDir canonicalization** — `filepath.Clean(filepath.Abs(workdir))`.
+    Symlinks are not resolved, so different symlinks to the same physical
+    directory produce different project identities. Canonicalization is
+    filesystem-free; the workdir does not need to exist at normalization time.
+23. **Stop ordering** — `stop`, `down`, and `restart` walk the DAG in reverse
+    dependency order (dependents before dependencies) when a compose file is
+    loaded; within each layer, commands stop concurrently. When no compose
+    file is loaded, the stop phase is fully concurrent. `restart`'s start
+    phase uses forward dependency order, identical to `up`/`start`.
+24. **`compose signal` CLI** — required `--signal <SIG>` flag (no default).
+    Positional arguments are command-name filters. Value is parsed by the
+    existing cmdman signal parser.
