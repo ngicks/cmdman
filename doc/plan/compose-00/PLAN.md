@@ -73,7 +73,7 @@ Proposed command-specific target model:
 | --- | --- | --- |
 | `create` | yes | commands in YAML |
 | `up` | yes | commands in YAML |
-| `start` | yes initially | commands in YAML, dependency ordered |
+| `start` | no, when `--project-name` is set | commands in YAML when loaded; otherwise all project-labeled commands |
 | `stop` | no, when `--project-name` is set | all project-labeled commands |
 | `down` | no, when `--project-name` is set | all project-labeled commands |
 | `logs` | no, when `--project-name` is set | all project-labeled commands |
@@ -410,10 +410,13 @@ use `errgroup` if concurrent start/wait is added.
 
 `compose start`:
 
-- start commands in dependency order;
-- operate on commands from the current config;
+- when a compose file is loaded, start commands in dependency order;
+- when `--project-name` is set and no compose file is loaded, start commands
+  selected by project labels;
 - optional command-name filters select a subset, plus dependencies required by
-  that subset unless `--no-deps` is added later.
+  that subset when a compose file is loaded, unless `--no-deps` is added later;
+- without a loaded compose file, command-name filters match
+  `cmdman.compose.command` labels directly and do not imply dependencies.
 
 `compose up`:
 
@@ -608,13 +611,11 @@ Implementation can land in slices:
 ## Questions for the next discussion
 
 1. Should `compose up` attach/follow logs by default, or only create and start?
-2. Should `compose start` require the YAML forever, or should it support
-   project-label-only starts with `--project-name`?
-3. Should project-scoped `logs` multiplex streams concurrently, or print one
+2. Should project-scoped `logs` multiplex streams concurrently, or print one
    command's buffered logs at a time in stable order when `--follow` is false?
-4. Is `<project>_<command>` the desired generated cmdman name, or should compose
+3. Is `<project>_<command>` the desired generated cmdman name, or should compose
    use `<project>-<command>`?
-5. Should `--remove-orphan` grow a force option in the first release, or should
+4. Should `--remove-orphan` grow a force option in the first release, or should
    running orphan removal wait until users ask for it?
-6. Should dependency scheduling be included in the first `up` implementation, or
+5. Should dependency scheduling be included in the first `up` implementation, or
    should `after` be parsed/validated but initially rejected as unsupported?
