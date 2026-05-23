@@ -2,8 +2,12 @@ package cmdman_test
 
 import (
 	"context"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/ngicks/cmdman/pkg/cmdman"
 )
 
 func testContext(t *testing.T) context.Context {
@@ -120,6 +124,63 @@ func TestRun_WithEnvVars(t *testing.T) {
 	}
 	if !found["MY_VAR"] || !found["OTHER_VAR"] {
 		t.Errorf("expected MY_VAR and OTHER_VAR in env, got %v", envList)
+	}
+}
+
+func TestRun_InjectsCmdmanContextEnv(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	id := env.run(ctx,
+		"run",
+		"-E", cmdman.ENV_CMDMAN_DATA_DIR+"=/wrong",
+		"-E", cmdman.ENV_CMDMAN_RUNTIME_DIR+"=/wrong",
+		"-E", cmdman.ENV_CMDMAN_CMD_DATA_DIR+"=/wrong",
+		"-E", cmdman.ENV_CMDMAN_CMD_ID+"=wrong",
+		"-E", "EXPECT_DATA="+env.dataHome,
+		"-E", "EXPECT_RUNTIME="+env.runtimeDir,
+		"--",
+		"/bin/sh", "-c", `
+test "$CMDMAN_DATA_DIR" = "$EXPECT_DATA" &&
+test "$CMDMAN_RUNTIME_DIR" = "$EXPECT_RUNTIME" &&
+test "$CMDMAN_CMD_DATA_DIR" = "$CMDMAN_DATA_DIR/commands/$CMDMAN_CMD_ID" &&
+test -f "$CMDMAN_CMD_DATA_DIR/config.json"
+`,
+	)
+	env.waitForState(ctx, id, "exited", defaultTimeout)
+
+	info := env.inspectJSON(ctx, id)
+	exitCode, _ := info["exit_code"].(float64)
+	if exitCode != 0 {
+		t.Fatalf("expected injected cmdman context environment, exit_code=%v", exitCode)
+	}
+
+	cfg, _ := info["config"].(map[string]any)
+	envList, _ := cfg["env"].([]any)
+	want := map[string]string{
+		cmdman.ENV_CMDMAN_DATA_DIR:     env.dataHome,
+		cmdman.ENV_CMDMAN_RUNTIME_DIR:  env.runtimeDir,
+		cmdman.ENV_CMDMAN_CMD_DATA_DIR: filepath.Join(env.dataHome, "commands", id),
+		cmdman.ENV_CMDMAN_CMD_ID:       id,
+	}
+	counts := map[string]int{}
+	for _, e := range envList {
+		s, _ := e.(string)
+		for key, value := range want {
+			prefix := key + "="
+			if strings.HasPrefix(s, prefix) {
+				counts[key]++
+				if s != prefix+value {
+					t.Errorf("expected %s, got %s", prefix+value, s)
+				}
+			}
+		}
+	}
+	for key := range want {
+		if counts[key] != 1 {
+			t.Fatalf("expected exactly one %s entry, got %d in %v", key, counts[key], envList)
+		}
 	}
 }
 

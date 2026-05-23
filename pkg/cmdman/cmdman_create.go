@@ -44,6 +44,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 		return nil, err
 	}
 	cfg.CommandDir = commandDir
+	cfg.Env = withCommandContextEnv(cfg.Env, s.cfg, id, commandDir)
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}

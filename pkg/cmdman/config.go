@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	ENV_CMDMAN_DATA_DIR    = "CMDMAN_DATA_DIR"
-	ENV_CMDMAN_RUNTIME_DIR = "CMDMAN_RUNTIME_DIR"
+	ENV_CMDMAN_DATA_DIR     = "CMDMAN_DATA_DIR"
+	ENV_CMDMAN_RUNTIME_DIR  = "CMDMAN_RUNTIME_DIR"
+	ENV_CMDMAN_CMD_DATA_DIR = "CMDMAN_CMD_DATA_DIR"
+	ENV_CMDMAN_CMD_ID       = "CMDMAN_CMD_ID"
 	// ENV_CMDMAN_CONF overrides the config-file path. When unset, the file
 	// at ${XDG_CONFIG_HOME:-$HOME/.config}/cmdman/config.json is consulted
 	// if it exists.

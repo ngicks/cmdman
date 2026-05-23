@@ -101,7 +101,7 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 func (m *Monitor) wireUpCmd(ctx context.Context) (*exec.Cmd, error) {
 	cmd := exec.CommandContext(ctx, m.cfg.Argv[0], m.cfg.Argv[1:]...)
 	cmd.Dir = m.cfg.Dir
-	cmd.Env = m.cfg.Env
+	cmd.Env = withCommandContextEnv(m.cfg.Env, m.Config, m.ID, m.cfg.CommandDir)
 	if len(cmd.Env) == 0 {
 		return nil, fmt.Errorf("command config env is empty")
 	}
