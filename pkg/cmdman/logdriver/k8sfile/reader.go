@@ -30,7 +30,7 @@ func (Driver) NewReader(
 	}
 	maxFile, err := parseLogMaxFileOption(opts)
 	if err != nil {
-		return nil, fmt.Errorf("logdriver: k8s-file: %s: %w", logOptMaxFile, err)
+		return nil, fmt.Errorf("logdriver: k8s-file: %s: %w", logdriver.LogOptMaxFile, err)
 	}
 	return newReader(ctx, path, maxFile, ro)
 }

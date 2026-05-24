@@ -9,7 +9,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/go-common/contextkey"
 )
 
@@ -120,9 +120,9 @@ func startInDAGOrder(
 		c := cmds[nc.Name]
 		st := stateByCommand[nc.Name]
 		switch st {
-		case store.StateRunning, store.StateStarting:
+		case model.StateRunning, model.StateStarting:
 			c.events <- depEvent{Started: true}
-		case store.StateExited, store.StateFailed:
+		case model.StateExited, model.StateFailed:
 			c.events <- depEvent{Stopped: true}
 		default:
 			c.events <- depEvent{Err: fmt.Errorf(
@@ -155,8 +155,8 @@ func startInDAGOrder(
 			}
 
 			// 2. Idempotency: skip Start if already running or starting.
-			if st := stateByCommand[c.nc.Name]; st == store.StateRunning ||
-				st == store.StateStarting {
+			if st := stateByCommand[c.nc.Name]; st == model.StateRunning ||
+				st == model.StateStarting {
 				record(StartOutcome{Command: c.nc.Name})
 				c.events <- depEvent{Started: true}
 				return nil
@@ -269,16 +269,16 @@ func waitForCondition(
 	if preState, snap := stateByCommand[dep.Name]; snap {
 		switch dep.Condition {
 		case ConditionStarted:
-			if preState == store.StateRunning ||
-				preState == store.StateStarting {
+			if preState == model.StateRunning ||
+				preState == model.StateStarting {
 				return nil
 			}
 		case ConditionCompleted:
-			if preState == store.StateExited || preState == store.StateFailed {
+			if preState == model.StateExited || preState == model.StateFailed {
 				return nil
 			}
 		case ConditionCompletedSuccessfully:
-			if preState == store.StateExited || preState == store.StateFailed {
+			if preState == model.StateExited || preState == model.StateFailed {
 				return checkExitZero(ctx, svc, depCmd.genName, dep.Name)
 			}
 		}

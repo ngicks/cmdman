@@ -52,3 +52,21 @@ func TestParseTime(t *testing.T) {
 	_, err = hrstr.ParseTime("5m", nil)
 	assert.ErrorContains(t, err, "now function is nil")
 }
+
+func TestParseSignal(t *testing.T) {
+	num, name, err := hrstr.ParseSignal("TERM")
+	assert.NilError(t, err)
+	assert.Assert(t, num > 0)
+	assert.Equal(t, name, "SIGTERM")
+
+	gotNum, gotName, err := hrstr.ParseSignal("15")
+	assert.NilError(t, err)
+	assert.Equal(t, gotNum, num)
+	assert.Equal(t, gotName, name)
+
+	_, _, err = hrstr.ParseSignal("")
+	assert.ErrorContains(t, err, "signal is empty")
+
+	_, _, err = hrstr.ParseSignal("NO_SUCH_SIGNAL")
+	assert.ErrorContains(t, err, "unknown signal")
+}

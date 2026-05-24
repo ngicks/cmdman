@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"gotest.tools/v3/assert"
 )
 
@@ -69,31 +70,31 @@ func TestOpenStoreCanceledContext(t *testing.T) {
 func TestExitCodeRangeCheck(t *testing.T) {
 	st := testStore(t)
 
-	cfg := &CommandConfigJSON{
+	cfg := &model.CommandConfigJSON{
 		Argv:            []string{"/bin/true"},
 		Dir:             "/tmp",
 		Env:             testEnv(),
-		RestartPolicy:   RestartPolicyNo,
+		RestartPolicy:   model.RestartPolicyNo,
 		ScrollbackBytes: DefaultScrollbackBytes,
-		LogDriver:       DefaultLogDriver,
+		LogDriver:       model.DefaultLogDriver,
 		CommandDir:      "/tmp/test",
 	}
 	assert.NilError(t, st.InsertCommandConfig("test-1", "", cfg))
-	assert.NilError(t, st.InsertCommandState("test-1", StateCreated, &CommandStateJSON{}))
+	assert.NilError(t, st.InsertCommandState("test-1", model.StateCreated, &model.CommandStateJSON{}))
 
 	ec := 0
-	assert.NilError(t, st.UpdateCommandState("test-1", StateExited, &ec, &CommandStateJSON{}))
+	assert.NilError(t, st.UpdateCommandState("test-1", model.StateExited, &ec, &model.CommandStateJSON{}))
 	ec = 255
-	assert.NilError(t, st.UpdateCommandState("test-1", StateExited, &ec, &CommandStateJSON{}))
+	assert.NilError(t, st.UpdateCommandState("test-1", model.StateExited, &ec, &model.CommandStateJSON{}))
 	ec = -1
-	assert.NilError(t, st.UpdateCommandState("test-1", StateExited, &ec, &CommandStateJSON{}))
+	assert.NilError(t, st.UpdateCommandState("test-1", model.StateExited, &ec, &model.CommandStateJSON{}))
 
 	ec = 256
-	err := st.UpdateCommandState("test-1", StateExited, &ec, &CommandStateJSON{})
+	err := st.UpdateCommandState("test-1", model.StateExited, &ec, &model.CommandStateJSON{})
 	assert.Assert(t, err != nil, "exit code 256 should be rejected")
 
 	ec = -2
-	err = st.UpdateCommandState("test-1", StateExited, &ec, &CommandStateJSON{})
+	err = st.UpdateCommandState("test-1", model.StateExited, &ec, &model.CommandStateJSON{})
 	assert.Assert(t, err != nil, "exit code -2 should be rejected")
 }
 
@@ -104,7 +105,7 @@ func TestDeferredForeignKey(t *testing.T) {
 	assert.NilError(t, err)
 
 	_, err = tx.Exec(`INSERT INTO CommandState (ID, State, JSON) VALUES (?, ?, ?)`,
-		"deferred-1", StateCreated, "{}")
+		"deferred-1", model.StateCreated, "{}")
 	assert.NilError(t, err)
 
 	_, err = tx.Exec(
@@ -122,13 +123,13 @@ func TestDeferredForeignKey(t *testing.T) {
 func TestInsertAndGetCommandConfig(t *testing.T) {
 	st := testStore(t)
 
-	cfg := &CommandConfigJSON{
+	cfg := &model.CommandConfigJSON{
 		Argv:            []string{"/bin/bash", "-c", "echo hello"},
 		Dir:             "/tmp",
 		Env:             testEnv(),
-		RestartPolicy:   RestartPolicyNo,
+		RestartPolicy:   model.RestartPolicyNo,
 		ScrollbackBytes: DefaultScrollbackBytes,
-		LogDriver:       DefaultLogDriver,
+		LogDriver:       model.DefaultLogDriver,
 		Labels:          map[string]string{"app": "test", "env": "dev"},
 		CommandDir:      "/tmp/cmd/test-1",
 	}
@@ -149,31 +150,31 @@ func TestInsertAndGetCommandConfig(t *testing.T) {
 func TestListCommandsWithLabels(t *testing.T) {
 	st := testStore(t)
 
-	cfg1 := &CommandConfigJSON{
+	cfg1 := &model.CommandConfigJSON{
 		Argv:            []string{"/bin/true"},
 		Dir:             "/tmp",
 		Env:             testEnv(),
-		RestartPolicy:   RestartPolicyNo,
+		RestartPolicy:   model.RestartPolicyNo,
 		ScrollbackBytes: DefaultScrollbackBytes,
-		LogDriver:       DefaultLogDriver,
+		LogDriver:       model.DefaultLogDriver,
 		Labels:          map[string]string{"app": "web", "env": "prod"},
 		CommandDir:      "/tmp/cmd/1",
 	}
-	cfg2 := &CommandConfigJSON{
+	cfg2 := &model.CommandConfigJSON{
 		Argv:            []string{"/bin/true"},
 		Dir:             "/tmp",
 		Env:             testEnv(),
-		RestartPolicy:   RestartPolicyNo,
+		RestartPolicy:   model.RestartPolicyNo,
 		ScrollbackBytes: DefaultScrollbackBytes,
-		LogDriver:       DefaultLogDriver,
+		LogDriver:       model.DefaultLogDriver,
 		Labels:          map[string]string{"app": "api", "env": "prod"},
 		CommandDir:      "/tmp/cmd/2",
 	}
 
 	assert.NilError(t, st.InsertCommandConfig("id-1", "web", cfg1))
-	assert.NilError(t, st.InsertCommandState("id-1", StateRunning, &CommandStateJSON{}))
+	assert.NilError(t, st.InsertCommandState("id-1", model.StateRunning, &model.CommandStateJSON{}))
 	assert.NilError(t, st.InsertCommandConfig("id-2", "api", cfg2))
-	assert.NilError(t, st.InsertCommandState("id-2", StateRunning, &CommandStateJSON{}))
+	assert.NilError(t, st.InsertCommandState("id-2", model.StateRunning, &model.CommandStateJSON{}))
 
 	entries, err := st.ListCommands(true, map[string]string{"app": "web"})
 	assert.NilError(t, err)
@@ -188,17 +189,17 @@ func TestListCommandsWithLabels(t *testing.T) {
 func TestDeleteCommand(t *testing.T) {
 	st := testStore(t)
 
-	cfg := &CommandConfigJSON{
+	cfg := &model.CommandConfigJSON{
 		Argv:            []string{"/bin/true"},
 		Dir:             "/tmp",
 		Env:             testEnv(),
-		RestartPolicy:   RestartPolicyNo,
+		RestartPolicy:   model.RestartPolicyNo,
 		ScrollbackBytes: DefaultScrollbackBytes,
-		LogDriver:       DefaultLogDriver,
+		LogDriver:       model.DefaultLogDriver,
 		CommandDir:      "/tmp/cmd/del-1",
 	}
 	assert.NilError(t, st.InsertCommandConfig("del-1", "", cfg))
-	assert.NilError(t, st.InsertCommandState("del-1", StateExited, &CommandStateJSON{}))
+	assert.NilError(t, st.InsertCommandState("del-1", model.StateExited, &model.CommandStateJSON{}))
 	assert.NilError(t, st.InsertCommandExitCode("del-1", 0))
 
 	assert.NilError(t, st.DeleteCommand("del-1"))
@@ -211,17 +212,17 @@ func TestConfigJSONMaterialization(t *testing.T) {
 	dir := t.TempDir()
 	commandDir := filepath.Join(dir, "cmd-1")
 
-	cfg := &CommandConfigJSON{
+	cfg := &model.CommandConfigJSON{
 		Argv:            []string{"/bin/echo", "hello"},
 		Dir:             "/tmp",
 		Env:             testEnv(),
-		RestartPolicy:   RestartPolicyNo,
+		RestartPolicy:   model.RestartPolicyNo,
 		ScrollbackBytes: DefaultScrollbackBytes,
-		LogDriver:       DefaultLogDriver,
+		LogDriver:       model.DefaultLogDriver,
 		CommandDir:      commandDir,
 	}
 
-	assert.NilError(t, cfg.Write())
+	assert.NilError(t, WriteCommandConfig(cfg.CommandDir, cfg))
 
 	data, err := os.ReadFile(filepath.Join(commandDir, "config.json"))
 	assert.NilError(t, err)

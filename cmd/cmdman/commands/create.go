@@ -6,6 +6,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -33,10 +35,10 @@ func bindCreateFlags(cmd *cobra.Command, f *createFlags) {
 	flags.StringVar(
 		&f.Restart,
 		"restart",
-		string(store.RestartPolicyNo),
+		string(model.RestartPolicyNo),
 		"Restart policy: no, on-failure, always",
 	)
-	flags.StringVar(&f.StopSignal, "stop-signal", store.DefaultStopSignal, "Default stop signal")
+	flags.StringVar(&f.StopSignal, "stop-signal", model.DefaultStopSignal, "Default stop signal")
 	flags.BoolVar(&f.Rm, "rm", false, "Auto-remove on exit")
 	flags.BoolVarP(&f.Tty, "tty", "t", false, "Allocate a pseudo-TTY")
 	flags.IntVar(
@@ -122,12 +124,12 @@ func doCreate(
 		Dir:             flags.Dir,
 		Env:             flags.Env,
 		Labels:          labels,
-		RestartPolicy:   store.RestartPolicy(flags.Restart),
+		RestartPolicy:   model.RestartPolicy(flags.Restart),
 		StopSignal:      flags.StopSignal,
 		AutoRemove:      flags.Rm,
 		Tty:             flags.Tty,
 		ScrollbackBytes: flags.ScrollbackBytes,
-		LogDriver:       store.LogDriver(flags.LogDriver),
+		LogDriver:       logdriver.LogDriver(flags.LogDriver),
 		LogOpts:         logOpts,
 		Argv:            args,
 	})

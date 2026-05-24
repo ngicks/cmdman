@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver/k8sfile"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"gotest.tools/v3/assert"
 )
@@ -37,7 +38,7 @@ func TestServiceLogsFollowNoDuplicatesAcrossStorageAndLive(t *testing.T) {
 	id := "test-logs-follow-bridge"
 	commandDir, err := appCfg.CommandDir(id)
 	assert.NilError(t, err)
-	cfg := &store.CommandConfigJSON{
+	cfg := &model.CommandConfigJSON{
 		Argv: []string{"/bin/sh", "-c", strings.Join([]string{
 			"i=1",
 			"while [ $i -le 20 ]; do",
@@ -49,15 +50,15 @@ func TestServiceLogsFollowNoDuplicatesAcrossStorageAndLive(t *testing.T) {
 		}, "\n")},
 		Dir:             dir,
 		Env:             testEnv(),
-		RestartPolicy:   store.RestartPolicyNo,
+		RestartPolicy:   model.RestartPolicyNo,
 		ScrollbackBytes: 4096,
-		LogDriver:       store.DefaultLogDriver,
+		LogDriver:       model.DefaultLogDriver,
 		CommandDir:      commandDir,
 	}
 
 	assert.NilError(t, st.InsertCommandConfig(id, "logs-follow-bridge", cfg))
-	assert.NilError(t, cfg.Write())
-	assert.NilError(t, st.InsertCommandState(id, store.StateCreated, &store.CommandStateJSON{}))
+	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
+	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandStateJSON{}))
 	assert.NilError(t, st.Close())
 
 	monitorCtx, stopMonitor := context.WithCancel(context.Background())
@@ -126,7 +127,7 @@ func waitForCommandRunning(t *testing.T, cfg CmdmanConfig, id string) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		state, _, stateJSON, err := st.GetCommandState(id)
-		if err == nil && state == store.StateRunning && stateJSON.SocketPath != "" {
+		if err == nil && state == model.StateRunning && stateJSON.SocketPath != "" {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)

@@ -4,6 +4,7 @@ import (
 	"os"
 	"syscall"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	cmdstore "github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -27,12 +28,12 @@ func CleanStaleEntries(st *cmdstore.Store, cfg CmdmanConfig) error {
 		return err
 	}
 	for _, e := range entries {
-		if e.State != cmdstore.StateStarting && e.State != cmdstore.StateRunning {
+		if e.State != model.StateStarting && e.State != model.StateRunning {
 			continue
 		}
 		if e.StateJSON.MonitorPID > 0 && !CheckMonitorAlive(e.StateJSON.MonitorPID) {
 			e.StateJSON.Error = "monitor died unexpectedly"
-			_ = st.UpdateCommandState(e.ID, cmdstore.StateFailed, nil, e.StateJSON)
+			_ = st.UpdateCommandState(e.ID, model.StateFailed, nil, e.StateJSON)
 
 			// Auto-remove if requested.
 			if e.ConfigJSON.Annotations[cmdstore.AnnotationAutoRemove] == "true" {

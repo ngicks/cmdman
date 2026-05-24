@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
 func signalCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
@@ -33,7 +33,7 @@ func runSignal(
 	rootCfg *cmdman.CmdmanConfig,
 	sigName string,
 ) error {
-	sig, _, err := store.ParseSignal(sigName)
+	sig, _, err := hrstr.ParseSignal(sigName)
 	if err != nil {
 		return err
 	}

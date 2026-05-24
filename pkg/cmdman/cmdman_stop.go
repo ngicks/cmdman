@@ -8,8 +8,9 @@ import (
 	"time"
 
 	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
-	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
 // StopRequest defines a stop operation across explicit targets and/or labels.
@@ -65,16 +66,16 @@ func (s *Service) stop(
 		effective = signalOverride
 	}
 	if effective == "" {
-		effective = store.DefaultStopSignal
+		effective = model.DefaultStopSignal
 	}
-	sig, _, err := store.ParseSignal(effective)
+	sig, _, err := hrstr.ParseSignal(effective)
 	if err != nil {
 		return err
 	}
 
-	s.emitEvent(eventlog.Event{
+	s.emitEvent(model.Event{
 		Time: time.Now().UTC(),
-		Type: eventlog.EventTypeStop,
+		Type: model.EventTypeStop,
 		ID:   id,
 		Attrs: map[string]string{
 			"signal": fmt.Sprintf("%d", sig),
@@ -90,7 +91,7 @@ func (s *Service) stop(
 		return err
 	}
 
-	killSig, _, _ := store.ParseSignal("SIGKILL")
+	killSig, _, _ := hrstr.ParseSignal("SIGKILL")
 	if err := s.sendStop(ctx, st, id, killSig); err != nil {
 		return fmt.Errorf("timeout waiting for stop, and SIGKILL failed: %w", err)
 	}
@@ -132,7 +133,7 @@ func waitForStopped(ctx context.Context, st *store.Store, id string, timeout tim
 		if err != nil {
 			return err
 		}
-		if state == store.StateExited || state == store.StateFailed {
+		if state == model.StateExited || state == model.StateFailed {
 			return nil
 		}
 

@@ -6,8 +6,10 @@ import (
 	"maps"
 	"time"
 
-	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
+	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
 // CreateRequest defines a command creation request.
@@ -16,12 +18,12 @@ type CreateRequest struct {
 	Dir             string
 	Env             []string
 	Labels          map[string]string
-	RestartPolicy   store.RestartPolicy
+	RestartPolicy   model.RestartPolicy
 	StopSignal      string
 	AutoRemove      bool
 	Tty             bool
 	ScrollbackBytes int
-	LogDriver       store.LogDriver
+	LogDriver       logdriver.LogDriver
 	LogOpts         map[string]string
 	Argv            []string
 }
@@ -56,34 +58,34 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 	if err := st.InsertCommandConfig(id, req.Name, cfg); err != nil {
 		return nil, fmt.Errorf("insert config: %w", err)
 	}
-	if err := cfg.Write(); err != nil {
+	if err := store.WriteCommandConfig(cfg.CommandDir, cfg); err != nil {
 		return nil, fmt.Errorf("materialize config: %w", err)
 	}
-	if err := st.InsertCommandState(id, store.StateCreated, &store.CommandStateJSON{}); err != nil {
+	if err := st.InsertCommandState(id, model.StateCreated, &model.CommandStateJSON{}); err != nil {
 		return nil, fmt.Errorf("insert state: %w", err)
 	}
 
-	s.emitEvent(eventlog.Event{
+	s.emitEvent(model.Event{
 		Time:  time.Now().UTC(),
-		Type:  eventlog.EventTypeCreate,
+		Type:  model.EventTypeCreate,
 		ID:    id,
 		Name:  req.Name,
-		State: store.StateCreated,
+		State: model.StateCreated,
 	})
 
 	return &CreateResult{ID: id, Name: req.Name}, nil
 }
 
-func (s *Service) buildCommandConfig(req CreateRequest) *store.CommandConfigJSON {
+func (s *Service) buildCommandConfig(req CreateRequest) *model.CommandConfigJSON {
 	restartPolicy := req.RestartPolicy
 	if restartPolicy == "" {
-		restartPolicy = store.RestartPolicyNo
+		restartPolicy = model.RestartPolicyNo
 	}
 	stopSignal := req.StopSignal
 	if stopSignal == "" {
-		stopSignal = store.DefaultStopSignal
+		stopSignal = model.DefaultStopSignal
 	} else {
-		_, canonical, err := store.ParseSignal(stopSignal)
+		_, canonical, err := hrstr.ParseSignal(stopSignal)
 		if err == nil {
 			stopSignal = canonical
 		}
@@ -114,7 +116,7 @@ func (s *Service) buildCommandConfig(req CreateRequest) *store.CommandConfigJSON
 		annotations = map[string]string{store.AnnotationAutoRemove: "true"}
 	}
 
-	return &store.CommandConfigJSON{
+	return &model.CommandConfigJSON{
 		Argv:            append([]string(nil), req.Argv...),
 		Dir:             dir,
 		Env:             env,

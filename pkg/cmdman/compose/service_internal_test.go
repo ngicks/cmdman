@@ -9,6 +9,7 @@ import (
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -87,7 +88,7 @@ func TestWaitForConditionStartedDoesNotPassOnPreExistingExit(t *testing.T) {
 				events:  events,
 			},
 		},
-		map[string]string{"api": store.StateExited},
+		map[string]string{"api": model.StateExited},
 		AfterSpec{Name: "api", Condition: ConditionStarted},
 		"worker",
 	)
@@ -204,9 +205,9 @@ func TestListProjectsGroupsComposeCommands(t *testing.T) {
 				t.Fatalf("expected compose label filter, got %#v", req.Labels)
 			}
 			return []store.CommandEntry{
-				buildTestProjectEntry("id-1", "api", "project-a", "/tmp/a", "/tmp/a/cmd-compose.yaml", store.StateRunning),
-				buildTestProjectEntry("id-2", "worker", "project-a", "/tmp/a", "/tmp/a/cmd-compose.yaml", store.StateExited),
-				buildTestProjectEntry("id-3", "api", "project-b", "/tmp/b", "/tmp/b/cmd-compose.yaml", store.StateFailed),
+				buildTestProjectEntry("id-1", "api", "project-a", "/tmp/a", "/tmp/a/cmd-compose.yaml", model.StateRunning),
+				buildTestProjectEntry("id-2", "worker", "project-a", "/tmp/a", "/tmp/a/cmd-compose.yaml", model.StateExited),
+				buildTestProjectEntry("id-3", "api", "project-b", "/tmp/b", "/tmp/b/cmd-compose.yaml", model.StateFailed),
 			}, nil
 		},
 	}}
@@ -234,7 +235,7 @@ func TestListProjectsGroupsComposeCommands(t *testing.T) {
 func buildTestEntry(id, command string) store.CommandEntry {
 	return store.CommandEntry{
 		ID: id,
-		ConfigJSON: &store.CommandConfigJSON{
+		ConfigJSON: &model.CommandConfigJSON{
 			Labels: map[string]string{LabelCommand: command},
 		},
 	}
@@ -246,7 +247,7 @@ func buildTestProjectEntry(
 	return store.CommandEntry{
 		ID:    id,
 		State: state,
-		ConfigJSON: &store.CommandConfigJSON{
+		ConfigJSON: &model.CommandConfigJSON{
 			Labels: map[string]string{
 				LabelCommand: command,
 				LabelProject: project,

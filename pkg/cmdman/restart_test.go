@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"gotest.tools/v3/assert"
 )
@@ -48,19 +49,19 @@ exit 0
 
 	counterFile := filepath.Join(dir, "counter")
 
-	cfg := &store.CommandConfigJSON{
+	cfg := &model.CommandConfigJSON{
 		Argv:            []string{"/bin/sh", scriptPath, counterFile},
 		Dir:             dir,
 		Env:             testEnv(),
-		RestartPolicy:   store.RestartPolicyOnFailure,
+		RestartPolicy:   model.RestartPolicyOnFailure,
 		ScrollbackBytes: 4096,
-		LogDriver:       store.DefaultLogDriver,
+		LogDriver:       model.DefaultLogDriver,
 		CommandDir:      commandDir,
 	}
 
 	assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
-	assert.NilError(t, cfg.Write())
-	assert.NilError(t, st.InsertCommandState(id, store.StateCreated, &store.CommandStateJSON{}))
+	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
+	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandStateJSON{}))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
@@ -73,7 +74,7 @@ exit 0
 	// Should have exited successfully after 3 runs.
 	state, exitCode, _, err := st.GetCommandState(id)
 	assert.NilError(t, err)
-	assert.Equal(t, state, store.StateExited)
+	assert.Equal(t, state, model.StateExited)
 	assert.Assert(t, exitCode != nil)
 	assert.Equal(t, *exitCode, 0)
 
@@ -103,19 +104,19 @@ func TestRestartPolicyAlways(t *testing.T) {
 	id := "test-restart-always"
 	commandDir, err := appCfg.CommandDir(id)
 	assert.NilError(t, err)
-	cfg := &store.CommandConfigJSON{
+	cfg := &model.CommandConfigJSON{
 		Argv:            []string{"/bin/sh", "-c", "true"},
 		Dir:             dir,
 		Env:             testEnv(),
-		RestartPolicy:   store.RestartPolicyAlways,
+		RestartPolicy:   model.RestartPolicyAlways,
 		ScrollbackBytes: 4096,
-		LogDriver:       store.DefaultLogDriver,
+		LogDriver:       model.DefaultLogDriver,
 		CommandDir:      commandDir,
 	}
 
 	assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
-	assert.NilError(t, cfg.Write())
-	assert.NilError(t, st.InsertCommandState(id, store.StateCreated, &store.CommandStateJSON{}))
+	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
+	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandStateJSON{}))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 

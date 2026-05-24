@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
 // scanOutcome is what scanFile reports to its caller.
@@ -91,22 +93,22 @@ func (r *Reader) scanFile(ctx context.Context, f *os.File, tailable bool) scanOu
 //
 // When skip and rotation are both false and err is nil, ev is the decoded
 // event ready for delivery.
-func parseLine(line []byte) (ev Event, skip, rotation bool, err error) {
+func parseLine(line []byte) (ev model.Event, skip, rotation bool, err error) {
 	if len(line) == 0 {
-		return Event{}, true, false, nil
+		return model.Event{}, true, false, nil
 	}
 	trim := line
 	for len(trim) > 0 && (trim[len(trim)-1] == '\n' || trim[len(trim)-1] == '\r') {
 		trim = trim[:len(trim)-1]
 	}
 	if len(trim) == 0 {
-		return Event{}, true, false, nil
+		return model.Event{}, true, false, nil
 	}
 	if err := json.Unmarshal(trim, &ev); err != nil {
-		return Event{}, false, false, fmt.Errorf("eventlog: decode line: %w", err)
+		return model.Event{}, false, false, fmt.Errorf("eventlog: decode line: %w", err)
 	}
 	if ev.Type == eventTypeRotation {
-		return Event{}, false, true, nil
+		return model.Event{}, false, true, nil
 	}
 	return ev, false, false, nil
 }

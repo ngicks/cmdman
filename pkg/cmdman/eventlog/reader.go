@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -33,7 +34,7 @@ type ReaderOption struct {
 // Record is one item emitted by a Reader. Err carries fatal read errors;
 // the reader closes its channel after emitting a terminal error.
 type Record struct {
-	Event Event
+	Event model.Event
 	Err   error
 }
 

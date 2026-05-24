@@ -73,7 +73,7 @@ var (
 )
 
 func init() {
-	Register("none", noneDriver{})
+	Register(string(DriverNone), noneDriver{})
 }
 
 // Register adds a log driver implementation by name.

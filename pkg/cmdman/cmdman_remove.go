@@ -7,7 +7,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -41,9 +41,9 @@ func (s *Service) Remove(ctx context.Context, req RemoveRequest) ([]RemoveResult
 			Err: err,
 		})
 		if err == nil {
-			s.emitEvent(eventlog.Event{
+			s.emitEvent(model.Event{
 				Time: time.Now().UTC(),
-				Type: eventlog.EventTypeRemove,
+				Type: model.EventTypeRemove,
 				ID:   id,
 			})
 		}
@@ -57,7 +57,7 @@ func rmOne(_ context.Context, cfg CmdmanConfig, st *store.Store, id string, forc
 		return err
 	}
 
-	if state == store.StateRunning || state == store.StateStarting {
+	if state == model.StateRunning || state == model.StateStarting {
 		if !force {
 			return fmt.Errorf("command is %s, use --force to remove", state)
 		}

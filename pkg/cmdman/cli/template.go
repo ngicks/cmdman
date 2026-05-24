@@ -8,7 +8,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
 const commandMaxLen = 40
@@ -16,7 +16,7 @@ const commandMaxLen = 40
 // templateFuncMap is the shared FuncMap used by both ls and inspect --format
 // templates.
 //
-// The "command" helper takes a *store.CommandConfigJSON so it works against
+// The "command" helper takes a *model.CommandConfigJSON so it works against
 // both CommandEntry.ConfigJSON (ls) and InspectOutput.Config (inspect).
 var templateFuncMap = template.FuncMap{
 	"json": func(v any) string {
@@ -27,7 +27,7 @@ var templateFuncMap = template.FuncMap{
 		return string(b)
 	},
 	"deref": deref,
-	"command": func(cfg *store.CommandConfigJSON) string {
+	"command": func(cfg *model.CommandConfigJSON) string {
 		if cfg == nil || len(cfg.Argv) == 0 {
 			return "-"
 		}

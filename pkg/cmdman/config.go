@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
+	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -27,12 +29,12 @@ const (
 // caller assignment / Cobra flags, environment variables, the on-disk
 // config file, and finally built-in defaults.
 type CmdmanConfig struct {
-	DataDir                string          `json:"dataDir,omitzero"`
-	RuntimeDir             string          `json:"runtimeDir,omitzero"`
-	DefaultWorkingDir      string          `json:"defaultWorkingDir,omitzero"`
-	DefaultEnvironment     []string        `json:"-"`
-	DefaultScrollbackBytes int             `json:"defaultScrollbackBytes,omitzero"`
-	DefaultLogDriver       store.LogDriver `json:"defaultLogDriver,omitzero"`
+	DataDir                string              `json:"dataDir,omitzero"`
+	RuntimeDir             string              `json:"runtimeDir,omitzero"`
+	DefaultWorkingDir      string              `json:"defaultWorkingDir,omitzero"`
+	DefaultEnvironment     []string            `json:"-"`
+	DefaultScrollbackBytes int                 `json:"defaultScrollbackBytes,omitzero"`
+	DefaultLogDriver       logdriver.LogDriver `json:"defaultLogDriver,omitzero"`
 	// EventWatcherKind selects the backend used by event-log subscribers
 	// (the `events` subcommand and any caller of Service.Events). Valid
 	// values are "inotify" (linux only) and "poll". When empty, the
@@ -102,7 +104,7 @@ func (c CmdmanConfig) WithDefaults() (CmdmanConfig, error) {
 		c.DefaultLogDriver = fileCfg.DefaultLogDriver
 	}
 	if c.DefaultLogDriver == "" {
-		c.DefaultLogDriver = store.DefaultLogDriver
+		c.DefaultLogDriver = model.DefaultLogDriver
 	}
 
 	if c.EventWatcherKind == "" {
@@ -134,7 +136,7 @@ func (c CmdmanConfig) Validate() error {
 			"cmdman config: default scrollback bytes must be positive: %d",
 			c.DefaultScrollbackBytes,
 		)
-	case !store.IsLogDriver(string(c.DefaultLogDriver)):
+	case !model.IsLogDriver(string(c.DefaultLogDriver)):
 		return fmt.Errorf(
 			"cmdman config: invalid default log driver %q",
 			c.DefaultLogDriver,

@@ -14,6 +14,7 @@ import (
 
 	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -63,7 +64,7 @@ func (s *Service) eventLog() (*eventlog.Writer, error) {
 
 // emitEvent appends an event best-effort. Failures are logged but do not
 // fail the calling operation.
-func (s *Service) emitEvent(e eventlog.Event) {
+func (s *Service) emitEvent(e model.Event) {
 	w, err := s.eventLog()
 	if err != nil {
 		slog.Default().Warn("eventlog: open writer", "error", err)
@@ -164,7 +165,7 @@ func (s *Service) connectMonitorByName(
 
 func (s *Service) connectMonitor(
 	_ context.Context,
-	state *store.CommandStateJSON,
+	state *model.CommandStateJSON,
 ) (conn *grpc.ClientConn, err error) {
 	// Hide transport details because we may add other transports later
 

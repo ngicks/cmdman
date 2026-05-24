@@ -13,6 +13,7 @@ import (
 	"gotest.tools/v3/assert/cmp"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/compose"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"github.com/ngicks/go-common/contextkey"
 )
@@ -244,7 +245,7 @@ func TestHashFormat(t *testing.T) {
 		Name:          "api",
 		Args:          []string{"go", "run", "./cmd/api"},
 		Dir:           "/work",
-		RestartPolicy: store.RestartPolicy("on-failure"),
+		RestartPolicy: model.RestartPolicy("on-failure"),
 	}
 	h, err := compose.Hash(cmd)
 	assert.NilError(t, err)
@@ -263,7 +264,7 @@ func TestHashStability(t *testing.T) {
 		Name:          "api",
 		Args:          []string{"go", "run", "./cmd/api"},
 		Dir:           "/work",
-		RestartPolicy: store.RestartPolicy("on-failure"),
+		RestartPolicy: model.RestartPolicy("on-failure"),
 	}
 	h1, err := compose.Hash(cmd)
 	assert.NilError(t, err)
@@ -804,7 +805,7 @@ func buildExistingEntry(id, name string, labels map[string]string) store.Command
 		ID:    id,
 		Name:  name,
 		State: "stopped",
-		ConfigJSON: &store.CommandConfigJSON{
+		ConfigJSON: &model.CommandConfigJSON{
 			Argv:   []string{"echo", "hello"},
 			Labels: labels,
 		},

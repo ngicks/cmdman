@@ -11,6 +11,7 @@ import (
 	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver/k8sfile"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -58,7 +59,7 @@ func (s *Service) Logs(ctx context.Context, req LogsRequest) (logdriver.Reader, 
 	// the subscription bridge resumes from here instead of byte zero, so it
 	// does not re-emit already-stored history.
 	var followStart any
-	if req.Follow && cfg.LogDriver == store.LogDriverK8sFile {
+	if req.Follow && cfg.LogDriver == logdriver.DriverK8sFile {
 		end, err := k8sfile.CurrentEnd(cfg.CommandDir, opts)
 		if err != nil {
 			_ = storageReader.Close()
@@ -100,7 +101,7 @@ func (s *Service) streamLogs(
 	ctx context.Context,
 	st *store.Store,
 	id string,
-	cfg *store.CommandConfigJSON,
+	cfg *model.CommandConfigJSON,
 	opts map[string]string,
 	follow bool,
 	storageReader logdriver.Reader,
@@ -122,7 +123,7 @@ func (s *Service) streamLogs(
 		sendRecordErr(ctx, out, fmt.Errorf("get command state: %w", err))
 		return
 	}
-	if state != store.StateStarting && state != store.StateRunning {
+	if state != model.StateStarting && state != model.StateRunning {
 		return
 	}
 
@@ -176,13 +177,13 @@ func (s *Service) streamLogs(
 
 func (s *Service) bridgeReread(
 	ctx context.Context,
-	cfg *store.CommandConfigJSON,
+	cfg *model.CommandConfigJSON,
 	opts map[string]string,
 	lastOffset any,
 	captured *pb.SubscribeOffset,
 	out chan<- logdriver.Record,
 ) error {
-	if captured.GetDriver() != string(store.LogDriverK8sFile) {
+	if captured.GetDriver() != string(logdriver.DriverK8sFile) {
 		return nil
 	}
 	if len(captured.GetOffset()) == 0 {

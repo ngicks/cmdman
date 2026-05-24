@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"github.com/ngicks/go-common/contextkey"
 )
@@ -42,7 +43,7 @@ func (s *Service) handleOrphans(
 
 		// --remove-orphan path.
 		// Running/starting orphans: skip and report.
-		if orphan.State == store.StateRunning || orphan.State == store.StateStarting {
+		if orphan.State == model.StateRunning || orphan.State == model.StateStarting {
 			contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: orphan command is running; skipping removal",
 				"project", spec.Project,
 				"workdir", spec.WorkDir,

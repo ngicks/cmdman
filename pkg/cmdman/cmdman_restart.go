@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -56,7 +57,7 @@ func (s *Service) restart(
 	if err != nil {
 		return fmt.Errorf("get command state: %w", err)
 	}
-	if state == store.StateStarting || state == store.StateRunning {
+	if state == model.StateStarting || state == model.StateRunning {
 		if err := s.stop(ctx, st, id, signalOverride, timeout); err != nil {
 			return fmt.Errorf("stop: %w", err)
 		}

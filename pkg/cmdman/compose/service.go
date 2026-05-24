@@ -6,6 +6,7 @@ import (
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"github.com/ngicks/go-common/contextkey"
 )
@@ -160,7 +161,7 @@ func (s *Service) executeAction(
 		}
 
 		// If the command is running/starting, skip it (resolved-decision 4: no force in v1).
-		if existing.State == store.StateRunning || existing.State == store.StateStarting {
+		if existing.State == model.StateRunning || existing.State == model.StateStarting {
 			contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: changed command is running; skipping recreate",
 				"project", spec.Project,
 				"command", nc.Name,

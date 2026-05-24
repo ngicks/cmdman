@@ -8,6 +8,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
 // EventsRequest defines an event-log subscription. The zero value tails
@@ -28,7 +29,7 @@ type EventsRequest struct {
 	IDFilter []string
 	// TypeFilter restricts delivery to events whose Type matches any
 	// value. Empty/nil means no filter.
-	TypeFilter []eventlog.EventType
+	TypeFilter []model.EventType
 }
 
 // EventsSubscription wraps an event reader with its post-filter channel
@@ -139,7 +140,7 @@ func buildSet(values []string) map[string]struct{} {
 	return out
 }
 
-func eventTypesAsStrings(types []eventlog.EventType) []string {
+func eventTypesAsStrings(types []model.EventType) []string {
 	if len(types) == 0 {
 		return nil
 	}
@@ -150,7 +151,7 @@ func eventTypesAsStrings(types []eventlog.EventType) []string {
 	return out
 }
 
-func matchesFilter(e eventlog.Event, idAllow, typeAllow map[string]struct{}) bool {
+func matchesFilter(e model.Event, idAllow, typeAllow map[string]struct{}) bool {
 	if idAllow != nil {
 		if _, ok := idAllow[e.ID]; !ok {
 			return false

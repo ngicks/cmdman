@@ -1,4 +1,4 @@
-package store
+package model
 
 // RestartPolicy determines how the monitor handles command exits.
 type RestartPolicy string

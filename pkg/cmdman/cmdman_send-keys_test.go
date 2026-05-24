@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"gotest.tools/v3/assert"
 )
@@ -109,7 +110,7 @@ func TestServiceSendKeys(t *testing.T) {
 	id := "test-send-keys"
 	commandDir, err := appCfg.CommandDir(id)
 	assert.NilError(t, err)
-	cfg := &store.CommandConfigJSON{
+	cfg := &model.CommandConfigJSON{
 		Argv: []string{
 			"/bin/sh",
 			"-c",
@@ -117,16 +118,16 @@ func TestServiceSendKeys(t *testing.T) {
 		},
 		Dir:             dir,
 		Env:             testEnv(),
-		RestartPolicy:   store.RestartPolicyNo,
+		RestartPolicy:   model.RestartPolicyNo,
 		Tty:             true,
 		ScrollbackBytes: 4096,
-		LogDriver:       store.DefaultLogDriver,
+		LogDriver:       model.DefaultLogDriver,
 		CommandDir:      commandDir,
 	}
 
 	assert.NilError(t, st.InsertCommandConfig(id, "send-keys", cfg))
-	assert.NilError(t, cfg.Write())
-	assert.NilError(t, st.InsertCommandState(id, store.StateCreated, &store.CommandStateJSON{}))
+	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
+	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandStateJSON{}))
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
@@ -142,7 +143,7 @@ func TestServiceSendKeys(t *testing.T) {
 	for time.Now().Before(deadline) {
 		state, _, stateJSON, err := st.GetCommandState(id)
 		assert.NilError(t, err)
-		if state == store.StateRunning && stateJSON.SocketPath != "" {
+		if state == model.StateRunning && stateJSON.SocketPath != "" {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)

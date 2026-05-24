@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"gotest.tools/v3/assert"
 )
 
@@ -67,7 +68,7 @@ func TestInotifyWatcherFiresOnRotation(t *testing.T) {
 	wr.maxSize = 128
 
 	// Seed the file so inotify on the dir has something to track.
-	assert.NilError(t, wr.Append(Event{Time: time.Now().UTC(), Type: EventTypeCreate, ID: "x"}))
+	assert.NilError(t, wr.Append(model.Event{Time: time.Now().UTC(), Type: model.EventTypeCreate, ID: "x"}))
 
 	w, err := NewWatcher(WatcherKindInotify, path, 0)
 	assert.NilError(t, err)
@@ -83,7 +84,7 @@ func TestInotifyWatcherFiresOnRotation(t *testing.T) {
 	for range 20 {
 		assert.NilError(
 			t,
-			wr.Append(Event{Time: time.Now().UTC(), Type: EventTypeRunning, ID: "x"}),
+			wr.Append(model.Event{Time: time.Now().UTC(), Type: model.EventTypeRunning, ID: "x"}),
 		)
 	}
 

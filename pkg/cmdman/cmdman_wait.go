@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -93,7 +94,7 @@ func validWaitCondition(c string) bool {
 
 func matchesWaitCondition(state, condition string) bool {
 	if condition == WaitConditionStopped {
-		return state == store.StateExited || state == store.StateFailed
+		return state == model.StateExited || state == model.StateFailed
 	}
 	return state == condition
 }

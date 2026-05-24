@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strings"
+
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
 // CommandEntry represents a joined row from CommandConfig and CommandState.
@@ -13,8 +15,8 @@ type CommandEntry struct {
 	CreatedAt  string
 	State      string
 	ExitCode   *int
-	ConfigJSON *CommandConfigJSON
-	StateJSON  *CommandStateJSON
+	ConfigJSON *model.CommandConfigJSON
+	StateJSON  *model.CommandStateJSON
 }
 
 // ListCommands lists commands, optionally filtering by state and labels.
@@ -78,12 +80,12 @@ func (s *Store) ListCommands(allStates bool, labels map[string]string) ([]Comman
 			ec := int(ecSQL.Int64)
 			e.ExitCode = &ec
 		}
-		e.ConfigJSON = &CommandConfigJSON{}
+		e.ConfigJSON = &model.CommandConfigJSON{}
 		if err := json.Unmarshal([]byte(cfgStr), e.ConfigJSON); err != nil {
 			return nil, err
 		}
 		backfillCommandConfigDefaults(e.ConfigJSON)
-		e.StateJSON = &CommandStateJSON{}
+		e.StateJSON = &model.CommandStateJSON{}
 		if err := json.Unmarshal([]byte(stateStr), e.StateJSON); err != nil {
 			return nil, err
 		}

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
 func (s *Service) Start(ctx context.Context, idOrName string) error {
@@ -27,26 +27,26 @@ func (s *Service) Start(ctx context.Context, idOrName string) error {
 		return fmt.Errorf("get command state: %w", err)
 	}
 	switch state {
-	case store.StateCreated, store.StateExited, store.StateFailed:
+	case model.StateCreated, model.StateExited, model.StateFailed:
 	default:
 		return fmt.Errorf(
 			"command %s is in state %q, must be %q, %q, or %q",
 			idOrName,
 			state,
-			store.StateCreated,
-			store.StateExited,
-			store.StateFailed,
+			model.StateCreated,
+			model.StateExited,
+			model.StateFailed,
 		)
 	}
 
 	if _, err := SpawnMonitor(s.cfg, id); err != nil {
 		return fmt.Errorf("spawn monitor: %w", err)
 	}
-	if finalState, err := WaitForState(st, id, store.StateRunning, 100); err != nil {
+	if finalState, err := WaitForState(st, id, model.StateRunning, 100); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
-		if finalState == store.StateExited {
+		if finalState == model.StateExited {
 			return nil
 		}
 		return fmt.Errorf("%w (state: %s)", err, finalState)

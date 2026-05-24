@@ -8,7 +8,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/go-common/contextkey"
 )
 
@@ -325,4 +325,4 @@ func buildGenNameByCommand(commands []Command) map[string]string {
 }
 
 // idleStates are the states where a command is not active and can be started.
-var _ = store.StateRunning // ensure store import is used via RestartOutcome
+var _ = model.StateRunning // ensure store import is used via RestartOutcome

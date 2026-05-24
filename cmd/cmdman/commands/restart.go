@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
 func restartCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
@@ -40,7 +40,7 @@ func runRestart(
 	timeoutSeconds int,
 ) error {
 	if sigName != "" {
-		if _, _, err := store.ParseSignal(sigName); err != nil {
+		if _, _, err := hrstr.ParseSignal(sigName); err != nil {
 			return err
 		}
 	}

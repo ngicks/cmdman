@@ -7,7 +7,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/go-common/contextkey"
 )
 
@@ -108,7 +108,7 @@ func (s *Service) startWithoutSpec(
 		id, name := e.ID, cmdName
 		state := e.State
 		eg.Go(func() error {
-			if state == store.StateRunning || state == store.StateStarting {
+			if state == model.StateRunning || state == model.StateStarting {
 				ch <- StartOutcome{Command: name}
 				return nil
 			}

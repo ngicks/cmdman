@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -73,18 +74,18 @@ func TestStale_AutoRemoveOnStale(t *testing.T) {
 
 	// Create a fake command that looks running but has a dead PID.
 	id := "stale-auto-rm-test-id"
-	cfg := &store.CommandConfigJSON{
+	cfg := &model.CommandConfigJSON{
 		Argv:            []string{"/bin/sh", "-c", "echo fake"},
 		Dir:             env.dataHome,
 		Env:             os.Environ(),
-		RestartPolicy:   store.RestartPolicyNo,
+		RestartPolicy:   model.RestartPolicyNo,
 		ScrollbackBytes: 1024,
-		LogDriver:       store.DefaultLogDriver,
+		LogDriver:       model.DefaultLogDriver,
 		Annotations:     map[string]string{store.AnnotationAutoRemove: "true"},
 		CommandDir:      filepath.Join(env.dataHome, "commands", id),
 	}
 	st.InsertCommandConfig(id, "stale-auto-rm", cfg)
-	st.InsertCommandState(id, store.StateRunning, &store.CommandStateJSON{
+	st.InsertCommandState(id, model.StateRunning, &model.CommandStateJSON{
 		MonitorPID: 99999999, // A PID that is almost certainly not alive.
 	})
 	st.Close()

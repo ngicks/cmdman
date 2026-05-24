@@ -7,6 +7,7 @@ import (
 
 	"gotest.tools/v3/assert"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -39,9 +40,9 @@ func TestRenderEntriesExitCode(t *testing.T) {
 			err := RenderEntries(&out, []store.CommandEntry{{
 				ID:       "123456789abc",
 				Name:     "test",
-				State:    store.StateExited,
+				State:    model.StateExited,
 				ExitCode: tt.exitCode,
-				ConfigJSON: &store.CommandConfigJSON{
+				ConfigJSON: &model.CommandConfigJSON{
 					Argv: []string{"/bin/true"},
 				},
 			}}, false, "")

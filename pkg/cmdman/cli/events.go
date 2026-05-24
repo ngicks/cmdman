@@ -8,6 +8,7 @@ import (
 	"text/template"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
 // DefaultEventsFormat renders one event per line in a compact JSON form.
@@ -47,7 +48,7 @@ func RenderEvents(out io.Writer, records <-chan eventlog.Record, format string) 
 // EventsFormatUsage returns a usage string describing fields and helper
 // functions available to the --format flag of the events subcommand.
 func EventsFormatUsage() string {
-	t := reflect.TypeFor[eventlog.Event]()
+	t := reflect.TypeFor[model.Event]()
 	var fields []string
 	for f := range t.Fields() {
 		fields = append(fields, fmt.Sprintf(".%s (%s)", f.Name, f.Type))

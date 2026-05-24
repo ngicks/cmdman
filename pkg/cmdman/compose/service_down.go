@@ -8,7 +8,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/go-common/contextkey"
 )
 
@@ -74,7 +74,7 @@ func (s *Service) Down(
 	// otherwise return monitor-connect errors from Service.Stop.
 	stoppable := make([]cmdmanEntry, 0, len(entries))
 	for _, e := range entries {
-		if e.State == store.StateRunning || e.State == store.StateStarting {
+		if e.State == model.StateRunning || e.State == model.StateStarting {
 			stoppable = append(stoppable, e)
 		}
 	}

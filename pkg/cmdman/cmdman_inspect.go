@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -12,10 +13,10 @@ import (
 type InspectOutput struct {
 	ID          string                   `json:"id"`
 	Name        string                   `json:"name,omitempty"`
-	Config      *store.CommandConfigJSON `json:"config"`
+	Config      *model.CommandConfigJSON `json:"config"`
 	State       string                   `json:"state"`
 	ExitCode    *int                     `json:"exit_code,omitempty"`
-	StateJSON   *store.CommandStateJSON  `json:"state_detail"`
+	StateJSON   *model.CommandStateJSON  `json:"state_detail"`
 	ExitHistory []store.ExitRecord       `json:"exit_history,omitempty"`
 	ConfigPath  string                   `json:"config_path,omitempty"`
 	LiveStatus  *LiveStatusInfo          `json:"live_status,omitempty"`
@@ -51,7 +52,7 @@ func (s *Service) Inspect(ctx context.Context, idOrName string) (*InspectOutput,
 		ExitCode:    exitCode,
 		StateJSON:   stateJSON,
 		ExitHistory: exitHistory,
-		ConfigPath:  cfg.ConfigPath(),
+		ConfigPath:  store.CommandConfigPath(cfg.CommandDir),
 	}
 
 	if stateJSON.SocketPath != "" {

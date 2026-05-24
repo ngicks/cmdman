@@ -13,7 +13,9 @@ import (
 
 	"github.com/compose-spec/compose-go/v2/dotenv"
 	"github.com/compose-spec/compose-go/v2/template"
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
+	"github.com/ngicks/cmdman/pkg/hrstr"
 	"github.com/ngicks/go-common/contextkey"
 	"go.yaml.in/yaml/v4"
 )
@@ -237,11 +239,11 @@ func Normalize(
 			Args:            interpolatedArgs,
 			Env:             envSlice,
 			Labels:          cmd.Labels,
-			RestartPolicy:   store.RestartPolicy(cmd.RestartPolicy),
+			RestartPolicy:   model.RestartPolicy(cmd.RestartPolicy),
 			StopSignal:      cmd.StopSignal,
 			Tty:             cmd.Tty,
 			ScrollbackBytes: cmd.ScrollbackBytes,
-			LogDriver:       store.LogDriver(cmd.LogDriver),
+			LogDriver:       logdriver.LogDriver(cmd.LogDriver),
 			LogOpts:         resolvedLogOpts,
 			After:           afterList,
 			GeneratedName:   genName,
@@ -510,23 +512,23 @@ func validateRuntimeFields(nc Command) error {
 	if len(nc.Args) == 0 {
 		return errors.New("args is empty")
 	}
-	if nc.RestartPolicy != "" && !store.IsRestartPolicy(string(nc.RestartPolicy)) {
+	if nc.RestartPolicy != "" && !model.IsRestartPolicy(string(nc.RestartPolicy)) {
 		return fmt.Errorf("invalid restart_policy %q", nc.RestartPolicy)
 	}
 	if nc.StopSignal != "" {
-		if _, _, err := store.ParseSignal(nc.StopSignal); err != nil {
+		if _, _, err := hrstr.ParseSignal(nc.StopSignal); err != nil {
 			return fmt.Errorf("invalid stop_signal %q: %w", nc.StopSignal, err)
 		}
 	}
 	if nc.ScrollbackBytes < 0 {
 		return fmt.Errorf("scrollback_bytes must be non-negative: %d", nc.ScrollbackBytes)
 	}
-	if nc.LogDriver != "" && !store.IsLogDriver(string(nc.LogDriver)) {
+	if nc.LogDriver != "" && !model.IsLogDriver(string(nc.LogDriver)) {
 		return fmt.Errorf("invalid log_driver %q", nc.LogDriver)
 	}
 	if nc.LogDriver != "" {
 		for k, v := range nc.LogOpts {
-			if err := store.ValidateLogOpt(nc.LogDriver, k, v); err != nil {
+			if err := logdriver.ValidateOpt(string(nc.LogDriver), k, v); err != nil {
 				return err
 			}
 		}

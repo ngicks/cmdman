@@ -2,7 +2,10 @@
 // graph validation, and reconciliation planning for cmdman compose.
 package compose
 
-import "github.com/ngicks/cmdman/pkg/cmdman/store"
+import (
+	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
+)
 
 // LabelPrefix is the reserved label key prefix. User labels using this prefix are rejected.
 const LabelPrefix = "cmdman.compose."
@@ -99,7 +102,7 @@ type Command struct {
 	// they are added by Plan when building CreateRequest inputs.
 	Labels map[string]string
 	// RestartPolicy from the YAML.
-	RestartPolicy store.RestartPolicy
+	RestartPolicy model.RestartPolicy
 	// StopSignal from the YAML.
 	StopSignal string
 	// Tty from the YAML.
@@ -107,7 +110,7 @@ type Command struct {
 	// ScrollbackBytes from the YAML.
 	ScrollbackBytes int
 	// LogDriver from the YAML.
-	LogDriver store.LogDriver
+	LogDriver logdriver.LogDriver
 	// LogOpts from the YAML.
 	LogOpts map[string]string
 	// After is the expanded dependency list.

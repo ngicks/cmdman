@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"gotest.tools/v3/assert"
 )
 
@@ -22,8 +23,8 @@ func TestDriverNewWriterExplicitEmptyOptionsDisableRotation(t *testing.T) {
 	dir := t.TempDir()
 
 	lw, err := Driver{}.NewWriter(context.Background(), dir, map[string]string{
-		logOptMaxSize: "",
-		logOptMaxFile: "",
+		logdriver.LogOptMaxSize: "",
+		logdriver.LogOptMaxFile: "",
 	})
 	assert.NilError(t, err)
 	w := lw.(*Writer)

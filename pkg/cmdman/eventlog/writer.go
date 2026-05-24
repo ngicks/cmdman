@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/internal/flock"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
 // DefaultMaxSize is the active log file size at which the writer rotates.
@@ -60,7 +61,7 @@ func (w *Writer) Path() string {
 // event would push the active file above the rotation threshold, the
 // rotation marker is appended first, the file is rotated in-place, and the
 // event is then written to the fresh file.
-func (w *Writer) Append(e Event) error {
+func (w *Writer) Append(e model.Event) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 

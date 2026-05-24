@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -69,7 +70,7 @@ func WaitForState(st *store.Store, id, desiredState string, maxAttempts int) (st
 		if state == desiredState {
 			return state, nil
 		}
-		if state == store.StateFailed && progressed {
+		if state == model.StateFailed && progressed {
 			return state, fmt.Errorf("monitor entered failed state")
 		}
 		time.Sleep(50 * time.Millisecond)

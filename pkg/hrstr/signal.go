@@ -1,4 +1,4 @@
-package store
+package hrstr
 
 import (
 	"fmt"
@@ -8,8 +8,6 @@ import (
 
 	"golang.org/x/sys/unix"
 )
-
-const DefaultStopSignal = "SIGTERM"
 
 // ParseSignal resolves a POSIX signal name or number into its numeric and canonical forms.
 func ParseSignal(s string) (int32, string, error) {

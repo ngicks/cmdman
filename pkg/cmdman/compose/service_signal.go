@@ -8,7 +8,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/hrstr"
 	"github.com/ngicks/go-common/contextkey"
 )
 
@@ -35,7 +35,7 @@ type SignalOutcome struct {
 // Signal sends a signal to project-labeled commands.
 //
 // Signal is required; an empty value returns an error before any network call.
-// The signal value is parsed once via store.ParseSignal; invalid values are
+// The signal value is parsed once via hrstr.ParseSignal; invalid values are
 // rejected up front.
 //
 // Per resolved-decision 15, an empty project target set exits 0 with a
@@ -50,7 +50,7 @@ func (s *Service) Signal(
 		return nil, fmt.Errorf("compose signal: --signal is required")
 	}
 
-	sig, _, err := store.ParseSignal(opts.Signal)
+	sig, _, err := hrstr.ParseSignal(opts.Signal)
 	if err != nil {
 		return nil, fmt.Errorf("compose signal: invalid signal %q: %w", opts.Signal, err)
 	}

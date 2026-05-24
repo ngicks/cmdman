@@ -25,6 +25,7 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
 	"github.com/ngicks/cmdman/pkg/cmdman/internal/flock"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	cmdstore "github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -39,8 +40,8 @@ type Monitor struct {
 	cleanUp []func() error
 
 	store     *cmdstore.Store
-	cfg       *cmdstore.CommandConfigJSON
-	stateJSON *cmdstore.CommandStateJSON
+	cfg       *model.CommandConfigJSON
+	stateJSON *model.CommandStateJSON
 	evtLog    *eventlog.Writer
 
 	lis net.Listener
@@ -120,7 +121,7 @@ func newMonitor(
 		cfg:               commandCfg,
 		evtLog:            evtLog,
 		ring:              newRingBuffer(commandCfg.ScrollbackBytes),
-		stateJSON: &cmdstore.CommandStateJSON{
+		stateJSON: &model.CommandStateJSON{
 			MonitorPID: os.Getpid(),
 		},
 		cleanUp: []func() error{
@@ -130,7 +131,7 @@ func newMonitor(
 }
 
 // emitEvent appends an event from the monitor side, best-effort.
-func (m *Monitor) emitEvent(e eventlog.Event) {
+func (m *Monitor) emitEvent(e model.Event) {
 	if m.evtLog == nil {
 		return
 	}
@@ -197,7 +198,7 @@ func (m *Monitor) init() (err error) {
 
 	if err := m.store.UpdateCommandState(
 		m.ID,
-		cmdstore.StateStarting,
+		model.StateStarting,
 		nil,
 		m.stateJSON,
 	); err != nil {
@@ -219,7 +220,7 @@ func (m *Monitor) init() (err error) {
 	m.stateJSON.SocketPath = m.sockPath
 	if err := m.store.UpdateCommandState(
 		m.ID,
-		cmdstore.StateStarting,
+		model.StateStarting,
 		nil,
 		m.stateJSON,
 	); err != nil {
@@ -300,28 +301,28 @@ func (m *Monitor) publishStateChange(state string, exitCode int) {
 }
 
 func isMonitorActiveState(state string) bool {
-	return state == cmdstore.StateStarting || state == cmdstore.StateRunning
+	return state == model.StateStarting || state == model.StateRunning
 }
 
 func (m *Monitor) setRunning() {
 	m.stateJSON.StartedAt = time.Now().UTC().Format(time.RFC3339)
 	// Append the event before flipping the DB state so observers polling
 	// state cannot see "running" without the corresponding event on disk.
-	m.emitEvent(eventlog.Event{
+	m.emitEvent(model.Event{
 		Time:  time.Now().UTC(),
-		Type:  eventlog.EventTypeRunning,
+		Type:  model.EventTypeRunning,
 		ID:    m.ID,
-		State: cmdstore.StateRunning,
+		State: model.StateRunning,
 	})
 	if err := m.store.UpdateCommandState(
 		m.ID,
-		cmdstore.StateRunning,
+		model.StateRunning,
 		nil,
 		m.stateJSON,
 	); err != nil {
 		m.Logger.Error("update state to running failed", slog.String("error", err.Error()))
 	}
-	m.publishStateChange(cmdstore.StateRunning, 0)
+	m.publishStateChange(model.StateRunning, 0)
 }
 
 func (m *Monitor) setExited(exitCode int) {
@@ -329,30 +330,30 @@ func (m *Monitor) setExited(exitCode int) {
 	// Append the exit event before flipping the DB state so observers
 	// that wait for state="exited" are guaranteed to find the event on
 	// disk, not racing with a still-in-flight Append.
-	m.emitEvent(eventlog.Event{
+	m.emitEvent(model.Event{
 		Time:     time.Now().UTC(),
-		Type:     eventlog.EventTypeExit,
+		Type:     model.EventTypeExit,
 		ID:       m.ID,
-		State:    cmdstore.StateExited,
+		State:    model.StateExited,
 		ExitCode: &ec,
 	})
-	_ = m.store.UpdateCommandState(m.ID, cmdstore.StateExited, &exitCode, m.stateJSON)
-	m.publishStateChange(cmdstore.StateExited, exitCode)
+	_ = m.store.UpdateCommandState(m.ID, model.StateExited, &exitCode, m.stateJSON)
+	m.publishStateChange(model.StateExited, exitCode)
 	m.stateChangeBridge.Close()
 }
 
 func (m *Monitor) setFailed(errMsg string) {
 	m.stateJSON.Error = errMsg
 	// Same ordering rationale as setExited/setRunning.
-	m.emitEvent(eventlog.Event{
+	m.emitEvent(model.Event{
 		Time:  time.Now().UTC(),
-		Type:  eventlog.EventTypeFail,
+		Type:  model.EventTypeFail,
 		ID:    m.ID,
-		State: cmdstore.StateFailed,
+		State: model.StateFailed,
 		Error: errMsg,
 	})
-	_ = m.store.UpdateCommandState(m.ID, cmdstore.StateFailed, nil, m.stateJSON)
-	m.publishStateChange(cmdstore.StateFailed, 0)
+	_ = m.store.UpdateCommandState(m.ID, model.StateFailed, nil, m.stateJSON)
+	m.publishStateChange(model.StateFailed, 0)
 	m.stateChangeBridge.Close()
 }
 

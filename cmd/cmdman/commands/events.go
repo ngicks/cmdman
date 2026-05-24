@@ -9,7 +9,7 @@ import (
 	"github.com/ngicks/cmdman/cmd/internal/stdiopipe"
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/cli"
-	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
@@ -81,15 +81,15 @@ func runEvents(
 		return fmt.Errorf("parse --until: %w", err)
 	}
 
-	typeFilter := make([]eventlog.EventType, 0, len(types))
+	typeFilter := make([]model.EventType, 0, len(types))
 	for _, t := range types {
 		if t == "" {
 			continue
 		}
-		if !eventlog.IsEventType(t) {
+		if !model.IsEventType(t) {
 			return fmt.Errorf("--type: unknown event type %q", t)
 		}
-		typeFilter = append(typeFilter, eventlog.EventType(t))
+		typeFilter = append(typeFilter, model.EventType(t))
 	}
 
 	sub, err := svc.Events(cmd.Context(), cmdman.EventsRequest{

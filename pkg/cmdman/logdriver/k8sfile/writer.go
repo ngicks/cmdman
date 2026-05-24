@@ -23,16 +23,13 @@ const DefaultLogFileName = "console.log"
 const K8sLogTimeFormat = "2006-01-02T15:04:05.000000000Z07:00"
 
 const (
-	logOptPath    = "path"
-	logOptMaxSize = "max-size"
-	logOptMaxFile = "max-file"
-	tagFull       = "F"
-	tagPartial    = "P"
-	tagRotation   = "R"
+	tagFull     = "F"
+	tagPartial  = "P"
+	tagRotation = "R"
 )
 
 func init() {
-	logdriver.Register("k8s-file", Driver{})
+	logdriver.Register(string(logdriver.DriverK8sFile), Driver{})
 }
 
 // Driver constructs k8s-file log writers and readers.
@@ -64,17 +61,17 @@ func (Driver) NewWriter(
 	}
 	maxSize, err := parseLogMaxSizeOption(opts)
 	if err != nil {
-		return nil, fmt.Errorf("logdriver: k8s-file: %s: %w", logOptMaxSize, err)
+		return nil, fmt.Errorf("logdriver: k8s-file: %s: %w", logdriver.LogOptMaxSize, err)
 	}
 	maxFile, err := parseLogMaxFileOption(opts)
 	if err != nil {
-		return nil, fmt.Errorf("logdriver: k8s-file: %s: %w", logOptMaxFile, err)
+		return nil, fmt.Errorf("logdriver: k8s-file: %s: %w", logdriver.LogOptMaxFile, err)
 	}
 	return newWriter(path, maxSize, maxFile)
 }
 
 func resolvePath(dir string, opts map[string]string) (string, error) {
-	if p := opts[logOptPath]; p != "" {
+	if p := opts[logdriver.LogOptPath]; p != "" {
 		return p, nil
 	}
 	if dir != "" {

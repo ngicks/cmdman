@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	cmdstore "github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
@@ -39,20 +39,20 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 	for ; ; m.stateJSON.RestartCount++ {
 		if m.stateJSON.RestartCount > org {
 			m.Logger.Info("restarting command", slog.Int("restart_count", m.stateJSON.RestartCount))
-			m.emitEvent(eventlog.Event{
+			m.emitEvent(model.Event{
 				Time: time.Now().UTC(),
-				Type: eventlog.EventTypeRestart,
+				Type: model.EventTypeRestart,
 				ID:   m.ID,
 				Attrs: map[string]string{
 					"restart_count": fmt.Sprintf("%d", m.stateJSON.RestartCount),
 				},
 			})
 		} else {
-			m.emitEvent(eventlog.Event{
+			m.emitEvent(model.Event{
 				Time:  time.Now().UTC(),
-				Type:  eventlog.EventTypeStart,
+				Type:  model.EventTypeStart,
 				ID:    m.ID,
-				State: cmdstore.StateStarting,
+				State: model.StateStarting,
 			})
 		}
 
@@ -81,12 +81,12 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 
 		// Check restart policy.
 		switch m.cfg.RestartPolicy {
-		case cmdstore.RestartPolicyNo:
-		case cmdstore.RestartPolicyOnFailure:
+		case model.RestartPolicyNo:
+		case model.RestartPolicyOnFailure:
 			if exitCode != 0 && !m.stopRequested.Load() && ctx.Err() == nil {
 				continue
 			}
-		case cmdstore.RestartPolicyAlways:
+		case model.RestartPolicyAlways:
 			if !m.stopRequested.Load() && ctx.Err() == nil {
 				continue
 			}

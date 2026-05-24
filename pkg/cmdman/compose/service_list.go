@@ -6,7 +6,7 @@ import (
 	"slices"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
 // ProjectSummary describes one compose project discovered from stored command
@@ -68,11 +68,11 @@ func (s *Service) ListProjects(ctx context.Context) ([]ProjectSummary, error) {
 		}
 		summary.Commands++
 		switch entry.State {
-		case store.StateRunning:
+		case model.StateRunning:
 			summary.Running++
-		case store.StateExited:
+		case model.StateExited:
 			summary.Exited++
-		case store.StateFailed:
+		case model.StateFailed:
 			summary.Failed++
 		}
 	}
