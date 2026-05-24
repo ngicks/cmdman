@@ -47,7 +47,7 @@ func (s *Store) GetCommandConfig(
 	if err := json.Unmarshal([]byte(jsonStr), cfg); err != nil {
 		return "", "", nil, err
 	}
-	backfillCommandConfigDefaults(cfg)
+	cfg.BackfillDefaults()
 	return id, name, cfg, nil
 }
 

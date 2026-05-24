@@ -103,11 +103,11 @@ func (c *CommandConfig) ValidateCreate() error {
 	return nil
 }
 
-// BackfillCommandConfigDefaults populates fields that may be missing from
-// command configs persisted before they were introduced. It only fills
-// fields that are unambiguously equivalent to the old behavior.
-func BackfillCommandConfigDefaults(cfg *CommandConfig) {
-	if cfg.LogDriver == "" {
-		cfg.LogDriver = DefaultLogDriver
+// BackfillDefaults populates fields that may be missing from persisted
+// configs before they were introduced. It only fills fields that are
+// unambiguously equivalent to the old behavior.
+func (c *CommandConfig) BackfillDefaults() {
+	if c.LogDriver == "" {
+		c.LogDriver = DefaultLogDriver
 	}
 }

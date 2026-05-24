@@ -35,13 +35,9 @@ func ReadCommandConfig(commandDir string) (*model.CommandConfig, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
-	backfillCommandConfigDefaults(&cfg)
+	cfg.BackfillDefaults()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
-}
-
-func backfillCommandConfigDefaults(cfg *model.CommandConfig) {
-	model.BackfillCommandConfigDefaults(cfg)
 }

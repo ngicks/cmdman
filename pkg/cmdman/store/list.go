@@ -84,7 +84,7 @@ func (s *Store) ListCommands(allStates bool, labels map[string]string) ([]Comman
 		if err := json.Unmarshal([]byte(cfgStr), e.ConfigJSON); err != nil {
 			return nil, err
 		}
-		backfillCommandConfigDefaults(e.ConfigJSON)
+		e.ConfigJSON.BackfillDefaults()
 		e.StateJSON = &model.CommandState{}
 		if err := json.Unmarshal([]byte(stateStr), e.StateJSON); err != nil {
 			return nil, err
