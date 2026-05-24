@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
@@ -95,7 +96,7 @@ func TestWaitForConditionStartedDoesNotPassOnPreExistingExit(t *testing.T) {
 	}
 }
 
-func TestLogsMergedReturnsOpenReaderErrors(t *testing.T) {
+func TestLogsStockReturnsOpenReaderErrors(t *testing.T) {
 	want := errors.New("no retained logs")
 	svc := &Service{svc: testCmdmanSvc{
 		logs: func(context.Context, cmdman.LogsRequest) (logdriver.Reader, error) {
@@ -103,15 +104,15 @@ func TestLogsMergedReturnsOpenReaderErrors(t *testing.T) {
 		},
 	}}
 
-	err := svc.logsMerged(context.Background(), "project", []cmdmanEntry{
+	err := svc.logsStock(context.Background(), "project", []cmdmanEntry{
 		buildTestEntry("id-alpha", "alpha"),
-	}, LogsOption{}, make(chan LogMessage, 1))
+	}, LogsOption{}, time.Time{}, make(chan LogMessage, 1))
 	if !errors.Is(err, want) {
 		t.Fatalf("expected logs error %v, got %v", want, err)
 	}
 }
 
-func TestLogsMergedReturnsRecordErrors(t *testing.T) {
+func TestLogsStockReturnsRecordErrors(t *testing.T) {
 	want := errors.New("bad record")
 	records := make(chan logdriver.Record, 1)
 	records <- logdriver.Record{Err: want}
@@ -123,15 +124,74 @@ func TestLogsMergedReturnsRecordErrors(t *testing.T) {
 		},
 	}}
 
-	err := svc.logsMerged(context.Background(), "project", []cmdmanEntry{
+	err := svc.logsStock(context.Background(), "project", []cmdmanEntry{
 		buildTestEntry("id-alpha", "alpha"),
-	}, LogsOption{}, make(chan LogMessage, 1))
+	}, LogsOption{}, time.Time{}, make(chan LogMessage, 1))
 	if !errors.Is(err, want) {
 		t.Fatalf("expected record error %v, got %v", want, err)
 	}
 	if !strings.Contains(err.Error(), "alpha") {
 		t.Fatalf("expected command name in error, got: %v", err)
 	}
+}
+
+// TestLogsStockMergesByTimestamp verifies the stock phase reorders records from
+// multiple commands into a single timestamp-ordered stream using a streaming
+// k-way merge over each command's already-sorted records.
+func TestLogsStockMergesByTimestamp(t *testing.T) {
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	mk := func(offset time.Duration, line string) logdriver.Record {
+		return logdriver.Record{
+			Line: logdriver.LogLine{Time: base.Add(offset), Line: []byte(line)},
+		}
+	}
+
+	// alpha and beta each emit ascending-by-time records that interleave.
+	alpha := makeRecordReader(
+		mk(0*time.Second, "a0"),
+		mk(2*time.Second, "a2"),
+		mk(4*time.Second, "a4"),
+	)
+	beta := makeRecordReader(
+		mk(1*time.Second, "b1"),
+		mk(3*time.Second, "b3"),
+		mk(5*time.Second, "b5"),
+	)
+
+	readers := map[string]logdriver.Reader{"id-alpha": alpha, "id-beta": beta}
+	svc := &Service{svc: testCmdmanSvc{
+		logs: func(_ context.Context, req cmdman.LogsRequest) (logdriver.Reader, error) {
+			return readers[req.IDOrName], nil
+		},
+	}}
+
+	out := make(chan LogMessage, 16)
+	err := svc.logsStock(context.Background(), "project", []cmdmanEntry{
+		buildTestEntry("id-alpha", "alpha"),
+		buildTestEntry("id-beta", "beta"),
+	}, LogsOption{}, time.Time{}, out)
+	if err != nil {
+		t.Fatalf("logsStock failed: %v", err)
+	}
+	close(out)
+
+	var got []string
+	for msg := range out {
+		got = append(got, string(msg.Record.Line.Line))
+	}
+	want := []string{"a0", "b1", "a2", "b3", "a4", "b5"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("expected timestamp-ordered merge %v, got %v", want, got)
+	}
+}
+
+func makeRecordReader(recs ...logdriver.Record) testLogReader {
+	ch := make(chan logdriver.Record, len(recs))
+	for _, rec := range recs {
+		ch <- rec
+	}
+	close(ch)
+	return testLogReader{records: ch}
 }
 
 func TestListProjectsGroupsComposeCommands(t *testing.T) {

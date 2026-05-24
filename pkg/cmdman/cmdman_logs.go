@@ -53,6 +53,20 @@ func (s *Service) Logs(ctx context.Context, req LogsRequest) (logdriver.Reader, 
 		return nil, err
 	}
 
+	// When following, capture where stored logs currently end. If the storage
+	// replay yields nothing (e.g. Since=now filters out every stored record),
+	// the subscription bridge resumes from here instead of byte zero, so it
+	// does not re-emit already-stored history.
+	var followStart any
+	if req.Follow && cfg.LogDriver == store.LogDriverK8sFile {
+		end, err := k8sfile.CurrentEnd(cfg.CommandDir, opts)
+		if err != nil {
+			_ = storageReader.Close()
+			return nil, fmt.Errorf("capture follow start offset: %w", err)
+		}
+		followStart = end
+	}
+
 	readerCtx, cancel := context.WithCancel(ctx)
 	r := &serviceLogsReader{
 		cancel: cancel,
@@ -61,7 +75,7 @@ func (s *Service) Logs(ctx context.Context, req LogsRequest) (logdriver.Reader, 
 	r.wg.Go(func() {
 		defer close(r.rec)
 		defer storageReader.Close()
-		s.streamLogs(readerCtx, st, id, cfg, opts, req.Follow, storageReader, r.rec)
+		s.streamLogs(readerCtx, st, id, cfg, opts, req.Follow, storageReader, followStart, r.rec)
 	})
 	return r, nil
 }
@@ -90,11 +104,17 @@ func (s *Service) streamLogs(
 	opts map[string]string,
 	follow bool,
 	storageReader logdriver.Reader,
+	followStart any,
 	out chan<- logdriver.Record,
 ) {
 	lastOffset, ok := forwardRecords(ctx, storageReader, out)
 	if !ok || !follow {
 		return
+	}
+	// With no replayed record to anchor on, fall back to the captured end of
+	// stored logs so the bridge does not rewind to byte zero.
+	if lastOffset == nil {
+		lastOffset = followStart
 	}
 
 	state, _, _, err := st.GetCommandState(id)

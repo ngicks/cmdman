@@ -8,13 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"math"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
-	"github.com/dustin/go-humanize"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 )
 
@@ -65,11 +62,11 @@ func (Driver) NewWriter(
 	if err != nil {
 		return nil, err
 	}
-	maxSize, err := parseLogMaxSize(opts[logOptMaxSize])
+	maxSize, err := parseLogMaxSizeOption(opts)
 	if err != nil {
 		return nil, fmt.Errorf("logdriver: k8s-file: %s: %w", logOptMaxSize, err)
 	}
-	maxFile, err := parseLogMaxFile(opts[logOptMaxFile])
+	maxFile, err := parseLogMaxFileOption(opts)
 	if err != nil {
 		return nil, fmt.Errorf("logdriver: k8s-file: %s: %w", logOptMaxFile, err)
 	}
@@ -84,34 +81,6 @@ func resolvePath(dir string, opts map[string]string) (string, error) {
 		return filepath.Join(dir, DefaultLogFileName), nil
 	}
 	return "", fmt.Errorf("logdriver: k8s-file path is empty")
-}
-
-func parseLogMaxSize(value string) (int64, error) {
-	if value == "" {
-		return 0, nil
-	}
-	n, err := humanize.ParseBytes(value)
-	if err != nil {
-		return 0, fmt.Errorf("invalid size %q: %w", value, err)
-	}
-	if n > math.MaxInt64 {
-		return 0, fmt.Errorf("size %q overflows int64", value)
-	}
-	return int64(n), nil
-}
-
-func parseLogMaxFile(value string) (int, error) {
-	if value == "" || value == "0" {
-		return 0, nil
-	}
-	n, err := strconv.Atoi(value)
-	if err != nil {
-		return 0, fmt.Errorf("invalid count %q: %w", value, err)
-	}
-	if n < 1 {
-		return 0, fmt.Errorf("count %q must be >= 1", value)
-	}
-	return n, nil
 }
 
 // Writer writes podman's k8s-file format, where each entry is:

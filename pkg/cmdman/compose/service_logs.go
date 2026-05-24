@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"sync"
 	"time"
 
@@ -28,6 +29,7 @@ type LogsOption struct {
 	// Since excludes log records before this time (zero = no lower bound).
 	Since time.Time
 	// Until excludes log records after this time (zero = no upper bound).
+	// It is ignored when Follow is set, where the stock/live boundary is "now".
 	Until time.Time
 	// Head returns only the first N records per command (0 = no limit).
 	Head int
@@ -53,12 +55,16 @@ type LogMessage struct {
 // a single terminal error (nil on success) once the stream ends. Cancel ctx to
 // stop following — both channels are then closed.
 //
-// When Follow=false, each command's records are read, merged in timestamp
-// order, then sent. When Follow=true, each command's reader runs in its own
-// goroutine and messages are sent as they arrive; cross-command ordering is not
-// stabilized (resolved-decision 2). Per resolved-decision 15, an empty project
-// target set ends with a nil error. Per resolved-decision 21, follow-mode
-// errors are aggregated and all commands are attempted.
+// Output is produced in two phases. The stock phase reads each command's stored
+// records up to "now", merges them across commands in timestamp order, and
+// emits them; because stored logs are finite they can be safely reordered. When
+// Follow=true a live phase then tails each command from "now" onward and emits
+// records as they arrive — live records cannot be reordered across commands, so
+// only the stock prefix is timestamp-ordered.
+//
+// Per resolved-decision 15, an empty project target set ends with a nil error.
+// Per resolved-decision 21, errors are aggregated and all commands are
+// attempted.
 func (s *Service) Logs(
 	ctx context.Context,
 	selection ProjectSelection,
@@ -97,35 +103,59 @@ func (s *Service) Logs(
 			return
 		}
 
+		// "now" splits finite stored logs (the stock, reorderable) from the live
+		// tail (not reorderable). Capture it once so the two phases share a
+		// boundary with no gap and no overlap.
+		now := time.Now()
+		stockUntil := opts.Until
 		if opts.Follow {
-			errc <- s.logsFollow(ctx, selection.Project, entries, opts, out)
-			return
+			stockUntil = now
 		}
-		errc <- s.logsMerged(ctx, selection.Project, entries, opts, out)
+
+		var errs []error
+		if err := s.logsStock(ctx, selection.Project, entries, opts, stockUntil, out); err != nil {
+			errs = append(errs, err)
+		}
+		// Since is inclusive, so start the live tail one tick past "now" to avoid
+		// re-emitting a record that landed exactly at the boundary.
+		if opts.Follow && ctx.Err() == nil {
+			if err := s.logsLive(ctx, selection.Project, entries, now.Add(time.Nanosecond), out); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		errc <- errors.Join(errs...)
 	}()
 
 	return out, errc
 }
 
-// logsMerged reads all per-command records, merges by timestamp, and sends
-// prefixable messages on out. Open/read/close errors are aggregated and
-// returned.
-func (s *Service) logsMerged(
+// logsStock reads each command's stored records up to until, adapts every
+// reader's record channel into a timestamp-ordered iterator, and merges them
+// across commands with hiter.MergeFunc. Each command's stored records are
+// already time-ordered, so a streaming k-way merge suffices — no full
+// in-memory sort. Open/read/close errors are aggregated and returned.
+func (s *Service) logsStock(
 	ctx context.Context,
 	project string,
 	entries []cmdmanEntry,
 	opts LogsOption,
+	until time.Time,
 	out chan<- LogMessage,
-) error {
+) (retErr error) {
 	type namedRecord struct {
 		cmdName string
 		rec     logdriver.Record
 	}
 
-	// Collect per-command record slices.
-	allSeqs := make([][]namedRecord, 0, len(entries))
-	var errs []error
+	var (
+		errs    []error
+		seqs    []iter.Seq[namedRecord]
+		readers []logdriver.Reader
+	)
 
+	// Open one non-follow reader per command. Readers stay open until the merge
+	// below drains them, so they are closed in a deferred sweep rather than per
+	// command.
 	for _, entry := range entries {
 		cmdName := ""
 		if entry.ConfigJSON != nil {
@@ -136,7 +166,7 @@ func (s *Service) logsMerged(
 			IDOrName: entry.ID,
 			Follow:   false,
 			Since:    opts.Since,
-			Until:    opts.Until,
+			Until:    until,
 			Head:     opts.Head,
 			Tail:     opts.Tail,
 		})
@@ -153,41 +183,36 @@ func (s *Service) logsMerged(
 			)
 			continue
 		}
-
-		var recs []namedRecord
-		for rec := range reader.Records() {
-			recs = append(recs, namedRecord{cmdName: cmdName, rec: rec})
-		}
-		if err := reader.Close(); err != nil {
-			errs = append(
-				errs,
-				fmt.Errorf("close logs for command %q (%s): %w", cmdName, entry.ID, err),
-			)
-		}
-		allSeqs = append(allSeqs, recs)
+		readers = append(readers, reader)
+		seqs = append(seqs, hiter.Map(
+			func(rec logdriver.Record) namedRecord {
+				return namedRecord{cmdName: cmdName, rec: rec}
+			},
+			hiter.Chan(ctx, reader.Records()),
+		))
 	}
 
-	if len(allSeqs) == 0 {
+	defer func() {
+		for _, reader := range readers {
+			if err := reader.Close(); err != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("close logs: %w", err))
+			}
+		}
+	}()
+
+	if len(seqs) == 0 {
 		return errors.Join(errs...)
 	}
 
-	// Build a merged iterator over all record slices, ordered by timestamp.
 	cmp := func(a, b namedRecord) int {
-		ta := a.rec.Line.Time
-		tb := b.rec.Line.Time
-		if ta.Before(tb) {
-			return -1
-		}
-		if ta.After(tb) {
-			return 1
-		}
-		return 0
+		return a.rec.Line.Time.Compare(b.rec.Line.Time)
 	}
 
-	// Fold multiple slices into a single merged sequence using hiter.MergeFunc.
-	merged := hiter.MergeSortFunc(allSeqs[0], cmp)
-	for _, seq := range allSeqs[1:] {
-		merged = hiter.MergeFunc(cmp, merged, hiter.MergeSortFunc(seq, cmp))
+	// Fold the per-command iterators into one timestamp-ordered sequence. The
+	// inputs are already sorted, so MergeFunc reorders across commands lazily.
+	merged := seqs[0]
+	for _, seq := range seqs[1:] {
+		merged = hiter.MergeFunc(cmp, merged, seq)
 	}
 
 	for nr := range merged {
@@ -209,14 +234,15 @@ func (s *Service) logsMerged(
 	return errors.Join(errs...)
 }
 
-// logsFollow opens per-command readers concurrently and sends prefixable
-// messages on out as they arrive. All goroutines are attempted; errors are
+// logsLive opens per-command follow readers concurrently from since and sends
+// records on out as they arrive. Cross-command ordering is not stabilized: live
+// records cannot be reordered. All goroutines are attempted; errors are
 // aggregated.
-func (s *Service) logsFollow(
+func (s *Service) logsLive(
 	ctx context.Context,
 	project string,
 	entries []cmdmanEntry,
-	opts LogsOption,
+	since time.Time,
 	out chan<- LogMessage,
 ) error {
 	var (
@@ -243,10 +269,7 @@ func (s *Service) logsFollow(
 			reader, err := s.svc.Logs(egCtx, cmdman.LogsRequest{
 				IDOrName: id,
 				Follow:   true,
-				Since:    opts.Since,
-				Until:    opts.Until,
-				Head:     opts.Head,
-				Tail:     opts.Tail,
+				Since:    since,
 			})
 			if err != nil {
 				contextkey.ValueSlogLoggerDefault(ctx).Warn("compose logs: open reader failed",

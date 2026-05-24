@@ -49,6 +49,28 @@ func TestReaderTailCrossesRotatedFiles(t *testing.T) {
 	assert.Equal(t, readK8sLines(t, r), "one\ntwo\nactive\n")
 }
 
+func TestDriverNewReaderUsesDefaultMaxFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "console.log")
+	writeK8sFixture(t, path,
+		"2023-08-07T19:56:38.000000000Z stdout F active\n",
+	)
+	writeK8sFixture(t, path+".1",
+		"2023-08-07T19:56:37.000000000Z stdout F one\n"+
+			"2023-08-07T19:56:37.500000000Z stdout R -\n",
+	)
+	writeK8sFixture(t, path+".2",
+		"2023-08-07T19:56:36.000000000Z stdout F two\n"+
+			"2023-08-07T19:56:36.500000000Z stdout R -\n",
+	)
+
+	r, err := Driver{}.NewReader(context.Background(), dir, nil, logdriver.ReaderOption{})
+	assert.NilError(t, err)
+	defer r.Close()
+
+	assert.Equal(t, readK8sLines(t, r), "two\none\nactive\n")
+}
+
 func TestReaderSinceSelectsArchive(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "console.log")

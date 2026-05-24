@@ -3,8 +3,10 @@ package k8sfile
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"sync"
 	"time"
@@ -26,7 +28,7 @@ func (Driver) NewReader(
 	if err != nil {
 		return nil, err
 	}
-	maxFile, err := parseLogMaxFile(opts[logOptMaxFile])
+	maxFile, err := parseLogMaxFileOption(opts)
 	if err != nil {
 		return nil, fmt.Errorf("logdriver: k8s-file: %s: %w", logOptMaxFile, err)
 	}
@@ -137,6 +139,26 @@ type staticReader struct {
 
 func (r staticReader) Records() <-chan logdriver.Record { return r.rec }
 func (r staticReader) Close() error                     { return nil }
+
+// CurrentEnd returns the offset just past the last byte currently stored in the
+// active log file. A follower whose Since/Until/Tail filter excludes every
+// stored record resumes from here, so the storage/subscription bridge does not
+// re-read already-stored history from byte zero. It reports a zero Offset when
+// no log file exists yet.
+func CurrentEnd(dir string, opts map[string]string) (Offset, error) {
+	path, err := resolvePath(dir, opts)
+	if err != nil {
+		return Offset{}, err
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return Offset{}, nil
+		}
+		return Offset{}, err
+	}
+	return Offset{Path: path, Bytes: fi.Size()}, nil
+}
 
 func closeUnselectedSpans(spans []fileSpan, selected []readSpan) {
 	keep := make(map[*os.File]struct{}, len(selected))

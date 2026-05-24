@@ -738,6 +738,20 @@ commands:
 `, name)
 }
 
+// composeFollowLogYAML defines two commands that each emit a stored line, go
+// quiet, then emit a live line and idle. The quiet window after the stored line
+// is the case that exercises the stock/live split: the follow starts while both
+// commands are silent, so the live phase must not re-emit the stored lines.
+func composeFollowLogYAML(name string) string {
+	return fmt.Sprintf(`name: %s
+commands:
+  alpha:
+    args: [sh, -c, "echo alpha-stock; sleep 1; echo alpha-live; sleep 60"]
+  beta:
+    args: [sh, -c, "echo beta-stock; sleep 1; echo beta-live; sleep 60"]
+`, name)
+}
+
 func TestComposeSignal(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnv(t)
@@ -857,13 +871,62 @@ func TestComposeLogsMerged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose logs failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
-	if !strings.Contains(stdout, " alpha|line-from-alpha") ||
-		!strings.Contains(stdout, " beta|line-from-beta") {
+	if !strings.Contains(stdout, " alpha |line-from-alpha") ||
+		!strings.Contains(stdout, " beta |line-from-beta") {
 		t.Fatalf("expected timestamped per-command prefixes in merged log output; got:\n%s", stdout)
 	}
 	if !strings.Contains(stdout, "line-from-alpha") ||
 		!strings.Contains(stdout, "line-from-beta") {
 		t.Fatalf("expected both commands' log lines; got:\n%s", stdout)
+	}
+}
+
+// TestComposeLogsFollowStockThenLive checks that `compose logs --follow` emits
+// the merged stored logs once and then tails live output. It guards the
+// regression where the storage/subscription bridge re-read stored logs from
+// byte zero when the live phase's Since filter excluded every stored record
+// (the commands are quiet when the follow begins), duplicating the stock.
+func TestComposeLogsFollowStockThenLive(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-logs-follow"
+	writeComposeFile(t, wd, composeFollowLogYAML(project))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	composePath := filepath.Join(wd, "cmd-compose.yaml")
+	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up"); err != nil {
+		t.Fatalf("compose up failed: %v", err)
+	}
+
+	for _, e := range env.lsJSON(ctx,
+		"-l", "cmdman.compose.workdir="+wd,
+		"-l", "cmdman.compose.project="+project,
+	) {
+		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
+	}
+	// Both stored lines must be persisted before following, so the follow starts
+	// while the commands are quiet.
+	waitUntil(t, 5*time.Second, func() bool {
+		out, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "logs")
+		return err == nil &&
+			strings.Contains(out, "alpha-stock") &&
+			strings.Contains(out, "beta-stock")
+	}, "stored lines persisted for both commands")
+
+	followCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+	stdout, _, _ := env.exec(followCtx, "compose", "--workdir", wd, "-f", composePath, "logs", "--follow")
+
+	for _, line := range []string{"alpha-stock", "beta-stock"} {
+		if got := strings.Count(stdout, line); got != 1 {
+			t.Fatalf("expected stored line %q exactly once (must not be duplicated by the live bridge), got %d:\n%s", line, got, stdout)
+		}
+	}
+	for _, line := range []string{"alpha-live", "beta-live"} {
+		if !strings.Contains(stdout, line) {
+			t.Fatalf("expected live line %q while following:\n%s", line, stdout)
+		}
 	}
 }
 
