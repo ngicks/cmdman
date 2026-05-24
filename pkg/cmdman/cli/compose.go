@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/compose"
@@ -40,6 +41,49 @@ func PrintComposeLogs(out, errOut io.Writer, msgs <-chan compose.LogMessage) err
 		}
 	}
 	return nil
+}
+
+// PrintComposeProjects writes one row per discovered compose project.
+func PrintComposeProjects(out io.Writer, summaries []compose.ProjectSummary) {
+	fmt.Fprintln(out, "PROJECT\tCOMMANDS\tRUNNING\tEXITED\tFAILED\tWORKDIR\tFILE")
+	for _, summary := range summaries {
+		fmt.Fprintf(
+			out,
+			"%s\t%d\t%d\t%d\t%d\t%s\t%s\n",
+			summary.Project,
+			summary.Commands,
+			summary.Running,
+			summary.Exited,
+			summary.Failed,
+			summary.WorkDir,
+			summary.ComposeFile,
+		)
+	}
+}
+
+// PrintComposePs writes one row per command in a compose project.
+func PrintComposePs(out io.Writer, statuses []compose.CommandStatus) {
+	fmt.Fprintln(out, "COMMAND\tID\tNAME\tSTATE\tEXIT CODE\tARGV")
+	for _, status := range statuses {
+		exitCode := "-"
+		if status.ExitCode != nil {
+			exitCode = fmt.Sprintf("%d", *status.ExitCode)
+		}
+		id := status.ID
+		if len(id) > 12 {
+			id = id[:12]
+		}
+		fmt.Fprintf(
+			out,
+			"%s\t%s\t%s\t%s\t%s\t%s\n",
+			status.Command,
+			id,
+			status.Name,
+			status.State,
+			exitCode,
+			strings.Join(status.Argv, " "),
+		)
+	}
 }
 
 func formatLogTime(t time.Time) string {

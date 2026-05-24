@@ -48,6 +48,8 @@ func composeCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	pf.StringVar(&flags.WorkDir, "workdir", "", "Override the effective work directory")
 
 	composeCreateCmd(cmd, rootCfg, &flags)
+	composeLsCmd(cmd, rootCfg)
+	composePsCmd(cmd, rootCfg, &flags)
 	composeUpCmd(cmd, rootCfg, &flags)
 	composeStartCmd(cmd, rootCfg, &flags)
 	composeStopCmd(cmd, rootCfg, &flags)

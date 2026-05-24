@@ -1,0 +1,48 @@
+package commands
+
+import (
+	"github.com/spf13/cobra"
+
+	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/pkg/cmdman/cli"
+	"github.com/ngicks/cmdman/pkg/cmdman/compose"
+)
+
+func composePsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+	cmd := &cobra.Command{
+		Use:   "ps [COMMAND...]",
+		Short: "List commands in a compose project",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runComposePs(cmd, rootCfg, cf, args)
+		},
+	}
+
+	parent.AddCommand(cmd)
+}
+
+func runComposePs(
+	cmd *cobra.Command,
+	rootCfg *cmdman.CmdmanConfig,
+	cf *composeFlags,
+	commandNames []string,
+) error {
+	selection, err := compose.LoadOrProject(cf.normalizeOpts())
+	if err != nil {
+		return err
+	}
+
+	svc, err := cmdmanService(rootCfg)
+	if err != nil {
+		return err
+	}
+	defer svc.Close()
+
+	statuses, err := compose.NewService(svc).Ps(cmd.Context(), selection, commandNames)
+	if err != nil {
+		return err
+	}
+
+	cli.PrintComposePs(cmd.OutOrStdout(), statuses)
+	return nil
+}

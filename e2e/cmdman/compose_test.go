@@ -97,6 +97,49 @@ func TestComposeCreate(t *testing.T) {
 	}
 }
 
+func TestComposeLsAndPs(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-ls-ps"
+	writeComposeFile(t, wd, composeBasicYAML(project))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	composePath := filepath.Join(wd, "cmd-compose.yaml")
+	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up"); err != nil {
+		t.Fatalf("compose up failed: %v", err)
+	}
+	for _, name := range []string{"alpha", "beta"} {
+		for _, e := range env.lsJSON(ctx,
+			"-l", "cmdman.compose.command="+name,
+			"-l", "cmdman.compose.project="+project,
+		) {
+			env.waitForState(ctx, e["ID"].(string), "exited", 5*time.Second)
+		}
+	}
+
+	lsOut, lsErr, err := env.exec(ctx, "compose", "ls")
+	if err != nil {
+		t.Fatalf("compose ls failed: %v\nstdout:\n%s\nstderr:\n%s", err, lsOut, lsErr)
+	}
+	if !strings.Contains(lsOut, "PROJECT\tCOMMANDS") ||
+		!strings.Contains(lsOut, project) ||
+		!strings.Contains(lsOut, wd) {
+		t.Fatalf("expected compose project in ls output; got:\n%s", lsOut)
+	}
+
+	psOut, psErr, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "ps")
+	if err != nil {
+		t.Fatalf("compose ps failed: %v\nstdout:\n%s\nstderr:\n%s", err, psOut, psErr)
+	}
+	if !strings.Contains(psOut, "COMMAND\tID") ||
+		!strings.Contains(psOut, "alpha") ||
+		!strings.Contains(psOut, "beta") ||
+		!strings.Contains(psOut, "exited") {
+		t.Fatalf("expected compose commands in ps output; got:\n%s", psOut)
+	}
+}
+
 func TestComposeUpIdempotent(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnv(t)
