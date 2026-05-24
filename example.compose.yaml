@@ -1,0 +1,32 @@
+name: cmdman-compose-example
+
+# Demonstrates cmdman compose: independent commands run concurrently, ${VAR}
+# interpolation, and dependency-ordered (topologically sorted) startup via `after`.
+commands:
+  # yay1: the simplest command — just prints.
+  yay1:
+    args:
+      - echo
+      - yay
+
+  # yay2: demonstrates interpolation from env — the env: block defines SLEEP_SECS
+  # (itself defaulting via ${INPUT_SLEEP:-3}), and args interpolate ${SLEEP_SECS}.
+  # It sleeps ~3s so dependents must wait for it to complete.
+  yay2:
+    env:
+      - SLEEP_SECS=${INPUT_SLEEP:-3}
+    args:
+      - sleep
+      - ${SLEEP_SECS}
+
+  # nay: depends on BOTH yay1 and yay2. Topological ordering puts nay in a later
+  # layer, so it starts only after both complete — waiting ~3s for yay2's sleep.
+  nay:
+    args:
+      - echo
+      - nay
+    after:
+      yay1:
+        condition: completed
+      yay2:
+        condition: completed
