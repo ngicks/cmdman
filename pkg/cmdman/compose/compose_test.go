@@ -825,3 +825,17 @@ func TestLoadOrProjectExplicitFileErrorDoesNotFallBack(t *testing.T) {
 		t.Fatalf("expected error to name explicit file, got: %v", err)
 	}
 }
+
+func TestLoadOrProjectByCwdWithoutFileOrProjectName(t *testing.T) {
+	t.Chdir(t.TempDir())
+	cwd, err := os.Getwd()
+	assert.NilError(t, err)
+
+	// No compose file and no --project-name: resolve by cwd (workdir) instead of
+	// erroring, with an empty project that matches every command in the workdir.
+	sel, err := compose.LoadOrProject(compose.NormalizeOpts{})
+	assert.NilError(t, err)
+	assert.Assert(t, sel.Spec == nil)
+	assert.Equal(t, sel.Project, "")
+	assert.Equal(t, sel.WorkDir, filepath.Clean(cwd))
+}

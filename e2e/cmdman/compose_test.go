@@ -777,8 +777,9 @@ func TestComposeLogsMerged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose logs failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "[alpha]") || !strings.Contains(stdout, "[beta]") {
-		t.Fatalf("expected per-command prefixes in merged log output; got:\n%s", stdout)
+	if !strings.Contains(stdout, " alpha|line-from-alpha") ||
+		!strings.Contains(stdout, " beta|line-from-beta") {
+		t.Fatalf("expected timestamped per-command prefixes in merged log output; got:\n%s", stdout)
 	}
 	if !strings.Contains(stdout, "line-from-alpha") ||
 		!strings.Contains(stdout, "line-from-beta") {

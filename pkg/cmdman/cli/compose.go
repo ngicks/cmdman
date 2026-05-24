@@ -3,14 +3,16 @@ package cli
 import (
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/compose"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 )
 
 // PrintComposeLogs consumes log messages from compose.Service.Logs and writes
-// each line to out (stdout) or errOut (stderr) by stream, prefixed with the
-// originating compose command name. It returns the first write error.
+// each line to out (stdout) or errOut (stderr) by stream, prefixed with the log
+// timestamp and originating compose command name. It returns the first write
+// error.
 func PrintComposeLogs(out, errOut io.Writer, msgs <-chan compose.LogMessage) error {
 	for msg := range msgs {
 		w := out
@@ -21,7 +23,13 @@ func PrintComposeLogs(out, errOut io.Writer, msgs <-chan compose.LogMessage) err
 			continue
 		}
 		line := msg.Record.Line.Line
-		if _, err := fmt.Fprintf(w, "[%s] %s", msg.Command, line); err != nil {
+		if _, err := fmt.Fprintf(
+			w,
+			"%s %s |%s",
+			formatLogTime(msg.Record.Line.Time),
+			msg.Command,
+			line,
+		); err != nil {
 			return fmt.Errorf("write logs for command %q: %w", msg.Command, err)
 		}
 		// Add a newline when the line doesn't already end with one (partial lines).
@@ -32,6 +40,13 @@ func PrintComposeLogs(out, errOut io.Writer, msgs <-chan compose.LogMessage) err
 		}
 	}
 	return nil
+}
+
+func formatLogTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339Nano)
 }
 
 // printStatusLine writes a left-aligned status column followed by a command name.

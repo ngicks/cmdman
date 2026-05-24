@@ -74,10 +74,7 @@ func (s *Service) startWithoutSpec(
 ) (*StartResult, error) {
 	entries, err := s.svc.List(ctx, cmdman.ListRequest{
 		AllStates: true,
-		Labels: map[string]string{
-			LabelWorkdir: selection.WorkDir,
-			LabelProject: selection.Project,
-		},
+		Labels:    projectLabels(selection.WorkDir, selection.Project),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list project commands: %w", err)

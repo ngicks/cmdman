@@ -13,15 +13,16 @@ import (
 // cmdmanEntry is a type alias to avoid importing store throughout the service files.
 type cmdmanEntry = store.CommandEntry
 
-// ProjectSelection describes how the target project was resolved.
-// Either Spec (compose file loaded) or just WorkDir+Project (project-name-only mode).
+// ProjectSelection describes how the target project was resolved: a loaded Spec
+// (compose file), or WorkDir plus an optional Project. An empty Project selects
+// every command in WorkDir (cwd-based query).
 type ProjectSelection struct {
 	// Spec is non-nil when a compose file was loaded. When set, DAG ordering is
 	// available for stop/restart.
 	Spec *ComposeSpec
 	// WorkDir is the effective work directory (resolved: --workdir > YAML work_dir > CWD).
 	WorkDir string
-	// Project is the effective project name.
+	// Project is the effective project name, or "" to match every command in WorkDir.
 	Project string
 }
 
@@ -110,14 +111,16 @@ func reverseLayers(layers [][]string) {
 }
 
 // LoadOrProject resolves the project selection for operations that do not
-// require a compose file (stop, restart, down).
+// require a compose file (stop, restart, down, ...).
 //
 // Resolution order:
 //  1. If a compose file is discoverable (explicit File or default file names in
 //     CWD), load and normalize it into a ProjectSelection with Spec set.
-//  2. Otherwise, if ProjectName is set, build a project-only selection using
-//     WorkDir or the process CWD as the effective work directory.
-//  3. Neither returns a clear error.
+//  2. An explicit --file that fails to load is an error; there is no fallback.
+//  3. Otherwise build a selection scoped to the working directory (--workdir or
+//     the process CWD). --project-name narrows it; when absent the selection
+//     matches every command in that workdir, so these operations work from the
+//     project directory without -f or --project-name.
 func LoadOrProject(opts NormalizeOpts) (ProjectSelection, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -140,13 +143,9 @@ func LoadOrProject(opts NormalizeOpts) (ProjectSelection, error) {
 		return ProjectSelection{}, discoverErr
 	}
 
-	if opts.ProjectName == "" {
-		return ProjectSelection{}, fmt.Errorf(
-			"neither a compose file nor --project-name is available; " +
-				"pass -f <file> or --project-name <name>",
-		)
-	}
-
+	// No compose file: query by working directory. --project-name narrows the
+	// selection; when empty it matches every command in this workdir (cwd), which
+	// is how down/stop/... work from the project directory without -f.
 	workDir := opts.WorkDir
 	if workDir == "" {
 		workDir = cwd
@@ -161,4 +160,16 @@ func LoadOrProject(opts NormalizeOpts) (ProjectSelection, error) {
 		WorkDir: workDir,
 		Project: opts.ProjectName,
 	}, nil
+}
+
+// projectLabels builds the List label filter for a project selection. WorkDir
+// always scopes the query; the project label is included only when known. An
+// empty project therefore matches every command in the workdir — the cwd-based
+// query used when no compose file or --project-name is given.
+func projectLabels(workDir, project string) map[string]string {
+	labels := map[string]string{LabelWorkdir: workDir}
+	if project != "" {
+		labels[LabelProject] = project
+	}
+	return labels
 }
