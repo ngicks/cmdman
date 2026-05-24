@@ -107,13 +107,13 @@ instead of guessing across all compose-managed commands.
 Conceptual Go shape:
 
 ```go
-type ComposeSpec struct {
+type RawComposeSpec struct {
 	Name     string
 	WorkDir  string
 	Commands map[string]Command // Raw YAML shape.
 }
 
-type NormalizedComposeSpec struct {
+type ComposeSpec struct {
 	Project  string
 	WorkDir  string
 	Commands []Command
