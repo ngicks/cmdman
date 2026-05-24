@@ -61,7 +61,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 	if err := store.WriteCommandConfig(cfg.CommandDir, cfg); err != nil {
 		return nil, fmt.Errorf("materialize config: %w", err)
 	}
-	if err := st.InsertCommandState(id, model.StateCreated, &model.CommandStateJSON{}); err != nil {
+	if err := st.InsertCommandState(id, model.StateCreated, &model.CommandState{}); err != nil {
 		return nil, fmt.Errorf("insert state: %w", err)
 	}
 
@@ -76,7 +76,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 	return &CreateResult{ID: id, Name: req.Name}, nil
 }
 
-func (s *Service) buildCommandConfig(req CreateRequest) *model.CommandConfigJSON {
+func (s *Service) buildCommandConfig(req CreateRequest) *model.CommandConfig {
 	restartPolicy := req.RestartPolicy
 	if restartPolicy == "" {
 		restartPolicy = model.RestartPolicyNo
@@ -116,7 +116,7 @@ func (s *Service) buildCommandConfig(req CreateRequest) *model.CommandConfigJSON
 		annotations = map[string]string{store.AnnotationAutoRemove: "true"}
 	}
 
-	return &model.CommandConfigJSON{
+	return &model.CommandConfig{
 		Argv:            append([]string(nil), req.Argv...),
 		Dir:             dir,
 		Env:             env,

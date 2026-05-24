@@ -42,7 +42,7 @@ func TestRenderEntriesExitCode(t *testing.T) {
 				Name:     "test",
 				State:    model.StateExited,
 				ExitCode: tt.exitCode,
-				ConfigJSON: &model.CommandConfigJSON{
+				ConfigJSON: &model.CommandConfig{
 					Argv: []string{"/bin/true"},
 				},
 			}}, false, "")

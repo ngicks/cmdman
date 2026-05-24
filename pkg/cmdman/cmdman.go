@@ -165,7 +165,7 @@ func (s *Service) connectMonitorByName(
 
 func (s *Service) connectMonitor(
 	_ context.Context,
-	state *model.CommandStateJSON,
+	state *model.CommandState,
 ) (conn *grpc.ClientConn, err error) {
 	// Hide transport details because we may add other transports later
 

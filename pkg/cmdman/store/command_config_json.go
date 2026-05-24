@@ -12,7 +12,7 @@ func CommandConfigPath(commandDir string) string {
 	return filepath.Join(commandDir, ConfigFileName)
 }
 
-func WriteCommandConfig(commandDir string, cfg *model.CommandConfigJSON) error {
+func WriteCommandConfig(commandDir string, cfg *model.CommandConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -26,12 +26,12 @@ func WriteCommandConfig(commandDir string, cfg *model.CommandConfigJSON) error {
 	return os.WriteFile(CommandConfigPath(commandDir), data, 0o644)
 }
 
-func ReadCommandConfig(commandDir string) (*model.CommandConfigJSON, error) {
+func ReadCommandConfig(commandDir string) (*model.CommandConfig, error) {
 	data, err := os.ReadFile(CommandConfigPath(commandDir))
 	if err != nil {
 		return nil, err
 	}
-	var cfg model.CommandConfigJSON
+	var cfg model.CommandConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
@@ -42,6 +42,6 @@ func ReadCommandConfig(commandDir string) (*model.CommandConfigJSON, error) {
 	return &cfg, nil
 }
 
-func backfillCommandConfigDefaults(cfg *model.CommandConfigJSON) {
+func backfillCommandConfigDefaults(cfg *model.CommandConfig) {
 	model.BackfillCommandConfigDefaults(cfg)
 }

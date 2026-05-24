@@ -38,7 +38,7 @@ func TestServiceLogsFollowNoDuplicatesAcrossStorageAndLive(t *testing.T) {
 	id := "test-logs-follow-bridge"
 	commandDir, err := appCfg.CommandDir(id)
 	assert.NilError(t, err)
-	cfg := &model.CommandConfigJSON{
+	cfg := &model.CommandConfig{
 		Argv: []string{"/bin/sh", "-c", strings.Join([]string{
 			"i=1",
 			"while [ $i -le 20 ]; do",
@@ -58,7 +58,7 @@ func TestServiceLogsFollowNoDuplicatesAcrossStorageAndLive(t *testing.T) {
 
 	assert.NilError(t, st.InsertCommandConfig(id, "logs-follow-bridge", cfg))
 	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
-	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandStateJSON{}))
+	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandState{}))
 	assert.NilError(t, st.Close())
 
 	monitorCtx, stopMonitor := context.WithCancel(context.Background())

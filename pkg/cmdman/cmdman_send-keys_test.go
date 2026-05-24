@@ -110,7 +110,7 @@ func TestServiceSendKeys(t *testing.T) {
 	id := "test-send-keys"
 	commandDir, err := appCfg.CommandDir(id)
 	assert.NilError(t, err)
-	cfg := &model.CommandConfigJSON{
+	cfg := &model.CommandConfig{
 		Argv: []string{
 			"/bin/sh",
 			"-c",
@@ -127,7 +127,7 @@ func TestServiceSendKeys(t *testing.T) {
 
 	assert.NilError(t, st.InsertCommandConfig(id, "send-keys", cfg))
 	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
-	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandStateJSON{}))
+	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandState{}))
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 

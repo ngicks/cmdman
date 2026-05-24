@@ -805,7 +805,7 @@ func buildExistingEntry(id, name string, labels map[string]string) store.Command
 		ID:    id,
 		Name:  name,
 		State: "stopped",
-		ConfigJSON: &model.CommandConfigJSON{
+		ConfigJSON: &model.CommandConfig{
 			Argv:   []string{"echo", "hello"},
 			Labels: labels,
 		},

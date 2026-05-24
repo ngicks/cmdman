@@ -8,8 +8,8 @@ import (
 	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
-// CommandConfigJSON is the canonical command configuration stored in CommandConfig.JSON.
-type CommandConfigJSON struct {
+// CommandConfig is the canonical command configuration stored in CommandConfig.JSON.
+type CommandConfig struct {
 	// Argv is the command and its arguments.
 	Argv []string `json:"argv"`
 	// Dir is the working directory for the command.
@@ -37,8 +37,8 @@ type CommandConfigJSON struct {
 	CommandDir string `json:"command_dir"`
 }
 
-// CommandStateJSON stores mutable runtime fields in CommandState.JSON.
-type CommandStateJSON struct {
+// CommandState stores mutable runtime fields in CommandState.JSON.
+type CommandState struct {
 	// MonitorPID is the PID of the monitor process.
 	MonitorPID int `json:"monitor_pid,omitempty"`
 	// SocketPath is the Unix socket path for the monitor gRPC server.
@@ -54,7 +54,7 @@ type CommandStateJSON struct {
 }
 
 // Validate rejects incomplete command configs so runtime code can assume values are present.
-func (c *CommandConfigJSON) Validate() error {
+func (c *CommandConfig) Validate() error {
 	if err := c.ValidateCreate(); err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func (c *CommandConfigJSON) Validate() error {
 }
 
 // ValidateCreate validates caller-supplied config before derived fields are filled in.
-func (c *CommandConfigJSON) ValidateCreate() error {
+func (c *CommandConfig) ValidateCreate() error {
 	if c == nil {
 		return errors.New("command config is nil")
 	}
@@ -106,7 +106,7 @@ func (c *CommandConfigJSON) ValidateCreate() error {
 // BackfillCommandConfigDefaults populates fields that may be missing from
 // command configs persisted before they were introduced. It only fills
 // fields that are unambiguously equivalent to the old behavior.
-func BackfillCommandConfigDefaults(cfg *CommandConfigJSON) {
+func BackfillCommandConfigDefaults(cfg *CommandConfig) {
 	if cfg.LogDriver == "" {
 		cfg.LogDriver = DefaultLogDriver
 	}

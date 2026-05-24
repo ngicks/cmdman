@@ -205,9 +205,30 @@ func TestListProjectsGroupsComposeCommands(t *testing.T) {
 				t.Fatalf("expected compose label filter, got %#v", req.Labels)
 			}
 			return []store.CommandEntry{
-				buildTestProjectEntry("id-1", "api", "project-a", "/tmp/a", "/tmp/a/cmd-compose.yaml", model.StateRunning),
-				buildTestProjectEntry("id-2", "worker", "project-a", "/tmp/a", "/tmp/a/cmd-compose.yaml", model.StateExited),
-				buildTestProjectEntry("id-3", "api", "project-b", "/tmp/b", "/tmp/b/cmd-compose.yaml", model.StateFailed),
+				buildTestProjectEntry(
+					"id-1",
+					"api",
+					"project-a",
+					"/tmp/a",
+					"/tmp/a/cmd-compose.yaml",
+					model.StateRunning,
+				),
+				buildTestProjectEntry(
+					"id-2",
+					"worker",
+					"project-a",
+					"/tmp/a",
+					"/tmp/a/cmd-compose.yaml",
+					model.StateExited,
+				),
+				buildTestProjectEntry(
+					"id-3",
+					"api",
+					"project-b",
+					"/tmp/b",
+					"/tmp/b/cmd-compose.yaml",
+					model.StateFailed,
+				),
 			}, nil
 		},
 	}}
@@ -235,7 +256,7 @@ func TestListProjectsGroupsComposeCommands(t *testing.T) {
 func buildTestEntry(id, command string) store.CommandEntry {
 	return store.CommandEntry{
 		ID: id,
-		ConfigJSON: &model.CommandConfigJSON{
+		ConfigJSON: &model.CommandConfig{
 			Labels: map[string]string{LabelCommand: command},
 		},
 	}
@@ -247,7 +268,7 @@ func buildTestProjectEntry(
 	return store.CommandEntry{
 		ID:    id,
 		State: state,
-		ConfigJSON: &model.CommandConfigJSON{
+		ConfigJSON: &model.CommandConfig{
 			Labels: map[string]string{
 				LabelCommand: command,
 				LabelProject: project,

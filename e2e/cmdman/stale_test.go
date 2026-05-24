@@ -74,7 +74,7 @@ func TestStale_AutoRemoveOnStale(t *testing.T) {
 
 	// Create a fake command that looks running but has a dead PID.
 	id := "stale-auto-rm-test-id"
-	cfg := &model.CommandConfigJSON{
+	cfg := &model.CommandConfig{
 		Argv:            []string{"/bin/sh", "-c", "echo fake"},
 		Dir:             env.dataHome,
 		Env:             os.Environ(),
@@ -85,7 +85,7 @@ func TestStale_AutoRemoveOnStale(t *testing.T) {
 		CommandDir:      filepath.Join(env.dataHome, "commands", id),
 	}
 	st.InsertCommandConfig(id, "stale-auto-rm", cfg)
-	st.InsertCommandState(id, model.StateRunning, &model.CommandStateJSON{
+	st.InsertCommandState(id, model.StateRunning, &model.CommandState{
 		MonitorPID: 99999999, // A PID that is almost certainly not alive.
 	})
 	st.Close()

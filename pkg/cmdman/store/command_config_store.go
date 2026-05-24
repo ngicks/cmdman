@@ -10,7 +10,7 @@ import (
 )
 
 // InsertCommandConfig inserts a new CommandConfig row.
-func (s *Store) InsertCommandConfig(id, name string, cfg *model.CommandConfigJSON) error {
+func (s *Store) InsertCommandConfig(id, name string, cfg *model.CommandConfig) error {
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return err
@@ -26,7 +26,7 @@ func (s *Store) InsertCommandConfig(id, name string, cfg *model.CommandConfigJSO
 // If the input matches multiple commands by prefix, an error is returned.
 func (s *Store) GetCommandConfig(
 	idOrName string,
-) (id, name string, cfg *model.CommandConfigJSON, err error) {
+) (id, name string, cfg *model.CommandConfig, err error) {
 	resolvedID, err := s.ResolveID(idOrName)
 	if err != nil {
 		return "", "", nil, err
@@ -43,7 +43,7 @@ func (s *Store) GetCommandConfig(
 	if nameSQL.Valid {
 		name = nameSQL.String
 	}
-	cfg = &model.CommandConfigJSON{}
+	cfg = &model.CommandConfig{}
 	if err := json.Unmarshal([]byte(jsonStr), cfg); err != nil {
 		return "", "", nil, err
 	}

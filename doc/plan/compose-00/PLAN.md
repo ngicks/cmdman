@@ -80,17 +80,17 @@ Targeting flags for subcommands that can operate on a subset of commands:
 
 Proposed command-specific target model:
 
-| Subcommand | Requires compose file | Default target set |
-| --- | --- | --- |
-| `create` | yes | commands in YAML |
-| `up` | yes | commands in YAML |
-| `start` | no, when `--project-name` is set | commands in YAML when loaded; otherwise all project-labeled commands |
-| `stop` | no, when `--project-name` is set | all project-labeled commands |
-| `restart` | no, when `--project-name` is set | commands in YAML when loaded; otherwise all project-labeled commands |
-| `down` | no, when `--project-name` is set | all project-labeled commands |
-| `logs` | no, when `--project-name` is set | all project-labeled commands |
-| `signal` | no, when `--project-name` is set | all project-labeled commands |
-| `wait` | no, when `--project-name` is set | all project-labeled commands |
+| Subcommand | Requires compose file            | Default target set                                                   |
+| ---------- | -------------------------------- | -------------------------------------------------------------------- |
+| `create`   | yes                              | commands in YAML                                                     |
+| `up`       | yes                              | commands in YAML                                                     |
+| `start`    | no, when `--project-name` is set | commands in YAML when loaded; otherwise all project-labeled commands |
+| `stop`     | no, when `--project-name` is set | all project-labeled commands                                         |
+| `restart`  | no, when `--project-name` is set | commands in YAML when loaded; otherwise all project-labeled commands |
+| `down`     | no, when `--project-name` is set | all project-labeled commands                                         |
+| `logs`     | no, when `--project-name` is set | all project-labeled commands                                         |
+| `signal`   | no, when `--project-name` is set | all project-labeled commands                                         |
+| `wait`     | no, when `--project-name` is set | all project-labeled commands                                         |
 
 For commands that do not require the YAML, project discovery still needs both
 a project name and an effective WorkDir. The WorkDir is resolved with the same
@@ -200,23 +200,23 @@ normalize it before validation, hashing, and reconciliation.
 Each compose command should be interpreted as the declarative YAML equivalent of
 `cmdman create`. Compose may add fields for env-file loading and dependencies,
 but command runtime fields should map directly to `cmdman.CreateRequest` /
-`store.CommandConfigJSON` instead of inventing a separate runtime model.
+`store.CommandConfig` instead of inventing a separate runtime model.
 
 Mapping to the current create surface:
 
-| Compose field | `cmdman create` flag / request field |
-| --- | --- |
-| `name` | `--name`, `CreateRequest.Name` |
-| `dir` | `--dir`, `CreateRequest.Dir` |
-| `args` | trailing `COMMAND [ARGS...]`, `CreateRequest.Argv` |
-| `env` | `--env`, `CreateRequest.Env` |
-| `labels` | `--label`, `CreateRequest.Labels` |
-| `restart_policy` | `--restart`, `CreateRequest.RestartPolicy` |
-| `stop_signal` | `--stop-signal`, `CreateRequest.StopSignal` |
-| `tty` | `--tty`, `CreateRequest.Tty` |
+| Compose field      | `cmdman create` flag / request field                  |
+| ------------------ | ----------------------------------------------------- |
+| `name`             | `--name`, `CreateRequest.Name`                        |
+| `dir`              | `--dir`, `CreateRequest.Dir`                          |
+| `args`             | trailing `COMMAND [ARGS...]`, `CreateRequest.Argv`    |
+| `env`              | `--env`, `CreateRequest.Env`                          |
+| `labels`           | `--label`, `CreateRequest.Labels`                     |
+| `restart_policy`   | `--restart`, `CreateRequest.RestartPolicy`            |
+| `stop_signal`      | `--stop-signal`, `CreateRequest.StopSignal`           |
+| `tty`              | `--tty`, `CreateRequest.Tty`                          |
 | `scrollback_bytes` | `--scrollback-bytes`, `CreateRequest.ScrollbackBytes` |
-| `log_driver` | `--log-driver`, `CreateRequest.LogDriver` |
-| `log_opts` | `--log-opt`, `CreateRequest.LogOpts` |
+| `log_driver`       | `--log-driver`, `CreateRequest.LogDriver`             |
+| `log_opts`         | `--log-opt`, `CreateRequest.LogOpts`                  |
 
 Compose-specific fields:
 
@@ -347,6 +347,7 @@ A compose-managed command is identified by three pieces:
   with a message asking for `--project-name` or a YAML `name:` entry.
   `--project-name` always wins, which is how the same template YAML can be
   instantiated multiple times in one WorkDir.
+
 - **Command name**: the YAML map key.
 
 Generated cmdman name: `<workdir-hash>-<escaped-project>-<escaped-command>`.
@@ -470,7 +471,7 @@ file".
 
 Hashing implementation should:
 
-- build a small canonical struct instead of hashing `store.CommandConfigJSON`
+- build a small canonical struct instead of hashing `store.CommandConfig`
   directly, because `CommandDir` and generated labels should be excluded;
 - sort map keys and env entries deterministically before marshaling;
 - hash canonical JSON with SHA-256 and store the full digest as an

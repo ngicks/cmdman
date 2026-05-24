@@ -35,7 +35,7 @@ func TestMonitorRunAndExit(t *testing.T) {
 	id := "test-monitor-1"
 	commandDir, err := appCfg.CommandDir(id)
 	assert.NilError(t, err)
-	cfg := &model.CommandConfigJSON{
+	cfg := &model.CommandConfig{
 		Argv:            []string{"/bin/sh", "-c", "echo hello from monitor"},
 		Dir:             dir,
 		Env:             testEnv(),
@@ -47,7 +47,7 @@ func TestMonitorRunAndExit(t *testing.T) {
 
 	assert.NilError(t, st.InsertCommandConfig(id, "test-echo", cfg))
 	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
-	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandStateJSON{}))
+	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandState{}))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
@@ -92,7 +92,7 @@ func TestMonitorNonZeroExit(t *testing.T) {
 	id := "test-monitor-2"
 	commandDir, err := appCfg.CommandDir(id)
 	assert.NilError(t, err)
-	cfg := &model.CommandConfigJSON{
+	cfg := &model.CommandConfig{
 		Argv:            []string{"/bin/sh", "-c", "exit 42"},
 		Dir:             dir,
 		Env:             testEnv(),
@@ -104,7 +104,7 @@ func TestMonitorNonZeroExit(t *testing.T) {
 
 	assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
 	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
-	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandStateJSON{}))
+	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandState{}))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
@@ -141,7 +141,7 @@ func TestMonitorAutoRemove(t *testing.T) {
 	id := "test-monitor-3"
 	commandDir, err := appCfg.CommandDir(id)
 	assert.NilError(t, err)
-	cfg := &model.CommandConfigJSON{
+	cfg := &model.CommandConfig{
 		Argv:            []string{"/bin/sh", "-c", "true"},
 		Dir:             dir,
 		Env:             testEnv(),
@@ -154,7 +154,7 @@ func TestMonitorAutoRemove(t *testing.T) {
 
 	assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
 	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
-	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandStateJSON{}))
+	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandState{}))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
@@ -193,7 +193,7 @@ func TestMonitorGracefulShutdown(t *testing.T) {
 	id := "test-monitor-4"
 	commandDir, err := appCfg.CommandDir(id)
 	assert.NilError(t, err)
-	cfg := &model.CommandConfigJSON{
+	cfg := &model.CommandConfig{
 		Argv:            []string{"/bin/sh", "-c", "sleep 60"},
 		Dir:             dir,
 		Env:             testEnv(),
@@ -205,7 +205,7 @@ func TestMonitorGracefulShutdown(t *testing.T) {
 
 	assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
 	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
-	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandStateJSON{}))
+	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandState{}))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
@@ -231,7 +231,7 @@ func TestMonitorGracefulShutdown(t *testing.T) {
 func TestStaleEntryCleanup(t *testing.T) {
 	st := testStore(t)
 
-	cfg := &model.CommandConfigJSON{
+	cfg := &model.CommandConfig{
 		Argv:            []string{"/bin/true"},
 		Dir:             "/tmp",
 		Env:             testEnv(),
@@ -242,7 +242,7 @@ func TestStaleEntryCleanup(t *testing.T) {
 	}
 	assert.NilError(t, st.InsertCommandConfig("stale-1", "", cfg))
 	// Set a PID that's definitely not alive (PID 1 is init, but use a very high PID).
-	stateJSON := &model.CommandStateJSON{MonitorPID: 99999999}
+	stateJSON := &model.CommandState{MonitorPID: 99999999}
 	assert.NilError(t, st.InsertCommandState("stale-1", model.StateRunning, stateJSON))
 
 	cfgForCleanup, err := (CmdmanConfig{
@@ -299,18 +299,18 @@ func TestMonitorSubscribeCapturesOffsetAndLiveRecordsUnderLock(t *testing.T) {
 func TestMonitorStateChangeBroadcastsTerminalStateAndCloses(t *testing.T) {
 	st := testStore(t)
 	id := "state-change"
-	assert.NilError(t, st.InsertCommandConfig(id, "", &model.CommandConfigJSON{
+	assert.NilError(t, st.InsertCommandConfig(id, "", &model.CommandConfig{
 		Argv:       []string{"/bin/true"},
 		Dir:        t.TempDir(),
 		Env:        testEnv(),
 		CommandDir: t.TempDir(),
 	}))
-	assert.NilError(t, st.InsertCommandState(id, model.StateRunning, &model.CommandStateJSON{}))
+	assert.NilError(t, st.InsertCommandState(id, model.StateRunning, &model.CommandState{}))
 
 	m := &Monitor{
 		ID:                id,
 		store:             st,
-		stateJSON:         &model.CommandStateJSON{},
+		stateJSON:         &model.CommandState{},
 		stateChangeBridge: newBroadcaster[monitorStateChange](),
 	}
 	ch, unsub := m.subscribeStateChange()

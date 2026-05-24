@@ -16,7 +16,7 @@ const commandMaxLen = 40
 // templateFuncMap is the shared FuncMap used by both ls and inspect --format
 // templates.
 //
-// The "command" helper takes a *model.CommandConfigJSON so it works against
+// The "command" helper takes a *model.CommandConfig so it works against
 // both CommandEntry.ConfigJSON (ls) and InspectOutput.Config (inspect).
 var templateFuncMap = template.FuncMap{
 	"json": func(v any) string {
@@ -27,7 +27,7 @@ var templateFuncMap = template.FuncMap{
 		return string(b)
 	},
 	"deref": deref,
-	"command": func(cfg *model.CommandConfigJSON) string {
+	"command": func(cfg *model.CommandConfig) string {
 		if cfg == nil || len(cfg.Argv) == 0 {
 			return "-"
 		}

@@ -15,8 +15,8 @@ type CommandEntry struct {
 	CreatedAt  string
 	State      string
 	ExitCode   *int
-	ConfigJSON *model.CommandConfigJSON
-	StateJSON  *model.CommandStateJSON
+	ConfigJSON *model.CommandConfig
+	StateJSON  *model.CommandState
 }
 
 // ListCommands lists commands, optionally filtering by state and labels.
@@ -80,12 +80,12 @@ func (s *Store) ListCommands(allStates bool, labels map[string]string) ([]Comman
 			ec := int(ecSQL.Int64)
 			e.ExitCode = &ec
 		}
-		e.ConfigJSON = &model.CommandConfigJSON{}
+		e.ConfigJSON = &model.CommandConfig{}
 		if err := json.Unmarshal([]byte(cfgStr), e.ConfigJSON); err != nil {
 			return nil, err
 		}
 		backfillCommandConfigDefaults(e.ConfigJSON)
-		e.StateJSON = &model.CommandStateJSON{}
+		e.StateJSON = &model.CommandState{}
 		if err := json.Unmarshal([]byte(stateStr), e.StateJSON); err != nil {
 			return nil, err
 		}

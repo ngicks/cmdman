@@ -11,6 +11,12 @@ func (s *Store) InsertCommandExitCode(id string, exitCode int) error {
 	return err
 }
 
+// ExitRecord represents an entry in CommandExitCode.
+type ExitRecord struct {
+	Timestamp string `json:"timestamp"`
+	ExitCode  int    `json:"exit_code"`
+}
+
 // GetExitHistory retrieves exit code history for a command.
 func (s *Store) GetExitHistory(id string) ([]ExitRecord, error) {
 	rows, err := s.db.Query(
@@ -31,10 +37,4 @@ func (s *Store) GetExitHistory(id string) ([]ExitRecord, error) {
 		records = append(records, r)
 	}
 	return records, rows.Err()
-}
-
-// ExitRecord represents an entry in CommandExitCode.
-type ExitRecord struct {
-	Timestamp string `json:"timestamp"`
-	ExitCode  int    `json:"exit_code"`
 }

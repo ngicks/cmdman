@@ -8,7 +8,7 @@ import (
 )
 
 // InsertCommandState inserts a new CommandState row.
-func (s *Store) InsertCommandState(id, state string, stateJSON *model.CommandStateJSON) error {
+func (s *Store) InsertCommandState(id, state string, stateJSON *model.CommandState) error {
 	data, err := json.Marshal(stateJSON)
 	if err != nil {
 		return err
@@ -24,7 +24,7 @@ func (s *Store) InsertCommandState(id, state string, stateJSON *model.CommandSta
 func (s *Store) UpdateCommandState(
 	id, state string,
 	exitCode *int,
-	stateJSON *model.CommandStateJSON,
+	stateJSON *model.CommandState,
 ) error {
 	data, err := json.Marshal(stateJSON)
 	if err != nil {
@@ -40,7 +40,7 @@ func (s *Store) UpdateCommandState(
 // GetCommandState retrieves the CommandState for a command by ID.
 func (s *Store) GetCommandState(
 	id string,
-) (state string, exitCode *int, stateJSON *model.CommandStateJSON, err error) {
+) (state string, exitCode *int, stateJSON *model.CommandState, err error) {
 	var ecSQL sql.NullInt64
 	var jsonStr string
 	err = s.db.QueryRow(
@@ -54,7 +54,7 @@ func (s *Store) GetCommandState(
 		ec := int(ecSQL.Int64)
 		exitCode = &ec
 	}
-	stateJSON = &model.CommandStateJSON{}
+	stateJSON = &model.CommandState{}
 	if err := json.Unmarshal([]byte(jsonStr), stateJSON); err != nil {
 		return "", nil, nil, err
 	}

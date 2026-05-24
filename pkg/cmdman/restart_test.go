@@ -49,7 +49,7 @@ exit 0
 
 	counterFile := filepath.Join(dir, "counter")
 
-	cfg := &model.CommandConfigJSON{
+	cfg := &model.CommandConfig{
 		Argv:            []string{"/bin/sh", scriptPath, counterFile},
 		Dir:             dir,
 		Env:             testEnv(),
@@ -61,7 +61,7 @@ exit 0
 
 	assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
 	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
-	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandStateJSON{}))
+	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandState{}))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
@@ -104,7 +104,7 @@ func TestRestartPolicyAlways(t *testing.T) {
 	id := "test-restart-always"
 	commandDir, err := appCfg.CommandDir(id)
 	assert.NilError(t, err)
-	cfg := &model.CommandConfigJSON{
+	cfg := &model.CommandConfig{
 		Argv:            []string{"/bin/sh", "-c", "true"},
 		Dir:             dir,
 		Env:             testEnv(),
@@ -116,7 +116,7 @@ func TestRestartPolicyAlways(t *testing.T) {
 
 	assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
 	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
-	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandStateJSON{}))
+	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandState{}))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 

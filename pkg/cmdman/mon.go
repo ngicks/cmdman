@@ -40,8 +40,8 @@ type Monitor struct {
 	cleanUp []func() error
 
 	store     *cmdstore.Store
-	cfg       *model.CommandConfigJSON
-	stateJSON *model.CommandStateJSON
+	cfg       *model.CommandConfig
+	stateJSON *model.CommandState
 	evtLog    *eventlog.Writer
 
 	lis net.Listener
@@ -121,7 +121,7 @@ func newMonitor(
 		cfg:               commandCfg,
 		evtLog:            evtLog,
 		ring:              newRingBuffer(commandCfg.ScrollbackBytes),
-		stateJSON: &model.CommandStateJSON{
+		stateJSON: &model.CommandState{
 			MonitorPID: os.Getpid(),
 		},
 		cleanUp: []func() error{

@@ -101,7 +101,7 @@ func (s *Service) streamLogs(
 	ctx context.Context,
 	st *store.Store,
 	id string,
-	cfg *model.CommandConfigJSON,
+	cfg *model.CommandConfig,
 	opts map[string]string,
 	follow bool,
 	storageReader logdriver.Reader,
@@ -177,7 +177,7 @@ func (s *Service) streamLogs(
 
 func (s *Service) bridgeReread(
 	ctx context.Context,
-	cfg *model.CommandConfigJSON,
+	cfg *model.CommandConfig,
 	opts map[string]string,
 	lastOffset any,
 	captured *pb.SubscribeOffset,
