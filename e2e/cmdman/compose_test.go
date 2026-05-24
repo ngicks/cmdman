@@ -532,6 +532,43 @@ func TestComposeDown(t *testing.T) {
 	}
 }
 
+// TestComposeDownByCwdTargetsAllProjectsInWorkdir verifies that, without -f or
+// --project-name, down resolves the project by working directory and therefore
+// tears down every project sharing that workdir.
+func TestComposeDownByCwdTargetsAllProjectsInWorkdir(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	// Keep the spec out of wd so wd holds no discoverable compose file; down
+	// must then resolve purely by --workdir.
+	specDir := composeWorkdir(t)
+	composePath := writeComposeFile(t, specDir, composeBasicYAML("ignored"))
+	projA, projB := "tc-cwd-a", "tc-cwd-b"
+	t.Cleanup(func() {
+		cleanupProject(ctx, env, wd, projA)
+		cleanupProject(ctx, env, wd, projB)
+	})
+
+	for _, p := range []string{projA, projB} {
+		if _, stderr, err := env.exec(ctx, "compose", "--workdir", wd,
+			"-f", composePath, "--project-name", p, "create"); err != nil {
+			t.Fatalf("compose create %s failed: %v\nstderr:\n%s", p, err, stderr)
+		}
+	}
+	if got := len(env.lsJSON(ctx, "-l", "cmdman.compose.workdir="+wd)); got != 4 {
+		t.Fatalf("expected 4 commands across both projects, got %d", got)
+	}
+
+	// No -f and no --project-name: resolved by cwd (workdir), so it targets every
+	// command in wd regardless of project.
+	if _, stderr, err := env.exec(ctx, "compose", "--workdir", wd, "down"); err != nil {
+		t.Fatalf("compose down (cwd) failed: %v\nstderr:\n%s", err, stderr)
+	}
+	if got := len(env.lsJSON(ctx, "-l", "cmdman.compose.workdir="+wd)); got != 0 {
+		t.Fatalf("expected 0 commands after cwd-based down, got %d", got)
+	}
+}
+
 func TestComposeDownRemovesOrphans(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnv(t)
