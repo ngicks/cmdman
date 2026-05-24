@@ -79,6 +79,8 @@ It simply starts a monitor process and the monitor damonizes itself and starts s
 	stopCmd(cmd, &rootConfig)
 	waitCmd(cmd, &rootConfig)
 
+	composeCmd(cmd, &rootConfig)
+
 	return cmd
 }
 

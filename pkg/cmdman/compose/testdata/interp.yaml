@@ -1,0 +1,12 @@
+name: interp-test
+
+commands:
+  app:
+    args:
+      - echo
+      - ${MSG}
+      - ${GREETING:-hello}
+      - ${REQUIRED_VAR:?REQUIRED_VAR must be set}
+    env:
+      - MSG=${INPUT_MSG:-default-msg}
+      - REQUIRED_VAR=present

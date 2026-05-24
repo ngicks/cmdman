@@ -91,6 +91,15 @@ func newTestEnv(t *testing.T) *testEnv {
 }
 
 func (e *testEnv) exec(ctx context.Context, args ...string) (string, string, error) {
+	return e.execWithExtraEnv(ctx, nil, args...)
+}
+
+// execWithExtraEnv is like exec but appends additional environment variables.
+func (e *testEnv) execWithExtraEnv(
+	ctx context.Context,
+	extraEnv []string,
+	args ...string,
+) (string, string, error) {
 	e.t.Helper()
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
@@ -101,6 +110,7 @@ func (e *testEnv) exec(ctx context.Context, args ...string) (string, string, err
 		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+e.runtimeDir,
 		cmdman.ENV_CMDMAN_CONF+"="+e.confPath,
 	)
+	cmd.Env = append(cmd.Env, extraEnv...)
 	// WaitDelay ensures cmd.Wait returns even if spawned child processes
 	// hold stdout/stderr pipe FDs open (e.g. the detached monitor).
 	cmd.WaitDelay = 3 * time.Second

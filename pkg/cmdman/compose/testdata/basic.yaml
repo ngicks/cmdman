@@ -1,0 +1,33 @@
+name: testproject
+
+commands:
+  api:
+    dir: ./api
+    args:
+      - go
+      - run
+      - ./cmd/api
+    env:
+      - PORT=8080
+    env_file:
+      - path: .env.api
+        required: false
+    restart_policy: on-failure
+    stop_signal: SIGTERM
+    tty: false
+    scrollback_bytes: 1048576
+    log_driver: k8s-file
+    log_opts:
+      max-size: 10m
+      max-file: "3"
+    labels:
+      app: api
+
+  worker:
+    args:
+      - go
+      - run
+      - ./cmd/worker
+    after:
+      api:
+        condition: started

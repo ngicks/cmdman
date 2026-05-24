@@ -1,0 +1,14 @@
+name: cycle-test
+
+commands:
+  a:
+    args: [echo, a]
+    after:
+      b:
+        condition: started
+
+  b:
+    args: [echo, b]
+    after:
+      a:
+        condition: started

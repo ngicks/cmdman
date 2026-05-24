@@ -1,0 +1,8 @@
+name: autoremove-test
+
+commands:
+  myapp:
+    args:
+      - echo
+      - hello
+    auto_remove: true

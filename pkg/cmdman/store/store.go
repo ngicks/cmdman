@@ -503,8 +503,8 @@ func (s *Store) ListCommands(allStates bool, labels map[string]string) ([]Comman
 	}
 
 	for k, v := range labels {
-		conditions = append(conditions, `json_extract(c.JSON, '$.labels.' || ?) = ?`)
-		args = append(args, k, v)
+		conditions = append(conditions, `json_extract(c.JSON, ?) = ?`)
+		args = append(args, labelJSONPath(k), v)
 	}
 
 	if len(conditions) > 0 {
@@ -669,8 +669,8 @@ func (s *Store) FindByLabels(labels map[string]string) ([]string, error) {
 	query.WriteString(`SELECT ID FROM CommandConfig WHERE 1=1`)
 	var args []any
 	for k, v := range labels {
-		query.WriteString(` AND json_extract(JSON, '$.labels.' || ?) = ?`)
-		args = append(args, k, v)
+		query.WriteString(` AND json_extract(JSON, ?) = ?`)
+		args = append(args, labelJSONPath(k), v)
 	}
 	rows, err := s.db.Query(query.String(), args...)
 	if err != nil {
@@ -686,6 +686,17 @@ func (s *Store) FindByLabels(labels map[string]string) ([]string, error) {
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// labelJSONPath returns a SQLite json_extract path expression that selects
+// the label whose key is k. Label keys can contain dots (e.g.
+// "cmdman.compose.workdir"), which json_extract would otherwise interpret as
+// nested property access. Quoting the key as $.labels."<k>" ensures it is
+// treated as a single property name; any embedded double quotes inside k are
+// escaped by doubling them, matching SQLite's quoting rules.
+func labelJSONPath(k string) string {
+	escaped := strings.ReplaceAll(k, `"`, `""`)
+	return `$.labels."` + escaped + `"`
 }
 
 func nullableString(s string) sql.NullString {

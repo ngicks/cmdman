@@ -47,7 +47,13 @@ func TestRenderEntriesExitCode(t *testing.T) {
 			}}, false, "")
 
 			assert.NilError(t, err)
-			assert.Assert(t, strings.Contains(out.String(), tt.want), "output = %q, want substring %q", out.String(), tt.want)
+			assert.Assert(
+				t,
+				strings.Contains(out.String(), tt.want),
+				"output = %q, want substring %q",
+				out.String(),
+				tt.want,
+			)
 		})
 	}
 }
