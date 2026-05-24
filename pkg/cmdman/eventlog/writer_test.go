@@ -60,7 +60,7 @@ func TestWriterRotation(t *testing.T) {
 	assert.Assert(t, len(archive) >= 1, "archive should have at least the marker")
 	var lastArchive model.Event
 	assert.NilError(t, json.Unmarshal(archive[len(archive)-1], &lastArchive))
-	assert.Equal(t, lastArchive.Type, eventTypeRotation, "archive must end with rotation marker")
+	assert.Equal(t, lastArchive.Type, model.EventTypeRotation, "archive must end with rotation marker")
 
 	// Active path must contain only post-rotation entries.
 	activeData, err := os.ReadFile(path)
@@ -70,7 +70,7 @@ func TestWriterRotation(t *testing.T) {
 		assert.NilError(t, json.Unmarshal(ln, &ev))
 		assert.Assert(
 			t,
-			ev.Type != eventTypeRotation,
+			ev.Type != model.EventTypeRotation,
 			"active file must not contain rotation marker mid-stream",
 		)
 	}

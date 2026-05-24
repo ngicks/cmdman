@@ -107,7 +107,7 @@ func parseLine(line []byte) (ev model.Event, skip, rotation bool, err error) {
 	if err := json.Unmarshal(trim, &ev); err != nil {
 		return model.Event{}, false, false, fmt.Errorf("eventlog: decode line: %w", err)
 	}
-	if ev.Type == eventTypeRotation {
+	if ev.Type == model.EventTypeRotation {
 		return model.Event{}, false, true, nil
 	}
 	return ev, false, false, nil

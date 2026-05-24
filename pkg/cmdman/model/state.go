@@ -48,6 +48,9 @@ const (
 	// EventTypeRestart is published when the monitor reschedules a command
 	// iteration under its restart policy.
 	EventTypeRestart EventType = "restart"
+	// EventTypeRotation is the on-disk event log rotation marker. Readers
+	// consume it internally and do not surface it to subscribers.
+	EventTypeRotation EventType = "_rotation"
 )
 
 // IsEventType reports whether s is a known public event type.

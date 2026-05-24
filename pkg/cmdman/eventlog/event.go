@@ -13,13 +13,6 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
-const (
-	// eventTypeRotation is the on-disk rotation marker. It is never
-	// surfaced to subscribers as an Event; readers treat it as a signal
-	// to reopen the active path.
-	eventTypeRotation model.EventType = "_rotation"
-)
-
 // marshalEvent renders an event as a single JSONL line (ends in '\n').
 func marshalEvent(e model.Event) ([]byte, error) {
 	if e.Time.IsZero() {
@@ -34,5 +27,5 @@ func marshalEvent(e model.Event) ([]byte, error) {
 
 // rotationMarker returns the rotation marker line.
 func rotationMarker(now time.Time) ([]byte, error) {
-	return marshalEvent(model.Event{Time: now, Type: eventTypeRotation})
+	return marshalEvent(model.Event{Time: now, Type: model.EventTypeRotation})
 }
