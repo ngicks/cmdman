@@ -20,7 +20,7 @@ func TestAttach_DetachKeysExitWithoutStoppingCommand(t *testing.T) {
 
 	id := env.run(ctx, "run", "-t", "-n", "attach-detach", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, id, "running", defaultTimeout)
+	env.waitForState(ctx, id, "started", defaultTimeout)
 
 	attach := exec.CommandContext(ctx, cmdmanBin, "attach", id)
 	attach.Env = append(
@@ -41,7 +41,7 @@ func TestAttach_DetachKeysExitWithoutStoppingCommand(t *testing.T) {
 	}
 
 	waitAttachExit(t, attach, 3*time.Second)
-	env.waitForState(ctx, id, "running", defaultTimeout)
+	env.waitForState(ctx, id, "started", defaultTimeout)
 }
 
 func TestAttach_ExitsWhenCommandStopsFromCtrlC(t *testing.T) {
@@ -50,7 +50,7 @@ func TestAttach_ExitsWhenCommandStopsFromCtrlC(t *testing.T) {
 	env := newTestEnv(t)
 
 	id := env.run(ctx, "run", "-t", "-n", "attach-sigint", "--", "/bin/sh", "-c", "sleep 300")
-	env.waitForState(ctx, id, "running", defaultTimeout)
+	env.waitForState(ctx, id, "started", defaultTimeout)
 
 	attach := exec.CommandContext(ctx, cmdmanBin, "attach", id)
 	attach.Env = append(
@@ -81,7 +81,7 @@ func TestAttach_DetachRestoresShellTtyMode(t *testing.T) {
 
 	id := env.run(ctx, "run", "-t", "-n", "attach-tty", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, id, "running", defaultTimeout)
+	env.waitForState(ctx, id, "started", defaultTimeout)
 
 	script := strings.Join([]string{
 		"before=$(stty -g)",
@@ -144,7 +144,7 @@ func TestAttach_CtrlCRestoresShellTtyMode(t *testing.T) {
 	env := newTestEnv(t)
 
 	id := env.run(ctx, "run", "-t", "-n", "attach-tty-sigint", "--", "/bin/sh", "-c", "sleep 300")
-	env.waitForState(ctx, id, "running", defaultTimeout)
+	env.waitForState(ctx, id, "started", defaultTimeout)
 
 	script := strings.Join([]string{
 		"before=$(stty -g)",

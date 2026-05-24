@@ -15,14 +15,14 @@ import (
 // WaitRequest defines a wait operation across explicit targets.
 type WaitRequest struct {
 	Targets   []string
-	Condition string
+	Condition model.EventType
 	Interval  time.Duration
 	Ignore    bool
 }
 
 // WaitResult reports per-command outcome of a Wait operation.
 // ExitCode is nil when the command has not exited (e.g. when waiting for a
-// non-terminal condition such as "running") or when the command has been
+// non-terminal condition such as "started") or when the command has been
 // removed from the store before any exit code was recorded.
 type WaitResult struct {
 	ID       string
@@ -34,16 +34,16 @@ type WaitResult struct {
 // "exited" or "failed" states; the rest match the corresponding state
 // verbatim.
 const (
-	WaitConditionStopped  = "stopped"
-	WaitConditionCreated  = "created"
-	WaitConditionStarting = "starting"
-	WaitConditionRunning  = "running"
-	WaitConditionExited   = "exited"
-	WaitConditionFailed   = "failed"
+	WaitConditionStopped  = model.EventTypeStopped
+	WaitConditionCreated  = model.EventTypeCreated
+	WaitConditionStarting = model.EventTypeStarting
+	WaitConditionStarted  = model.EventTypeStarted
+	WaitConditionExited   = model.EventTypeExited
+	WaitConditionFailed   = model.EventTypeFailed
 )
 
 // Wait blocks until each target reaches req.Condition (default "stopped",
-// matching either StateExited or StateFailed), then returns one WaitResult
+// matching either EventTypeExited or EventTypeFailed), then returns one WaitResult
 // per target in argument order. A target removed from the store while we
 // poll is treated as terminal. With Ignore=true, targets that fail to
 // resolve are skipped silently instead of being reported.
@@ -83,18 +83,18 @@ func (s *Service) Wait(ctx context.Context, req WaitRequest) ([]WaitResult, erro
 	return results, nil
 }
 
-func validWaitCondition(c string) bool {
+func validWaitCondition(c model.EventType) bool {
 	switch c {
 	case WaitConditionStopped, WaitConditionCreated, WaitConditionStarting,
-		WaitConditionRunning, WaitConditionExited, WaitConditionFailed:
+		WaitConditionStarted, WaitConditionExited, WaitConditionFailed:
 		return true
 	}
 	return false
 }
 
-func matchesWaitCondition(state, condition string) bool {
+func matchesWaitCondition(state, condition model.EventType) bool {
 	if condition == WaitConditionStopped {
-		return state == model.StateExited || state == model.StateFailed
+		return state == model.EventTypeExited || state == model.EventTypeFailed
 	}
 	return state == condition
 }
@@ -106,7 +106,8 @@ func matchesWaitCondition(state, condition string) bool {
 func (s *Service) waitForCondition(
 	ctx context.Context,
 	st *store.Store,
-	id, condition string,
+	id string,
+	condition model.EventType,
 	interval time.Duration,
 ) (*int, error) {
 	// Subscribe to events filtered by id BEFORE the first state read so

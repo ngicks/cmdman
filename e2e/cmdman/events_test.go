@@ -12,7 +12,7 @@ import (
 )
 
 // TestEvents_ReplayHistorical runs a short-lived command and verifies that
-// `cmdman events --no-follow` replays the create/start/running/exit
+// `cmdman events --no-follow` replays the created/starting/running/exited
 // events from the on-disk event log.
 func TestEvents_ReplayHistorical(t *testing.T) {
 	t.Parallel()
@@ -27,7 +27,7 @@ func TestEvents_ReplayHistorical(t *testing.T) {
 		t.Fatalf("events output empty for id %q", id)
 	}
 	gotTypes := collectEventTypes(t, stdout)
-	wantPresent := []string{"create", "start", "running", "exit"}
+	wantPresent := []string{"created", "starting", "started", "exited"}
 	for _, w := range wantPresent {
 		if _, ok := gotTypes[w]; !ok {
 			t.Errorf("expected event type %q in output, got types %v\nraw:\n%s",
@@ -89,13 +89,13 @@ func TestEvents_FollowLivePublishes(t *testing.T) {
 			buf = append(buf, chunk[:n]...)
 		}
 		gotTypes := collectEventTypes(t, string(buf))
-		// Wait for the terminal "exit" event. The reader observes
+		// Wait for the terminal "exited" event. The reader observes
 		// ENOENT at startup and suppresses the FromEnd seek for the
-		// freshly-created log file, so by the time we see "exit" the
+		// freshly-created log file, so by the time we see "exited" the
 		// earlier events should also have been delivered — assert
 		// that to guard against regressions in the fresh-log path.
-		if _, ok := gotTypes["exit"]; ok {
-			for _, w := range []string{"create", "start", "running", "exit"} {
+		if _, ok := gotTypes["exited"]; ok {
+			for _, w := range []string{"created", "starting", "started", "exited"} {
 				if _, ok := gotTypes[w]; !ok {
 					t.Fatalf("expected event type %q in live output; got %v\nraw:\n%s",
 						w, sortedKeys(gotTypes), string(buf))

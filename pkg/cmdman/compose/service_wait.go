@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/go-common/contextkey"
 )
 
@@ -14,8 +15,8 @@ type WaitOption struct {
 	// CommandNames optionally narrows the target set to specific compose command names.
 	CommandNames []string
 	// Condition is the wait condition (default "stopped").
-	// Valid values: "stopped", "created", "starting", "running", "exited", "failed".
-	Condition string
+	// Valid values: "stopped", "created", "starting", "started", "exited", "failed".
+	Condition model.EventType
 	// Interval is the polling interval (default: 250ms when zero).
 	Interval time.Duration
 	// Ignore causes targets that fail to resolve to be skipped silently.

@@ -58,7 +58,7 @@ func TestServiceLogsFollowNoDuplicatesAcrossStorageAndLive(t *testing.T) {
 
 	assert.NilError(t, st.InsertCommandConfig(id, "logs-follow-bridge", cfg))
 	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
-	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandState{}))
+	assert.NilError(t, st.InsertCommandState(id, model.EventTypeCreated, &model.CommandState{}))
 	assert.NilError(t, st.Close())
 
 	monitorCtx, stopMonitor := context.WithCancel(context.Background())
@@ -127,7 +127,7 @@ func waitForCommandRunning(t *testing.T, cfg CmdmanConfig, id string) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		state, _, stateJSON, err := st.GetCommandState(id)
-		if err == nil && state == model.StateRunning && stateJSON.SocketPath != "" {
+		if err == nil && state == model.EventTypeStarted && stateJSON.SocketPath != "" {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)

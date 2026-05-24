@@ -75,7 +75,7 @@ func (s *Service) stop(
 
 	s.emitEvent(model.Event{
 		Time: time.Now().UTC(),
-		Type: model.EventTypeStop,
+		Type: model.EventTypeStopped,
 		ID:   id,
 		Attrs: map[string]string{
 			"signal": fmt.Sprintf("%d", sig),
@@ -133,7 +133,7 @@ func waitForStopped(ctx context.Context, st *store.Store, id string, timeout tim
 		if err != nil {
 			return err
 		}
-		if state == model.StateExited || state == model.StateFailed {
+		if state == model.EventTypeExited || state == model.EventTypeFailed {
 			return nil
 		}
 

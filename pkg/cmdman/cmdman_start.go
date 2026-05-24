@@ -27,26 +27,26 @@ func (s *Service) Start(ctx context.Context, idOrName string) error {
 		return fmt.Errorf("get command state: %w", err)
 	}
 	switch state {
-	case model.StateCreated, model.StateExited, model.StateFailed:
+	case model.EventTypeCreated, model.EventTypeExited, model.EventTypeFailed:
 	default:
 		return fmt.Errorf(
 			"command %s is in state %q, must be %q, %q, or %q",
 			idOrName,
 			state,
-			model.StateCreated,
-			model.StateExited,
-			model.StateFailed,
+			model.EventTypeCreated,
+			model.EventTypeExited,
+			model.EventTypeFailed,
 		)
 	}
 
 	if _, err := SpawnMonitor(s.cfg, id); err != nil {
 		return fmt.Errorf("spawn monitor: %w", err)
 	}
-	if finalState, err := WaitForState(st, id, model.StateRunning, 100); err != nil {
+	if finalState, err := WaitForState(st, id, model.EventTypeStarted, 100); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
-		if finalState == model.StateExited {
+		if finalState == model.EventTypeExited {
 			return nil
 		}
 		return fmt.Errorf("%w (state: %s)", err, finalState)

@@ -20,7 +20,7 @@ func TestStale_DetectedOnLs(t *testing.T) {
 	// Start a command.
 	id := env.run(ctx, "run", "-n", "stale-target", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, "stale-target", "running", defaultTimeout)
+	env.waitForState(ctx, "stale-target", "started", defaultTimeout)
 
 	// Get the monitor PID from inspect.
 	info := env.inspectJSON(ctx, "stale-target")
@@ -85,7 +85,7 @@ func TestStale_AutoRemoveOnStale(t *testing.T) {
 		CommandDir:      filepath.Join(env.dataHome, "commands", id),
 	}
 	st.InsertCommandConfig(id, "stale-auto-rm", cfg)
-	st.InsertCommandState(id, model.StateRunning, &model.CommandState{
+	st.InsertCommandState(id, model.EventTypeStarted, &model.CommandState{
 		MonitorPID: 99999999, // A PID that is almost certainly not alive.
 	})
 	st.Close()

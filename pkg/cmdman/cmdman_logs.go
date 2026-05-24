@@ -123,7 +123,7 @@ func (s *Service) streamLogs(
 		sendRecordErr(ctx, out, fmt.Errorf("get command state: %w", err))
 		return
 	}
-	if state != model.StateStarting && state != model.StateRunning {
+	if state != model.EventTypeStarting && state != model.EventTypeStarted {
 		return
 	}
 

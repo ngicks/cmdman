@@ -235,7 +235,7 @@ func (s *monitorServer) Stop(_ context.Context, req *pb.StopRequest) (*pb.StopRe
 func (s *monitorServer) Status(_ context.Context, _ *pb.StatusRequest) (*pb.StatusResponse, error) {
 	state, exitCode, pid := s.monitor.GetState()
 	return &pb.StatusResponse{
-		State:    state,
+		State:    string(state),
 		ExitCode: int32(exitCode),
 		Pid:      int32(pid),
 	}, nil

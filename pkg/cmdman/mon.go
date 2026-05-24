@@ -198,7 +198,7 @@ func (m *Monitor) init() (err error) {
 
 	if err := m.store.UpdateCommandState(
 		m.ID,
-		model.StateStarting,
+		model.EventTypeStarting,
 		nil,
 		m.stateJSON,
 	); err != nil {
@@ -220,7 +220,7 @@ func (m *Monitor) init() (err error) {
 	m.stateJSON.SocketPath = m.sockPath
 	if err := m.store.UpdateCommandState(
 		m.ID,
-		model.StateStarting,
+		model.EventTypeStarting,
 		nil,
 		m.stateJSON,
 	); err != nil {
@@ -279,7 +279,7 @@ func (m *Monitor) start(ctx context.Context) error {
 }
 
 type monitorStateChange struct {
-	State    string
+	State    model.EventType
 	ExitCode int
 	Pid      int
 }
@@ -288,7 +288,7 @@ func (m *Monitor) subscribeStateChange() (<-chan monitorStateChange, func()) {
 	return m.stateChangeBridge.Subscribe()
 }
 
-func (m *Monitor) publishStateChange(state string, exitCode int) {
+func (m *Monitor) publishStateChange(state model.EventType, exitCode int) {
 	pid := 0
 	if m.cmd != nil && m.cmd.Process != nil {
 		pid = m.cmd.Process.Pid
@@ -300,29 +300,29 @@ func (m *Monitor) publishStateChange(state string, exitCode int) {
 	})
 }
 
-func isMonitorActiveState(state string) bool {
-	return state == model.StateStarting || state == model.StateRunning
+func isMonitorActiveState(state model.EventType) bool {
+	return state == model.EventTypeStarting || state == model.EventTypeStarted
 }
 
 func (m *Monitor) setRunning() {
 	m.stateJSON.StartedAt = time.Now().UTC().Format(time.RFC3339)
 	// Append the event before flipping the DB state so observers polling
-	// state cannot see "running" without the corresponding event on disk.
+	// state cannot see "started" without the corresponding event on disk.
 	m.emitEvent(model.Event{
 		Time:  time.Now().UTC(),
-		Type:  model.EventTypeRunning,
+		Type:  model.EventTypeStarted,
 		ID:    m.ID,
-		State: model.StateRunning,
+		State: model.EventTypeStarted,
 	})
 	if err := m.store.UpdateCommandState(
 		m.ID,
-		model.StateRunning,
+		model.EventTypeStarted,
 		nil,
 		m.stateJSON,
 	); err != nil {
 		m.Logger.Error("update state to running failed", slog.String("error", err.Error()))
 	}
-	m.publishStateChange(model.StateRunning, 0)
+	m.publishStateChange(model.EventTypeStarted, 0)
 }
 
 func (m *Monitor) setExited(exitCode int) {
@@ -332,13 +332,13 @@ func (m *Monitor) setExited(exitCode int) {
 	// disk, not racing with a still-in-flight Append.
 	m.emitEvent(model.Event{
 		Time:     time.Now().UTC(),
-		Type:     model.EventTypeExit,
+		Type:     model.EventTypeExited,
 		ID:       m.ID,
-		State:    model.StateExited,
+		State:    model.EventTypeExited,
 		ExitCode: &ec,
 	})
-	_ = m.store.UpdateCommandState(m.ID, model.StateExited, &exitCode, m.stateJSON)
-	m.publishStateChange(model.StateExited, exitCode)
+	_ = m.store.UpdateCommandState(m.ID, model.EventTypeExited, &exitCode, m.stateJSON)
+	m.publishStateChange(model.EventTypeExited, exitCode)
 	m.stateChangeBridge.Close()
 }
 
@@ -347,13 +347,13 @@ func (m *Monitor) setFailed(errMsg string) {
 	// Same ordering rationale as setExited/setRunning.
 	m.emitEvent(model.Event{
 		Time:  time.Now().UTC(),
-		Type:  model.EventTypeFail,
+		Type:  model.EventTypeFailed,
 		ID:    m.ID,
-		State: model.StateFailed,
+		State: model.EventTypeFailed,
 		Error: errMsg,
 	})
-	_ = m.store.UpdateCommandState(m.ID, model.StateFailed, nil, m.stateJSON)
-	m.publishStateChange(model.StateFailed, 0)
+	_ = m.store.UpdateCommandState(m.ID, model.EventTypeFailed, nil, m.stateJSON)
+	m.publishStateChange(model.EventTypeFailed, 0)
 	m.stateChangeBridge.Close()
 }
 
@@ -414,7 +414,7 @@ func (m *Monitor) StopProcess(sig syscall.Signal) error {
 }
 
 // GetState returns the current command state.
-func (m *Monitor) GetState() (string, int, int) {
+func (m *Monitor) GetState() (model.EventType, int, int) {
 	state, ec, _, _ := m.store.GetCommandState(m.ID)
 	exitCode := 0
 	if ec != nil {

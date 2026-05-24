@@ -29,7 +29,7 @@ func (s *Service) Signal(ctx context.Context, idOrName string, sig int32) error 
 
 	s.emitEvent(model.Event{
 		Time: time.Now().UTC(),
-		Type: model.EventTypeSignal,
+		Type: model.EventTypeSignaled,
 		ID:   idOrName,
 		Attrs: map[string]string{
 			"signal": fmt.Sprintf("%d", sig),

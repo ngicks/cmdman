@@ -25,7 +25,7 @@ func TestLs_ShowsRunningByDefault(t *testing.T) {
 	// Start a long-running command.
 	id := env.run(ctx, "run", "-n", "runner", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, "runner", "running", defaultTimeout)
+	env.waitForState(ctx, "runner", "started", defaultTimeout)
 
 	// Also start one that exits immediately.
 	exitedID := env.run(ctx, "run", "-n", "quitter", "--", "/bin/sh", "-c", "echo done")
@@ -74,7 +74,7 @@ func TestLs_QuietMode(t *testing.T) {
 
 	id := env.run(ctx, "run", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, id, "running", defaultTimeout)
+	env.waitForState(ctx, id, "started", defaultTimeout)
 
 	// Quiet mode should print only IDs.
 	stdout := env.run(ctx, "ls", "-q")
@@ -94,7 +94,7 @@ func TestLs_TableFormat(t *testing.T) {
 
 	id := env.run(ctx, "run", "-n", "table-test", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, "table-test", "running", defaultTimeout)
+	env.waitForState(ctx, "table-test", "started", defaultTimeout)
 
 	// Default table format should contain headers.
 	stdout := env.run(ctx, "ls")
@@ -125,8 +125,8 @@ func TestLs_FilterByLabel(t *testing.T) {
 		env.cleanupCommand(ctx, id2)
 	})
 
-	env.waitForState(ctx, id1, "running", defaultTimeout)
-	env.waitForState(ctx, id2, "running", defaultTimeout)
+	env.waitForState(ctx, id1, "started", defaultTimeout)
+	env.waitForState(ctx, id2, "started", defaultTimeout)
 
 	// Filter by label.
 	stdout := env.run(ctx, "ls", "-q", "-l", "tier=frontend")

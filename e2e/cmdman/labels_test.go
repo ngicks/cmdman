@@ -53,9 +53,9 @@ func TestLabels_MultipleLabelsANDLogic(t *testing.T) {
 		env.cleanupCommand(ctx, id3)
 	})
 
-	env.waitForState(ctx, id1, "running", defaultTimeout)
-	env.waitForState(ctx, id2, "running", defaultTimeout)
-	env.waitForState(ctx, id3, "running", defaultTimeout)
+	env.waitForState(ctx, id1, "started", defaultTimeout)
+	env.waitForState(ctx, id2, "started", defaultTimeout)
+	env.waitForState(ctx, id3, "started", defaultTimeout)
 
 	// Filter by both labels (AND logic): env=prod AND tier=web.
 	stdout := env.run(ctx, "ls", "-q", "-l", "env=prod", "-l", "tier=web")
@@ -82,8 +82,8 @@ func TestLabels_SingleLabel(t *testing.T) {
 		env.cleanupCommand(ctx, id2)
 	})
 
-	env.waitForState(ctx, id1, "running", defaultTimeout)
-	env.waitForState(ctx, id2, "running", defaultTimeout)
+	env.waitForState(ctx, id1, "started", defaultTimeout)
+	env.waitForState(ctx, id2, "started", defaultTimeout)
 
 	// Filter by single label.
 	stdout := env.run(ctx, "ls", "-q", "-l", "role=worker")
@@ -102,7 +102,7 @@ func TestLabels_NoMatch(t *testing.T) {
 
 	id := env.run(ctx, "run", "-l", "color=blue", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, id, "running", defaultTimeout)
+	env.waitForState(ctx, id, "started", defaultTimeout)
 
 	// Filter by a non-existent label value.
 	entries := env.lsJSON(ctx, "-l", "color=red")

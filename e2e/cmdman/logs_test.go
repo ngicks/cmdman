@@ -42,7 +42,7 @@ func TestLogs_RunningCommand(t *testing.T) {
 	id := env.run(ctx, "run", "-n", "log-running", "--", "/bin/sh", "-c",
 		"echo 'hello-from-logs'; sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, "log-running", "running", defaultTimeout)
+	env.waitForState(ctx, "log-running", "started", defaultTimeout)
 
 	// Give it a moment to produce output.
 	time.Sleep(500 * time.Millisecond)
@@ -67,7 +67,7 @@ func TestLogs_PreservesFullHistoryBeyondScrollback(t *testing.T) {
 		"--", "/bin/sh", "-c",
 		"for i in $(seq 1 20); do echo \"scrollback-line-$i--\"; done; sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, "scrollback-test", "running", defaultTimeout)
+	env.waitForState(ctx, "scrollback-test", "started", defaultTimeout)
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -467,7 +467,7 @@ func TestLogs_FollowStreamsAppendedOutput(t *testing.T) {
 	env.run(ctx, "run", "-n", "follow-cmd", "--", "/bin/sh", "-c",
 		"echo first; sleep 1; echo second; sleep 60")
 	t.Cleanup(func() { env.cleanupCommand(ctx, "follow-cmd") })
-	env.waitForState(ctx, "follow-cmd", "running", defaultTimeout)
+	env.waitForState(ctx, "follow-cmd", "started", defaultTimeout)
 
 	followCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -574,7 +574,7 @@ func TestLogs_FollowSeesStoredThenLive(t *testing.T) {
 	id := env.run(ctx, "run", "-n", "follow-stored-live", "--", "/bin/sh", "-c",
 		"echo follow-A; sleep 0.5; echo follow-B; sleep 0.5; echo follow-C; sleep 60")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, "follow-stored-live", "running", defaultTimeout)
+	env.waitForState(ctx, "follow-stored-live", "started", defaultTimeout)
 
 	info := env.inspectJSON(ctx, "follow-stored-live")
 	hexID, _ := info["id"].(string)
@@ -612,7 +612,7 @@ func TestLogs_FollowPreservesStreamSplit(t *testing.T) {
 	}, "\n")
 	id := env.run(ctx, "run", "-n", "follow-stream-split", "--", "/bin/sh", "-c", script)
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, "follow-stream-split", "running", defaultTimeout)
+	env.waitForState(ctx, "follow-stream-split", "started", defaultTimeout)
 
 	followCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
@@ -644,7 +644,7 @@ func TestLogs_NoneDriverErrors(t *testing.T) {
 	env.run(ctx, "run", "-n", "logs-none", "--log-driver", "none",
 		"--", "/bin/sh", "-c", "echo unreadable; sleep 60")
 	t.Cleanup(func() { env.cleanupCommand(ctx, "logs-none") })
-	env.waitForState(ctx, "logs-none", "running", defaultTimeout)
+	env.waitForState(ctx, "logs-none", "started", defaultTimeout)
 
 	_, stderr := env.runExpectFail(ctx, "logs", "logs-none")
 	if !strings.Contains(stderr, "does not retain logs") {

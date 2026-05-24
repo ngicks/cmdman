@@ -74,7 +74,7 @@ func (s *Service) Down(
 	// otherwise return monitor-connect errors from Service.Stop.
 	stoppable := make([]cmdmanEntry, 0, len(entries))
 	for _, e := range entries {
-		if e.State == model.StateRunning || e.State == model.StateStarting {
+		if e.State == model.EventTypeStarted || e.State == model.EventTypeStarting {
 			stoppable = append(stoppable, e)
 		}
 	}

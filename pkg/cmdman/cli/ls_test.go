@@ -40,7 +40,7 @@ func TestRenderEntriesExitCode(t *testing.T) {
 			err := RenderEntries(&out, []store.CommandEntry{{
 				ID:       "123456789abc",
 				Name:     "test",
-				State:    model.StateExited,
+				State:    model.EventTypeExited,
 				ExitCode: tt.exitCode,
 				ConfigJSON: &model.CommandConfig{
 					Argv: []string{"/bin/true"},

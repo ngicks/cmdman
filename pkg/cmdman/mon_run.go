@@ -41,7 +41,7 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 			m.Logger.Info("restarting command", slog.Int("restart_count", m.stateJSON.RestartCount))
 			m.emitEvent(model.Event{
 				Time: time.Now().UTC(),
-				Type: model.EventTypeRestart,
+				Type: model.EventTypeStarting,
 				ID:   m.ID,
 				Attrs: map[string]string{
 					"restart_count": fmt.Sprintf("%d", m.stateJSON.RestartCount),
@@ -50,9 +50,9 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 		} else {
 			m.emitEvent(model.Event{
 				Time:  time.Now().UTC(),
-				Type:  model.EventTypeStart,
+				Type:  model.EventTypeStarting,
 				ID:    m.ID,
-				State: model.StateStarting,
+				State: model.EventTypeStarting,
 			})
 		}
 

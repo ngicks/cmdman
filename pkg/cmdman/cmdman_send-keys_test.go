@@ -127,7 +127,7 @@ func TestServiceSendKeys(t *testing.T) {
 
 	assert.NilError(t, st.InsertCommandConfig(id, "send-keys", cfg))
 	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
-	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandState{}))
+	assert.NilError(t, st.InsertCommandState(id, model.EventTypeCreated, &model.CommandState{}))
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
@@ -143,7 +143,7 @@ func TestServiceSendKeys(t *testing.T) {
 	for time.Now().Before(deadline) {
 		state, _, stateJSON, err := st.GetCommandState(id)
 		assert.NilError(t, err)
-		if state == model.StateRunning && stateJSON.SocketPath != "" {
+		if state == model.EventTypeStarted && stateJSON.SocketPath != "" {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)

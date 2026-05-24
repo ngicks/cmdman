@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
 // UpOption configures an Up operation (a Create followed by a Start), so it
@@ -57,7 +58,7 @@ func (s *Service) Up(
 func (s *Service) snapshotProjectStates(
 	ctx context.Context,
 	workDir, project string,
-) (map[string]string, error) {
+) (map[string]model.EventType, error) {
 	existing, err := s.svc.List(ctx, cmdman.ListRequest{
 		AllStates: true,
 		Labels: map[string]string{
@@ -68,7 +69,7 @@ func (s *Service) snapshotProjectStates(
 	if err != nil {
 		return nil, fmt.Errorf("list existing commands before start: %w", err)
 	}
-	stateByCommand := map[string]string{}
+	stateByCommand := map[string]model.EventType{}
 	for _, e := range existing {
 		if e.ConfigJSON == nil {
 			continue

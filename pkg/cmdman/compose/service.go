@@ -161,7 +161,7 @@ func (s *Service) executeAction(
 		}
 
 		// If the command is running/starting, skip it (resolved-decision 4: no force in v1).
-		if existing.State == model.StateRunning || existing.State == model.StateStarting {
+		if existing.State == model.EventTypeStarted || existing.State == model.EventTypeStarting {
 			contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: changed command is running; skipping recreate",
 				"project", spec.Project,
 				"command", nc.Name,

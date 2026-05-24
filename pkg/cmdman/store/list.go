@@ -13,7 +13,7 @@ type CommandEntry struct {
 	ID         string
 	Name       string
 	CreatedAt  string
-	State      string
+	State      model.EventType
 	ExitCode   *int
 	ConfigJSON *model.CommandConfig
 	StateJSON  *model.CommandState
@@ -30,7 +30,13 @@ func (s *Store) ListCommands(allStates bool, labels map[string]string) ([]Comman
 	var conditions []string
 
 	if !allStates {
-		conditions = append(conditions, `s.State IN ('created', 'starting', 'running')`)
+		conditions = append(conditions, `s.State IN (?, ?, ?)`)
+		args = append(
+			args,
+			string(model.EventTypeCreated),
+			string(model.EventTypeStarting),
+			string(model.EventTypeStarted),
+		)
 	}
 
 	for k, v := range labels {
@@ -61,18 +67,19 @@ func (s *Store) ListCommands(allStates bool, labels map[string]string) ([]Comman
 		var e CommandEntry
 		var nameSQL sql.NullString
 		var ecSQL sql.NullInt64
-		var cfgStr, stateStr string
+		var cfgStr, stateJSONStr, stateStr string
 		if err := rows.Scan(
 			&e.ID,
 			&nameSQL,
 			&e.CreatedAt,
-			&e.State,
+			&stateStr,
 			&ecSQL,
 			&cfgStr,
-			&stateStr,
+			&stateJSONStr,
 		); err != nil {
 			return nil, err
 		}
+		e.State = model.EventType(stateStr)
 		if nameSQL.Valid {
 			e.Name = nameSQL.String
 		}
@@ -86,7 +93,7 @@ func (s *Store) ListCommands(allStates bool, labels map[string]string) ([]Comman
 		}
 		e.ConfigJSON.BackfillDefaults()
 		e.StateJSON = &model.CommandState{}
-		if err := json.Unmarshal([]byte(stateStr), e.StateJSON); err != nil {
+		if err := json.Unmarshal([]byte(stateJSONStr), e.StateJSON); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)

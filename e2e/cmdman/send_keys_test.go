@@ -14,7 +14,7 @@ func TestSendKeys_RunningCommandReceivesInput(t *testing.T) {
 	id := env.run(ctx, "run", "-t", "-n", "send-keys-read", "--", "/bin/sh", "-c",
 		`read line; printf "<%s>\n" "$line"; sleep 300`)
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, "send-keys-read", "running", defaultTimeout)
+	env.waitForState(ctx, "send-keys-read", "started", defaultTimeout)
 
 	env.run(ctx, "send-keys", "send-keys-read", "hello world", "Enter")
 
@@ -32,7 +32,7 @@ func TestSendKeys_LiteralModeSendsRawText(t *testing.T) {
 	id := env.run(ctx, "run", "-t", "-n", "send-keys-literal", "--", "/bin/sh", "-c",
 		`read line; printf "<%s>\n" "$line"; sleep 300`)
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, "send-keys-literal", "running", defaultTimeout)
+	env.waitForState(ctx, "send-keys-literal", "started", defaultTimeout)
 
 	env.run(ctx, "send-keys", "-l", "send-keys-literal", "Enter")
 	time.Sleep(200 * time.Millisecond)

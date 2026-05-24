@@ -108,7 +108,7 @@ func (s *Service) startWithoutSpec(
 		id, name := e.ID, cmdName
 		state := e.State
 		eg.Go(func() error {
-			if state == model.StateRunning || state == model.StateStarting {
+			if state == model.EventTypeStarted || state == model.EventTypeStarting {
 				ch <- StartOutcome{Command: name}
 				return nil
 			}

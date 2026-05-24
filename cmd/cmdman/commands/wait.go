@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
 func waitCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
@@ -26,8 +27,8 @@ func waitCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		},
 	}
 
-	cmd.Flags().StringVarP(&flagCondition, "condition", "c", cmdman.WaitConditionStopped,
-		"Condition to wait on (stopped|created|starting|running|exited|failed)")
+	cmd.Flags().StringVarP(&flagCondition, "condition", "c", string(cmdman.WaitConditionStopped),
+		"Condition to wait on (stopped|created|starting|started|exited|failed)")
 	cmd.Flags().DurationVarP(&flagInterval, "interval", "i", 250*time.Millisecond,
 		"Time interval between state checks")
 	cmd.Flags().BoolVar(&flagIgnore, "ignore", false,
@@ -52,7 +53,7 @@ func runWait(
 
 	results, err := svc.Wait(cmd.Context(), cmdman.WaitRequest{
 		Targets:   args,
-		Condition: condition,
+		Condition: model.EventType(condition),
 		Interval:  interval,
 		Ignore:    ignore,
 	})

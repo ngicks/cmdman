@@ -47,7 +47,7 @@ func TestMonitorRunAndExit(t *testing.T) {
 
 	assert.NilError(t, st.InsertCommandConfig(id, "test-echo", cfg))
 	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
-	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandState{}))
+	assert.NilError(t, st.InsertCommandState(id, model.EventTypeCreated, &model.CommandState{}))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
@@ -61,7 +61,7 @@ func TestMonitorRunAndExit(t *testing.T) {
 	// Verify final state.
 	state, exitCode, _, err := st.GetCommandState(id)
 	assert.NilError(t, err)
-	assert.Equal(t, state, model.StateExited)
+	assert.Equal(t, state, model.EventTypeExited)
 	assert.Assert(t, exitCode != nil)
 	assert.Equal(t, *exitCode, 0)
 
@@ -104,7 +104,7 @@ func TestMonitorNonZeroExit(t *testing.T) {
 
 	assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
 	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
-	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandState{}))
+	assert.NilError(t, st.InsertCommandState(id, model.EventTypeCreated, &model.CommandState{}))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
@@ -116,7 +116,7 @@ func TestMonitorNonZeroExit(t *testing.T) {
 
 	state, exitCode, _, err := st.GetCommandState(id)
 	assert.NilError(t, err)
-	assert.Equal(t, state, model.StateExited)
+	assert.Equal(t, state, model.EventTypeExited)
 	assert.Assert(t, exitCode != nil)
 	assert.Equal(t, *exitCode, 42)
 }
@@ -154,7 +154,7 @@ func TestMonitorAutoRemove(t *testing.T) {
 
 	assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
 	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
-	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandState{}))
+	assert.NilError(t, st.InsertCommandState(id, model.EventTypeCreated, &model.CommandState{}))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
@@ -205,7 +205,7 @@ func TestMonitorGracefulShutdown(t *testing.T) {
 
 	assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
 	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
-	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandState{}))
+	assert.NilError(t, st.InsertCommandState(id, model.EventTypeCreated, &model.CommandState{}))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
@@ -225,7 +225,7 @@ func TestMonitorGracefulShutdown(t *testing.T) {
 
 	state, _, _, err := st.GetCommandState(id)
 	assert.NilError(t, err)
-	assert.Equal(t, state, model.StateExited)
+	assert.Equal(t, state, model.EventTypeExited)
 }
 
 func TestStaleEntryCleanup(t *testing.T) {
@@ -243,7 +243,7 @@ func TestStaleEntryCleanup(t *testing.T) {
 	assert.NilError(t, st.InsertCommandConfig("stale-1", "", cfg))
 	// Set a PID that's definitely not alive (PID 1 is init, but use a very high PID).
 	stateJSON := &model.CommandState{MonitorPID: 99999999}
-	assert.NilError(t, st.InsertCommandState("stale-1", model.StateRunning, stateJSON))
+	assert.NilError(t, st.InsertCommandState("stale-1", model.EventTypeStarted, stateJSON))
 
 	cfgForCleanup, err := (CmdmanConfig{
 		DataDir:            t.TempDir(),
@@ -256,7 +256,7 @@ func TestStaleEntryCleanup(t *testing.T) {
 
 	state, _, _, err := st.GetCommandState("stale-1")
 	assert.NilError(t, err)
-	assert.Equal(t, state, model.StateFailed)
+	assert.Equal(t, state, model.EventTypeFailed)
 }
 
 func TestMonitorSubscribeCapturesOffsetAndLiveRecordsUnderLock(t *testing.T) {
@@ -305,7 +305,7 @@ func TestMonitorStateChangeBroadcastsTerminalStateAndCloses(t *testing.T) {
 		Env:        testEnv(),
 		CommandDir: t.TempDir(),
 	}))
-	assert.NilError(t, st.InsertCommandState(id, model.StateRunning, &model.CommandState{}))
+	assert.NilError(t, st.InsertCommandState(id, model.EventTypeStarted, &model.CommandState{}))
 
 	m := &Monitor{
 		ID:                id,
@@ -321,7 +321,7 @@ func TestMonitorStateChangeBroadcastsTerminalStateAndCloses(t *testing.T) {
 	select {
 	case state, ok := <-ch:
 		assert.Assert(t, ok)
-		assert.Equal(t, state.State, model.StateExited)
+		assert.Equal(t, state.State, model.EventTypeExited)
 		assert.Equal(t, state.ExitCode, 7)
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for exited state change")

@@ -14,7 +14,7 @@ type InspectOutput struct {
 	ID          string               `json:"id"`
 	Name        string               `json:"name,omitempty"`
 	Config      *model.CommandConfig `json:"config"`
-	State       string               `json:"state"`
+	State       model.EventType      `json:"state"`
 	ExitCode    *int                 `json:"exit_code,omitempty"`
 	StateJSON   *model.CommandState  `json:"state_detail"`
 	ExitHistory []store.ExitRecord   `json:"exit_history,omitempty"`

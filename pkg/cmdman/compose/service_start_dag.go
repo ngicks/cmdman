@@ -80,7 +80,7 @@ func startInDAGOrder(
 	ctx context.Context,
 	svc cmdmanSvc,
 	spec ComposeSpec,
-	stateByCommand map[string]string,
+	stateByCommand map[string]model.EventType,
 	restrict map[string]struct{},
 ) []StartOutcome {
 	// Pre-create per-command event channels for every command in the spec, so
@@ -120,9 +120,9 @@ func startInDAGOrder(
 		c := cmds[nc.Name]
 		st := stateByCommand[nc.Name]
 		switch st {
-		case model.StateRunning, model.StateStarting:
+		case model.EventTypeStarted, model.EventTypeStarting:
 			c.events <- depEvent{Started: true}
-		case model.StateExited, model.StateFailed:
+		case model.EventTypeExited, model.EventTypeFailed:
 			c.events <- depEvent{Stopped: true}
 		default:
 			c.events <- depEvent{Err: fmt.Errorf(
@@ -155,8 +155,8 @@ func startInDAGOrder(
 			}
 
 			// 2. Idempotency: skip Start if already running or starting.
-			if st := stateByCommand[c.nc.Name]; st == model.StateRunning ||
-				st == model.StateStarting {
+			if st := stateByCommand[c.nc.Name]; st == model.EventTypeStarted ||
+				st == model.EventTypeStarting {
 				record(StartOutcome{Command: c.nc.Name})
 				c.events <- depEvent{Started: true}
 				return nil
@@ -253,7 +253,7 @@ func waitForCondition(
 	ctx context.Context,
 	svc cmdmanSvc,
 	cmds map[string]*dagCommand,
-	stateByCommand map[string]string,
+	stateByCommand map[string]model.EventType,
 	dep AfterSpec,
 	dependentName string,
 ) error {
@@ -269,16 +269,16 @@ func waitForCondition(
 	if preState, snap := stateByCommand[dep.Name]; snap {
 		switch dep.Condition {
 		case ConditionStarted:
-			if preState == model.StateRunning ||
-				preState == model.StateStarting {
+			if preState == model.EventTypeStarted ||
+				preState == model.EventTypeStarting {
 				return nil
 			}
 		case ConditionCompleted:
-			if preState == model.StateExited || preState == model.StateFailed {
+			if preState == model.EventTypeExited || preState == model.EventTypeFailed {
 				return nil
 			}
 		case ConditionCompletedSuccessfully:
-			if preState == model.StateExited || preState == model.StateFailed {
+			if preState == model.EventTypeExited || preState == model.EventTypeFailed {
 				return checkExitZero(ctx, svc, depCmd.genName, dep.Name)
 			}
 		}

@@ -411,7 +411,7 @@ func TestComposeRunningOrphanSkipped(t *testing.T) {
 		t.Fatalf("expected 1 command after up, got %d", len(entries))
 	}
 	alphaID := entries[0]["ID"].(string)
-	env.waitForState(ctx, alphaID, "running", 10*time.Second)
+	env.waitForState(ctx, alphaID, "started", 10*time.Second)
 
 	// Clean up alpha on test exit.
 	t.Cleanup(func() {
@@ -442,7 +442,7 @@ func TestComposeRunningOrphanSkipped(t *testing.T) {
 	// A "skipped" line must appear in stdout (summary) or a warning in stderr.
 	hasSkippedInSummary := strings.Contains(stdout, "skipped") || strings.Contains(stdout, "error")
 	hasSkippedInLog := strings.Contains(stderr, "skipping removal") ||
-		strings.Contains(stderr, "running")
+		strings.Contains(stderr, "started")
 	if !hasSkippedInSummary && !hasSkippedInLog {
 		t.Fatalf(
 			"expected skipped indicator in stdout or stderr;\nstdout:\n%s\nstderr:\n%s",
@@ -486,7 +486,7 @@ func TestComposeStop(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
+		env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
 	}
 
 	stdout, stderr, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "stop")
@@ -525,7 +525,7 @@ func TestComposeStopProjectOnly(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
+		env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
 	}
 
 	// Second invocation: project + workdir only, no -f.
@@ -667,7 +667,7 @@ func TestComposeRestart(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
+		env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
 	}
 
 	stdout, stderr, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "restart")
@@ -684,7 +684,7 @@ func TestComposeRestart(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
+		env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
 	}
 }
 
@@ -706,7 +706,7 @@ func TestComposeReverseDepOrderStop(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
+		env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
 	}
 
 	// Stop should walk the DAG in reverse: worker before api.
@@ -768,7 +768,7 @@ func TestComposeSignal(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
+		env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
 	}
 
 	stdout, stderr, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath,
@@ -903,7 +903,7 @@ func TestComposeLogsFollowStockThenLive(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
+		env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
 	}
 	// Both stored lines must be persisted before following, so the follow starts
 	// while the commands are quiet.

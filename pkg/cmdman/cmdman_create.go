@@ -61,16 +61,16 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 	if err := store.WriteCommandConfig(cfg.CommandDir, cfg); err != nil {
 		return nil, fmt.Errorf("materialize config: %w", err)
 	}
-	if err := st.InsertCommandState(id, model.StateCreated, &model.CommandState{}); err != nil {
+	if err := st.InsertCommandState(id, model.EventTypeCreated, &model.CommandState{}); err != nil {
 		return nil, fmt.Errorf("insert state: %w", err)
 	}
 
 	s.emitEvent(model.Event{
 		Time:  time.Now().UTC(),
-		Type:  model.EventTypeCreate,
+		Type:  model.EventTypeCreated,
 		ID:    id,
 		Name:  req.Name,
-		State: model.StateCreated,
+		State: model.EventTypeCreated,
 	})
 
 	return &CreateResult{ID: id, Name: req.Name}, nil

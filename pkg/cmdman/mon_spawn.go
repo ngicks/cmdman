@@ -49,12 +49,17 @@ func SpawnMonitor(cfg CmdmanConfig, id string) (*os.Process, error) {
 // WaitForState polls the store until the command reaches the desired state
 // or the timeout is reached. Returns the final state observed.
 //
-// When the initial observation is StateFailed (e.g. when restarting a
+// When the initial observation is EventTypeFailed (e.g. when restarting a
 // previously failed command), the leftover state is not treated as a new
-// failure; only a transition into StateFailed after the state has progressed
+// failure; only a transition into EventTypeFailed after the state has progressed
 // is reported as such.
-func WaitForState(st *store.Store, id, desiredState string, maxAttempts int) (string, error) {
-	var initial string
+func WaitForState(
+	st *store.Store,
+	id string,
+	desiredState model.EventType,
+	maxAttempts int,
+) (model.EventType, error) {
+	var initial model.EventType
 	progressed := false
 	for i := range maxAttempts {
 		state, _, _, err := st.GetCommandState(id)
@@ -70,7 +75,7 @@ func WaitForState(st *store.Store, id, desiredState string, maxAttempts int) (st
 		if state == desiredState {
 			return state, nil
 		}
-		if state == model.StateFailed && progressed {
+		if state == model.EventTypeFailed && progressed {
 			return state, fmt.Errorf("monitor entered failed state")
 		}
 		time.Sleep(50 * time.Millisecond)

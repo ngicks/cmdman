@@ -8,6 +8,7 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/cli"
 	"github.com/ngicks/cmdman/pkg/cmdman/compose"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
 func composeWaitCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
@@ -27,7 +28,7 @@ func composeWaitCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *com
 	}
 
 	cmd.Flags().StringVar(&flagCondition, "condition", "",
-		`Wait condition: stopped (default), created, starting, running, exited, failed`)
+		`Wait condition: stopped (default), created, starting, started, exited, failed`)
 	cmd.Flags().DurationVar(&flagInterval, "interval", 0,
 		"Polling interval (default: 250ms)")
 	cmd.Flags().BoolVar(&flagIgnore, "ignore", false,
@@ -58,7 +59,7 @@ func runComposeWait(
 
 	result, err := compose.NewService(svc).Wait(cmd.Context(), selection, compose.WaitOption{
 		CommandNames: commandNames,
-		Condition:    condition,
+		Condition:    model.EventType(condition),
 		Interval:     interval,
 		Ignore:       ignore,
 	})

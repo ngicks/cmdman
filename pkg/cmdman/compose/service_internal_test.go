@@ -88,7 +88,7 @@ func TestWaitForConditionStartedDoesNotPassOnPreExistingExit(t *testing.T) {
 				events:  events,
 			},
 		},
-		map[string]string{"api": model.StateExited},
+		map[string]model.EventType{"api": model.EventTypeExited},
 		AfterSpec{Name: "api", Condition: ConditionStarted},
 		"worker",
 	)
@@ -211,7 +211,7 @@ func TestListProjectsGroupsComposeCommands(t *testing.T) {
 					"project-a",
 					"/tmp/a",
 					"/tmp/a/cmd-compose.yaml",
-					model.StateRunning,
+					model.EventTypeStarted,
 				),
 				buildTestProjectEntry(
 					"id-2",
@@ -219,7 +219,7 @@ func TestListProjectsGroupsComposeCommands(t *testing.T) {
 					"project-a",
 					"/tmp/a",
 					"/tmp/a/cmd-compose.yaml",
-					model.StateExited,
+					model.EventTypeExited,
 				),
 				buildTestProjectEntry(
 					"id-3",
@@ -227,7 +227,7 @@ func TestListProjectsGroupsComposeCommands(t *testing.T) {
 					"project-b",
 					"/tmp/b",
 					"/tmp/b/cmd-compose.yaml",
-					model.StateFailed,
+					model.EventTypeFailed,
 				),
 			}, nil
 		},
@@ -263,7 +263,8 @@ func buildTestEntry(id, command string) store.CommandEntry {
 }
 
 func buildTestProjectEntry(
-	id, command, project, workDir, file, state string,
+	id, command, project, workDir, file string,
+	state model.EventType,
 ) store.CommandEntry {
 	return store.CommandEntry{
 		ID:    id,

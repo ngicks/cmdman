@@ -61,7 +61,7 @@ exit 0
 
 	assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
 	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
-	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandState{}))
+	assert.NilError(t, st.InsertCommandState(id, model.EventTypeCreated, &model.CommandState{}))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
@@ -74,7 +74,7 @@ exit 0
 	// Should have exited successfully after 3 runs.
 	state, exitCode, _, err := st.GetCommandState(id)
 	assert.NilError(t, err)
-	assert.Equal(t, state, model.StateExited)
+	assert.Equal(t, state, model.EventTypeExited)
 	assert.Assert(t, exitCode != nil)
 	assert.Equal(t, *exitCode, 0)
 
@@ -116,7 +116,7 @@ func TestRestartPolicyAlways(t *testing.T) {
 
 	assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
 	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
-	assert.NilError(t, st.InsertCommandState(id, model.StateCreated, &model.CommandState{}))
+	assert.NilError(t, st.InsertCommandState(id, model.EventTypeCreated, &model.CommandState{}))
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 

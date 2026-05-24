@@ -28,12 +28,12 @@ func CleanStaleEntries(st *cmdstore.Store, cfg CmdmanConfig) error {
 		return err
 	}
 	for _, e := range entries {
-		if e.State != model.StateStarting && e.State != model.StateRunning {
+		if e.State != model.EventTypeStarting && e.State != model.EventTypeStarted {
 			continue
 		}
 		if e.StateJSON.MonitorPID > 0 && !CheckMonitorAlive(e.StateJSON.MonitorPID) {
 			e.StateJSON.Error = "monitor died unexpectedly"
-			_ = st.UpdateCommandState(e.ID, model.StateFailed, nil, e.StateJSON)
+			_ = st.UpdateCommandState(e.ID, model.EventTypeFailed, nil, e.StateJSON)
 
 			// Auto-remove if requested.
 			if e.ConfigJSON.Annotations[cmdstore.AnnotationAutoRemove] == "true" {

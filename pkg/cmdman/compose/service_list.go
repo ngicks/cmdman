@@ -26,7 +26,7 @@ type CommandStatus struct {
 	Command  string
 	ID       string
 	Name     string
-	State    string
+	State    model.EventType
 	ExitCode *int
 	Argv     []string
 }
@@ -68,11 +68,11 @@ func (s *Service) ListProjects(ctx context.Context) ([]ProjectSummary, error) {
 		}
 		summary.Commands++
 		switch entry.State {
-		case model.StateRunning:
+		case model.EventTypeStarted:
 			summary.Running++
-		case model.StateExited:
+		case model.EventTypeExited:
 			summary.Exited++
-		case model.StateFailed:
+		case model.EventTypeFailed:
 			summary.Failed++
 		}
 	}

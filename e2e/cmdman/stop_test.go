@@ -13,7 +13,7 @@ func TestStop_RunningCommand(t *testing.T) {
 	id := env.run(ctx, "run", "-n", "sleeper", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
 
-	env.waitForState(ctx, "sleeper", "running", defaultTimeout)
+	env.waitForState(ctx, "sleeper", "started", defaultTimeout)
 
 	// Stop it.
 	env.run(ctx, "stop", "sleeper")
@@ -35,7 +35,7 @@ func TestStop_ByID(t *testing.T) {
 	id := env.run(ctx, "run", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
 
-	env.waitForState(ctx, id, "running", defaultTimeout)
+	env.waitForState(ctx, id, "started", defaultTimeout)
 
 	// Stop by ID.
 	env.run(ctx, "stop", id)
@@ -51,7 +51,7 @@ func TestStop_WithSignal(t *testing.T) {
 	id := env.run(ctx, "run", "-n", "sig-test", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
 
-	env.waitForState(ctx, "sig-test", "running", defaultTimeout)
+	env.waitForState(ctx, "sig-test", "started", defaultTimeout)
 
 	// Send SIGKILL explicitly.
 	env.run(ctx, "stop", "-s", "SIGKILL", "sig-test")
@@ -67,7 +67,7 @@ func TestSignal_Subcommand(t *testing.T) {
 	id := env.run(ctx, "run", "-n", "signal-test", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
 
-	env.waitForState(ctx, "signal-test", "running", defaultTimeout)
+	env.waitForState(ctx, "signal-test", "started", defaultTimeout)
 	env.run(ctx, "signal", "-s", "SIGKILL", "signal-test")
 	env.waitForState(ctx, "signal-test", "exited", defaultTimeout)
 }
@@ -109,8 +109,8 @@ func TestStop_MultipleTargets(t *testing.T) {
 		env.cleanupCommand(ctx, id2)
 	})
 
-	env.waitForState(ctx, id1, "running", defaultTimeout)
-	env.waitForState(ctx, id2, "running", defaultTimeout)
+	env.waitForState(ctx, id1, "started", defaultTimeout)
+	env.waitForState(ctx, id2, "started", defaultTimeout)
 
 	env.run(ctx, "stop", id1, id2)
 

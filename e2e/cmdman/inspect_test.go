@@ -203,7 +203,7 @@ func TestInspect_LiveStatusForRunningCommand(t *testing.T) {
 
 	id := env.run(ctx, "run", "-n", "live-status", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, "live-status", "running", defaultTimeout)
+	env.waitForState(ctx, "live-status", "started", defaultTimeout)
 
 	info := env.inspectJSON(ctx, "live-status")
 
@@ -212,7 +212,7 @@ func TestInspect_LiveStatusForRunningCommand(t *testing.T) {
 	if liveStatus == nil {
 		t.Fatal("expected live_status for running command")
 	}
-	if liveStatus["state"] != "running" {
+	if liveStatus["state"] != "started" {
 		t.Errorf("expected live_status.state=running, got %v", liveStatus["state"])
 	}
 	pid, _ := liveStatus["pid"].(float64)
