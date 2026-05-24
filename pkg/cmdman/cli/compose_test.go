@@ -28,6 +28,6 @@ func TestPrintComposeLogsPrefixesTimeAndCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := PrintComposeLogs(&stdout, &stderr, msgs)
 	assert.NilError(t, err)
-	assert.Equal(t, stdout.String(), "2026-05-24T01:02:03.456789Z alpha|line-from-alpha\n")
+	assert.Equal(t, stdout.String(), "2026-05-24T01:02:03.456789Z alpha |line-from-alpha\n")
 	assert.Equal(t, stderr.String(), "")
 }
