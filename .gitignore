@@ -46,3 +46,6 @@ apm_modules/
 
 /CLAUDE_*.md
 /CODEX_*.md
+
+CLAUDE.md
+AGENTS.md
