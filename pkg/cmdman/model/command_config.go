@@ -18,6 +18,9 @@ type CommandConfig struct {
 	Env []string `json:"env,omitempty"`
 	// RestartPolicy is one of "no", "on-failure", "always".
 	RestartPolicy RestartPolicy `json:"restart_policy"`
+	// MaxRetries caps the number of automatic restarts under the "on-failure"
+	// policy. Zero means unlimited. It is only valid with "on-failure".
+	MaxRetries int `json:"max_retries,omitempty"`
 	// StopSignal is the default signal used by stop when no override is provided.
 	StopSignal string `json:"stop_signal,omitempty"`
 	// Tty controls whether the command is attached to a pseudo-terminal.
@@ -64,6 +67,15 @@ func (c *CommandConfig) ValidateCreate() error {
 	}
 	if !IsRestartPolicy(string(c.RestartPolicy)) {
 		return fmt.Errorf("command config: invalid restart policy %q", c.RestartPolicy)
+	}
+	if c.MaxRetries < 0 {
+		return fmt.Errorf("command config: max_retries must be non-negative: %d", c.MaxRetries)
+	}
+	if c.MaxRetries > 0 && c.RestartPolicy != RestartPolicyOnFailure {
+		return fmt.Errorf(
+			"command config: max_retries is only valid with restart policy %q",
+			RestartPolicyOnFailure,
+		)
 	}
 	if c.StopSignal != "" {
 		if _, _, err := hrstr.ParseSignal(c.StopSignal); err != nil {

@@ -84,7 +84,9 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 		case model.RestartPolicyNo:
 		case model.RestartPolicyOnFailure:
 			if exitCode != 0 && !m.stopRequested.Load() && ctx.Err() == nil {
-				continue
+				if m.cfg.MaxRetries == 0 || m.stateJSON.RestartCount < m.cfg.MaxRetries {
+					continue
+				}
 			}
 		case model.RestartPolicyAlways:
 			if !m.stopRequested.Load() && ctx.Err() == nil {

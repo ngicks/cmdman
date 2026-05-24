@@ -233,13 +233,25 @@ func Normalize(
 		envSlice := mapToEnvSlice(commandEnv)
 		genName := GenerateName(wdHash, project, name)
 
+		var (
+			restartPolicy model.RestartPolicy
+			maxRetries    int
+		)
+		if cmd.RestartPolicy != "" {
+			restartPolicy, maxRetries, err = model.ParseRestartPolicy(cmd.RestartPolicy)
+			if err != nil {
+				return ComposeSpec{}, fmt.Errorf("command %q: %w", name, err)
+			}
+		}
+
 		nc := Command{
 			Name:            name,
 			Dir:             cmdDir,
 			Args:            interpolatedArgs,
 			Env:             envSlice,
 			Labels:          cmd.Labels,
-			RestartPolicy:   model.RestartPolicy(cmd.RestartPolicy),
+			RestartPolicy:   restartPolicy,
+			MaxRetries:      maxRetries,
 			StopSignal:      cmd.StopSignal,
 			Tty:             cmd.Tty,
 			ScrollbackBytes: cmd.ScrollbackBytes,

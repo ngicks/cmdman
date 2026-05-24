@@ -36,7 +36,7 @@ func bindCreateFlags(cmd *cobra.Command, f *createFlags) {
 		&f.Restart,
 		"restart",
 		string(model.RestartPolicyNo),
-		"Restart policy: no, on-failure, always",
+		"Restart policy: no, on-failure[:max-retries], always",
 	)
 	flags.StringVar(&f.StopSignal, "stop-signal", model.DefaultStopSignal, "Default stop signal")
 	flags.BoolVar(&f.Rm, "rm", false, "Auto-remove on exit")
@@ -119,12 +119,22 @@ func doCreate(
 		return "", "", err
 	}
 
+	restartPolicy := model.RestartPolicyNo
+	var maxRetries int
+	if flags.Restart != "" {
+		restartPolicy, maxRetries, err = model.ParseRestartPolicy(flags.Restart)
+		if err != nil {
+			return "", "", err
+		}
+	}
+
 	result, err := svc.Create(cmd.Context(), cmdman.CreateRequest{
 		Name:            flags.Name,
 		Dir:             flags.Dir,
 		Env:             flags.Env,
 		Labels:          labels,
-		RestartPolicy:   model.RestartPolicy(flags.Restart),
+		RestartPolicy:   restartPolicy,
+		MaxRetries:      maxRetries,
 		StopSignal:      flags.StopSignal,
 		AutoRemove:      flags.Rm,
 		Tty:             flags.Tty,

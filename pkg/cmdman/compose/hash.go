@@ -46,6 +46,7 @@ type hashCanonical struct {
 	Dir             string            `json:"dir"`
 	Env             []string          `json:"env"` // sorted KEY=VALUE; env_file + env: merged
 	RestartPolicy   string            `json:"restart_policy"`
+	MaxRetries      int               `json:"max_retries,omitempty"`
 	StopSignal      string            `json:"stop_signal"`
 	Tty             bool              `json:"tty"`
 	ScrollbackBytes int               `json:"scrollback_bytes"`

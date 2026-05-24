@@ -103,6 +103,9 @@ type Command struct {
 	Labels map[string]string
 	// RestartPolicy from the YAML.
 	RestartPolicy model.RestartPolicy
+	// MaxRetries is the on-failure restart cap parsed from restart_policy
+	// ("on-failure:N"). Zero means unlimited.
+	MaxRetries int
 	// StopSignal from the YAML.
 	StopSignal string
 	// Tty from the YAML.

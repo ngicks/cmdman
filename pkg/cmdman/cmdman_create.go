@@ -19,6 +19,7 @@ type CreateRequest struct {
 	Env             []string
 	Labels          map[string]string
 	RestartPolicy   model.RestartPolicy
+	MaxRetries      int
 	StopSignal      string
 	AutoRemove      bool
 	Tty             bool
@@ -121,6 +122,7 @@ func (s *Service) buildCommandConfig(req CreateRequest) *model.CommandConfig {
 		Dir:             dir,
 		Env:             env,
 		RestartPolicy:   restartPolicy,
+		MaxRetries:      req.MaxRetries,
 		StopSignal:      stopSignal,
 		Tty:             req.Tty,
 		ScrollbackBytes: scrollbackBytes,

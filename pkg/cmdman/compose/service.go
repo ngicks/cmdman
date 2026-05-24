@@ -229,6 +229,7 @@ func buildCreateRequest(
 		Argv:            nc.Args,
 		Env:             nc.Env,
 		RestartPolicy:   nc.RestartPolicy,
+		MaxRetries:      nc.MaxRetries,
 		StopSignal:      nc.StopSignal,
 		Tty:             nc.Tty,
 		ScrollbackBytes: nc.ScrollbackBytes,
