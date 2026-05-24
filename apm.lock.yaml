@@ -1,5 +1,5 @@
 lockfile_version: '1'
-generated_at: '2026-05-24T11:09:33.249078+00:00'
+generated_at: '2026-05-24T14:31:10.766302+00:00'
 apm_version: 0.14.1
 dependencies:
 - repo_url: ngicks/agents-package
@@ -84,4 +84,4 @@ local_deployed_files:
 - .claude/rules/base.md
 - .claude/skills/go-cmdman-review-checklist
 local_deployed_file_hashes:
-  .claude/rules/base.md: sha256:254d4c66cc571ec4f58e45a4579619bc88a3423c42d19ad012fb1f1c11909433
+  .claude/rules/base.md: sha256:8ee4db368cc493bc823e8808e5059e441f3ee8c3af0096f0ad0e99be15bec357

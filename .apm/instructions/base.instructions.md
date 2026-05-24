@@ -17,16 +17,32 @@ A simple shell command daemonizor written in Go which runs blocking commands in 
 
 ```
 .
-├── AGENTS.md
-├── bin             git-ignore'd bin dir.
-├── cmd             Entry point. cobra subcommand structure.
-│   └─── cmdman
-├── e2e             e2e test
+├── cmd                Entry point. cobra subcommand structure.
 │   └── cmdman
-└─── pkg
-    ├── api         API definition and generated code / related type definitions. proto schema basically sit here.
-    ├── cmdman      cmdman implementation: a simple command daemon. It's like Podman without pods, tmux without terminals.
-    └── mux         terminal multiplexer helper implementation.
+├── doc
+│   └── plan           old plan files. You may not read this
+├── e2e
+│   └── cmdman
+├── internal
+│   ├── cmd            internal helper entry points
+│   │   └── release    release helper
+│   ├── loggerfactory  internal helper
+│   └── versioninfo
+└── pkg
+    ├── api            IPC / RPC definition
+    │   ├── gen        generated code by `buf generate`
+    │   └── schema     `buf generate` target
+    ├── cmdman         cmdman usecase code
+    │   ├── cli        cli wiring
+    │   ├── compose    compose functionality
+    │   ├── eventlog   log functionality
+    │   ├── internal
+    │   ├── logdriver  log reader / writer
+    │   ├── model      domain models
+    │   └── store      SQLite config / state store
+    ├── hrstr          human readable string parser / maybe writer
+    ├── mux            terminal multiplexer driver
+    └── stdcopy        copy cmdman logs to io.Writer
 ```
 
 ### Implementing functionality
