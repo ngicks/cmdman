@@ -8,26 +8,26 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/compose"
 )
 
-func composePsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeInspectCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
 	var (
 		flagFormat string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "ps [COMMAND...]",
-		Short: "List commands in a compose project",
+		Use:   "inspect [COMMAND...]",
+		Short: "Show merged definition, state, and exit history for compose commands",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposePs(cmd, rootCfg, cf, args, flagFormat)
+			return runComposeInspect(cmd, rootCfg, cf, args, flagFormat)
 		},
 	}
 
-	cmd.Flags().StringVar(&flagFormat, "format", "", cli.ComposePsFormatUsage())
+	cmd.Flags().StringVar(&flagFormat, "format", "", cli.InspectFormatUsage())
 
 	parent.AddCommand(cmd)
 }
 
-func runComposePs(
+func runComposeInspect(
 	cmd *cobra.Command,
 	rootCfg *cmdman.CmdmanConfig,
 	cf *composeFlags,
@@ -45,10 +45,10 @@ func runComposePs(
 	}
 	defer svc.Close()
 
-	statuses, err := compose.NewService(svc).Ps(cmd.Context(), selection, commandNames)
+	outputs, err := compose.NewService(svc).Inspect(cmd.Context(), selection, commandNames)
 	if err != nil {
 		return err
 	}
 
-	return cli.RenderComposePs(cmd.OutOrStdout(), statuses, format)
+	return cli.RenderComposeInspect(cmd.OutOrStdout(), outputs, format)
 }

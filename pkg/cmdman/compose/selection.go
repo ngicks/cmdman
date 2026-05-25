@@ -46,6 +46,15 @@ func filterByCommandNames(entries []cmdmanEntry, names []string) []cmdmanEntry {
 	return out
 }
 
+// commandNameOf returns the compose command name (LabelCommand) recorded on an
+// entry, or "" when the entry has no stored config or label.
+func commandNameOf(e cmdmanEntry) string {
+	if e.ConfigJSON == nil {
+		return ""
+	}
+	return e.ConfigJSON.Labels[LabelCommand]
+}
+
 // buildIDByCommand returns a map from compose command name (LabelCommand) to
 // the cmdman entry ID for the supplied entries.
 func buildIDByCommand(entries []cmdmanEntry) map[string]string {

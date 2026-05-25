@@ -1,11 +1,15 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
+	"text/template"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/compose"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 )
@@ -43,8 +47,24 @@ func PrintComposeLogs(out, errOut io.Writer, msgs <-chan compose.LogMessage) err
 	return nil
 }
 
-// PrintComposeProjects writes one row per discovered compose project.
-func PrintComposeProjects(out io.Writer, summaries []compose.ProjectSummary) {
+// RenderComposeProjects renders the compose ls output. format selects the
+// layout:
+//   - "" or "table": the default tab-separated table.
+//   - "json": an indented JSON array of project summaries.
+//   - anything else: a Go text/template applied per project summary.
+func RenderComposeProjects(out io.Writer, summaries []compose.ProjectSummary, format string) error {
+	switch format {
+	case "", "table":
+		printComposeProjectsTable(out, summaries)
+		return nil
+	case "json":
+		return renderJSONArray(out, summaries)
+	default:
+		return renderTemplate(out, summaries, format)
+	}
+}
+
+func printComposeProjectsTable(out io.Writer, summaries []compose.ProjectSummary) {
 	fmt.Fprintln(out, "PROJECT\tCOMMANDS\tRUNNING\tEXITED\tFAILED\tWORKDIR\tFILE")
 	for _, summary := range summaries {
 		fmt.Fprintf(
@@ -61,8 +81,23 @@ func PrintComposeProjects(out io.Writer, summaries []compose.ProjectSummary) {
 	}
 }
 
-// PrintComposePs writes one row per command in a compose project.
-func PrintComposePs(out io.Writer, statuses []compose.CommandStatus) {
+// RenderComposePs renders the compose ps output. format selects the layout:
+//   - "" or "table": the default tab-separated table.
+//   - "json": an indented JSON array of command statuses.
+//   - anything else: a Go text/template applied per command status.
+func RenderComposePs(out io.Writer, statuses []compose.CommandStatus, format string) error {
+	switch format {
+	case "", "table":
+		printComposePsTable(out, statuses)
+		return nil
+	case "json":
+		return renderJSONArray(out, statuses)
+	default:
+		return renderTemplate(out, statuses, format)
+	}
+}
+
+func printComposePsTable(out io.Writer, statuses []compose.CommandStatus) {
 	fmt.Fprintln(out, "COMMAND\tID\tNAME\tSTATE\tEXIT CODE\tARGV")
 	for _, status := range statuses {
 		exitCode := "-"
@@ -84,6 +119,67 @@ func PrintComposePs(out io.Writer, statuses []compose.CommandStatus) {
 			strings.Join(status.Argv, " "),
 		)
 	}
+}
+
+// RenderComposeInspect renders the compose inspect output. When format is empty
+// it emits an indented JSON array of inspect outputs. Otherwise format is a Go
+// text/template applied per output, newline-terminated.
+func RenderComposeInspect(out io.Writer, outputs []*cmdman.InspectOutput, format string) error {
+	if format == "" {
+		return renderJSONArray(out, outputs)
+	}
+	return renderTemplate(out, outputs, format)
+}
+
+// renderJSONArray writes v as an indented JSON document. A nil slice is
+// normalized to an empty array so the output is always valid JSON ("[]" rather
+// than "null").
+func renderJSONArray[T any](out io.Writer, items []T) error {
+	if items == nil {
+		items = []T{}
+	}
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	return enc.Encode(items)
+}
+
+// renderTemplate applies a Go text/template to each item, newline-terminated.
+func renderTemplate[T any](out io.Writer, items []T, format string) error {
+	tmpl, err := template.New("format").Funcs(templateFuncMap).Parse(format)
+	if err != nil {
+		return fmt.Errorf("parse format template: %w", err)
+	}
+	for _, item := range items {
+		if err := tmpl.Execute(out, item); err != nil {
+			return fmt.Errorf("execute format template: %w", err)
+		}
+		fmt.Fprintln(out)
+	}
+	return nil
+}
+
+// ComposePsFormatUsage returns the --format usage string for compose ps.
+func ComposePsFormatUsage() string {
+	return composeFormatUsage[compose.CommandStatus]()
+}
+
+// ComposeLsFormatUsage returns the --format usage string for compose ls.
+func ComposeLsFormatUsage() string {
+	return composeFormatUsage[compose.ProjectSummary]()
+}
+
+func composeFormatUsage[T any]() string {
+	t := reflect.TypeFor[T]()
+	var fields []string
+	for f := range t.Fields() {
+		fields = append(fields, fmt.Sprintf(".%s (%s)", f.Name, f.Type))
+	}
+	return fmt.Sprintf(
+		`Output format: "table" (default), "json", or a Go text/template string.`+
+			"\nTemplate fields:\n  %s\nTemplate functions: %s",
+		strings.Join(fields, ", "),
+		templateFuncList(),
+	)
 }
 
 func formatLogTime(t time.Time) string {
@@ -207,6 +303,21 @@ func PrintSignalResult(out, errOut io.Writer, outcomes []compose.SignalOutcome) 
 		printStatusLine(out, status, o.Command)
 	}
 	return reportErrors(errOut, "compose signal operation", errs)
+}
+
+// PrintSendKeysResult writes a status line per send-keys outcome and returns a
+// combined error when any send failed.
+func PrintSendKeysResult(out, errOut io.Writer, outcomes []compose.SendKeysOutcome) error {
+	var errs []error
+	for _, o := range outcomes {
+		status := "sent"
+		if o.Err != nil {
+			status = "error"
+			errs = append(errs, o.Err)
+		}
+		printStatusLine(out, status, o.Command)
+	}
+	return reportErrors(errOut, "compose send-keys operation", errs)
 }
 
 // PrintWaitResult writes a status line per wait outcome, including the exit code

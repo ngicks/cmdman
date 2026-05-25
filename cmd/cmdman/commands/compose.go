@@ -50,14 +50,18 @@ func composeCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	composeCreateCmd(cmd, rootCfg, &flags)
 	composeLsCmd(cmd, rootCfg)
 	composePsCmd(cmd, rootCfg, &flags)
+	composeInspectCmd(cmd, rootCfg, &flags)
 	composeUpCmd(cmd, rootCfg, &flags)
 	composeStartCmd(cmd, rootCfg, &flags)
 	composeStopCmd(cmd, rootCfg, &flags)
 	composeRestartCmd(cmd, rootCfg, &flags)
 	composeDownCmd(cmd, rootCfg, &flags)
 	composeLogsCmd(cmd, rootCfg, &flags)
+	composeEventsCmd(cmd, rootCfg, &flags)
 	composeSignalCmd(cmd, rootCfg, &flags)
 	composeWaitCmd(cmd, rootCfg, &flags)
+	composeAttachCmd(cmd, rootCfg, &flags)
+	composeSendKeysCmd(cmd, rootCfg, &flags)
 
 	parent.AddCommand(cmd)
 }

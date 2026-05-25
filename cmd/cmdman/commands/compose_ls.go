@@ -9,14 +9,20 @@ import (
 )
 
 func composeLsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+	var (
+		flagFormat string
+	)
+
 	cmd := &cobra.Command{
 		Use:   "ls",
 		Short: "List compose projects",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeLs(cmd, rootCfg)
+			return runComposeLs(cmd, rootCfg, flagFormat)
 		},
 	}
+
+	cmd.Flags().StringVar(&flagFormat, "format", "", cli.ComposeLsFormatUsage())
 
 	parent.AddCommand(cmd)
 }
@@ -24,6 +30,7 @@ func composeLsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 func runComposeLs(
 	cmd *cobra.Command,
 	rootCfg *cmdman.CmdmanConfig,
+	format string,
 ) error {
 	svc, err := cmdmanService(rootCfg)
 	if err != nil {
@@ -36,6 +43,5 @@ func runComposeLs(
 		return err
 	}
 
-	cli.PrintComposeProjects(cmd.OutOrStdout(), summaries)
-	return nil
+	return cli.RenderComposeProjects(cmd.OutOrStdout(), summaries, format)
 }

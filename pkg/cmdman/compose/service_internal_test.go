@@ -14,8 +14,11 @@ import (
 )
 
 type testCmdmanSvc struct {
-	logs func(context.Context, cmdman.LogsRequest) (logdriver.Reader, error)
-	list func(context.Context, cmdman.ListRequest) ([]store.CommandEntry, error)
+	logs     func(context.Context, cmdman.LogsRequest) (logdriver.Reader, error)
+	list     func(context.Context, cmdman.ListRequest) ([]store.CommandEntry, error)
+	inspect  func(context.Context, string) (*cmdman.InspectOutput, error)
+	events   func(context.Context, cmdman.EventsRequest) (*cmdman.EventsSubscription, error)
+	sendKeys func(context.Context, string, cmdman.SendKeysRequest) error
 }
 
 func (s testCmdmanSvc) Start(context.Context, string) error {
@@ -60,6 +63,41 @@ func (s testCmdmanSvc) Logs(
 	req cmdman.LogsRequest,
 ) (logdriver.Reader, error) {
 	return s.logs(ctx, req)
+}
+
+func (s testCmdmanSvc) Inspect(
+	ctx context.Context,
+	idOrName string,
+) (*cmdman.InspectOutput, error) {
+	if s.inspect != nil {
+		return s.inspect(ctx, idOrName)
+	}
+	return nil, nil
+}
+
+func (s testCmdmanSvc) Events(
+	ctx context.Context,
+	req cmdman.EventsRequest,
+) (*cmdman.EventsSubscription, error) {
+	if s.events != nil {
+		return s.events(ctx, req)
+	}
+	return nil, nil
+}
+
+func (s testCmdmanSvc) OpenAttachSession(context.Context, string) (*cmdman.Session, error) {
+	return nil, nil
+}
+
+func (s testCmdmanSvc) SendKeys(
+	ctx context.Context,
+	idOrName string,
+	req cmdman.SendKeysRequest,
+) error {
+	if s.sendKeys != nil {
+		return s.sendKeys(ctx, idOrName, req)
+	}
+	return nil
 }
 
 type testLogReader struct {

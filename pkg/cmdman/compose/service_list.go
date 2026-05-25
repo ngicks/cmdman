@@ -12,23 +12,23 @@ import (
 // ProjectSummary describes one compose project discovered from stored command
 // labels.
 type ProjectSummary struct {
-	Project     string
-	WorkDir     string
-	ComposeFile string
-	Commands    int
-	Running     int
-	Exited      int
-	Failed      int
+	Project     string `json:"project"`
+	WorkDir     string `json:"workdir"`
+	ComposeFile string `json:"compose_file,omitempty"`
+	Commands    int    `json:"commands"`
+	Running     int    `json:"running"`
+	Exited      int    `json:"exited"`
+	Failed      int    `json:"failed"`
 }
 
 // CommandStatus describes one stored command in a compose project.
 type CommandStatus struct {
-	Command  string
-	ID       string
-	Name     string
-	State    model.EventType
-	ExitCode *int
-	Argv     []string
+	Command  string          `json:"command"`
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	State    model.EventType `json:"state"`
+	ExitCode *int            `json:"exit_code,omitempty"`
+	Argv     []string        `json:"argv,omitempty"`
 }
 
 // ListProjects returns every compose project known to the cmdman store.
