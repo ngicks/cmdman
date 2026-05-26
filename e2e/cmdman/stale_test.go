@@ -55,6 +55,58 @@ func TestStale_DetectedOnLs(t *testing.T) {
 	}
 }
 
+// TestStale_DetectedOnStop verifies that stop can repair a command whose
+// monitor died without updating the persisted state.
+func TestStale_DetectedOnStop(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	dbPath := filepath.Join(env.dataHome, "commands.db")
+	st, err := store.OpenStore(ctx, dbPath, true)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+
+	id := "stale-stop-test-id"
+	cfg := &model.CommandConfig{
+		Argv:            []string{"/bin/sh", "-c", "sleep 300"},
+		Dir:             env.dataHome,
+		Env:             os.Environ(),
+		RestartPolicy:   model.RestartPolicyNo,
+		StopSignal:      model.DefaultStopSignal,
+		ScrollbackBytes: 1024,
+		LogDriver:       model.DefaultLogDriver,
+		CommandDir:      filepath.Join(env.dataHome, "commands", id),
+	}
+	if err := st.InsertCommandConfig(id, "stale-stop", cfg); err != nil {
+		t.Fatalf("insert command config: %v", err)
+	}
+	if err := st.InsertCommandState(id, model.EventTypeStarted, &model.CommandState{
+		MonitorPID: os.Getpid(),
+		SocketPath: filepath.Join(env.runtimeDir, id, "monitor.sock"),
+	}); err != nil {
+		t.Fatalf("insert command state: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	stdout, stderr, err := env.exec(ctx, "stop", "stale-stop")
+	if err != nil {
+		t.Fatalf("stop stale command failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	info := env.inspectJSON(ctx, "stale-stop")
+	if info["state"] != "failed" {
+		t.Fatalf("expected state=failed after stop repaired stale command, got %v", info["state"])
+	}
+	stateDetail, _ := info["state_detail"].(map[string]any)
+	if errorMsg, _ := stateDetail["error"].(string); errorMsg == "" {
+		t.Fatal("expected error message in state_detail after stale stop")
+	}
+}
+
 // TestStale_AutoRemoveOnStale verifies that a stale command with --rm
 // is automatically removed when detected.
 func TestStale_AutoRemoveOnStale(t *testing.T) {

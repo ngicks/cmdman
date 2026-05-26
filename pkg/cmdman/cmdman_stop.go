@@ -56,6 +56,17 @@ func (s *Service) stop(
 	signalOverride string,
 	timeout time.Duration,
 ) error {
+	state, _, stateJSON, err := st.GetCommandState(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get command state: %w", err)
+	}
+	if state == model.EventTypeExited || state == model.EventTypeFailed {
+		return nil
+	}
+
 	_, _, cfg, err := st.GetCommandConfig(id)
 	if err != nil {
 		return fmt.Errorf("get command config: %w", err)
@@ -83,6 +94,9 @@ func (s *Service) stop(
 	})
 
 	if err := s.sendStop(ctx, st, id, sig); err != nil {
+		if isMonitorUnavailable(err) {
+			return markMonitorDied(st, s.cfg, id, stateJSON, cfg)
+		}
 		return err
 	}
 	if err := waitForStopped(ctx, st, id, timeout); err == nil {

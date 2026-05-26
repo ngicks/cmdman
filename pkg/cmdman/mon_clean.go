@@ -28,23 +28,64 @@ func CleanStaleEntries(st *cmdstore.Store, cfg CmdmanConfig) error {
 		return err
 	}
 	for _, e := range entries {
-		if e.State != model.EventTypeStarting && e.State != model.EventTypeStarted {
-			continue
-		}
-		if e.StateJSON.MonitorPID > 0 && !CheckMonitorAlive(e.StateJSON.MonitorPID) {
-			e.StateJSON.Error = "monitor died unexpectedly"
-			_ = st.UpdateCommandState(e.ID, model.EventTypeFailed, nil, e.StateJSON)
-
-			// Auto-remove if requested.
-			if e.ConfigJSON.Annotations[cmdstore.AnnotationAutoRemove] == "true" {
-				_ = st.DeleteCommand(e.ID)
-				_ = os.RemoveAll(e.ConfigJSON.CommandDir)
-				runtimeDir, err := cfg.MonitorRuntimeDir(e.ID)
-				if err == nil {
-					_ = os.RemoveAll(runtimeDir)
-				}
-			}
+		if err := cleanStaleEntry(
+			st,
+			cfg,
+			e.ID,
+			e.State,
+			e.StateJSON,
+			e.ConfigJSON,
+		); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func cleanStaleEntry(
+	st *cmdstore.Store,
+	cfg CmdmanConfig,
+	id string,
+	state model.EventType,
+	stateJSON *model.CommandState,
+	configJSON *model.CommandConfig,
+) error {
+	if !isStaleCheckState(state) || !isStaleMonitor(stateJSON) {
+		return nil
+	}
+
+	return markMonitorDied(st, cfg, id, stateJSON, configJSON)
+}
+
+func markMonitorDied(
+	st *cmdstore.Store,
+	cfg CmdmanConfig,
+	id string,
+	stateJSON *model.CommandState,
+	configJSON *model.CommandConfig,
+) error {
+	stateJSON.Error = "monitor died unexpectedly"
+	if err := st.UpdateCommandState(id, model.EventTypeFailed, nil, stateJSON); err != nil {
+		return err
+	}
+	// Auto-remove if requested.
+	if configJSON.Annotations[cmdstore.AnnotationAutoRemove] == "true" {
+		if err := st.DeleteCommand(id); err != nil {
+			return err
+		}
+		_ = os.RemoveAll(configJSON.CommandDir)
+		runtimeDir, err := cfg.MonitorRuntimeDir(id)
+		if err == nil {
+			_ = os.RemoveAll(runtimeDir)
+		}
+	}
+	return nil
+}
+
+func isStaleCheckState(state model.EventType) bool {
+	return state == model.EventTypeStarting || state == model.EventTypeStarted
+}
+
+func isStaleMonitor(stateJSON *model.CommandState) bool {
+	return stateJSON.MonitorPID > 0 && !CheckMonitorAlive(stateJSON.MonitorPID)
 }

@@ -17,7 +17,9 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 type Service struct {
@@ -34,6 +36,10 @@ type Service struct {
 // NewService constructs a Service from an already-normalized config.
 func NewService(cfg CmdmanConfig) *Service {
 	return &Service{cfg: cfg}
+}
+
+func isMonitorUnavailable(err error) bool {
+	return status.Code(err) == codes.Unavailable
 }
 
 // eventLog lazily opens (and caches) the process-wide event log writer.
