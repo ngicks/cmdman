@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -16,6 +17,7 @@ type attachFlags struct {
 	NoStdin    bool
 	SigProxy   bool
 	DetachKeys string
+	AutoExit   bool
 }
 
 func attachCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
@@ -34,6 +36,10 @@ func attachCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	f.BoolVar(&flags.NoStdin, "no-stdin", false, "Output-only mode")
 	f.BoolVar(&flags.SigProxy, "sig-proxy", true, "Forward signals to command")
 	f.StringVar(&flags.DetachKeys, "detach-keys", "ctrl-p,ctrl-q", "Key sequence to detach")
+	f.BoolVar(
+		&flags.AutoExit, "auto-exit", false,
+		"Exit immediately when the command exits or is not running (opt out of sticky default)",
+	)
 
 	parent.AddCommand(cmd)
 }
@@ -53,13 +59,7 @@ func runAttach(
 	attachCtx, cancelAttach := context.WithCancel(cmd.Context())
 	defer cancelAttach()
 
-	session, err := svc.OpenAttachSession(attachCtx, args[0])
-	if err != nil {
-		return err
-	}
-	defer func() { _ = session.Close() }()
-
-	return cli.Attach(attachCtx, session, cli.AttachOptions{
+	opts := cli.AttachOptions{
 		NoStdin:      flags.NoStdin,
 		SigProxy:     flags.SigProxy,
 		DetachKeys:   flags.DetachKeys,
@@ -68,5 +68,40 @@ func runAttach(
 		Stdout:       os.Stdout,
 		StdinPipe:    stdiopipe.Stdin(attachCtx),
 		StdoutPipe:   stdiopipe.Stdout(attachCtx),
-	})
+	}
+
+	if flags.AutoExit {
+		session, err := svc.OpenAttachSession(attachCtx, args[0])
+		if err != nil {
+			return err
+		}
+		defer func() { _ = session.Close() }()
+
+		err = cli.Attach(attachCtx, session, opts)
+		if errors.Is(err, cli.ErrRemoteEOF) {
+			// --auto-exit preserves today's silent exit on EOF.
+			return nil
+		}
+		return err
+	}
+
+	hooks := cli.StickyHooks{
+		State: stickyStateFor(svc, args[0]),
+		OpenSession: func(ctx context.Context) (cli.AttachSession, error) {
+			return svc.OpenAttachSession(ctx, args[0])
+		},
+		Restart: func(ctx context.Context) error {
+			results, err := svc.Restart(ctx, cmdman.RestartRequest{Targets: []string{args[0]}})
+			if err != nil {
+				return err
+			}
+			for _, r := range results {
+				if r.Err != nil {
+					return r.Err
+				}
+			}
+			return nil
+		},
+	}
+	return cli.AttachSticky(attachCtx, hooks, opts)
 }

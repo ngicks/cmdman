@@ -23,6 +23,12 @@ import (
 // boundary should propagate it so the process exits non-zero.
 var ErrForceExit = errors.New("attach: force exit requested")
 
+// ErrRemoteEOF indicates the remote attach stream closed gracefully (the
+// monitored command exited or the monitor went away). Distinguished from
+// the detach-keys path (which still returns nil) so the sticky-attach loop
+// in [AttachSticky] can prompt the user for restart.
+var ErrRemoteEOF = errors.New("attach: remote stream closed")
+
 // forwardedSignals are forwarded to the remote command during an attach
 // session.
 var forwardedSignals = []os.Signal{
@@ -149,7 +155,14 @@ func Attach(ctx context.Context, session AttachSession, opts AttachOptions) erro
 	var exitErr error
 	select {
 	case err := <-errCh:
-		if _, isEscape := errors.AsType[term.EscapeError](err); err != io.EOF && !isEscape {
+		_, isEscape := errors.AsType[term.EscapeError](err)
+		switch {
+		case isEscape:
+			// User pressed detach-keys; treat as a graceful exit.
+		case err == io.EOF:
+			// Remote stream closed (command exited / monitor gone).
+			exitErr = ErrRemoteEOF
+		default:
 			exitErr = err
 		}
 	case <-forceExitCh:

@@ -710,8 +710,46 @@ integration tests for New / ApplyLayout (single, h-split, nested mixed,
 reset-on-reapply, focus, title override, Close-doesn't-touch-siblings,
 too-small-warns-via-logger).
 
-Implementation chunks remaining: (a) attach/logs stickiness internals
-(exit code, auto-reattach via `eventlog`; `r`→`restart`), and (b) the
-cmdman-layer YAML parser + leaf resolver above muxctl (cmdman-YAML
-`command:`/`mode:` → `muxctl.PaneSpec.Cmd` argv via the cmdman / compose
-services), plus the `cmdman mux` / `cmdman compose mux` cobra wiring.
+The cmdman layer above `pkg/muxctl` is also in: `pkg/cmdman/mux` carries
+`Spec`/`Layout`/`PaneSpec` (bare-string leaf shorthand, `command:`/`mode:`/
+`cmd_opt:`/`focus:`), `Decode(r)` for the wrapped `mux:` form, `DecodeNode`
+for the compose-embedded form, `Build(ctx, Spec, Resolver, PaneArgvOpts)`
+that resolves leaves to argv (rejecting duplicate commands within a layout
+and surfacing `muxctl.MuxSpec.Validate` errors), and `Run(ctx, MuxSpec,
+RunOptions)` that does driver autodetect (`$TMUX` > `$ZELLIJ` > tmux),
+constructs `tmux.Config` from `DriverOpt` (`socket`, `path`), cycles via
+`StatWindow` → `(prev+1) mod len(Layouts)` → `ApplyLayout`, and prints the
+`tmux attach -t <session>` hint when outside a multiplexer. Cobra
+subcommands are wired: `cmdman mux [path]` (positional, `-`/omitted ⇒ stdin;
+resolver = `cmdman.Service.Inspect`) and `cmdman compose mux` (reads
+`selection.Spec.Mux`, resolver = exported `compose.Service.ResolveCommandID`,
+window name `cmdman-<project>`). Compose carries the embedded `mux:` node
+through `RawComposeSpec.Mux`/`ComposeSpec.Mux` (`*yaml.Node`).
+Covered by `pkg/cmdman/mux/spec_test.go` (shorthand + full-mapping leaves +
+nested containers + argv shape per mode + duplicate-leaf rejection +
+resolver-error propagation + missing `mux:` key); e2e + `compose mux`
+integration tests are TODO.
+
+Sticky-attach (chunk a, partial) is also in: `pkg/cmdman/cli/sticky.go`
+adds `StickyState`/`StickyHooks`/`PromptResult` + `AttachSticky` (loop:
+State → OpenSession → Attach; on `ErrRemoteEOF` or `Running==false`, run
+`promptWait`; on `r`/`R` call Restart and re-loop; on detach-keys / ctx
+cancel return cleanly) + `PromptStickyWait` (single-shot prompt building
+block) backed by a `stdinMux` fan-out so stdin survives across iterations.
+`cli.Attach` now returns the new `ErrRemoteEOF` sentinel (distinct from
+detach-keys, which still returns nil) so the sticky wrapper can tell why
+the stream ended. Both `cmdman attach` and `cmdman compose attach` gain
+`--auto-exit` (default false → sticky on; true → today's exit-on-EOF
+preserved by translating `ErrRemoteEOF` to nil). Exit-code source is
+`cmdman.Service.Inspect` (state + `ExitCode *int`) via the `stickyStateFor`
+helper in `cmd/.../zz_helpers.go`. Covered by
+`pkg/cmdman/cli/sticky_test.go` (r→Restart, detach-keys→Detach, ctx
+cancel→Detach).
+
+Implementation chunks remaining: (a-rest) `cmdman logs --sticky` (`#|`
+meta prefix, `--meta-prefix` configurable; wait + resume on next start
+via `eventlog`), and eventlog-driven auto-reattach inside `AttachSticky`
+(subscribe to the command's `eventlog` so a restart-policy-triggered
+restart auto-reattaches without the `r` prompt). Once `--sticky` lands,
+`pkg/cmdman/mux/build.go` paneArgv swaps `logs -f` → `logs --sticky`
+(TODO marker in source).
