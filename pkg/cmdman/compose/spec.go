@@ -3,6 +3,8 @@
 package compose
 
 import (
+	"go.yaml.in/yaml/v4"
+
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
@@ -38,6 +40,10 @@ type RawComposeSpec struct {
 	Name     string                `yaml:"name"`
 	WorkDir  string                `yaml:"work_dir"`
 	Commands map[string]RawCommand `yaml:"commands"`
+	// Mux is the embedded cmdman mux layout. Captured as a raw yaml.Node so
+	// pkg/cmdman/mux owns the decoding of its own grammar; nil when the file
+	// has no "mux:" section.
+	Mux *yaml.Node `yaml:"mux,omitempty"`
 	// Unknown captures unrecognized top-level keys so Normalize can warn about them.
 	Unknown map[string]any `yaml:",inline"`
 }
@@ -85,6 +91,9 @@ type ComposeSpec struct {
 	WorkDir string
 	// Commands is the ordered list of normalized commands.
 	Commands []Command
+	// Mux carries through the raw "mux:" section from the compose file (nil
+	// when absent). Consumed by pkg/cmdman/mux for `cmdman compose mux`.
+	Mux *yaml.Node
 }
 
 // Command is a single command after normalization.

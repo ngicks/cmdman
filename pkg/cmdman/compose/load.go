@@ -173,7 +173,13 @@ func Normalize(
 		return ComposeSpec{}, err
 	}
 
-	warnUnknownFields(ctx, raw.Unknown, "compose: ignoring unrecognized top-level field", "project", project)
+	warnUnknownFields(
+		ctx,
+		raw.Unknown,
+		"compose: ignoring unrecognized top-level field",
+		"project",
+		project,
+	)
 
 	wdHash := workdirHash(effectiveWorkDir)
 
@@ -192,7 +198,15 @@ func Normalize(
 			return ComposeSpec{}, fmt.Errorf("command %q: %w", name, err)
 		}
 
-		warnUnknownFields(ctx, cmd.Unknown, "compose: ignoring unrecognized command field", "project", project, "command", name)
+		warnUnknownFields(
+			ctx,
+			cmd.Unknown,
+			"compose: ignoring unrecognized command field",
+			"project",
+			project,
+			"command",
+			name,
+		)
 
 		cmdDir := resolvePath(effectiveWorkDir, cmd.Dir)
 
@@ -275,6 +289,7 @@ func Normalize(
 		Project:     project,
 		WorkDir:     effectiveWorkDir,
 		Commands:    normalized,
+		Mux:         raw.Mux,
 	}, nil
 }
 

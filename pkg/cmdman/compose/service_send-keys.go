@@ -68,7 +68,8 @@ func (s *Service) SendKeys(
 	}
 
 	if len(entries) == 0 {
-		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose send-keys: no commands found for project",
+		contextkey.ValueSlogLoggerDefault(ctx).Warn(
+			"compose send-keys: no commands found for project",
 			"project", selection.Project,
 			"workdir", selection.WorkDir,
 			"operation", "send-keys",

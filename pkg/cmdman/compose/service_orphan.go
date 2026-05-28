@@ -44,13 +44,14 @@ func (s *Service) handleOrphans(
 		// --remove-orphan path.
 		// Running/starting orphans: skip and report.
 		if orphan.State == model.EventTypeStarted || orphan.State == model.EventTypeStarting {
-			contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: orphan command is running; skipping removal",
-				"project", spec.Project,
-				"workdir", spec.WorkDir,
-				"command", cmdName,
-				"id", orphan.ID,
-				"state", orphan.State,
-			)
+			contextkey.ValueSlogLoggerDefault(ctx).
+				Warn("compose: orphan command is running; skipping removal",
+					"project", spec.Project,
+					"workdir", spec.WorkDir,
+					"command", cmdName,
+					"id", orphan.ID,
+					"state", orphan.State,
+				)
 			outcomes = append(outcomes, ActionOutcome{
 				Command: cmdName,
 				Action:  "skipped",

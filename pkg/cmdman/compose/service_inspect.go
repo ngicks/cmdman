@@ -40,7 +40,8 @@ func (s *Service) Inspect(
 	}
 
 	if len(entries) == 0 {
-		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose inspect: no commands found for project",
+		contextkey.ValueSlogLoggerDefault(ctx).Warn(
+			"compose inspect: no commands found for project",
 			"project", selection.Project,
 			"workdir", selection.WorkDir,
 			"operation", "inspect",

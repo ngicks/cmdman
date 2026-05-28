@@ -72,13 +72,17 @@ func runComposeSendKeys(
 	}
 	defer svc.Close()
 
-	result, err := compose.NewService(svc).SendKeys(cmd.Context(), selection, compose.SendKeysOption{
-		CommandNames: commandNames,
-		Keys:         keys,
-		Literal:      literal,
-		Hex:          hexMode,
-		RepeatCount:  repeatCount,
-	})
+	result, err := compose.NewService(svc).SendKeys(
+		cmd.Context(),
+		selection,
+		compose.SendKeysOption{
+			CommandNames: commandNames,
+			Keys:         keys,
+			Literal:      literal,
+			Hex:          hexMode,
+			RepeatCount:  repeatCount,
+		},
+	)
 	if err != nil {
 		return err
 	}

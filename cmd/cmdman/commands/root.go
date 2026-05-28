@@ -70,6 +70,7 @@ It simply starts a monitor process and the monitor damonizes itself and starts s
 	lsCmd(cmd, &rootConfig)
 	migrateCmd(cmd, &rootConfig)
 	monitorCmd(cmd, &rootConfig)
+	muxCmd(cmd, &rootConfig)
 	restartCmd(cmd, &rootConfig)
 	rmCmd(cmd, &rootConfig)
 	runCmd(cmd, &rootConfig)

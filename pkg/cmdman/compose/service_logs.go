@@ -95,7 +95,8 @@ func (s *Service) Logs(
 		}
 
 		if len(entries) == 0 {
-			contextkey.ValueSlogLoggerDefault(ctx).Warn("compose logs: no commands found for project",
+			contextkey.ValueSlogLoggerDefault(ctx).Warn(
+				"compose logs: no commands found for project",
 				"project", selection.Project,
 				"workdir", selection.WorkDir,
 				"operation", "logs",
@@ -119,7 +120,13 @@ func (s *Service) Logs(
 		// Since is inclusive, so start the live tail one tick past "now" to avoid
 		// re-emitting a record that landed exactly at the boundary.
 		if opts.Follow && ctx.Err() == nil {
-			if err := s.logsLive(ctx, selection.Project, entries, now.Add(time.Nanosecond), out); err != nil {
+			if err := s.logsLive(
+				ctx,
+				selection.Project,
+				entries,
+				now.Add(time.Nanosecond),
+				out,
+			); err != nil {
 				errs = append(errs, err)
 			}
 		}

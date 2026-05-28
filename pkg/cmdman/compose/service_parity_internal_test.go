@@ -90,7 +90,11 @@ func TestSendKeysEmptyProjectWarns(t *testing.T) {
 
 func TestSendKeysRequiresKeys(t *testing.T) {
 	svc := &Service{svc: testCmdmanSvc{}}
-	if _, err := svc.SendKeys(context.Background(), ProjectSelection{WorkDir: "/wd"}, SendKeysOption{}); err == nil {
+	if _, err := svc.SendKeys(
+		context.Background(),
+		ProjectSelection{WorkDir: "/wd"},
+		SendKeysOption{},
+	); err == nil {
 		t.Fatal("expected error when no keys are supplied")
 	}
 }
@@ -189,7 +193,7 @@ func TestResolveCommandID(t *testing.T) {
 		},
 	}}
 
-	id, err := svc.resolveCommandID(context.Background(), ProjectSelection{WorkDir: "/wd"}, "alpha")
+	id, err := svc.ResolveCommandID(context.Background(), ProjectSelection{WorkDir: "/wd"}, "alpha")
 	if err != nil {
 		t.Fatalf("resolveCommandID(alpha) failed: %v", err)
 	}
@@ -197,7 +201,7 @@ func TestResolveCommandID(t *testing.T) {
 		t.Fatalf("expected id-alpha, got %q", id)
 	}
 
-	if _, err := svc.resolveCommandID(
+	if _, err := svc.ResolveCommandID(
 		context.Background(), ProjectSelection{WorkDir: "/wd"}, "ghost"); err == nil {
 		t.Fatal("expected error for an unknown command name")
 	}

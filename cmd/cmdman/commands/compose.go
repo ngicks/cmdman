@@ -62,6 +62,7 @@ func composeCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	composeWaitCmd(cmd, rootCfg, &flags)
 	composeAttachCmd(cmd, rootCfg, &flags)
 	composeSendKeysCmd(cmd, rootCfg, &flags)
+	composeMuxCmd(cmd, rootCfg, &flags)
 
 	parent.AddCommand(cmd)
 }

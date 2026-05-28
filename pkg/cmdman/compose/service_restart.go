@@ -62,7 +62,8 @@ func (s *Service) Restart(
 	}
 
 	if len(entries) == 0 {
-		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose restart: no commands found for project",
+		contextkey.ValueSlogLoggerDefault(ctx).Warn(
+			"compose restart: no commands found for project",
 			"project", selection.Project,
 			"workdir", selection.WorkDir,
 			"operation", "restart",

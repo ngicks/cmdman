@@ -18,16 +18,18 @@ func (s *Service) OpenAttachSession(
 	selection ProjectSelection,
 	commandName string,
 ) (*cmdman.Session, error) {
-	id, err := s.resolveCommandID(ctx, selection, commandName)
+	id, err := s.ResolveCommandID(ctx, selection, commandName)
 	if err != nil {
 		return nil, err
 	}
 	return s.svc.OpenAttachSession(ctx, id)
 }
 
-// resolveCommandID resolves a single compose command name to the cmdman command
-// ID backing it within the selected project.
-func (s *Service) resolveCommandID(
+// ResolveCommandID resolves a single compose command name to the cmdman command
+// ID backing it within the selected project. Exported so other operations that
+// take a single service name (e.g. `compose mux` leaf resolution) can share the
+// lookup logic.
+func (s *Service) ResolveCommandID(
 	ctx context.Context,
 	selection ProjectSelection,
 	commandName string,
