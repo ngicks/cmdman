@@ -332,15 +332,42 @@ type Session interface {
 	// ApplyLayout (re)builds the controlled window's pane tree to match
 	// root. It RESETS the window's panes — switching among MuxSpec.Layouts
 	// is repeated ApplyLayout calls. Returns panes keyed by PaneSpec.Name.
-	ApplyLayout(ctx context.Context, root PaneSpec) (map[string]Pane, error)
+	//
+	// marker is an opaque non-negative integer the driver embeds in each
+	// pane's border title as a "#<marker>" suffix; muxctl does not
+	// interpret it. Pass marker < 0 to skip embedding. Consumers (the
+	// cmdman layer, the tester) typically pass the index of the layout
+	// inside MuxSpec.Layouts so re-running can cycle to the next layout
+	// by reading the previous marker via StatWindow.
+	ApplyLayout(ctx context.Context, root PaneSpec, marker int) (map[string]Pane, error)
+
 	// Close closes the controlled window. MUST NOT stop the panes' processes.
 	Close(ctx context.Context) error
+
+	// StatWindow inspects an arbitrary window in this driver's
+	// server/session (NOT necessarily the Session's controlled window)
+	// and returns the muxctl-recognized embedded data parsed from its
+	// panes' border titles. Use for probes like "is this window
+	// muxctl-owned" or "what was the last-applied layout index".
+	StatWindow(ctx context.Context, windowID string) (WindowStat, error)
 }
 
 // Pane is the runtime pane identity returned by ApplyLayout.
 type Pane interface {
 	PaneId() string
 	Name() string // matches PaneSpec.Name and the map key from ApplyLayout
+}
+
+// WindowStat is the muxctl-recognized data extracted from a window's
+// external state. All fields are best-effort: missing data is zero-valued.
+type WindowStat struct {
+	// Marker is the int parsed from a "#<digits>" suffix on the panes'
+	// border titles. -1 when no pane carries a parseable suffix, the
+	// panes disagree, or the window has no panes muxctl tagged.
+	Marker int
+	// PaneNames are the pane border titles with the "#<digits>" suffix
+	// stripped (so consumers can compare them against command names).
+	PaneNames []string
 }
 ```
 
@@ -375,6 +402,46 @@ argv plus `CmdOpt` driver hints; it knows nothing about cmdman. The
 `ProjectSelection` for `compose mux`), builds a `muxctl.MuxSpec` with those
 argv, and calls `ApplyLayout()` once per switch. One cmdman MuxSpec → one
 builder → both commands.
+
+## Layout selection & cycling
+
+`MuxSpec.Layouts` is a list; consumers select which one to apply. muxctl
+intentionally provides only the read/write primitives — it does NOT carry
+cycle state of its own. State lives entirely outside muxctl, embedded in
+tmux/zellij window state where any process can read it back.
+
+- **Wire form: pane border title with `#<digits>` suffix.** ApplyLayout
+  writes each leaf's pane title as `<base-title>#<marker>` where
+  `<base-title>` is `CmdOpt["title"]` (or the leaf name) and `<marker>`
+  is the int passed to ApplyLayout (typically the spec's layout index).
+  The trailing `#\d+` is the stable parse anchor — it lets `<base-title>`
+  contain `#` freely. Marker < 0 ⇒ skip embedding.
+
+- **Read: `Session.StatWindow(ctx, windowID)`.** Lists the window's
+  panes, strips `#\d+` from each title, returns
+  `WindowStat{Marker, PaneNames}`. When no pane carries a parseable
+  suffix or panes disagree, `Marker = -1`. Works on any window — the
+  parameter is the tmux window id, not the Session's controlled window
+  — so callers can probe "is this someone else's muxctl window" before
+  taking over.
+
+- **Cycle = consumer concern.** Re-running the cmdman mux family (or
+  the tester) reads the previous marker via StatWindow, picks the next
+  layout via `(prev+1) mod len(spec.Layouts)` (or any explicit index
+  the caller chose), and calls ApplyLayout with the new marker. muxctl
+  has no `Selector`, `Next()`, or `Apply` convenience. The one-liner
+  belongs in the cmdman layer, not in the driver-agnostic core.
+
+- **Brittleness tradeoff:** the marker is the **index**, not the layout
+  name. Reordering layouts in YAML between runs makes the persisted
+  marker point at a different layout. Acceptable for a switch handle;
+  flagged here so the cmdman layer can warn (or rebase by name) if
+  desired.
+
+- **Portability:** pane titles exist in both tmux and zellij, so the
+  same `#<digits>` suffix encoding works for the future zellij driver
+  with no `@`-option dependency. Consistent with the "ownership/
+  correlation must key on NAMES, not tmux-specific metadata" rule.
 
 ## tmux realization notes (the tmux `muxctl` driver)
 

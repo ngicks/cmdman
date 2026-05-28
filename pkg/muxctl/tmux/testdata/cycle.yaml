@@ -1,0 +1,44 @@
+driver: tmux
+layouts:
+  - name: solo
+    root:
+      name: only
+      cmd:
+        - /bin/sh
+        - -c
+        - sleep 60
+  - name: pair
+    root:
+      dir: h
+      splits: [1, 1]
+      panes:
+        - name: a
+          cmd:
+            - /bin/sh
+            - -c
+            - sleep 60
+        - name: b
+          cmd:
+            - /bin/sh
+            - -c
+            - sleep 60
+  - name: trio
+    root:
+      dir: v
+      splits: [1, 1, 1]
+      panes:
+        - name: top
+          cmd:
+            - /bin/sh
+            - -c
+            - sleep 60
+        - name: mid
+          cmd:
+            - /bin/sh
+            - -c
+            - sleep 60
+        - name: bot
+          cmd:
+            - /bin/sh
+            - -c
+            - sleep 60

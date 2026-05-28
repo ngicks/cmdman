@@ -10,6 +10,7 @@ import (
 
 	"github.com/ngicks/go-common/contextkey"
 
+	"github.com/ngicks/cmdman/pkg/muxctl"
 	tmuxctl "github.com/ngicks/cmdman/pkg/muxctl/tmux"
 )
 
@@ -77,7 +78,7 @@ func TestNew_WindowIDBypassesFindOrCreate(t *testing.T) {
 
 	// ApplyLayout works against the by-id session.
 	root := loadLayout(t, "single-leaf.yaml", "")
-	panes, err := sess.ApplyLayout(context.Background(), root)
+	panes, err := sess.ApplyLayout(context.Background(), root, -1)
 	if err != nil {
 		t.Fatalf("ApplyLayout: %v", err)
 	}
@@ -91,7 +92,7 @@ func TestApplyLayout_SingleLeaf(t *testing.T) {
 	sess, socket := newSession(t, "cmdman")
 
 	root := loadLayout(t, "single-leaf.yaml", "")
-	panes, err := sess.ApplyLayout(context.Background(), root)
+	panes, err := sess.ApplyLayout(context.Background(), root, -1)
 	if err != nil {
 		t.Fatalf("ApplyLayout: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestApplyLayout_HorizontalTwoLeaves(t *testing.T) {
 	sess, socket := newSession(t, "cmdman")
 
 	root := loadLayout(t, "horizontal-two.yaml", "")
-	panes, err := sess.ApplyLayout(context.Background(), root)
+	panes, err := sess.ApplyLayout(context.Background(), root, -1)
 	if err != nil {
 		t.Fatalf("ApplyLayout: %v", err)
 	}
@@ -133,7 +134,7 @@ func TestApplyLayout_NestedMixed(t *testing.T) {
 	sess, socket := newSession(t, "cmdman")
 
 	root := loadLayout(t, "nested-mixed.yaml", "")
-	panes, err := sess.ApplyLayout(context.Background(), root)
+	panes, err := sess.ApplyLayout(context.Background(), root, -1)
 	if err != nil {
 		t.Fatalf("ApplyLayout: %v", err)
 	}
@@ -158,7 +159,7 @@ func TestApplyLayout_ResetsOnReapply(t *testing.T) {
 	sess, socket := newSession(t, "cmdman")
 
 	first := loadLayout(t, "horizontal-three.yaml", "")
-	if _, err := sess.ApplyLayout(context.Background(), first); err != nil {
+	if _, err := sess.ApplyLayout(context.Background(), first, -1); err != nil {
 		t.Fatalf("first ApplyLayout: %v", err)
 	}
 	if got := len(listPaneIDs(t, socket, sess.WindowID())); got != 3 {
@@ -166,7 +167,7 @@ func TestApplyLayout_ResetsOnReapply(t *testing.T) {
 	}
 
 	second := loadLayout(t, "single-leaf.yaml", "")
-	panes, err := sess.ApplyLayout(context.Background(), second)
+	panes, err := sess.ApplyLayout(context.Background(), second, -1)
 	if err != nil {
 		t.Fatalf("second ApplyLayout: %v", err)
 	}
@@ -202,12 +203,151 @@ func TestApplyLayout_CmdOptTitleOverridesName(t *testing.T) {
 	sess, socket := newSession(t, "cmdman")
 
 	root := loadLayout(t, "cmdopt-title.yaml", "")
-	if _, err := sess.ApplyLayout(context.Background(), root); err != nil {
+	if _, err := sess.ApplyLayout(context.Background(), root, -1); err != nil {
 		t.Fatalf("ApplyLayout: %v", err)
 	}
 	titles := listPaneTitles(t, socket, sess.WindowID())
 	if !slices.Equal(titles, []string{"Pretty Title"}) {
 		t.Errorf("titles = %v, want [Pretty Title]", titles)
+	}
+}
+
+// TestApplyLayout_EmbedsMarkerInTitles verifies that a non-negative
+// marker is appended to every pane's border title as "#<marker>".
+func TestApplyLayout_EmbedsMarkerInTitles(t *testing.T) {
+	requireTmux(t)
+	sess, socket := newSession(t, "cmdman")
+
+	root := loadLayout(t, "horizontal-two.yaml", "")
+	if _, err := sess.ApplyLayout(context.Background(), root, 7); err != nil {
+		t.Fatalf("ApplyLayout: %v", err)
+	}
+	titles := listPaneTitles(t, socket, sess.WindowID())
+	slices.Sort(titles)
+	want := []string{"a#7", "b#7"}
+	if !slices.Equal(titles, want) {
+		t.Errorf("titles = %v, want %v", titles, want)
+	}
+}
+
+// TestApplyLayout_NegativeMarker_SkipsEmbed verifies that marker < 0
+// leaves pane titles as plain base titles (no "#<digits>" suffix).
+func TestApplyLayout_NegativeMarker_SkipsEmbed(t *testing.T) {
+	requireTmux(t)
+	sess, socket := newSession(t, "cmdman")
+
+	root := loadLayout(t, "horizontal-two.yaml", "")
+	if _, err := sess.ApplyLayout(context.Background(), root, -1); err != nil {
+		t.Fatalf("ApplyLayout: %v", err)
+	}
+	titles := listPaneTitles(t, socket, sess.WindowID())
+	slices.Sort(titles)
+	if !slices.Equal(titles, []string{"a", "b"}) {
+		t.Errorf("titles = %v, want [a b]", titles)
+	}
+}
+
+// TestApplyLayout_PreservesHashesInBaseTitle verifies that base titles
+// (cmd_opt.title or leaf name) can contain '#' freely: the parser
+// anchors on the TRAILING "#<digits>" only.
+func TestApplyLayout_PreservesHashesInBaseTitle(t *testing.T) {
+	requireTmux(t)
+	sess, socket := newSession(t, "cmdman")
+
+	// Build a tree by hand so we can use a base name containing '#'.
+	root := muxctl.PaneSpec{
+		Leaf: muxctl.Leaf{
+			Name:   "weird",
+			Cmd:    []string{"/bin/sh", "-c", "sleep 60"},
+			CmdOpt: map[string]string{"title": "weird#name#5"},
+		},
+	}
+	if _, err := sess.ApplyLayout(context.Background(), root, 3); err != nil {
+		t.Fatalf("ApplyLayout: %v", err)
+	}
+	titles := listPaneTitles(t, socket, sess.WindowID())
+	if !slices.Equal(titles, []string{"weird#name#5#3"}) {
+		t.Errorf("titles = %v, want [weird#name#5#3]", titles)
+	}
+
+	// StatWindow must round-trip: marker=3, name="weird#name#5".
+	stat, err := sess.StatWindow(context.Background(), sess.WindowID())
+	if err != nil {
+		t.Fatalf("StatWindow: %v", err)
+	}
+	if stat.Marker != 3 {
+		t.Errorf("Marker = %d, want 3", stat.Marker)
+	}
+	if !slices.Equal(stat.PaneNames, []string{"weird#name#5"}) {
+		t.Errorf("PaneNames = %v, want [weird#name#5]", stat.PaneNames)
+	}
+}
+
+func TestStatWindow_RoundTripsMarker(t *testing.T) {
+	requireTmux(t)
+	sess, _ := newSession(t, "cmdman")
+
+	root := loadLayout(t, "nested-mixed.yaml", "")
+	if _, err := sess.ApplyLayout(context.Background(), root, 2); err != nil {
+		t.Fatalf("ApplyLayout: %v", err)
+	}
+	stat, err := sess.StatWindow(context.Background(), sess.WindowID())
+	if err != nil {
+		t.Fatalf("StatWindow: %v", err)
+	}
+	if stat.Marker != 2 {
+		t.Errorf("Marker = %d, want 2", stat.Marker)
+	}
+	got := append([]string(nil), stat.PaneNames...)
+	slices.Sort(got)
+	want := []string{"api", "db", "redis", "worker"}
+	if !slices.Equal(got, want) {
+		t.Errorf("PaneNames = %v, want %v", got, want)
+	}
+}
+
+// TestStatWindow_NoMarker_ReturnsMinusOne verifies that a window whose
+// panes carry no "#<digits>" suffix surfaces Marker = -1.
+func TestStatWindow_NoMarker_ReturnsMinusOne(t *testing.T) {
+	requireTmux(t)
+	sess, _ := newSession(t, "cmdman")
+
+	root := loadLayout(t, "horizontal-two.yaml", "")
+	if _, err := sess.ApplyLayout(context.Background(), root, -1); err != nil {
+		t.Fatalf("ApplyLayout: %v", err)
+	}
+	stat, err := sess.StatWindow(context.Background(), sess.WindowID())
+	if err != nil {
+		t.Fatalf("StatWindow: %v", err)
+	}
+	if stat.Marker != -1 {
+		t.Errorf("Marker = %d, want -1", stat.Marker)
+	}
+}
+
+// TestStatWindow_InconsistentMarkers_ReturnsMinusOne verifies that
+// panes carrying different markers surface as indeterminate (-1).
+func TestStatWindow_InconsistentMarkers_ReturnsMinusOne(t *testing.T) {
+	requireTmux(t)
+	sess, socket := newSession(t, "cmdman")
+
+	root := loadLayout(t, "horizontal-two.yaml", "")
+	if _, err := sess.ApplyLayout(context.Background(), root, 1); err != nil {
+		t.Fatalf("ApplyLayout: %v", err)
+	}
+	// Manually rewrite one pane's title with a different marker.
+	ids := listPaneIDs(t, socket, sess.WindowID())
+	if len(ids) < 2 {
+		t.Fatalf("expected at least 2 panes, got %d", len(ids))
+	}
+	run(t, socket, "select-pane", "-t", ids[0], "-T", "a#9")
+
+	stat, err := sess.StatWindow(context.Background(), sess.WindowID())
+	if err != nil {
+		t.Fatalf("StatWindow: %v", err)
+	}
+	if stat.Marker != -1 {
+		t.Errorf("Marker = %d, want -1 (inconsistent)", stat.Marker)
 	}
 }
 
@@ -226,7 +366,7 @@ func TestApplyLayout_SkipsTooSmall_WarnsViaContextLogger(t *testing.T) {
 	// Detached tmux sessions default to 80x24. A 200-cell absolute leaves
 	// nothing for the weighted siblings, so they are skipped.
 	root := loadLayout(t, "oversized.yaml", "")
-	panes, err := sess.ApplyLayout(ctx, root)
+	panes, err := sess.ApplyLayout(ctx, root, -1)
 	if err != nil {
 		t.Fatalf("ApplyLayout: %v", err)
 	}

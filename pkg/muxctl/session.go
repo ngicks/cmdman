@@ -22,14 +22,30 @@ type Session interface {
 	// by passing each layout's Root in turn. Returns the resulting runtime
 	// panes keyed by pane name (PaneSpec.Name).
 	//
+	// marker is an opaque non-negative integer the driver embeds in each
+	// pane's border title as a "#<marker>" suffix; muxctl does not
+	// interpret it. Pass marker < 0 to skip embedding. Consumers
+	// (the cmdman mux family, the muxctltester) typically pass the layout's
+	// position in MuxSpec.Layouts so re-running can cycle by reading the
+	// previous marker back via [Session.StatWindow]. Cycling itself is a
+	// consumer concern; muxctl provides only the read/write primitives.
+	//
 	// ApplyLayout MUST NOT stop any external process; only the in-pane argv
 	// from the previous build is torn down with the panes.
-	ApplyLayout(ctx context.Context, root PaneSpec) (map[string]Pane, error)
+	ApplyLayout(ctx context.Context, root PaneSpec, marker int) (map[string]Pane, error)
 
 	// Close closes the controlled window. As with ApplyLayout, closing MUST
 	// NOT affect any process the panes were observing — the multiplexer is a
 	// viewer, not a supervisor.
 	Close(ctx context.Context) error
+
+	// StatWindow inspects an arbitrary window in this driver's
+	// server/session and returns the muxctl-recognized embedded data
+	// parsed from its panes' border titles. windowID is the driver's
+	// native window id (e.g. tmux "@7"). The queried window need NOT be
+	// the Session's own controlled window — callers probe other windows
+	// via this method to decide "is this someone else's muxctl window".
+	StatWindow(ctx context.Context, windowID string) (WindowStat, error)
 }
 
 // Pane is the runtime identity of a realized pane returned by
@@ -44,4 +60,20 @@ type Pane interface {
 	// Name returns the pane name. It matches [PaneSpec.Name] and the map key
 	// under which this Pane was returned from [Session.ApplyLayout].
 	Name() string
+}
+
+// WindowStat is the muxctl-recognized data extracted from a window's
+// external state via [Session.StatWindow]. All fields are best-effort:
+// missing or unparseable data is zero-valued rather than errored.
+type WindowStat struct {
+	// Marker is the int parsed from a "#<digits>" suffix on the panes'
+	// border titles (set by [Session.ApplyLayout]). -1 when no pane in
+	// the window carries a parseable suffix, when panes disagree, or
+	// when the window has no panes muxctl can recognize.
+	Marker int
+
+	// PaneNames are the pane border titles with the "#<digits>" suffix
+	// stripped, so consumers can compare them against command names. The
+	// slice is in tmux list-panes order, not muxctl pane-name order.
+	PaneNames []string
 }

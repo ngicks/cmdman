@@ -23,13 +23,18 @@ import (
 //  3. Walk root depth-first:
 //
 //     - At a leaf, respawn the anchor pane with the leaf's argv and set
-//     its pane-border title.
+//     its pane-border title to "<base>#<marker>" (or just "<base>" when
+//     marker < 0), where <base> is CmdOpt["title"] or the leaf name.
 //     - At a container, peel each non-last child off the anchor with
 //     split-window (in node.Dir, taking cells[i] of the anchor's split
 //     dim); the last child takes over the anchor.
 //
 //  4. Select the focused pane (first leaf with Focus=true; otherwise the
 //     first leaf in document order).
+//
+// marker is an opaque non-negative int that is embedded in every pane's
+// border title (see [Session.StatWindow] for the read side). Pass < 0 to
+// skip embedding.
 //
 // If a child's computed cell budget is < 1, the child is skipped and the
 // dropped pane names are emitted via the context-scoped logger
@@ -38,6 +43,7 @@ import (
 func (s *Session) ApplyLayout(
 	ctx context.Context,
 	root muxctl.PaneSpec,
+	marker int,
 ) (map[string]muxctl.Pane, error) {
 	anchorID, err := s.resetWindow(ctx)
 	if err != nil {
@@ -50,9 +56,10 @@ func (s *Session) ApplyLayout(
 	}
 
 	st := &applyState{
-		s:     s,
-		ctx:   ctx,
-		panes: make(map[string]muxctl.Pane),
+		s:      s,
+		ctx:    ctx,
+		marker: marker,
+		panes:  make(map[string]muxctl.Pane),
 	}
 	if err := st.materialize(anchorID, root, w, h); err != nil {
 		return nil, err
@@ -80,6 +87,7 @@ func (s *Session) ApplyLayout(
 type applyState struct {
 	s       *Session
 	ctx     context.Context
+	marker  int
 	panes   map[string]muxctl.Pane
 	skipped []string
 }
@@ -118,14 +126,23 @@ func (st *applyState) materialize(anchorID string, node muxctl.PaneSpec, w, h in
 }
 
 func (st *applyState) realizeLeafAt(paneID string, leaf muxctl.PaneSpec) error {
-	if err := st.s.respawnPane(st.ctx, paneID, leaf.Cmd); err != nil {
-		return fmt.Errorf("tmux: respawn pane %s with %v: %w", paneID, leaf.Cmd, err)
+	// Set the pane-border title BEFORE respawning. respawn-pane -k SIGHUPs
+	// the existing in-pane process tree; when the caller (e.g. the
+	// muxctltester) is running inside that pane, it can die before any
+	// follow-up tmux command lands. Setting the title first lets it
+	// persist regardless — tmux per-pane state survives respawn-pane.
+	base := cmp.Or(leaf.CmdOpt["title"], leaf.Name)
+	title := base
+	if st.marker >= 0 {
+		title = base + "#" + strconv.Itoa(st.marker)
 	}
-	title := cmp.Or(leaf.CmdOpt["title"], leaf.Name)
 	if _, err := st.s.exec.run(
 		st.ctx, "select-pane", "-t", paneID, "-T", title,
 	); err != nil {
 		return fmt.Errorf("tmux: set pane title for %s: %w", paneID, err)
+	}
+	if err := st.s.respawnPane(st.ctx, paneID, leaf.Cmd); err != nil {
+		return fmt.Errorf("tmux: respawn pane %s with %v: %w", paneID, leaf.Cmd, err)
 	}
 	st.panes[leaf.Name] = &Pane{id: paneID, name: leaf.Name}
 	return nil

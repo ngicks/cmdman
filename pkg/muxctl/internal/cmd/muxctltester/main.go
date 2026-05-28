@@ -33,6 +33,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -88,7 +89,6 @@ func run() error {
 	if len(spec.Layouts) == 0 {
 		return fmt.Errorf("%s has no layouts", path)
 	}
-	layout := spec.Layouts[0]
 
 	ctx := contextkey.WithSlogLogger(
 		context.Background(),
@@ -107,19 +107,46 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("tmux.New: %w", err)
 	}
-	panes, err := sess.ApplyLayout(ctx, layout.Root)
+
+	// Cycle: read the previous layout marker off the target window and
+	// advance to the next layout. First run on an unmarked window starts
+	// at layout 0.
+	prev, err := sess.StatWindow(ctx, target.windowID)
+	if err != nil {
+		return fmt.Errorf("StatWindow: %w", err)
+	}
+	idx := nextLayout(prev.Marker, len(spec.Layouts))
+	layout := spec.Layouts[idx]
+
+	panes, err := sess.ApplyLayout(ctx, layout.Root, idx)
 	if err != nil {
 		return fmt.Errorf("ApplyLayout: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr,
-		"muxctltester: applied layout %q to %s; windowId=%s, panes=%d\n",
-		layout.Name, target.summary, sess.WindowID(), len(panes),
+	fmt.Fprintf(
+		os.Stderr,
+		"muxctltester: applied layout %q (index %d) to %s; windowId=%s, panes=%d (prev marker=%d)\n",
+		layout.Name,
+		idx,
+		target.summary,
+		sess.WindowID(),
+		len(panes),
+		prev.Marker,
 	)
 	if target.attachHint != "" {
 		fmt.Fprintln(os.Stderr, "attach:", target.attachHint)
 	}
 	return nil
+}
+
+// nextLayout picks the next layout index given the previously-embedded
+// marker and the total number of layouts. An unset/out-of-range marker
+// (e.g. -1 or >= n) starts at index 0.
+func nextLayout(prevMarker, n int) int {
+	if prevMarker < 0 || prevMarker >= n {
+		return 0
+	}
+	return (prevMarker + 1) % n
 }
 
 // targetWindow is the resolved tmux window the tester will hand to
@@ -134,13 +161,15 @@ type targetWindow struct {
 
 // resolveTarget picks the tmux window the layout should be applied to:
 //
-//   - Inside tmux, when the current window's name matches ownedName, or
-//     the current window has only a single pane (an "empty" window safe
-//     to take over): returns the current window's id (apply in place).
+//   - Inside tmux, when the current window is recognized as muxctl-owned —
+//     either its name matches ownedName, or its panes carry a muxctl
+//     marker suffix — returns the current window's id (apply in place).
 //
-//   - Inside tmux otherwise (current window has multiple panes AND its
-//     name does not match ownedName): creates a fresh window in the
-//     current session and returns its id.
+//   - Inside tmux, when the current window has only a single pane: takes
+//     it over as an "empty" window safe to repurpose.
+//
+//   - Inside tmux otherwise (multi-pane, unowned current window): creates
+//     a fresh window in the current session and returns its id.
 //
 //   - Outside tmux: ensures the named session exists and creates a fresh
 //     window in it, returning its id and an attach hint.
@@ -158,13 +187,23 @@ func resolveTarget(
 		if err != nil {
 			return targetWindow{}, fmt.Errorf("detect current window: %w", err)
 		}
-		switch {
-		case curName == ownedName:
+		if curName == ownedName {
 			return targetWindow{
 				windowID: curID,
 				summary:  fmt.Sprintf("current window (muxctl-owned: %q)", curName),
 			}, nil
-		case curPanes <= 1:
+		}
+		// Probe for an embedded muxctl marker — a marker-bearing window
+		// is one of ours, regardless of its tmux name.
+		if marker, ok := exe.windowMarker(ctx, curID); ok {
+			return targetWindow{
+				windowID: curID,
+				summary: fmt.Sprintf(
+					"current window %q (muxctl-marked, marker=%d)", curName, marker,
+				),
+			}, nil
+		}
+		if curPanes <= 1 {
 			return targetWindow{
 				windowID: curID,
 				summary: fmt.Sprintf(
@@ -269,6 +308,46 @@ func (t tmuxExec) run(ctx context.Context, args ...string) (string, error) {
 			strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimSpace(stdout.String()), nil
+}
+
+// markerSuffix matches a trailing "#<digits>" segment on a pane title.
+// Mirrors the parse in pkg/muxctl/tmux/stat.go; duplicated here so the
+// tester can probe "is this window muxctl-owned" without first having
+// to construct a muxctl.Session (which would side-effect the window by
+// turning on pane-border-status).
+var markerSuffix = regexp.MustCompile(`#(\d+)$`)
+
+// windowMarker reports the marker embedded in windowID's pane titles.
+// Returns (marker, true) only when every pane carries the SAME marker;
+// returns (-1, false) when no marker is present, panes disagree, or the
+// window has no panes / fails to list.
+func (t tmuxExec) windowMarker(ctx context.Context, windowID string) (int, bool) {
+	out, err := t.run(ctx, "list-panes", "-t", windowID, "-F", "#{pane_title}")
+	if err != nil || out == "" {
+		return -1, false
+	}
+	marker := -1
+	for line := range strings.SplitSeq(out, "\n") {
+		m := markerSuffix.FindStringSubmatch(line)
+		if m == nil {
+			return -1, false
+		}
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			return -1, false
+		}
+		if marker == -1 {
+			marker = n
+			continue
+		}
+		if n != marker {
+			return -1, false
+		}
+	}
+	if marker < 0 {
+		return -1, false
+	}
+	return marker, true
 }
 
 func (t tmuxExec) currentWindow(ctx context.Context) (name, id string, panes int, err error) {
