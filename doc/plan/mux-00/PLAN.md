@@ -746,10 +746,26 @@ helper in `cmd/.../zz_helpers.go`. Covered by
 `pkg/cmdman/cli/sticky_test.go` (r→Restart, detach-keys→Detach, ctx
 cancel→Detach).
 
-Implementation chunks remaining: (a-rest) `cmdman logs --sticky` (`#|`
-meta prefix, `--meta-prefix` configurable; wait + resume on next start
-via `eventlog`), and eventlog-driven auto-reattach inside `AttachSticky`
-(subscribe to the command's `eventlog` so a restart-policy-triggered
-restart auto-reattaches without the `r` prompt). Once `--sticky` lands,
-`pkg/cmdman/mux/build.go` paneArgv swaps `logs -f` → `logs --sticky`
-(TODO marker in source).
+Sticky logs (chunk a, finishing piece) is also in: `LogsRequest` gains
+`Sticky bool` + `MetaPrefix string`; `Service.Logs` branches into
+`runStickyStreaming` when sticky, which drains one run via the existing
+`streamLogs`, emits a `MetaPrefix`-tagged stderr meta line carrying the
+terminal state + exit code, waits for the next `EventTypeStarted` on
+the command via `Service.Events`, opens a fresh storage reader pinned
+at `Since=now()` (so the new instance's records replay without
+re-emitting the previous run), and loops. `cmdman logs` gains
+`--sticky` (implies `--follow`) + `--meta-prefix` (default `#|`).
+`pkg/cmdman/mux/build.go` paneArgv now emits `logs --sticky <id>` for
+`mode: logs` panes (the earlier `logs -f` TODO is gone). All existing
+tests pass unchanged; the mux unit test was updated to expect the new
+argv.
+
+Chunk (a) is complete. **Dropped:** eventlog-driven auto-reattach
+inside `AttachSticky` (the plan originally envisioned a
+restart-policy-triggered restart auto-reattaching without the `r`
+prompt). The explicit `r`-restart UX is sufficient; the auto path adds
+eventlog-subscription wiring without matching value.
+
+Remaining: e2e + `compose mux` integration tests for the mux scaffold
+(TODO flagged earlier); a sticky-logs e2e test would also be valuable
+but is not blocking.

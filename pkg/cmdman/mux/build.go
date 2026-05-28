@@ -117,12 +117,11 @@ func buildPane(
 // paneArgv builds the in-pane argv for a leaf:
 //
 //   - ModeAttach / "" (default): cmdman [--data-dir D] [--runtime-dir R] attach <id>
-//   - ModeLogs:                  cmdman [--data-dir D] [--runtime-dir R] logs -f <id>
+//   - ModeLogs:                  cmdman [--data-dir D] [--runtime-dir R] logs --sticky <id>
 //
-// TODO(plan/mux-00 chunk a): switch ModeLogs to `logs --sticky` and rely on
-// sticky-attach-by-default once chunk (a) lands. Today's `logs -f` keeps the
-// pane following the log but exits when the command stops; sticky mode will
-// wait + resume.
+// Sticky-attach is the default (no flag needed; opt out with `--auto-exit`),
+// and `logs --sticky` mirrors that — the pane stays open across command
+// restarts, with injected `#|`-prefixed meta lines marking each exit.
 func paneArgv(opts PaneArgvOpts, mode Mode, id string) []string {
 	argv := []string{opts.Executable}
 	if opts.DataDir != "" {
@@ -133,7 +132,7 @@ func paneArgv(opts PaneArgvOpts, mode Mode, id string) []string {
 	}
 	switch mode {
 	case ModeLogs:
-		argv = append(argv, "logs", "-f", id)
+		argv = append(argv, "logs", "--sticky", id)
 	default:
 		argv = append(argv, "attach", id)
 	}

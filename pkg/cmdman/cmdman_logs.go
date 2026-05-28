@@ -23,12 +23,30 @@ type LogsRequest struct {
 	Until    time.Time
 	Head     int
 	Tail     int
+	// Sticky keeps the follow stream alive across command restarts: when the
+	// running instance exits, an injected MetaPrefix-tagged line records the
+	// exit (or other terminal state), and the reader waits for the next
+	// `EventTypeStarted` on this command via the event log before resuming.
+	// Sticky implies Follow. Detach by canceling ctx.
+	Sticky bool
+	// MetaPrefix is the line prefix used for sticky meta-event lines. Empty
+	// defaults to "#|". Ignored when Sticky is false. The prefix lets users
+	// distinguish injected meta lines from real log records.
+	MetaPrefix string
 }
 
 // Logs opens a structured reader for command output. It replays persisted
 // storage first; with Follow=true it then subscribes to the running monitor
 // and bridges the storage/subscription race with a bounded reread.
+//
+// With Sticky=true the reader keeps producing across command restarts:
+// after each run's stream EOFs, an injected meta line records the exit,
+// and the reader waits for the next `EventTypeStarted` event before
+// resuming. Cancel ctx to stop a sticky reader.
 func (s *Service) Logs(ctx context.Context, req LogsRequest) (logdriver.Reader, error) {
+	if req.Sticky {
+		req.Follow = true
+	}
 	st, err := s.openStore(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
@@ -75,10 +93,160 @@ func (s *Service) Logs(ctx context.Context, req LogsRequest) (logdriver.Reader, 
 	}
 	r.wg.Go(func() {
 		defer close(r.rec)
+		if req.Sticky {
+			s.runStickyStreaming(
+				readerCtx, st, id, cfg, opts,
+				req.MetaPrefix, storageReader, followStart, r.rec,
+			)
+			return
+		}
 		defer storageReader.Close()
 		s.streamLogs(readerCtx, st, id, cfg, opts, req.Follow, storageReader, followStart, r.rec)
 	})
 	return r, nil
+}
+
+// runStickyStreaming drives the sticky logs loop: stream one run via
+// [Service.streamLogs], emit a meta line on EOF, wait for the next start
+// event, then open a fresh storage reader (Since=now so the new instance's
+// fresh records are picked up without replaying the previous run) and
+// repeat. Stops cleanly on ctx cancel; any error during reader open or
+// event subscription surfaces as a logdriver.Record{Err: ...}.
+func (s *Service) runStickyStreaming(
+	ctx context.Context,
+	st *store.Store,
+	id string,
+	cfg *model.CommandConfig,
+	opts map[string]string,
+	metaPrefix string,
+	initialReader logdriver.Reader,
+	initialFollowStart any,
+	out chan<- logdriver.Record,
+) {
+	if metaPrefix == "" {
+		metaPrefix = "#|"
+	}
+
+	reader := initialReader
+	followStart := initialFollowStart
+
+	for {
+		s.streamLogs(ctx, st, id, cfg, opts, true, reader, followStart, out)
+		_ = reader.Close()
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		state, exitCode, _, err := st.GetCommandState(id)
+		if err != nil {
+			sendRecordErr(ctx, out, fmt.Errorf("sticky logs: get state: %w", err))
+			return
+		}
+		if !sendStickyMeta(ctx, out, metaPrefix, state, exitCode) {
+			return
+		}
+
+		if err := s.waitForStart(ctx, id); err != nil {
+			if ctx.Err() == nil {
+				sendRecordErr(ctx, out, err)
+			}
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+
+		resumeFrom := time.Now()
+		newReader, err := logdriver.NewReader(
+			ctx,
+			string(cfg.LogDriver),
+			cfg.CommandDir,
+			opts,
+			logdriver.ReaderOption{Since: resumeFrom},
+		)
+		if err != nil {
+			sendRecordErr(ctx, out, fmt.Errorf("sticky logs: open new reader: %w", err))
+			return
+		}
+		reader = newReader
+		// Capture the new bridge start so streamLogs doesn't rewind past it.
+		if cfg.LogDriver == logdriver.DriverK8sFile {
+			end, err := k8sfile.CurrentEnd(cfg.CommandDir, opts)
+			if err != nil {
+				_ = newReader.Close()
+				sendRecordErr(ctx, out, fmt.Errorf("sticky logs: capture resume offset: %w", err))
+				return
+			}
+			followStart = end
+		} else {
+			followStart = nil
+		}
+	}
+}
+
+// waitForStart subscribes to the event log and returns when the next
+// EventTypeStarted event for id arrives, or when ctx is canceled.
+func (s *Service) waitForStart(ctx context.Context, id string) error {
+	sub, err := s.Events(ctx, EventsRequest{
+		IDFilter:   []string{id},
+		TypeFilter: []model.EventType{model.EventTypeStarted},
+	})
+	if err != nil {
+		return fmt.Errorf("sticky logs: subscribe events: %w", err)
+	}
+	defer sub.Close()
+	select {
+	case _, ok := <-sub.Records():
+		if !ok {
+			return ctx.Err()
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// sendStickyMeta sends a meta-line record describing the current terminal
+// state of the command. The line is timestamped, prefixed with metaPrefix,
+// and emitted on stderr so consumers can render it distinctly from stdout
+// records. Returns false when the send is preempted by ctx.
+func sendStickyMeta(
+	ctx context.Context,
+	out chan<- logdriver.Record,
+	metaPrefix string,
+	state model.EventType,
+	exitCode *int,
+) bool {
+	now := time.Now()
+	var msg string
+	switch {
+	case state == model.EventTypeExited && exitCode != nil:
+		msg = fmt.Sprintf(
+			"%s %s exited (code %d)",
+			metaPrefix,
+			now.Format(time.TimeOnly),
+			*exitCode,
+		)
+	case state == model.EventTypeFailed && exitCode != nil:
+		msg = fmt.Sprintf(
+			"%s %s failed (code %d)",
+			metaPrefix,
+			now.Format(time.TimeOnly),
+			*exitCode,
+		)
+	case state == "":
+		msg = fmt.Sprintf("%s %s not running", metaPrefix, now.Format(time.TimeOnly))
+	default:
+		msg = fmt.Sprintf("%s %s %s", metaPrefix, now.Format(time.TimeOnly), state)
+	}
+	return sendRecord(ctx, out, logdriver.Record{
+		Line: logdriver.LogLine{
+			Time:   now,
+			Stream: logdriver.StreamStderr,
+			Line:   []byte(msg),
+		},
+	})
 }
 
 type serviceLogsReader struct {

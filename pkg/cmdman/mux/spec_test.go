@@ -104,13 +104,13 @@ func TestBuildResolvesArgvAndPropagatesFields(t *testing.T) {
 		"attach", "id-api",
 	})
 
-	// worker: ModeLogs → logs -f argv. cmd_opt + focus propagate.
+	// worker: ModeLogs → logs --sticky argv. cmd_opt + focus propagate.
 	worker := root.Panes[1].Leaf
 	assert.DeepEqual(t, worker.Cmd, []string{
 		"/usr/bin/cmdman",
 		"--data-dir", "/var/lib/cmdman",
 		"--runtime-dir", "/run/cmdman",
-		"logs", "-f", "id-worker",
+		"logs", "--sticky", "id-worker",
 	})
 	assert.Equal(t, worker.CmdOpt["title"], "w")
 	assert.Assert(t, worker.Focus)

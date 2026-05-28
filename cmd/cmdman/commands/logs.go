@@ -14,11 +14,13 @@ import (
 
 func logsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	var (
-		flagFollow bool
-		flagSince  string
-		flagUntil  string
-		flagHead   int
-		flagTail   int
+		flagFollow     bool
+		flagSince      string
+		flagUntil      string
+		flagHead       int
+		flagTail       int
+		flagSticky     bool
+		flagMetaPrefix string
 	)
 
 	cmd := &cobra.Command{
@@ -26,7 +28,11 @@ func logsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		Short: "Show command output from the on-disk log file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runLogs(cmd, args, rootCfg, flagFollow, flagSince, flagUntil, flagHead, flagTail)
+			return runLogs(
+				cmd, args, rootCfg,
+				flagFollow, flagSince, flagUntil, flagHead, flagTail,
+				flagSticky, flagMetaPrefix,
+			)
 		},
 	}
 
@@ -46,6 +52,14 @@ func logsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	)
 	cmd.Flags().IntVar(&flagHead, "head", 0, "Show at most N first log lines (0 = unlimited)")
 	cmd.Flags().IntVar(&flagTail, "tail", 0, "Show at most N last log lines (0 = unlimited)")
+	cmd.Flags().BoolVar(
+		&flagSticky, "sticky", false,
+		"Keep following across command restarts; emit a meta line on exit (implies --follow)",
+	)
+	cmd.Flags().StringVar(
+		&flagMetaPrefix, "meta-prefix", "#|",
+		"Prefix for injected meta lines when --sticky is set",
+	)
 
 	parent.AddCommand(cmd)
 }
@@ -59,6 +73,8 @@ func runLogs(
 	untilFlag string,
 	head int,
 	tail int,
+	sticky bool,
+	metaPrefix string,
 ) error {
 	svc, err := cmdmanService(rootCfg)
 	if err != nil {
@@ -76,12 +92,14 @@ func runLogs(
 	}
 
 	r, err := svc.Logs(cmd.Context(), cmdman.LogsRequest{
-		IDOrName: args[0],
-		Follow:   follow,
-		Since:    since,
-		Until:    until,
-		Head:     head,
-		Tail:     tail,
+		IDOrName:   args[0],
+		Follow:     follow,
+		Since:      since,
+		Until:      until,
+		Head:       head,
+		Tail:       tail,
+		Sticky:     sticky,
+		MetaPrefix: metaPrefix,
 	})
 	if err != nil {
 		return err
