@@ -1,0 +1,11 @@
+driver: tmux
+layouts:
+  - name: titled
+    root:
+      name: internal
+      cmd:
+        - /bin/sh
+        - -c
+        - sleep 60
+      cmd_opt:
+        title: Pretty Title

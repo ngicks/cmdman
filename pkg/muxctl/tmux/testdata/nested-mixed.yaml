@@ -1,0 +1,31 @@
+driver: tmux
+layouts:
+  - name: services
+    root:
+      dir: h
+      splits: [1, 1, 1]
+      panes:
+        - name: api
+          cmd:
+            - /bin/sh
+            - -c
+            - sleep 60
+        - name: worker
+          cmd:
+            - /bin/sh
+            - -c
+            - sleep 60
+        - dir: v
+          splits: [1, 1]
+          panes:
+            - name: redis
+              cmd:
+                - /bin/sh
+                - -c
+                - sleep 60
+            - name: db
+              focus: true
+              cmd:
+                - /bin/sh
+                - -c
+                - sleep 60

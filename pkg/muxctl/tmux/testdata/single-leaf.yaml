@@ -1,0 +1,9 @@
+driver: tmux
+layouts:
+  - name: single
+    root:
+      name: only
+      cmd:
+        - /bin/sh
+        - -c
+        - sleep 60

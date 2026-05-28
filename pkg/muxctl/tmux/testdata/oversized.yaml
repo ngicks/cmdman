@@ -1,0 +1,22 @@
+driver: tmux
+layouts:
+  - name: oversized
+    root:
+      dir: h
+      splits: [200c, 1, 1]
+      panes:
+        - name: huge
+          cmd:
+            - /bin/sh
+            - -c
+            - sleep 60
+        - name: dropped-a
+          cmd:
+            - /bin/sh
+            - -c
+            - sleep 60
+        - name: dropped-b
+          cmd:
+            - /bin/sh
+            - -c
+            - sleep 60

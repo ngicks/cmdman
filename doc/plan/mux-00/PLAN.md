@@ -83,12 +83,15 @@ re-becoming "tmux" (cmdman bills itself as "the tmux without terminals" —
 - **`cmdman compose mux` is a confirmed subcommand** (not just a candidate). It
   reuses the compose flags for project resolution and `resolveCommandID` /
   `filterByCommandNames` to map a leaf's service name → backing command ID.
-- **New controller package `pkg/muxctl`**: minimal window-centric `Session`
-  (`NewWindow` / `Layout`(resets, returns `map[command-name]Pane`) /
-  `CloseWindow`) + a tiny `Pane` interface (`PaneId`/`Name`). Session
-  reuse/teardown and the new-vs-existing/socket choice are **driver config**
-  (`pkg/muxctl/tmux.New`), not on the interface. The old `pkg/mux` tree is
-  superseded. See Public API shape.
+- **New controller package `pkg/muxctl`**: minimal single-window `Session`
+  (`ApplyLayout`(resets, returns `map[pane-name]Pane`) / `Close`) + a tiny
+  `Pane` interface (`PaneId`/`Name`). One invocation owns one window;
+  switching among `MuxSpec.Layouts` is repeated `ApplyLayout` calls. The
+  window name, session reuse/teardown, and socket choice are **driver config**
+  (`pkg/muxctl/tmux.New`), not on the interface. **`MuxSpec` and its tree
+  (`Layout`, `PaneSpec`, `Size`) also live here** — generic, with leaves
+  carrying resolved `Cmd []string` argv + per-pane `CmdOpt`. The old `pkg/mux`
+  tree is superseded. See Public API shape.
 - **Standalone `cmdman mux` takes the layout path as a positional arg** (`-` or
   omitted ⇒ stdin).
 - **`compose mux` with no `mux:` section is an error** — no synthesized default.
@@ -105,8 +108,10 @@ re-becoming "tmux" (cmdman bills itself as "the tmux without terminals" —
   own; a dedicated `-L cmdman` / `zellij --session cmdman` session is the opt-in
   for isolation.
 - **Ownership keys on NAMES, not tmux `@`-options** (portable to zellij): pane
-  name = command name, window/tab name = spec window key. mux owns whole
-  windows/tabs and never injects panes into a user's window.
+  name = command name (cmdman layer's convention; muxctl just sees `PaneSpec.Name`),
+  the cmdman-owned window/tab name is fixed by the driver constructor
+  (`cmdman` / `cmdman-<project>`). mux owns whole window/tab and never
+  injects panes into a user's window.
 - **Pane detach-keys are kept** (`ctrl-p,ctrl-q`); inside a pane they mean "close
   this pane" (end the attach / the stay-wait). tmux's `Ctrl-b` still owns
   navigation and whole-dashboard detach.
@@ -115,9 +120,17 @@ re-becoming "tmux" (cmdman bills itself as "the tmux without terminals" —
 - **Autodetect: default `tmux` when neither `$TMUX`/`$ZELLIJ` is set; `$TMUX` wins
   when both** — never errors on the plain-shell case.
 - **mux is view-only** (never starts commands); a **running command with no leaf
-  is silently omitted** (unknown leaf name = hard error); the leaf-options key is
-  **`command:`**; each window's **`name` is required and unique** (the re-run
+  is silently omitted** (unknown leaf name = hard error); the leaf-options key
+  at the cmdman-YAML layer is **`command:`** (which the cmdman layer resolves
+  to argv before emitting `muxctl.PaneSpec.Cmd`); each **layout** `name` is
+  required and unique (it is the user-facing switch handle; the cmdman-owned
+  window itself is named by the driver constructor and is the re-run
   ownership key).
+- **Per-pane driver hints via `cmd_opt`** (a map at the pane level, mirror of
+  the top-level `driver_opt`): driver-specific options for a single pane
+  (e.g. tmux pane title), surfaced on `muxctl.PaneSpec.CmdOpt`. Drivers
+  pick keys they understand and ignore the rest. Replaces per-pane env
+  injection (retired).
 - **Pane titles = command name** (tmux pane-border title; driver equivalents
   later) so panes are identifiable in multi-pane windows.
 - **Initial focus = first leaf** in document order; one `focus: true` overrides;
@@ -141,11 +154,14 @@ re-becoming "tmux" (cmdman bills itself as "the tmux without terminals" —
 
 ### Open (the part still "up")
 
-- Two implementation chunks remain: (a) attach-stickiness internals (`r`→restart
-  wiring, exit-code source, auto-reattach), and (b) the layout-tree builder + leaf
-  resolver layered above `pkg/muxctl`. Everything else (the muxctl interface,
-  compose surface, tmux default, autodetect, detach UX, sizing, dup-command) is
-  settled. See "Open questions."
+- Implementation chunks remaining: (a) attach-stickiness internals (`r`→restart
+  wiring, exit-code source, auto-reattach), and (b) the **cmdman-layer** YAML
+  parser + leaf resolver above `pkg/muxctl` (turning `command:`-bearing leaves
+  into `muxctl.PaneSpec.Cmd` argv via the cmdman / compose services), plus the
+  `cmdman mux` / `cmdman compose mux` cobra wiring. The `pkg/muxctl` interface
+  and the **tmux driver** under `pkg/muxctl/tmux` are now implemented (see
+  "Where we left off"). Everything else (compose surface, tmux default,
+  autodetect, detach UX, sizing, dup-command) is settled. See "Open questions."
 
 ## Layout spec (UX surface — mostly settled)
 
@@ -157,7 +173,7 @@ mux:
   driver: tmux            # tmux | zellij | "" (autodetect; see below)
   driver_opt:             # optional, driver-specific (e.g. tmux: socket / dedicated)
     socket: cmdman
-  windows:
+  layouts:                # one window per invocation; user switches among these
     - name: services
       dir: h              # h = side by side, v = stacked (tmux semantics)
       splits: [90c, 1, 2] # index-parallel to panes; len(splits) == len(panes)
@@ -168,6 +184,11 @@ mux:
           splits: [1, 1]
           panes: [redis, db]
 ```
+
+A **single command invocation creates exactly one window**; the named entries
+under `layouts:` are switchable configurations applied to that window (the
+cmdman mux family exposes the switch UX). This is NOT a multi-window dashboard
+— that's what distinguishes mux from generic tmux/zellij usage.
 
 Grammar:
 
@@ -184,53 +205,84 @@ Grammar:
 - **Size grammar**:
   - `Nc` — absolute, `N` character cells (`c` = character). Columns when `dir:h`,
     rows when `dir:v`.
-  - bare `N` — proportional weight. Absolutes are reserved first; the leftover
-    space is divided among the bare weights by ratio (e.g. `[90c, 1, 2]` → first
-    pane 90 cells, the rest split 1:2).
-  - `%` — not supported (decided). Percentages are expressible as proportional
-    weights (e.g. `1:2:1`).
-- Only the window **root** pane is unsized (fills the window). Every nested
+  - `N%` — percent of parent dimension (1..100). Resolved as
+    `floor(parent * N / 100)` cells; reserved-first alongside absolutes (so
+    `[50%, 1, 1]` gives the first pane half the parent and the rest split
+    1:1 over the remainder, minus separators).
+  - bare `N` — proportional weight. Absolutes and percents are reserved first;
+    the leftover space is divided among the bare weights by ratio (e.g.
+    `[90c, 1, 2]` → first pane 90 cells, the rest split 1:2).
+- Only the layout **root** pane is unsized (fills the window). Every nested
   pane's size comes from its parent's `splits[i]`.
-- Each **window** requires a unique `name` (error if missing or duplicated) — it
-  is the ownership key mux uses to find and reset only its own window on re-run.
+- Each **layout** requires a unique `name` (error if missing or duplicated) — it
+  is the user-facing switch handle. The cmdman-owned **window** itself is named
+  by the driver constructor (a fixed `cmdman` / `cmdman-<project>` window) and
+  is the ownership key drivers use to find and reset only their own window
+  on re-run.
 - Initial **focus** = the first leaf in document order, unless exactly one leaf
-  sets `focus: true` (more than one per window is an error).
+  sets `focus: true` (more than one per layout is an error).
+- Per-pane driver hints flow via `cmd_opt:` (a map, mirroring the top-level
+  `driver_opt:` but scoped to one pane). Drivers pick out keys they understand
+  (e.g. tmux pane title) and ignore the rest. This is the post-snapshot
+  replacement for per-pane env injection (which was retired).
 
-Conceptual Go shape (lives in its own layout package; note this spec `Pane`
-(layout node) is distinct from the runtime `muxctl.Pane` (pane identity), so the
-spec type belongs in its own package — e.g. `pkg/cmdman/mux` or `pkg/muxlayout` —
-not inside `pkg/muxctl`):
+Go shape (post-skeleton: `MuxSpec` lives in `pkg/muxctl` and is generic /
+driver-agnostic — leaves carry already-resolved argv plus a per-pane
+driver-options bag, NOT cmdman concepts):
 
 ```go
+package muxctl
+
 type MuxSpec struct {
 	Driver    string            // "tmux" | "zellij" | "" (autodetect)
-	DriverOpt map[string]string // driver-specific opts (YAML: driver_opt); e.g. tmux socket/dedicated
-	Windows   []Window
+	DriverOpt map[string]string // driver-specific opts (YAML: driver_opt)
+	Layouts   []Layout          // switchable layouts; one window per invocation
 }
 
-type Window struct {
-	Name string
-	Root Pane // a container or a single leaf
+type Layout struct {
+	Name string   // user-facing switch handle; unique within MuxSpec.Layouts
+	Root PaneSpec // container or single leaf
 }
 
-// Pane is a container (Dir+Splits+Panes) XOR a leaf (Cmd).
-type Pane struct {
-	// container
-	Dir    string // "h" | "v"
+// Container holds the fields that make a PaneSpec a container node.
+type Container struct {
+	Dir    Direction
 	Splits []Size // index-parallel to Panes
-	Panes  []Pane
+	Panes  []PaneSpec
+}
 
-	// leaf
-	Command string // referenced command/service name (YAML key: command)
-	Mode    string // "attach" (default) | "logs"
-	Focus   bool
+// Leaf holds the fields that make a PaneSpec a leaf node.
+type Leaf struct {
+	Name   string            // pane name; map key in Session.ApplyLayout's return
+	Cmd    []string          // argv to spawn (already resolved)
+	CmdOpt map[string]string // per-pane driver-specific opts (YAML: cmd_opt)
+	Focus  bool
+}
+
+// PaneSpec is a layout-tree node: a Container XOR a Leaf. Both groups are
+// embedded so each side can be constructed and described independently. The
+// YAML wire form is unchanged (Container/Leaf are inlined). Distinct from
+// the runtime muxctl.Pane (an interface for pane identity returned by
+// Session.ApplyLayout).
+type PaneSpec struct {
+	Container // inline; container fields
+	Leaf      // inline; leaf fields
 }
 
 type Size struct {
-	N   int
-	Abs bool // true => absolute cells (Nc); false => proportional weight
+	N   int  // N>0; for Percent N is in 1..100
+	Absolute bool // absolute cells (Nc)
+	Percent bool // percent of parent dim (N%); mutually exclusive with Absolute
+	// Both false => proportional weight
 }
 ```
+
+The cmdman-facing YAML (the example above, with bare-string named leaves
+like `api`, and a `mode: attach|logs` keyword) is the **higher layer's UX
+surface**, not muxctl's wire form. The cmdman layer (a future
+`pkg/cmdman/...` package) parses that YAML, resolves named leaves to argv
+(`./api` → `cmdman attach <id>` or `cmdman logs --sticky <id>`), and emits
+a `muxctl.MuxSpec` with resolved `Cmd []string`.
 
 ## CLI input
 
@@ -267,53 +319,62 @@ layout path as a positional arg; `-`/omitted ⇒ stdin.)
 ## Public API shape — new package `pkg/muxctl` (decided)
 
 The existing `pkg/mux` tree (`Split`/`SendKeys`/`Capture`) is **superseded —
-ignore it.** `pkg/muxctl` defines a small, window-centric controller:
+ignore it.** `pkg/muxctl` defines a small, window-controlling controller:
 
 ```go
 package muxctl
 
-// Session controls one multiplexer session. Minimal by design: window lifecycle
-// only. Session reuse and teardown are NOT on the interface — they are the driver
-// constructor's / the OS's concern.
+// Session controls the cmdman-owned window in one multiplexer session.
+// Minimal by design: a single window, switchable layouts. Session reuse,
+// socket choice, dedicated-server isolation, and the window name belong
+// to each driver's constructor (e.g. tmux.New), not to this interface.
 type Session interface {
-	NewWindow(name string) (WindowID, error)
-	// Layout (re)builds window w to match l. It RESETS the window's panes, so it
-	// doubles as reset-layout. Returns the resulting panes keyed by command name.
-	Layout(w WindowID, l Layout) (map[string]Pane, error)
-	CloseWindow(w WindowID) error
+	// ApplyLayout (re)builds the controlled window's pane tree to match
+	// root. It RESETS the window's panes — switching among MuxSpec.Layouts
+	// is repeated ApplyLayout calls. Returns panes keyed by PaneSpec.Name.
+	ApplyLayout(ctx context.Context, root PaneSpec) (map[string]Pane, error)
+	// Close closes the controlled window. MUST NOT stop the panes' processes.
+	Close(ctx context.Context) error
 }
 
-// Pane is just identity: the multiplexer's pane id and the command name the pane
-// was built for (used to correlate, set titles, refocus, close-one).
+// Pane is the runtime pane identity returned by ApplyLayout.
 type Pane interface {
 	PaneId() string
-	Name() string // command name
+	Name() string // matches PaneSpec.Name and the map key from ApplyLayout
 }
 ```
 
 Decided properties:
 
-- **Window-centric, three methods only.** Create a window, hand it a whole
-  `Layout`, get back `map[command-name]Pane`. No incremental `Split`/`SendKeys`,
-  and no `Close`/`ListWindows`/`ID` on the interface (reuse/teardown live outside).
-- **`Layout` resets.** Re-running `cmdman mux` re-applies the layout; the window
-  reconciles by teardown+rebuild (also kills+respawns the panes' `cmdman attach` —
-  fine, mux is only a viewer).
-- **`map[string]Pane` keyed by command name.** Order-independent correlation.
-  (Edge: a layout showing the same command in two panes collides on the key —
-  decide whether that's rejected, or the key must be a distinct leaf id.)
+- **Single window, two methods.** One command invocation owns one window;
+  the user switches among `MuxSpec.Layouts` by repeated `ApplyLayout`. No
+  incremental `Split`/`SendKeys`, no per-window create/close on the
+  interface (the driver constructor takes the window name and finds-or-creates;
+  `Close` tears it down).
+- **`ApplyLayout` resets.** Re-running `cmdman mux` or switching layouts
+  re-applies the pane tree; the window reconciles by teardown+rebuild
+  (kills+respawns the panes' `cmdman attach` — fine, mux is only a viewer).
+- **`map[string]Pane` keyed by pane name.** Order-independent correlation.
+  In the cmdman layer above, the pane name is typically the command name
+  (and the cmdman layer rejects two panes referencing the same command —
+  the muxctl layer rejects two panes with the same Name in a layout).
+- **`MuxSpec` lives in `pkg/muxctl`.** It is the generic, driver-agnostic
+  wire form: leaves carry resolved `Cmd []string` and a `CmdOpt` per-pane
+  driver-opts bag. Higher layers parse their own user-facing YAML and emit
+  a `muxctl.MuxSpec` after leaf-name → argv resolution.
 - **Targeting + socket/server are driver-specific, NOT on the interface.**
   `pkg/muxctl/tmux.New(...)` takes tmux-specific config (the "session specifier")
   that decides: attach an existing session vs create a new one, and dedicated
   socket/server vs the current one. The generic autodetect (`$TMUX`/`$ZELLIJ`)
   only picks the driver; the chosen driver's `New` resolves the session.
 
-**Leaf resolver lives ABOVE muxctl.** A `muxctl.Layout` carries pure geometry plus
-per-leaf spawn info (argv, env, title); it knows nothing about cmdman. The
-`cmdman mux` / `compose mux` layer resolves a leaf name → argv/env via a resolver
-(`func(ctx, name) (argv []string, env map[string]string, err error)`; cmdman
-service for `mux`, `ProjectSelection` for `compose mux`), builds a `muxctl.Layout`
-with those argv, and calls `Layout()`. One `MuxSpec` → one builder → both commands.
+**Leaf resolver lives ABOVE muxctl.** A `muxctl.PaneSpec` leaf carries pure
+argv plus `CmdOpt` driver hints; it knows nothing about cmdman. The
+`cmdman mux` / `compose mux` layer resolves a leaf name → argv via a resolver
+(`func(ctx, name) (argv []string, err error)`; cmdman service for `mux`,
+`ProjectSelection` for `compose mux`), builds a `muxctl.MuxSpec` with those
+argv, and calls `ApplyLayout()` once per switch. One cmdman MuxSpec → one
+builder → both commands.
 
 ## tmux realization notes (the tmux `muxctl` driver)
 
@@ -323,8 +384,12 @@ Fresh implementation behind `muxctl.Session`; the old `pkg/mux/tmux` is not reus
 - Container `dir:h` → `split-window -h`; `dir:v` → `split-window -v`. Build the
   tree by recursive splits in pane order; pass each leaf's argv as the pane
   command so the pane *is* the attach process.
-- Sizes: `-l <cells>` (tmux ≥3.1 also accepts `-l N%`). Absolute `Nc` → `-l N`;
-  proportional weights → compute cell sizes from leftover after absolutes.
+- Sizes: `-l <cells>` (tmux ≥3.1 also accepts `-l N%`, but we always pass
+  resolved cells — `N%` is converted to cells against the live parent
+  dimension at apply time, so the on-the-wire form is identical to
+  absolutes). Absolute `Nc` → `-l N`; percent `N%` → `-l floor(parent*N/100)`;
+  proportional weights → compute cell sizes from leftover after absolutes and
+  percents.
 - No per-pane env injection (retired). Identity/config goes via argv flags:
   `os.Executable()` + propagate `--data-dir` / `--runtime-dir` into the pane's
   `cmdman attach`/`logs` command.
@@ -341,14 +406,14 @@ check below (verified against its docs) confirms the `muxctl` interface is
 portable, which de-risks adding those drivers later — zellij maps cleanly onto
 `muxctl.Session`:
 
-| muxctl | tmux | zellij |
+| muxctl op (post-skeleton) | tmux | zellij |
 | --- | --- | --- |
-| `NewWindow(name)` → id | `new-window -n -P -F '#{window_id}'` | `action new-tab --name` (prints tab id) |
+| driver constructor: find-or-create the cmdman window | `new-window -n cmdman -P -F '#{window_id}'` | `action new-tab --name cmdman` (prints tab id) |
 | run a leaf | `split-window -- argv` | `run -- argv` / `new-pane --name <cmd> -- argv` (prints pane id) |
-| build from layout | recursive `split-window` | `action new-tab --layout x.kdl` (we emit KDL) |
-| `Layout` returns panes | `list-panes -F` | `action list-panes --json` |
+| `ApplyLayout` builds from PaneSpec | recursive `split-window` | `action new-tab --layout x.kdl` (we emit KDL) |
+| `ApplyLayout` returns panes | `list-panes -F` | `action list-panes --json` |
 | target a pane/window | `-t %id` / `-t @id` | `--pane-id terminal_N` / `--tab-id N` |
-| `CloseWindow` | `kill-window -t` | `action close-tab --tab-id N` |
+| `Close` (tear down the cmdman window) | `kill-window -t` | `action close-tab --tab-id N` |
 | focus/find by name | window names | `action go-to-tab-name --create` |
 
 **The one real gap:** zellij has no equivalent of tmux `@`-user-options (arbitrary
@@ -494,9 +559,12 @@ machinery with sticky attach.
 
 ## Open questions (next session)
 
-1. (Decided) `pkg/muxctl`: `Session` = NewWindow / Layout / CloseWindow; `Layout`
-   returns `map[command-name]Pane` (`Pane`: `PaneId`/`Name`); duplicate command is
-   rejected; targeting + socket are `tmux.New` config.
+1. (Decided, revised post-snapshot) `pkg/muxctl`: `Session` = `ApplyLayout` /
+   `Close` (single cmdman-owned window per invocation; switching among
+   `MuxSpec.Layouts` is repeated `ApplyLayout`); returns
+   `map[pane-name]Pane` (`Pane`: `PaneId`/`Name`); duplicate pane name in a
+   layout is rejected; targeting + socket + window name are `tmux.New` config.
+   `MuxSpec` lives in `pkg/muxctl` (generic — `Cmd []string` + `CmdOpt`).
 2. (Decided) Autodetect: none set → `tmux`; both set → `$TMUX` wins.
 3. (Decided) "From current session" is `tmux.New` config (drive current server /
    existing / new); only its default value is TBD (see Q4).
@@ -514,8 +582,12 @@ machinery with sticky attach.
 7. (Decided) No synthesized default layout: `compose mux` errors on a missing
    `mux:` section and standalone `mux` requires a positional spec, so there is no
    "no layout" path.
-8. (Decided) Naming: leaf-options key is `command:`; window `name` required &
-   unique; no `%` sizes; top-level `windows`; keep `dir`.
+8. (Decided, revised post-snapshot) Naming: cmdman-YAML leaf-options key is
+   `command:` (resolves to `muxctl.PaneSpec.Cmd`); layout `name` required &
+   unique (top-level key is `layouts:`, not `windows:` — one window per
+   invocation, switchable among layouts); per-pane driver hints via
+   `cmd_opt:` map (mirror of `driver_opt:`); `%` sizes now supported
+   (resolved against parent dim, reserved alongside absolutes); keep `dir`.
 9. (Confirmed) `cmdman attach` replays scrollback — the monitor sends
    `sub.Scrollback` to a new client before live streaming (`mon_server.go` Attach,
    lines ~61-65). Freshly-opened mux panes show recent history for free.
@@ -535,12 +607,17 @@ machinery with sticky attach.
 
 ## Where we left off
 
-Design is essentially complete. Pinned: the layout DSL (`command:` leaf = ID|NAME,
-per-pane `mode: attach|logs` with attach default, window `name` required, pane
-titles = command name, focus = first leaf unless one `focus: true`, no `%` sizes);
-`pkg/muxctl` (`Session` = NewWindow / Layout / CloseWindow, `Layout` →
-`map[command-name]Pane`, ownership whole-window/tab **by name**,
-**reset-and-rebuild** on re-run — no pane reuse); **tmux driver only in v1**
+Design is essentially complete. Pinned (post-skeleton): the cmdman-facing
+layout DSL (`command:` leaf = Id|NAME, per-pane `mode: attach|logs` with
+attach default, `layouts:` top-level — single window per invocation,
+switchable among named layouts — each layout `name` required, pane titles =
+command name via `cmd_opt`, focus = first leaf unless one `focus: true`,
+sizes: `Nc` absolute, `N%` percent (1..100), bare `N` weight — absolutes and
+percents reserved first); `pkg/muxctl` (`Session` = `ApplyLayout` / `Close`,
+`ApplyLayout` → `map[pane-name]Pane`, ownership whole-window/tab **by name**
+(driver-constructor-set), **reset-and-rebuild** on each `ApplyLayout` — no
+pane reuse; `MuxSpec` lives here generic with `Cmd []string` + `CmdOpt`);
+**tmux driver only in v1**
 (zellij + wezterm are TODO; interface verified portable against zellij); default =
 drive the current server when inside (no focus-steal), else build detached + print
 the attach hint (`tmux attach -t cmdman`); isolation via `mux.driver_opt`; attach
@@ -552,7 +629,22 @@ duplicate/unknown leaves rejected; autodetect → tmux (`$TMUX` wins). `compose 
 reads the file's `mux:` section (missing = error); no `compose up --attach` yet.
 Per-pane env injection retired (flags only); `logs --sticky` meta prefix `#|`
 (configurable via `--meta-prefix`); too-small terminal → best-effort + warn.
-Two implementation chunks remain to spec: (a) attach/logs stickiness internals
-(exit code, auto-reattach via `eventlog`; `r`→`restart`), and (b) the layout-tree
-builder + leaf resolver above muxctl (tmux recursive split-window; zellij KDL
-later).
+
+**Implemented so far:** `pkg/muxctl` spec types + validation + YAML decoder
+(`MuxSpec`/`Layout`/`PaneSpec`/`Size`); the `pkg/muxctl/tmux` driver
+(`Config`{Path,Socket,SessionName,WindowName}, `New` find-or-create window,
+`ApplyLayout` reset-then-recursive-`split-window -b -l Ncells` with absolutes-
+reserved-first cell math, `respawn-pane -k -- argv` at leaves, `select-pane -T`
+for `CmdOpt["title"]`/name pane titles, `select-pane` for focus, `Close`
+kills only the owned window; too-small-leftover children are skipped and
+the dropped names go to `contextkey.ValueSlogLoggerDefault(ctx).WarnContext`).
+Covered by unit tests for cell math + focus pick and tmux-required
+integration tests for New / ApplyLayout (single, h-split, nested mixed,
+reset-on-reapply, focus, title override, Close-doesn't-touch-siblings,
+too-small-warns-via-logger).
+
+Implementation chunks remaining: (a) attach/logs stickiness internals
+(exit code, auto-reattach via `eventlog`; `r`→`restart`), and (b) the
+cmdman-layer YAML parser + leaf resolver above muxctl (cmdman-YAML
+`command:`/`mode:` → `muxctl.PaneSpec.Cmd` argv via the cmdman / compose
+services), plus the `cmdman mux` / `cmdman compose mux` cobra wiring.

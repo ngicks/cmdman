@@ -1,0 +1,22 @@
+driver: tmux
+layouts:
+  - name: three
+    root:
+      dir: h
+      splits: [1, 1, 1]
+      panes:
+        - name: a
+          cmd:
+            - /bin/sh
+            - -c
+            - sleep 60
+        - name: b
+          cmd:
+            - /bin/sh
+            - -c
+            - sleep 60
+        - name: c
+          cmd:
+            - /bin/sh
+            - -c
+            - sleep 60
