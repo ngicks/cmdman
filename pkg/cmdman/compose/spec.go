@@ -3,10 +3,9 @@
 package compose
 
 import (
-	"go.yaml.in/yaml/v4"
-
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
+	"github.com/ngicks/cmdman/pkg/cmdman/mux"
 )
 
 // LabelPrefix is the reserved label key prefix. User labels using this prefix are rejected.
@@ -40,10 +39,13 @@ type RawComposeSpec struct {
 	Name     string                `yaml:"name"`
 	WorkDir  string                `yaml:"work_dir"`
 	Commands map[string]RawCommand `yaml:"commands"`
-	// Mux is the embedded cmdman mux layout. Captured as a raw yaml.Node so
-	// pkg/cmdman/mux owns the decoding of its own grammar; nil when the file
-	// has no "mux:" section.
-	Mux *yaml.Node `yaml:"mux,omitempty"`
+	// Mux is the embedded cmdman mux layout, decoded straight into the
+	// cmdman-layer spec type (nil when the file has no "mux:" section). Its
+	// leaves still carry project-scoped service names; `cmdman compose mux`
+	// resolves those to commands at run time. Storing a typed *mux.Spec
+	// (rather than a raw yaml node or bytes) keeps any decoder-specific type
+	// off this struct, so the spec format is not pinned to YAML.
+	Mux *mux.Spec `yaml:"mux,omitempty"`
 	// Unknown captures unrecognized top-level keys so Normalize can warn about them.
 	Unknown map[string]any `yaml:",inline"`
 }
@@ -91,9 +93,11 @@ type ComposeSpec struct {
 	WorkDir string
 	// Commands is the ordered list of normalized commands.
 	Commands []Command
-	// Mux carries through the raw "mux:" section from the compose file (nil
-	// when absent). Consumed by pkg/cmdman/mux for `cmdman compose mux`.
-	Mux *yaml.Node
+	// Mux is the embedded "mux:" layout from the compose file (nil when
+	// absent), with project-scoped service names still in its leaves.
+	// `cmdman compose mux` resolves those to commands and runs it through the
+	// same path as standalone `cmdman mux`.
+	Mux *mux.Spec
 }
 
 // Command is a single command after normalization.

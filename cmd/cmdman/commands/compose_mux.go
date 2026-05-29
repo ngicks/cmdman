@@ -43,10 +43,7 @@ func runComposeMux(cmd *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *compose
 		return errors.New(`compose mux: missing "mux:" section in compose file`)
 	}
 
-	spec, err := mux.DecodeNode(selection.Spec.Mux)
-	if err != nil {
-		return err
-	}
+	spec := *selection.Spec.Mux
 
 	svc, err := cmdmanService(rootCfg)
 	if err != nil {

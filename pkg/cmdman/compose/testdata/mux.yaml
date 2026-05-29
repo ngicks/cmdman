@@ -1,0 +1,39 @@
+name: muxproject
+
+commands:
+  api:
+    args: [go, run, ./cmd/api]
+  worker:
+    args: [go, run, ./cmd/worker]
+  redis:
+    args: [redis-server]
+  db:
+    args: [postgres]
+
+# Embedded mux dashboard. Leaves reference compose service names; cmdman
+# compose mux resolves them to commands at run time. The compose loader decodes
+# this section eagerly into ComposeSpec.Mux (*mux.Spec).
+mux:
+  driver: tmux
+  driver_opt:
+    socket: cmdman
+  layouts:
+    - name: services
+      root:
+        dir: h
+        splits: [50%, 1, 1]
+        panes:
+          - api
+          - command: worker
+            mode: logs
+            cmd_opt:
+              title: Worker
+            focus: true
+          - dir: v
+            splits: [1, 1]
+            panes: [redis, db]
+    - name: stacked
+      root:
+        dir: v
+        splits: [10c, 1]
+        panes: [api, worker]

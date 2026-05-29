@@ -234,7 +234,12 @@ func TestComposeSendKeys(t *testing.T) {
 	stdout, stderr, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath,
 		"send-keys", "alpha", "--", "Enter")
 	if err != nil {
-		t.Fatalf("compose send-keys alpha failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		t.Fatalf(
+			"compose send-keys alpha failed: %v\nstdout:\n%s\nstderr:\n%s",
+			err,
+			stdout,
+			stderr,
+		)
 	}
 	if !strings.Contains(stdout, "sent         alpha") {
 		t.Fatalf("expected sent line for alpha; got:\n%s", stdout)
@@ -280,7 +285,15 @@ func TestComposeSendKeysRequiresSeparator(t *testing.T) {
 	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
 
 	composePath := filepath.Join(wd, "cmd-compose.yaml")
-	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "create"); err != nil {
+	if _, _, err := env.exec(
+		ctx,
+		"compose",
+		"--workdir",
+		wd,
+		"-f",
+		composePath,
+		"create",
+	); err != nil {
 		t.Fatalf("compose create failed: %v", err)
 	}
 

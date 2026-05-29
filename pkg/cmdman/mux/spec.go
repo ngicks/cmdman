@@ -93,9 +93,9 @@ func (p PaneSpec) IsContainer() bool {
 	return p.Command == "" && (p.Dir != "" || len(p.Panes) > 0 || len(p.Splits) > 0)
 }
 
-// Decode parses a [Spec] from r. The reader must contain a single YAML
-// document with a top-level "mux:" key wrapping the spec body — both
-// standalone-`cmdman mux` files and compose files share that wrapper.
+// Decode parses a [Spec] from r. The reader must contain a single document
+// with a top-level "mux:" key wrapping the spec body — the standalone
+// `cmdman mux` file form.
 //
 // Decode does not validate the spec; [Build] surfaces validation errors via
 // [muxctl.MuxSpec.Validate] after leaf resolution.
@@ -112,18 +112,4 @@ func Decode(r io.Reader) (Spec, error) {
 		return Spec{}, errors.New(`mux: missing top-level "mux:" key`)
 	}
 	return *wrapper.Mux, nil
-}
-
-// DecodeNode decodes a [Spec] from a pre-extracted [yaml.Node] (typically a
-// compose file's `mux:` section, already unmarshaled into a node by the
-// compose loader). It is the `cmdman compose mux` entry point.
-func DecodeNode(node *yaml.Node) (Spec, error) {
-	if node == nil {
-		return Spec{}, errors.New("mux: nil yaml node")
-	}
-	var spec Spec
-	if err := node.Decode(&spec); err != nil {
-		return Spec{}, fmt.Errorf("mux: decode: %w", err)
-	}
-	return spec, nil
 }

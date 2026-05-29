@@ -916,11 +916,26 @@ func TestComposeLogsFollowStockThenLive(t *testing.T) {
 
 	followCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
 	defer cancel()
-	stdout, _, _ := env.exec(followCtx, "compose", "--workdir", wd, "-f", composePath, "logs", "--follow")
+	stdout, _, _ := env.exec(
+		followCtx,
+		"compose",
+		"--workdir",
+		wd,
+		"-f",
+		composePath,
+		"logs",
+		"--follow",
+	)
 
 	for _, line := range []string{"alpha-stock", "beta-stock"} {
 		if got := strings.Count(stdout, line); got != 1 {
-			t.Fatalf("expected stored line %q exactly once (must not be duplicated by the live bridge), got %d:\n%s", line, got, stdout)
+			t.Fatalf(
+				"expected stored line %q exactly once "+
+					"(must not be duplicated by the live bridge), got %d:\n%s",
+				line,
+				got,
+				stdout,
+			)
 		}
 	}
 	for _, line := range []string{"alpha-live", "beta-live"} {
