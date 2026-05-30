@@ -13,6 +13,7 @@ import (
 
 	"github.com/compose-spec/compose-go/v2/dotenv"
 	"github.com/compose-spec/compose-go/v2/template"
+	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/hrstr"
@@ -22,6 +23,16 @@ import (
 
 // defaultFileNames are the candidate compose file names searched in CWD order.
 var defaultFileNames = []string{"cmd-compose.yaml", "cmd-compose.yml"}
+
+// namedComposeFile is the file searched inside a directory-style named compose
+// project under the default compose dir (see cmdman.ComposeConfigDir).
+const namedComposeFile = "compose.yaml"
+
+// ENV_CMDMAN_COMPOSE_FILE is the interpolation variable exposing the absolute
+// path of the compose file being loaded. Compose authors reference it to locate
+// resources (env files, configs) next to the compose file, e.g.
+// `env_file: ["${CMDMAN_COMPOSE_FILE}/../app.env"]`.
+const ENV_CMDMAN_COMPOSE_FILE = "CMDMAN_COMPOSE_FILE"
 
 // NormalizeOpts holds caller-supplied overrides for Normalize.
 type NormalizeOpts struct {
@@ -34,8 +45,15 @@ type NormalizeOpts struct {
 }
 
 // DiscoverFile discovers the compose file given opts and cwd.
-// When opts.File is non-empty it is used directly (resolved relative to cwd).
-// Otherwise the two default file names are tried in cwd order.
+//
+// When opts.File is non-empty it is resolved in order:
+//  1. as a filesystem path relative to cwd (a regular file there wins);
+//  2. as a bare project name under the default compose dir
+//     (see resolveNamedComposeFile);
+//  3. otherwise the path form is decoded directly so the error message points
+//     at the path the caller actually typed.
+//
+// When opts.File is empty the two default file names are tried in cwd order.
 // Returns the absolute compose file path and decoded spec.
 func DiscoverFile(cwd string, opts NormalizeOpts) (path string, raw RawComposeSpec, err error) {
 	if opts.File != "" {
@@ -44,6 +62,20 @@ func DiscoverFile(cwd string, opts NormalizeOpts) (path string, raw RawComposeSp
 			path = filepath.Join(cwd, path)
 		}
 		path = filepath.Clean(path)
+		if info, statErr := os.Stat(path); statErr == nil && info.Mode().IsRegular() {
+			raw, err = decodeFile(path)
+			return path, raw, err
+		}
+
+		named, ok, nerr := resolveNamedComposeFile(opts.File)
+		if nerr != nil {
+			return "", RawComposeSpec{}, nerr
+		}
+		if ok {
+			raw, err = decodeFile(named)
+			return named, raw, err
+		}
+
 		raw, err = decodeFile(path)
 		return path, raw, err
 	}
@@ -69,6 +101,104 @@ func DiscoverFile(cwd string, opts NormalizeOpts) (path string, raw RawComposeSp
 		"no compose file found (tried %s); pass --file to specify one",
 		strings.Join(tried, ", "),
 	)
+}
+
+// resolveNamedComposeFile resolves a bare project name to a compose file under
+// the default compose dir (cmdman.ComposeConfigDir). The name maps to, in order:
+//
+//	<dir>/<name>          (when <name> already ends in .yaml/.yml)
+//	<dir>/<name>.yaml
+//	<dir>/<name>.yml
+//	<dir>/<name>/compose.yaml   (directory-style project)
+//
+// ok is false when name is not a bare name (contains a path separator) or no
+// matching entry exists. A directory whose compose.yaml is missing is an error,
+// since the directory clearly names a project the caller expected to find.
+func resolveNamedComposeFile(name string) (path string, ok bool, err error) {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return "", false, nil
+	}
+
+	dir, err := cmdman.ComposeConfigDir()
+	if err != nil {
+		return "", false, err
+	}
+	if dir == "" {
+		return "", false, nil
+	}
+
+	var candidates []string
+	if strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml") {
+		candidates = append(candidates, filepath.Join(dir, name))
+	}
+	candidates = append(candidates,
+		filepath.Join(dir, name+".yaml"),
+		filepath.Join(dir, name+".yml"),
+	)
+	for _, cand := range candidates {
+		if info, statErr := os.Stat(cand); statErr == nil && info.Mode().IsRegular() {
+			return cand, true, nil
+		}
+	}
+
+	dirCand := filepath.Join(dir, name)
+	if info, statErr := os.Stat(dirCand); statErr == nil && info.IsDir() {
+		cand := filepath.Join(dirCand, namedComposeFile)
+		if info2, statErr2 := os.Stat(cand); statErr2 == nil && info2.Mode().IsRegular() {
+			return cand, true, nil
+		}
+		return "", false, fmt.Errorf(
+			"compose project %q: %s has no %s", name, dirCand, namedComposeFile)
+	}
+
+	return "", false, nil
+}
+
+// ListNamedProjects returns the names of compose projects discoverable under
+// the default compose dir (cmdman.ComposeConfigDir): one per <name>.yaml /
+// <name>.yml file and one per directory containing a compose.yaml. The result
+// is sorted and deduplicated. It returns nil (no error) when the directory does
+// not exist or cannot be determined.
+func ListNamedProjects() ([]string, error) {
+	dir, err := cmdman.ComposeConfigDir()
+	if err != nil || dir == "" {
+		return nil, err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	seen := make(map[string]struct{})
+	var names []string
+	add := func(n string) {
+		if _, ok := seen[n]; ok {
+			return
+		}
+		seen[n] = struct{}{}
+		names = append(names, n)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() {
+			cand := filepath.Join(dir, name, namedComposeFile)
+			if info, statErr := os.Stat(cand); statErr == nil && info.Mode().IsRegular() {
+				add(name)
+			}
+			continue
+		}
+		switch {
+		case strings.HasSuffix(name, ".yaml"):
+			add(strings.TrimSuffix(name, ".yaml"))
+		case strings.HasSuffix(name, ".yml"):
+			add(strings.TrimSuffix(name, ".yml"))
+		}
+	}
+	slices.Sort(names)
+	return names, nil
 }
 
 // DecodeFile reads and YAML-decodes a compose file at path.
@@ -145,6 +275,14 @@ func Normalize(
 	}
 	composeFilePath = filepath.Clean(composeFilePath)
 
+	// baseEnv is the OS environment plus CMDMAN_COMPOSE_FILE, used as the base
+	// for every interpolation in this spec (work_dir, dirs, env files, env:,
+	// args, log opts). CMDMAN_COMPOSE_FILE is interpolation-only: it never lands
+	// in a command's stored Env unless an author copies it through env:.
+	baseEnv := osEnvMap()
+	baseEnv[ENV_CMDMAN_COMPOSE_FILE] = composeFilePath
+	baseLookup := buildLookup(baseEnv)
+
 	// effective work directory
 	effectiveWorkDir := opts.WorkDir
 	if effectiveWorkDir == "" {
@@ -152,6 +290,10 @@ func Normalize(
 	}
 	if effectiveWorkDir == "" {
 		effectiveWorkDir = cwd
+	}
+	effectiveWorkDir, err = template.Substitute(effectiveWorkDir, baseLookup)
+	if err != nil {
+		return ComposeSpec{}, fmt.Errorf("work_dir interpolation: %w", err)
 	}
 	if !filepath.IsAbs(effectiveWorkDir) {
 		effectiveWorkDir = filepath.Join(cwd, effectiveWorkDir)
@@ -208,11 +350,15 @@ func Normalize(
 			name,
 		)
 
-		cmdDir := resolvePath(effectiveWorkDir, cmd.Dir)
+		dirVal, err := template.Substitute(cmd.Dir, baseLookup)
+		if err != nil {
+			return ComposeSpec{}, fmt.Errorf("command %q: dir interpolation: %w", name, err)
+		}
+		cmdDir := resolvePath(effectiveWorkDir, dirVal)
 
 		// commandEnv: KEY→VALUE for env_file + env: entries (not OS env).
 		// finalEnv: OS + env_file + env: (for args interpolation).
-		commandEnv, finalEnv, err := buildCommandEnv(effectiveWorkDir, cmd)
+		commandEnv, finalEnv, err := buildCommandEnv(effectiveWorkDir, cmd, baseEnv)
 		if err != nil {
 			return ComposeSpec{}, fmt.Errorf("command %q: %w", name, err)
 		}
@@ -237,7 +383,10 @@ func Normalize(
 			return ComposeSpec{}, fmt.Errorf("command %q: labels: %w", name, err)
 		}
 
-		resolvedLogOpts := resolveLogOptPaths(effectiveWorkDir, cmd.LogOpts)
+		resolvedLogOpts, err := resolveLogOptPaths(effectiveWorkDir, cmd.LogOpts, baseLookup)
+		if err != nil {
+			return ComposeSpec{}, fmt.Errorf("command %q: log_opts: %w", name, err)
+		}
 
 		afterList, err := normalizeAfter(name, cmd.After)
 		if err != nil {
@@ -300,9 +449,8 @@ func Normalize(
 func buildCommandEnv(
 	workDir string,
 	cmd RawCommand,
+	osEnv map[string]string,
 ) (commandEnv, finalEnv map[string]string, err error) {
-	osEnv := osEnvMap()
-
 	// Layer 2: env_files in order.
 	envFileAccum := make(map[string]string)
 
@@ -311,7 +459,15 @@ func buildCommandEnv(
 		if ef.Required != nil {
 			required = *ef.Required
 		}
-		path := resolvePath(workDir, ef.Path)
+		// env_file paths interpolate against OS env + CMDMAN_COMPOSE_FILE +
+		// prior env_file keys, so a project can point at a dot env file living
+		// next to its compose file.
+		interpPath, interpErr := template.Substitute(
+			ef.Path, buildLookupFromMaps(osEnv, envFileAccum))
+		if interpErr != nil {
+			return nil, nil, fmt.Errorf("env_file[%d] interpolation: %w", i, interpErr)
+		}
+		path := resolvePath(workDir, interpPath)
 
 		if !required {
 			if _, statErr := os.Stat(path); statErr != nil {
@@ -419,32 +575,42 @@ func mapToEnvSlice(env map[string]string) []string {
 	return out
 }
 
-// resolvePath resolves p relative to workDir. Absolute paths are used as-is.
-// Empty p returns workDir.
+// resolvePath resolves p relative to workDir. Absolute paths are cleaned (so
+// "${CMDMAN_COMPOSE_FILE}/../x" collapses the file component away) but otherwise
+// used as-is. Empty p returns workDir.
 func resolvePath(workDir, p string) string {
 	if p == "" {
 		return workDir
 	}
 	if filepath.IsAbs(p) {
-		return p
+		return filepath.Clean(p)
 	}
 	return filepath.Join(workDir, p)
 }
 
-// resolveLogOptPaths resolves the "path" key in log opts against workDir.
-func resolveLogOptPaths(workDir string, opts map[string]string) map[string]string {
+// resolveLogOptPaths interpolates and resolves the "path" key in log opts
+// against workDir. Non-path opts are passed through unchanged.
+func resolveLogOptPaths(
+	workDir string,
+	opts map[string]string,
+	lookup template.Mapping,
+) (map[string]string, error) {
 	if len(opts) == 0 {
-		return opts
+		return opts, nil
 	}
 	out := make(map[string]string, len(opts))
 	for k, v := range opts {
 		if k == "path" {
-			out[k] = resolvePath(workDir, v)
+			interp, err := template.Substitute(v, lookup)
+			if err != nil {
+				return nil, fmt.Errorf("path interpolation: %w", err)
+			}
+			out[k] = resolvePath(workDir, interp)
 		} else {
 			out[k] = v
 		}
 	}
-	return out
+	return out, nil
 }
 
 // validateUserLabels rejects labels with the reserved cmdman.compose. prefix.

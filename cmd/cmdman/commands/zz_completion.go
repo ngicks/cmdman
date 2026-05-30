@@ -150,6 +150,27 @@ func composeCommandNames(
 	return names
 }
 
+// completeComposeFile completes the compose -f/--file flag with the names of
+// projects discoverable under the default compose dir, while still letting the
+// shell offer its default file-path completion (ShellCompDirectiveDefault).
+func completeComposeFile(
+	_ *cobra.Command,
+	_ []string,
+	toComplete string,
+) ([]cobra.Completion, cobra.ShellCompDirective) {
+	names, err := compose.ListNamedProjects()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveDefault
+	}
+	var out []cobra.Completion
+	for _, n := range names {
+		if strings.HasPrefix(n, toComplete) {
+			out = append(out, n)
+		}
+	}
+	return out, cobra.ShellCompDirectiveDefault
+}
+
 // signalCompletions offers the common POSIX signal names. hrstr.ParseSignal also
 // accepts bare names (TERM) and numbers (15); these canonical hints cover the
 // usual cases without enumerating every platform signal.

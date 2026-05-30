@@ -235,6 +235,29 @@ func loadConfigFile() (CmdmanConfig, error) {
 	return cfg, nil
 }
 
+// ComposeConfigDir returns the directory that holds named compose projects: the
+// "compose" subdirectory of the config directory (the directory containing the
+// config file). It tracks configFilePath, so pointing $CMDMAN_CONF at a config
+// file in another directory moves the compose dir alongside it.
+//
+// Examples:
+//
+//	$CMDMAN_CONF=/etc/cmdman/config.json -> /etc/cmdman/compose
+//	default                              -> ${XDG_CONFIG_HOME:-$HOME/.config}/cmdman/compose
+//
+// Returns "" (without an error) when no config path can be determined (e.g. no
+// $HOME) — there is simply nowhere to look.
+func ComposeConfigDir() (string, error) {
+	path, err := configFilePath()
+	if err != nil {
+		return "", err
+	}
+	if path == "" {
+		return "", nil
+	}
+	return filepath.Join(filepath.Dir(path), "compose"), nil
+}
+
 // configFilePath resolves the on-disk config file path, or returns an
 // empty string when no path can be determined (e.g. no $HOME).
 func configFilePath() (string, error) {

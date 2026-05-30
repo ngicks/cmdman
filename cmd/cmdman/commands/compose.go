@@ -36,7 +36,10 @@ func composeCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	pf := cmd.PersistentFlags()
 	pf.StringVarP(
 		&flags.File, "file", "f", "",
-		"Compose file path (default: cmd-compose.yaml or cmd-compose.yml in CWD)",
+		"Compose file path, or a project name resolved under the compose/ subdir"+
+			" of the cmdman config dir (the dir holding the config file, e.g."+
+			" $XDG_CONFIG_HOME/cmdman); default: cmd-compose.yaml or"+
+			" cmd-compose.yml in CWD",
 	)
 	pf.StringVarP(
 		&flags.ProjectName,
@@ -46,6 +49,7 @@ func composeCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		"Project name (overrides YAML name:)",
 	)
 	pf.StringVar(&flags.WorkDir, "workdir", "", "Override the effective work directory")
+	_ = cmd.RegisterFlagCompletionFunc("file", completeComposeFile)
 
 	composeCreateCmd(cmd, rootCfg, &flags)
 	composeLsCmd(cmd, rootCfg)
