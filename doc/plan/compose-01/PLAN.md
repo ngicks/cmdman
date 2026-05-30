@@ -33,8 +33,8 @@ Relevant code today:
 
 For every selected command in spec-backed `up/start`:
 
-- `starting` or `started`: do not call `Start`; record success and publish a
-  started dependency event.
+- `starting` or `started`: do not call `Start`; record success in the graph as
+  an active command.
 - `created`, `exited`, or `failed`: call `cmdman.Service.Start`.
 - Start failures are recorded for that command and propagated only to its
   dependents.
@@ -44,7 +44,7 @@ For every selected command in spec-backed `up/start`:
 For dependency conditions:
 
 - `condition: started` is satisfied by pre-existing `starting/started`, or by a
-  started event from the dependency during this reconciliation.
+  graph state update from the dependency during this reconciliation.
 - `condition: completed` is satisfied by relevant terminal state:
   pre-existing terminal state only when the dependency is outside the active
   reconciliation set, otherwise the terminal event from the new run.
@@ -72,74 +72,305 @@ type commandSnapshot struct {
 Build `map[composeName]commandSnapshot` from
 `List(AllStates: true, Labels: projectLabels(...))`.
 
+This observation is the service-level equivalent of `compose ps`: it should use
+the same project/workdir/command selection semantics and expose the same current
+state, exit code, and command identity that `compose ps` would show. Reconcile
+decisions and user-visible status must agree on this snapshot.
+
 Use `Command.GeneratedName` as the `Start` target to preserve current behavior,
 but retain stored `ID`, `State`, and `ExitCode` for dependency decisions,
 diagnostics, and tests.
 
-### 2. Make DAG events represent lifecycle observations
+### 2. Introduce an explicit reconcile graph
 
-In `service_start_dag.go`, replace boolean `depEvent` fields with an event that
-can carry the observed state:
+Add a graph type under `pkg/cmdman/compose`, replacing the start-only channel
+sketch with a reusable graph walker for `up`, `start`, `stop`, and `down`.
+
+The graph should include two virtual vertices:
+
+- `begin`: every command depends on `begin`.
+- `end`: `end` depends on every command.
+
+These virtual edges are added for every command, not only roots/leaves. That
+keeps graph construction uniform and removes special root/terminal detection
+from the builder. A root command is a command whose only parent is `begin`. A
+leaf command is a command whose only child is `end`.
+
+For compose `after`, keep the natural edge direction as:
+
+```text
+dependency -> dependent
+```
+
+For example, if `worker.after.api.condition: started`, the graph has:
+
+```text
+begin -> api -> end
+begin -> worker -> end
+api --started--> worker
+```
+
+Independent services are simply multiple outgoing edges from `begin` and
+multiple incoming edges to `end`.
+
+Suggested internal shape:
 
 ```go
-type depEvent struct {
-    Type     model.EventType // started, exited, failed
+type vertexID string
+
+const (
+    beginVertex vertexID = "\x00begin"
+    endVertex   vertexID = "\x00end"
+)
+
+type graphEdge struct {
+    From      vertexID
+    To        vertexID
+    Condition AfterCondition
+}
+
+type graphVertex struct {
+    ID       vertexID
+    Command  *Command // nil for begin/end
+    Snapshot commandSnapshot
+
+    Parents  map[vertexID]graphEdge
+    Children map[vertexID]graphEdge
+
+    Queued     bool
+    InProgress bool
+    Consumed   bool
+    Blocked    bool
+    State    model.EventType
     ExitCode *int
     Err      error
 }
+
+type reconcileGraph struct {
+    Vertices map[vertexID]*graphVertex
+}
 ```
 
-Each selected command goroutine should:
+The graph state is in-process reconciliation state. It is initially populated
+from the command snapshot and then updated by workers after each service action.
+This lets later vertices make dependency decisions from the graph rather than
+from stale store snapshots.
 
-1. Wait for every dependency edge condition.
-2. If the snapshot state is `starting/started`, publish `started`, record
-   success, and return unless completion wait is needed for outgoing edges.
-3. Otherwise call `Start`.
-4. After successful `Start`, publish `started`.
-5. If any outgoing edge requires completion, call `Wait(stopped)` and publish
-   the terminal event with exit code.
+Cycle validation stays strict. Unlike Docker Compose, this project rejects
+cyclic graphs; keep or reuse existing `ValidateDAG` behavior before building the
+reconcile graph.
 
-This preserves prompt unblocking for `started` edges while supporting
-`completed` and `completed_successfully`.
+### 3. Add directional graph walks
 
-### 3. Do not reuse stale terminal state for restarted dependencies
+Add two walk functions:
 
-Change `waitForCondition` so pre-existing `exited/failed` can satisfy
-`completed` only when the dependency is not active in this reconciliation.
+- `walkDown(ctx, graph, targets, action)`: start at `begin` and move toward
+  `end`. Used by `compose up` and spec-backed `compose start`.
+- `walkUp(ctx, graph, targets, action)`: start at `end` and move toward
+  `begin`. Used by spec-backed `compose stop` and `compose down` stop phases.
 
-If the dependency is selected or pulled in transitively and is not already
-`starting/started`, dependents must wait for the new run's events. This is the
-core fix for stale success/failure being reused across `up/start`.
+The walkers share one work queue and use `errgroup.Group` as the only
+concurrency limiter:
 
-### 4. Decouple branch errors from global cancellation
+```go
+type walkDirection int
 
-Use an `errgroup.Group` or equivalent goroutine join for lifecycle management,
-but do not use `errgroup.WithContext` for ordinary command/dependency failures.
-The only global cancellation source should be the caller's `ctx`.
+const (
+    walkFromBegin walkDirection = iota
+    walkFromEnd
+)
 
-Branch failures should:
+type graphAction func(context.Context, *reconcileGraph, *graphVertex) actionResult
+```
 
-- record a `StartOutcome` for the failed command;
-- publish an error event to dependents;
-- allow unrelated branches to continue.
+Use a buffered channel sized to the number of target commands:
 
-### 5. Preserve event-driven parallelism
+```go
+workCh := make(chan vertexID, len(targetCommands))
+```
 
-Keep one goroutine per selected command. Commands wait only by reading their
-dependencies' event channels.
+Do not close `workCh`. The queue is fed from multiple scheduler paths, so the
+implementation should not rely on close-channel cancellation unless there is one
+obvious final writer. Instead, derive completion from graph state and cancel the
+worker context when the walk is done.
 
-Expected behavior:
+Initial enqueue:
 
-- independent commands start concurrently;
-- fan-out dependents unblock together;
-- dependency chains serialize only along the chain;
-- `completed` edges wait only for the depended-on command's terminal event, not
-  for an entire topological layer.
+- down walk: enqueue command vertices with no real parents, i.e. whose only
+  parent is the virtual `begin` edge.
+- up walk: enqueue command vertices with no real children, i.e. whose only child
+  is the virtual `end` edge.
 
-`TopoLayers` can remain for stop/restart/down flows. `up/start` should stay
-event-driven because edge conditions differ.
+The virtual nodes are not action targets. They only seed and terminate the walk.
 
-### 6. Align spec-backed and project-only start
+Use `errgroup.Group.SetLimit(limit)` for bounded parallelism. Do not introduce a
+semaphore or a separate fixed worker pool. Do not use worker errors to cancel
+sibling branches; ordinary command failures are accumulated into graph vertices
+and final outcomes.
+
+The walker does not need a separate pending-work counter. Track scheduling state
+on graph vertices (`queued`, `in_progress`, `consumed`, `blocked`) and use it to
+answer the only termination question that matters: are all target vertices
+finished or blocked, and are there no in-progress actions left? That state is
+also what final reporting needs.
+
+### 4. Consumption and enqueue rules
+
+Each `errgroup` task must take the graph lock before deciding whether to act on
+a vertex.
+The same vertex can become reachable from multiple parents/dependents, so the
+walk must be idempotent at the vertex level.
+
+Task loop:
+
+1. Receive or claim a vertex ID from the scheduler.
+2. Lock graph state.
+3. If the vertex is virtual, consumed, or not in the operation target closure,
+   skip it.
+4. Check whether the vertex is ready for this walk direction.
+5. If not ready, leave the vertex pending without recording an error. Another
+   parent/dependent completion will enqueue it again later. After the whole walk
+   drains, any still-unconsumed target vertex is reported as blocked by unmet
+   dependency/dependent conditions.
+6. Mark it consumed or in-progress before unlocking, so duplicate enqueues do
+   not run the action twice.
+7. Run the action outside the lock.
+8. Lock graph state and update vertex `State`, `ExitCode`, and `Err`.
+9. Enqueue next vertices that may now be ready.
+
+Sketch:
+
+```go
+for {
+    var id vertexID
+    select {
+    case <-ctx.Done():
+        return ctx.Err()
+    case next := <-workCh:
+        id = next
+    }
+
+    v, ready, skip := graph.claim(id, direction)
+    if skip {
+        graph.releaseSkipped(id)
+        continue
+    }
+    if !ready {
+        graph.markPending(id)
+        continue
+    }
+
+    result := action(ctx, graph, v)
+
+    next := graph.complete(v.ID, result, direction)
+    for _, id := range next {
+        enqueue(id)
+    }
+    graph.completeAction(v.ID)
+}
+```
+
+`claim` is where consumption is checked and the vertex is marked in-progress.
+`complete` is where graph state is updated and the next frontier is computed.
+For a down walk, the next frontier is children; for an up walk, it is parents.
+`releaseSkipped`, `markPending`, and `completeAction` update only graph
+scheduling state and wake the scheduler. When graph state shows no queued or
+in-progress target vertices remain, the scheduler marks any unconsumed target
+vertices as blocked, records final outcomes, and cancels the worker context.
+`workCh` remains unclosed.
+
+`markPending` should record enough reason/state to be shown to users later, for
+example "waiting for api to complete successfully" or "waiting for worker to
+stop". Treat it as part of the reconcile status model, not only internal
+bookkeeping.
+
+Readiness checks are directional:
+
+- Down walk readiness: all relevant parents satisfy their edge condition.
+- Up walk readiness: all relevant children have already been consumed or are
+  already in a state that makes stopping/removing this vertex valid.
+
+For down walk, edge condition evaluation uses graph state:
+
+- `begin -> command`: always satisfied.
+- `started`: parent state is `starting` or `started`, or this reconciliation
+  has just recorded `started`.
+- `completed`: parent state is `exited` or `failed`.
+- `completed_successfully`: parent state is terminal and exit code is `0`.
+
+For up walk, the default condition is structural rather than `after.Condition`:
+dependents are handled before dependencies. The exact stop action can still
+decide that an already-stopped command is a no-op success.
+
+If a vertex is ready but the operation cannot be performed, record an error on
+that vertex and continue walking unrelated branches. For example:
+
+- `completed_successfully` cannot be satisfied because a parent exited non-zero:
+  record a dependency error on the dependent and do not start it.
+- `Start` fails for a command: record a start error and do not enqueue its
+  dependents whose conditions cannot be satisfied.
+- `Stop`/`Remove` fails: record the action error, continue independent branches,
+  and report the aggregate at the end.
+
+### 5. Define operation actions
+
+The walker should be generic; behavior lives in small action functions.
+
+For `up/start` action:
+
+- If graph state is `starting` or `started`, no-op success.
+- If graph state is `created`, `exited`, or `failed`, call
+  `cmdmanSvc.Start(ctx, GeneratedName)`.
+- After `Start`, update graph state by observing the backing command. At minimum
+  record `started` when `Start` returns nil. If the command already reached a
+  terminal state before `Start` observed `started`, update graph state from the
+  store or `Wait(stopped)` so `completed` edges can progress.
+- If any outgoing edge requires `completed` or `completed_successfully`, wait
+  for stopped and update `State`/`ExitCode` before enqueueing dependents.
+
+For `stop` action:
+
+- If state is already terminal, no-op success.
+- Otherwise call `cmdmanSvc.Stop`.
+- Update graph state from the stop result or by observing stopped state.
+
+For `down` action:
+
+- Walk up to stop dependents before dependencies.
+- After stop phase completes, remove stopped commands. Removal can be a second
+  graph walk or a concurrent pass over vertices that are terminal and selected.
+- Preserve existing orphan handling rules.
+
+### 6. Target closure rules
+
+The graph should support operation-specific target closures:
+
+- `up/start` with no command names: all commands.
+- `up/start` with command names: named commands plus all recursive dependencies,
+  because dependencies may need to run to satisfy `after`.
+- `stop/down` with no command names: all commands.
+- `stop/down` with command names: named commands plus recursive dependents, so a
+  dependency is not stopped before commands that depend on it.
+
+This target closure is separate from graph construction. Build the full graph
+from the spec, then mark which vertices are in the operation closure.
+
+### 7. Preserve parallelism
+
+The scheduler must allow all currently-ready vertices to run concurrently up to
+the `errgroup.Group.SetLimit` value:
+
+- independent roots from `begin` start together;
+- fan-out dependents become eligible together after their parent updates graph
+  state;
+- only true dependency paths serialize;
+- stop/down naturally run in reverse dependency order by walking up from `end`.
+
+Add a conservative default limit, for example `runtime.GOMAXPROCS(0)` or
+`min(len(targetCommands), 8)`, pass it to `errgroup.Group.SetLimit`, and keep the
+implementation structured so a CLI flag can be added later if needed.
+
+### 8. Align spec-backed and project-only start
 
 Spec-backed `compose start` should match project-only start and low-level
 `cmdman start`:
@@ -187,6 +418,13 @@ go test ./pkg/cmdman
 go test ./e2e/cmdman -run 'Compose|Start'
 go test ./...
 ```
+
+## Progress Tracking
+
+After implementing any part of this plan, update
+`doc/plan/compose-01/STATE.md` in the same change. Record what was completed,
+what remains, relevant files touched, tests run, and any behavior decisions made
+while implementing.
 
 ## Risks And Notes
 
