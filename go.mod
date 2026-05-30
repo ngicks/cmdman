@@ -7,6 +7,7 @@ require (
 	github.com/compose-spec/compose-go/v2 v2.11.0
 	github.com/creack/pty/v2 v2.0.1
 	github.com/dustin/go-humanize v1.0.1
+	github.com/mattn/go-runewidth v0.0.16
 	github.com/moby/term v0.5.2
 	github.com/ngicks/go-common/contextkey v0.2.0
 	github.com/ngicks/go-iterator-helper v0.0.23
@@ -32,7 +33,6 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect

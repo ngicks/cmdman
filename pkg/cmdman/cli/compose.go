@@ -6,7 +6,6 @@ import (
 	"io"
 	"reflect"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
@@ -47,78 +46,132 @@ func PrintComposeLogs(out, errOut io.Writer, msgs <-chan compose.LogMessage) err
 	return nil
 }
 
+// composeLsRow and composePsRow are the data models for the compose ls / ps
+// tables and their user --format. Each embeds the original input row (so its
+// fields and {{json .}} keep working) and adds the table layout via tableMeta
+// (.W, .Win), which is json:"-".
+type composeLsRow struct {
+	compose.ProjectSummary
+	tableMeta
+}
+
+type composePsRow struct {
+	compose.CommandStatus
+	tableMeta
+}
+
+// DefaultComposeLsRowFormat and DefaultComposePsRowFormat render one row of the
+// built-in compose ls / compose ps tables: each column is laid out with "cell"
+// against the width the model already measured, and the trailing column runs
+// through "fit". They are ordinary per-row templates — the direct and compose
+// subcommands share the exact same template functions.
+const (
+	DefaultComposeLsRowFormat = `{{- cell .Project .W.Project -}}
+{{- cell (printf "%d" .Commands) .W.Commands -}}
+{{- cell (printf "%d" .Running) .W.Running -}}
+{{- cell (printf "%d" .Exited) .W.Exited -}}
+{{- cell (printf "%d" .Failed) .W.Failed -}}
+{{- cell .WorkDir .W.WorkDir -}}
+{{- fit .ComposeFile .Win .W.Used -}}`
+
+	DefaultComposePsRowFormat = `{{- cell .Command .W.Command -}}
+{{- cell (shortID .ID) .W.ID -}}
+{{- cell .Name .W.Name -}}
+{{- cell (printf "%v" .State) .W.State -}}
+{{- cell (exitCode .ExitCode) .W.Code -}}
+{{- fit (join " " .Argv) .Win .W.Used -}}`
+)
+
 // RenderComposeProjects renders the compose ls output. format selects the
 // layout:
-//   - "" or "table": the default tab-separated table.
+//   - "" or "table": the default width-aware aligned table.
 //   - "json": an indented JSON array of project summaries.
 //   - anything else: a Go text/template applied per project summary.
 func RenderComposeProjects(out io.Writer, summaries []compose.ProjectSummary, format string) error {
-	switch format {
-	case "", "table":
-		printComposeProjectsTable(out, summaries)
-		return nil
-	case "json":
+	if format == "json" {
 		return renderJSONArray(out, summaries)
-	default:
-		return renderTemplate(out, summaries, format)
 	}
+
+	w := measureComposeLs(summaries)
+	meta := tableMeta{W: w, Win: terminalWidth(out)}
+	rows := make([]composeLsRow, len(summaries))
+	for i, s := range summaries {
+		rows[i] = composeLsRow{ProjectSummary: s, tableMeta: meta}
+	}
+
+	if format == "" || format == "table" {
+		fmt.Fprintln(out, cell("PROJECT", w["Project"])+cell("COMMANDS", w["Commands"])+
+			cell("RUNNING", w["Running"])+cell("EXITED", w["Exited"])+
+			cell("FAILED", w["Failed"])+cell("WORKDIR", w["WorkDir"])+"FILE")
+		format = DefaultComposeLsRowFormat
+	}
+	return renderTemplate(out, rows, format)
 }
 
-func printComposeProjectsTable(out io.Writer, summaries []compose.ProjectSummary) {
-	fmt.Fprintln(out, "PROJECT\tCOMMANDS\tRUNNING\tEXITED\tFAILED\tWORKDIR\tFILE")
-	for _, summary := range summaries {
-		fmt.Fprintf(
-			out,
-			"%s\t%d\t%d\t%d\t%d\t%s\t%s\n",
-			summary.Project,
-			summary.Commands,
-			summary.Running,
-			summary.Exited,
-			summary.Failed,
-			summary.WorkDir,
-			summary.ComposeFile,
-		)
+func measureComposeLs(summaries []compose.ProjectSummary) map[string]int {
+	w := map[string]int{
+		"Project":  width("PROJECT"),
+		"Commands": width("COMMANDS"),
+		"Running":  width("RUNNING"),
+		"Exited":   width("EXITED"),
+		"Failed":   width("FAILED"),
+		"WorkDir":  width("WORKDIR"),
 	}
+	for _, s := range summaries {
+		w["Project"] = max(w["Project"], width(s.Project))
+		w["Commands"] = max(w["Commands"], width(fmt.Sprintf("%d", s.Commands)))
+		w["Running"] = max(w["Running"], width(fmt.Sprintf("%d", s.Running)))
+		w["Exited"] = max(w["Exited"], width(fmt.Sprintf("%d", s.Exited)))
+		w["Failed"] = max(w["Failed"], width(fmt.Sprintf("%d", s.Failed)))
+		w["WorkDir"] = max(w["WorkDir"], width(s.WorkDir))
+	}
+	w["Used"] = w["Project"] + w["Commands"] + w["Running"] + w["Exited"] +
+		w["Failed"] + w["WorkDir"] + 6*len(columnGap)
+	return w
 }
 
 // RenderComposePs renders the compose ps output. format selects the layout:
-//   - "" or "table": the default tab-separated table.
+//   - "" or "table": the default width-aware aligned table.
 //   - "json": an indented JSON array of command statuses.
 //   - anything else: a Go text/template applied per command status.
 func RenderComposePs(out io.Writer, statuses []compose.CommandStatus, format string) error {
-	switch format {
-	case "", "table":
-		printComposePsTable(out, statuses)
-		return nil
-	case "json":
+	if format == "json" {
 		return renderJSONArray(out, statuses)
-	default:
-		return renderTemplate(out, statuses, format)
 	}
+
+	w := measureComposePs(statuses)
+	meta := tableMeta{W: w, Win: terminalWidth(out)}
+	rows := make([]composePsRow, len(statuses))
+	for i, s := range statuses {
+		rows[i] = composePsRow{CommandStatus: s, tableMeta: meta}
+	}
+
+	if format == "" || format == "table" {
+		fmt.Fprintln(out, cell("COMMAND", w["Command"])+cell("ID", w["ID"])+
+			cell("NAME", w["Name"])+cell("STATE", w["State"])+
+			cell("EXIT CODE", w["Code"])+"ARGV")
+		format = DefaultComposePsRowFormat
+	}
+	return renderTemplate(out, rows, format)
 }
 
-func printComposePsTable(out io.Writer, statuses []compose.CommandStatus) {
-	fmt.Fprintln(out, "COMMAND\tID\tNAME\tSTATE\tEXIT CODE\tARGV")
-	for _, status := range statuses {
-		exitCode := "-"
-		if status.ExitCode != nil {
-			exitCode = fmt.Sprintf("%d", *status.ExitCode)
-		}
-		id := status.ID
-		if len(id) > 12 {
-			id = id[:12]
-		}
-		fmt.Fprintf(
-			out,
-			"%s\t%s\t%s\t%s\t%s\t%s\n",
-			status.Command,
-			id,
-			status.Name,
-			status.State,
-			exitCode,
-			strings.Join(status.Argv, " "),
-		)
+func measureComposePs(statuses []compose.CommandStatus) map[string]int {
+	w := map[string]int{
+		"Command": width("COMMAND"),
+		"ID":      width("ID"),
+		"Name":    width("NAME"),
+		"State":   width("STATE"),
+		"Code":    width("EXIT CODE"),
 	}
+	for _, s := range statuses {
+		w["Command"] = max(w["Command"], width(s.Command))
+		w["ID"] = max(w["ID"], width(shortID(s.ID)))
+		w["Name"] = max(w["Name"], width(s.Name))
+		w["State"] = max(w["State"], width(fmt.Sprintf("%v", s.State)))
+		w["Code"] = max(w["Code"], width(exitCode(s.ExitCode)))
+	}
+	w["Used"] = w["Command"] + w["ID"] + w["Name"] + w["State"] + w["Code"] + 5*len(columnGap)
+	return w
 }
 
 // RenderComposeInspect renders the compose inspect output. When format is empty
@@ -141,21 +194,6 @@ func renderJSONArray[T any](out io.Writer, items []T) error {
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(items)
-}
-
-// renderTemplate applies a Go text/template to each item, newline-terminated.
-func renderTemplate[T any](out io.Writer, items []T, format string) error {
-	tmpl, err := template.New("format").Funcs(templateFuncMap).Parse(format)
-	if err != nil {
-		return fmt.Errorf("parse format template: %w", err)
-	}
-	for _, item := range items {
-		if err := tmpl.Execute(out, item); err != nil {
-			return fmt.Errorf("execute format template: %w", err)
-		}
-		fmt.Fprintln(out)
-	}
-	return nil
 }
 
 // ComposePsFormatUsage returns the --format usage string for compose ps.

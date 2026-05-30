@@ -164,7 +164,8 @@ func TestComposeLsAndPs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose ls failed: %v\nstdout:\n%s\nstderr:\n%s", err, lsOut, lsErr)
 	}
-	if !strings.Contains(lsOut, "PROJECT\tCOMMANDS") ||
+	if !strings.Contains(lsOut, "PROJECT") ||
+		!strings.Contains(lsOut, "COMMANDS") ||
 		!strings.Contains(lsOut, project) ||
 		!strings.Contains(lsOut, wd) {
 		t.Fatalf("expected compose project in ls output; got:\n%s", lsOut)
@@ -174,7 +175,8 @@ func TestComposeLsAndPs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose ps failed: %v\nstdout:\n%s\nstderr:\n%s", err, psOut, psErr)
 	}
-	if !strings.Contains(psOut, "COMMAND\tID") ||
+	if !strings.Contains(psOut, "COMMAND") ||
+		!strings.Contains(psOut, "ID") ||
 		!strings.Contains(psOut, "alpha") ||
 		!strings.Contains(psOut, "beta") ||
 		!strings.Contains(psOut, "exited") {
