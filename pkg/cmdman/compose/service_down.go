@@ -30,14 +30,17 @@ type RemoveOutcome struct {
 	Err     error
 }
 
-// Down stops and then removes all project-labeled commands.
+// Down stops and then removes project-labeled commands.
 //
-// Stop phase: same ordering as Stop (reverse DAG when Spec is loaded; concurrent otherwise).
-// Remove phase: fully concurrent after all stops complete.
+// Stop phase: same ordering as Stop (reverse-dependency up walk when Spec is
+// loaded; concurrent otherwise). Remove phase: fully concurrent after all stops
+// complete.
 //
-// Because selection is by the (workdir, project) label pair, Down implicitly
-// removes orphans of that pair. This is intentional: down is the destructive
-// whole-project teardown (resolved-decision 20).
+// With no command names and a loaded Spec, Down is the destructive whole-project
+// teardown: because selection is by the (workdir, project) label pair, it also
+// stops and removes orphans of that pair (resolved-decision 20). With command
+// names, the target set is the named commands plus their recursive dependents;
+// only that set is stopped and removed.
 //
 // Per resolved-decision 21, failures are aggregated; every command is attempted.
 func (s *Service) Down(
@@ -45,7 +48,7 @@ func (s *Service) Down(
 	selection ProjectSelection,
 	opts DownOption,
 ) (*DownResult, error) {
-	entries, err := s.svc.List(ctx, cmdman.ListRequest{
+	allEntries, err := s.svc.List(ctx, cmdman.ListRequest{
 		AllStates: true,
 		Labels:    projectLabels(selection.WorkDir, selection.Project),
 	})
@@ -53,14 +56,15 @@ func (s *Service) Down(
 		return nil, fmt.Errorf("list project commands: %w", err)
 	}
 
-	if err := validateCommandNames(opts.CommandNames, selection.Spec, entries); err != nil {
+	if err := validateCommandNames(opts.CommandNames, selection.Spec, allEntries); err != nil {
 		return nil, err
 	}
-	if len(opts.CommandNames) > 0 {
-		entries = filterByCommandNames(entries, opts.CommandNames)
-	}
 
-	if len(entries) == 0 {
+	selected := allEntries
+	if len(opts.CommandNames) > 0 {
+		selected = filterByCommandNames(allEntries, opts.CommandNames)
+	}
+	if len(selected) == 0 {
 		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose down: no commands found for project",
 			"project", selection.Project,
 			"workdir", selection.WorkDir,
@@ -69,55 +73,93 @@ func (s *Service) Down(
 		return &DownResult{}, nil
 	}
 
-	// Stop phase. Only entries with a live monitor (running/starting) can be
-	// gracefully stopped; created/exited/failed entries are no-ops and would
-	// otherwise return monitor-connect errors from Service.Stop.
-	stoppable := make([]cmdmanEntry, 0, len(entries))
-	for _, e := range entries {
-		if e.State == model.EventTypeStarted || e.State == model.EventTypeStarting {
-			stoppable = append(stoppable, e)
-		}
-	}
-
-	var stops []StopOutcome
+	var (
+		stops         []StopOutcome
+		removeTargets []cmdmanEntry
+	)
 	if selection.Spec != nil {
-		layers, err := TopoLayers(selection.Spec.Commands)
+		// Stop the declared closure (named + recursive dependents) in
+		// reverse-dependency order via the reconcile graph.
+		stops, err = s.reconcileStop(ctx, *selection.Spec, opts.CommandNames)
 		if err != nil {
-			return nil, fmt.Errorf("topo layers: %w", err)
+			return nil, err
 		}
-		reverseLayers(layers)
-		idByCommand := buildIDByCommand(stoppable)
-		for _, layer := range layers {
-			outcomes := stopLayerConcurrent(ctx, s, layer, idByCommand, selection.Project)
-			stops = append(stops, outcomes...)
-		}
-		// Also stop entries not in the YAML (orphans) — down is destructive.
-		yamlNames := make(map[string]struct{}, len(selection.Spec.Commands))
-		for _, nc := range selection.Spec.Commands {
-			yamlNames[nc.Name] = struct{}{}
-		}
-		var orphanEntries []cmdmanEntry
-		for _, e := range stoppable {
-			if e.ConfigJSON == nil {
-				continue
-			}
-			cn := e.ConfigJSON.Labels[LabelCommand]
-			if _, inYAML := yamlNames[cn]; !inYAML {
-				orphanEntries = append(orphanEntries, e)
-			}
-		}
-		if len(orphanEntries) > 0 {
-			orphanStops := stopAllConcurrent(ctx, s, orphanEntries, selection.Project)
-			stops = append(stops, orphanStops...)
+		if len(opts.CommandNames) == 0 {
+			// Whole-project teardown: also stop running orphans, remove everything.
+			stops = append(
+				stops,
+				s.stopOrphans(ctx, allEntries, *selection.Spec, selection.Project)...)
+			removeTargets = allEntries
+		} else {
+			// Scoped teardown: remove exactly the stopped closure.
+			closure := resolveStopTargetCommands(*selection.Spec, opts.CommandNames)
+			removeTargets = filterEntriesInClosure(allEntries, closure)
 		}
 	} else {
-		stops = stopAllConcurrent(ctx, s, stoppable, selection.Project)
+		// No spec: stop running entries concurrently, remove the selected set.
+		stops = stopAllConcurrent(ctx, s, runningEntries(selected), selection.Project)
+		removeTargets = selected
 	}
 
 	// Remove phase: fully concurrent, regardless of stop errors.
-	removes := removeAllConcurrent(ctx, s, entries, selection.Project)
+	removes := removeAllConcurrent(ctx, s, removeTargets, selection.Project)
 
 	return &DownResult{Stops: stops, Removes: removes}, nil
+}
+
+// runningEntries returns the entries with a live monitor (started/starting),
+// the only states Service.Stop can gracefully stop.
+func runningEntries(entries []cmdmanEntry) []cmdmanEntry {
+	out := make([]cmdmanEntry, 0, len(entries))
+	for _, e := range entries {
+		if e.State == model.EventTypeStarted || e.State == model.EventTypeStarting {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// stopOrphans stops running project entries whose command is not declared in the
+// spec. Down is a destructive whole-project teardown, so orphans are torn down
+// alongside declared commands.
+func (s *Service) stopOrphans(
+	ctx context.Context,
+	entries []cmdmanEntry,
+	spec ComposeSpec,
+	project string,
+) []StopOutcome {
+	declared := make(map[string]struct{}, len(spec.Commands))
+	for _, nc := range spec.Commands {
+		declared[nc.Name] = struct{}{}
+	}
+	var orphans []cmdmanEntry
+	for _, e := range runningEntries(entries) {
+		if e.ConfigJSON == nil {
+			continue
+		}
+		if _, ok := declared[e.ConfigJSON.Labels[LabelCommand]]; !ok {
+			orphans = append(orphans, e)
+		}
+	}
+	if len(orphans) == 0 {
+		return nil
+	}
+	return stopAllConcurrent(ctx, s, orphans, project)
+}
+
+// filterEntriesInClosure returns the entries whose compose command name is a
+// member of closure.
+func filterEntriesInClosure(entries []cmdmanEntry, closure map[string]struct{}) []cmdmanEntry {
+	out := make([]cmdmanEntry, 0, len(entries))
+	for _, e := range entries {
+		if e.ConfigJSON == nil {
+			continue
+		}
+		if _, ok := closure[e.ConfigJSON.Labels[LabelCommand]]; ok {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // removeAllConcurrent removes all entries concurrently and returns outcomes.

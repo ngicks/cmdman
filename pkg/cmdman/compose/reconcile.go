@@ -65,6 +65,48 @@ func resolveTargetCommands(spec ComposeSpec, names []string) map[string]struct{}
 	return target
 }
 
+// resolveStopTargetCommands resolves the supplied command-name subset to the set
+// of commands to operate on for an up walk (stop/down), transitively pulling in
+// every dependent so a dependency is never torn down before the commands that
+// depend on it. names == nil (or empty) → every command in the spec.
+func resolveStopTargetCommands(spec ComposeSpec, names []string) map[string]struct{} {
+	all := make(map[string]struct{}, len(spec.Commands))
+	for _, nc := range spec.Commands {
+		all[nc.Name] = struct{}{}
+	}
+	target := make(map[string]struct{})
+	if len(names) == 0 {
+		for n := range all {
+			target[n] = struct{}{}
+		}
+		return target
+	}
+	// dependents maps a command to the commands that declare it in their After.
+	dependents := make(map[string][]string)
+	for _, nc := range spec.Commands {
+		for _, dep := range nc.After {
+			dependents[dep.Name] = append(dependents[dep.Name], nc.Name)
+		}
+	}
+	var walk func(string)
+	walk = func(n string) {
+		if _, seen := target[n]; seen {
+			return
+		}
+		if _, ok := all[n]; !ok {
+			return
+		}
+		target[n] = struct{}{}
+		for _, d := range dependents[n] {
+			walk(d)
+		}
+	}
+	for _, n := range names {
+		walk(n)
+	}
+	return target
+}
+
 // vertexID identifies a graph vertex. Command vertices use the compose command
 // name; the two virtual vertices use sentinel values that cannot collide with a
 // command name.
@@ -126,6 +168,12 @@ type graphVertex struct {
 	State    model.EventType
 	ExitCode *int
 	Err      error
+
+	// Order is a monotonic consumption sequence assigned when the vertex is
+	// finished (completed or finalized). It records the order the walk acted on
+	// vertices so teardown reporting can reflect what actually happened (for a
+	// stop walk that is reverse-dependency order). 0 means not yet consumed.
+	Order int
 }
 
 // reconcileGraph is in-process reconciliation state. It is built from the spec
@@ -134,6 +182,15 @@ type graphVertex struct {
 type reconcileGraph struct {
 	mu       sync.Mutex
 	Vertices map[vertexID]*graphVertex
+	// seq is the monotonic counter behind graphVertex.Order. Guarded by mu.
+	seq int
+}
+
+// markConsumedLocked stamps a vertex with the next consumption sequence. Caller
+// holds g.mu.
+func (g *reconcileGraph) markConsumedLocked(v *graphVertex) {
+	g.seq++
+	v.Order = g.seq
 }
 
 // actionResult is what a graphAction reports about the vertex it acted on.
@@ -367,6 +424,7 @@ func (g *reconcileGraph) complete(id vertexID, res actionResult, dir walkDirecti
 	v := g.Vertices[id]
 	v.InProgress = false
 	v.Consumed = true
+	g.markConsumedLocked(v)
 	v.State = res.State
 	v.ExitCode = res.ExitCode
 	v.Err = res.Err
@@ -596,6 +654,7 @@ func (g *reconcileGraph) finalize() {
 			continue
 		}
 		v.Consumed = true
+		g.markConsumedLocked(v)
 		v.Blocked = true
 		if v.Err == nil {
 			reason := v.WaitReason
@@ -621,6 +680,36 @@ func (g *reconcileGraph) startOutcomes(spec ComposeSpec) []StartOutcome {
 			continue
 		}
 		out = append(out, StartOutcome{Command: name, Err: v.Err})
+	}
+	return out
+}
+
+// stopOutcomes extracts per-command StopOutcome for the in-closure commands,
+// ordered by the sequence in which the walk consumed them. For an up walk that
+// is teardown (reverse-dependency) order: dependents before dependencies.
+func (g *reconcileGraph) stopOutcomes(spec ComposeSpec) []StopOutcome {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	type item struct {
+		name  string
+		order int
+		err   error
+	}
+	var items []item
+	for i := range spec.Commands {
+		name := spec.Commands[i].Name
+		v := g.Vertices[vertexID(name)]
+		if v == nil || !v.InClosure {
+			continue
+		}
+		items = append(items, item{name: name, order: v.Order, err: v.Err})
+	}
+	slices.SortStableFunc(items, func(a, b item) int { return a.order - b.order })
+
+	out := make([]StopOutcome, 0, len(items))
+	for _, it := range items {
+		out = append(out, StopOutcome{Command: it.name, Err: it.err})
 	}
 	return out
 }

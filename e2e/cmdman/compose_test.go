@@ -727,6 +727,55 @@ func TestComposeReverseDepOrderStop(t *testing.T) {
 	}
 }
 
+// TestComposeStopByNameStopsDependents verifies that stopping only the named
+// dependency also stops its recursive dependents (named + dependents closure),
+// so a command is never left running with a dead dependency.
+func TestComposeStopByNameStopsDependents(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-stop-deps"
+	writeComposeFile(t, wd, composeAfterYAML(project))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	composePath := filepath.Join(wd, "cmd-compose.yaml")
+	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up"); err != nil {
+		t.Fatalf("compose up failed: %v", err)
+	}
+	for _, e := range env.lsJSON(ctx,
+		"-l", "cmdman.compose.workdir="+wd,
+		"-l", "cmdman.compose.project="+project,
+	) {
+		env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
+	}
+
+	// Stop only the dependency by name; its dependent must be torn down too.
+	stdout, stderr, err := env.exec(ctx, "compose",
+		"--workdir", wd, "-f", composePath, "stop", "api")
+	if err != nil {
+		t.Fatalf("compose stop api failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	idxWorker := strings.Index(stdout, "worker")
+	idxAPI := strings.Index(stdout, "api")
+	if idxWorker < 0 || idxAPI < 0 {
+		t.Fatalf("expected both worker and api in stop output; got:\n%s", stdout)
+	}
+	if idxWorker > idxAPI {
+		t.Fatalf("expected worker (dependent) stopped before api; got:\n%s", stdout)
+	}
+
+	// Both commands must now be terminal.
+	for _, e := range env.lsJSON(ctx,
+		"-l", "cmdman.compose.workdir="+wd,
+		"-l", "cmdman.compose.project="+project,
+	) {
+		st := e["State"].(string)
+		if st != "exited" && st != "failed" {
+			t.Fatalf("expected api and worker exited/failed after stopping api, got %q", st)
+		}
+	}
+}
+
 // composeLogYAML produces a YAML where each command prints one line and exits.
 func composeLogYAML(name string) string {
 	return fmt.Sprintf(`name: %s

@@ -108,6 +108,76 @@ func (s *Service) upStartAction(
 	return actionResult{State: model.EventTypeFailed}
 }
 
+// reconcileStop converges the targeted commands to a stopped state by walking
+// the dependency graph up from end: dependents are stopped before the
+// dependencies they rely on. It is shared by spec-backed compose stop and the
+// stop phase of compose down.
+//
+// Dependents are pulled into the closure transitively (resolveStopTargetCommands)
+// so a dependency is never stopped while a command that depends on it is still
+// running.
+func (s *Service) reconcileStop(
+	ctx context.Context,
+	spec ComposeSpec,
+	names []string,
+) ([]StopOutcome, error) {
+	if err := ValidateDAG(spec.Commands); err != nil {
+		return nil, err
+	}
+
+	snaps, err := s.snapshotCommands(ctx, spec.WorkDir, spec.Project)
+	if err != nil {
+		return nil, err
+	}
+
+	closure := resolveStopTargetCommands(spec, names)
+	g := buildReconcileGraph(spec, snaps, closure)
+
+	limit := min(len(closure), reconcileWalkLimit)
+	g.walk(
+		ctx,
+		walkFromEnd,
+		limit,
+		func(ctx context.Context, _ *reconcileGraph, v *graphVertex) actionResult {
+			return s.stopAction(ctx, v, spec.Project)
+		},
+	)
+
+	return g.stopOutcomes(spec), nil
+}
+
+// stopAction stops a single command. Only a command with a live monitor
+// (starting/started) is stopped; created/exited/failed are already terminal and
+// a stop on them would only return monitor-connect errors, so they are no-ops.
+func (s *Service) stopAction(
+	ctx context.Context,
+	v *graphVertex,
+	project string,
+) actionResult {
+	cmd := v.Command
+	snap := v.Snapshot
+
+	active := snap.State == model.EventTypeStarted || snap.State == model.EventTypeStarting
+	if !active || snap.ID == "" {
+		// Nothing to stop: keep the observed state for diagnostics.
+		return actionResult{State: snap.State, ExitCode: snap.ExitCode}
+	}
+
+	if _, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{snap.ID}}); err != nil {
+		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: stop failed",
+			"project", project,
+			"command", cmd.Name,
+			"id", snap.ID,
+			"error", err,
+		)
+		return actionResult{
+			State: snap.State,
+			Err:   fmt.Errorf("stop command %q (%s): %w", cmd.Name, snap.ID, err),
+		}
+	}
+	return actionResult{State: model.EventTypeExited, ExitCode: snap.ExitCode}
+}
+
 // snapshotCommands builds the pre-reconciliation command snapshot for a project.
 // This is the service-level equivalent of `compose ps`: it uses the same
 // project/workdir selection and exposes the same state, exit code, and command

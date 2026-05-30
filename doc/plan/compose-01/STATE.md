@@ -2,9 +2,12 @@
 
 ## Current Status
 
-Core reconciliation rewrite implemented and tested. `compose up` and spec-backed
-`compose start` now converge through an explicit reconcile graph walked from
-`begin`. All three stated failures are fixed and covered by unit and e2e tests.
+PLAN fully implemented. `compose up` and spec-backed `compose start` converge
+through an explicit reconcile graph walked from `begin`; spec-backed
+`compose stop` and the `compose down` stop phase now converge through the same
+graph walked from `end` (the previously deferred PLAN step 3 `walkUp` / step 5
+down action). All three stated failures remain fixed, and stop/down reverse-
+dependency teardown is now graph-driven. Covered by unit and e2e tests.
 
 ## Completed
 
@@ -50,6 +53,36 @@ Core reconciliation rewrite implemented and tested. `compose up` and spec-backed
   `waitForCondition`, `depEvent`, `dagCommand`, `anyAwaitsCompletion`,
   `checkExitZero`). `resolveTargetCommands` moved to `reconcile.go`.
 
+### 3 (walkUp), 5 (down), 6 (stop closure). Stop/down via the reconcile graph
+
+- `reconcile.go` additions:
+  - `resolveStopTargetCommands(spec, names)`: stop/down closure = named commands
+    **plus recursive dependents** (walks the dependent direction), so a
+    dependency is never stopped while a command that depends on it still runs
+    (PLAN step 6). names empty ⇒ all commands.
+  - `stopOutcomes(spec)`: per-command `StopOutcome` ordered by a new monotonic
+    consumption sequence (`graphVertex.Order`, stamped under lock in `complete`
+    and `finalize`). For an up walk this is teardown order: dependents before
+    dependencies — what `PrintStopResult`/`PrintDownResult` render.
+- `service_reconcile.go` additions:
+  - `Service.reconcileStop` (shared by `Stop` and the `Down` stop phase):
+    validate DAG → snapshot → build graph (stop closure) → `walk(walkFromEnd)`
+    → `stopOutcomes`.
+  - `Service.stopAction`: only `starting`/`started` (with a known ID) are
+    stopped via `cmdmanSvc.Stop`; `created`/`exited`/`failed` are no-ops (a stop
+    on them only returns monitor-connect errors). Failures are recorded per
+    command; the up-walk readiness ignores child state, so a dependent's stop
+    failure never blocks stopping its dependency (best-effort teardown).
+- `service_stop.go`: spec path now calls `reconcileStop`; removed the dead
+  `stopLayerConcurrent`. No-spec path unchanged (`stopAllConcurrent`).
+- `service_down.go`: spec stop phase calls `reconcileStop`. New helpers
+  `runningEntries`, `stopOrphans`, `filterEntriesInClosure`. Remove set: whole
+  project (incl. orphans) when no names; exactly the named+dependents closure
+  when names are given. No-spec path unchanged. Orphan stop/remove rules
+  preserved (down is destructive whole-project teardown).
+- `TopoLayers`/`reverseLayers`/`buildIDByCommand` are still used by
+  `service_restart.go` and `plan.go`, so they stay.
+
 ## Failures fixed
 
 1. **Stale terminal state** — in-closure dependencies are evaluated against the
@@ -73,19 +106,27 @@ Core reconciliation rewrite implemented and tested. `compose up` and spec-backed
   conditions, stale-state fix, restart of exited/failed, skip-active, concurrent
   independent start via barriers, failed-branch isolation.
 - Graph (`reconcile_test.go`): virtual-edge construction, down-walk and up-walk
-  ordering, closure exclusion. Up-walk is covered here for future stop/down use.
+  ordering, closure exclusion.
+- Stop walk (`service_internal_test.go`, fake `cmdmanSvc.Stop` recorder added):
+  `TestReconcileStopVisitsDependentsBeforeDependencies` (teardown order +
+  outcome order), `TestReconcileStopSkipsNonRunning`,
+  `TestReconcileStopWithNamesIncludesDependents` (named pulls in dependents,
+  excludes unrelated), `TestReconcileStopContinuesPastFailedDependent`
+  (dependent stop failure recorded but dependency still stopped; logger injected
+  via `contextkey.WithSlogLogger`).
 - E2E (`e2e/cmdman/compose_test.go`): re-up exited, start-from-failed, started
   condition does not block on exit, completed re-run honors the new run,
-  independent concurrency.
+  independent concurrency; existing `TestComposeReverseDepOrderStop` still green
+  under the graph walk; new `TestComposeStopByNameStopsDependents`.
 - Commands run (2026-05-30):
   - `go test ./pkg/cmdman/compose` → ok (also `-race` → ok)
   - `go test ./pkg/cmdman` → ok
   - `go test ./e2e/cmdman -run 'Compose|Start'` → ok
-  - `go test ./...` → all ok **except** two pre-existing PTY/attach failures
-    (`TestAttach_CtrlCRestoresShellTtyMode`,
-    `TestAttach_ExitsWhenCommandStopsFromCtrlC`). Confirmed these fail identically
-    on the clean baseline (git stash) and do not touch the compose path; they are
-    environment-sensitive (WSL2 PTY), unrelated to this change.
+  - `go test ./...` → all ok **except** the same two pre-existing PTY/attach
+    failures (`TestAttach_CtrlCRestoresShellTtyMode`,
+    `TestAttach_ExitsWhenCommandStopsFromCtrlC`). They are environment-sensitive
+    (WSL2 PTY) and touch only the attach path, not compose; unrelated to this
+    change.
 
 ## Behavior / design decisions
 
@@ -99,20 +140,31 @@ Core reconciliation rewrite implemented and tested. `compose up` and spec-backed
 - **Completed edges** use `Wait(stopped)` and map a recorded exit code to
   `exited` (any code) vs. `failed` (no code). `completed_successfully` requires
   `exited` with code 0 from this run's observation, never a stale exit code.
-- **Outcomes** stay deterministic in spec order; blocked vertices carry the last
-  recorded wait reason as their error.
+- **Up/start outcomes** stay deterministic in spec order; blocked vertices carry
+  the last recorded wait reason as their error.
+- **Stop/down outcomes** are reported in consumption (teardown) order via
+  `graphVertex.Order`, not spec order, so the user-visible summary matches the
+  reverse-dependency order things were actually stopped in. This keeps
+  `TestComposeReverseDepOrderStop` (asserts `worker` before `api` in stdout)
+  meaningful under the graph walk.
+- **Stop/down closure expansion is a deliberate behavior change**: `stop`/`down`
+  with command names now also acts on the named commands' recursive *dependents*
+  (PLAN step 6), unlike the prior code that touched only the named commands.
+  There was no existing test asserting the old "only-named" behavior; the new
+  behavior is covered by `TestReconcileStopWithNamesIncludesDependents` and
+  `TestComposeStopByNameStopsDependents`.
+- **`stopAction` records `EventTypeExited` on a successful stop** purely for
+  diagnostics; the up-walk readiness ignores vertex state and `stopOutcomes`
+  reads only `Err`, so the recorded state is never user-visible. Kept simple
+  rather than re-observing the precise stopped state.
 
 ## Remaining / deferred
 
-- **Production wiring of `stop`/`down` to `walkUp` (PLAN step 3, step 5 down
-  action)**: deferred. The reusable graph and the up-walk are implemented and
-  unit-tested, but `Service.Stop`/`Service.Down` still use the existing
-  `TopoLayers` reverse-dependency ordering. Rationale: all three stated failures
-  and the entire PLAN test plan concern up/start; `stop`/`down` already produce
-  correct reverse-dependency ordering and are covered by ordering-sensitive tests
-  (e.g. `TestComposeReverseDepOrderStop`), so rewiring them carries regression
-  risk for no failure-fixing benefit. Adopting `walkUp` for stop/down (preserving
-  orphan handling and the remove phase) is a clean follow-up on top of this graph.
+- Nothing outstanding from PLAN.md. All eight implementation steps and both
+  test-plan groups are implemented. `down`'s remove phase remains a concurrent
+  pass over the resolved target set (PLAN step 5 explicitly allows either a
+  second graph walk or a concurrent pass over selected terminal vertices); the
+  concurrent pass was kept as it is simpler and already correct.
 
 ## Notes
 

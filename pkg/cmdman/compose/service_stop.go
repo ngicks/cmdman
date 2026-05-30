@@ -30,9 +30,12 @@ type StopOutcome struct {
 
 // Stop stops project-labeled commands.
 //
-// When selection carries a Spec (compose file loaded), commands are stopped in
-// reverse topological (DAG) order: dependents before dependencies. Within each
-// layer, stops run concurrently via errgroup.
+// When selection carries a Spec (compose file loaded), commands are stopped by
+// an up walk of the reconcile graph: dependents are stopped before the
+// dependencies they rely on, and independent branches stop concurrently. When
+// command names are given, their recursive dependents are pulled in so a
+// dependency is never stopped while a command that depends on it is still
+// running.
 //
 // When no Spec is loaded, all selected commands stop concurrently.
 //
@@ -71,22 +74,11 @@ func (s *Service) Stop(
 	}
 
 	var stops []StopOutcome
-
 	if selection.Spec != nil {
-		// Spec available: reverse DAG order, concurrent within each layer.
-		layers, err := TopoLayers(selection.Spec.Commands)
+		// Spec available: reverse-dependency order via the reconcile graph.
+		stops, err = s.reconcileStop(ctx, *selection.Spec, opts.CommandNames)
 		if err != nil {
-			return nil, fmt.Errorf("topo layers: %w", err)
-		}
-		// Reverse layers: dependents first.
-		reverseLayers(layers)
-
-		// Build a lookup from compose command name → ID.
-		idByCommand := buildIDByCommand(entries)
-
-		for _, layer := range layers {
-			outcomes := stopLayerConcurrent(ctx, s, layer, idByCommand, selection.Project)
-			stops = append(stops, outcomes...)
+			return nil, err
 		}
 	} else {
 		// No spec: all concurrent.
@@ -94,49 +86,6 @@ func (s *Service) Stop(
 	}
 
 	return &StopResult{Stops: stops}, nil
-}
-
-// stopLayerConcurrent stops a single DAG layer concurrently and returns outcomes.
-// Commands absent from idByCommand (not in the project's running set) are skipped silently.
-func stopLayerConcurrent(
-	ctx context.Context,
-	s *Service,
-	layer []string,
-	idByCommand map[string]string,
-	project string,
-) []StopOutcome {
-	var (
-		mu       sync.Mutex
-		outcomes []StopOutcome
-	)
-	eg, _ := errgroup.WithContext(ctx)
-
-	for _, name := range layer {
-		id, ok := idByCommand[name]
-		if !ok {
-			// Command is in YAML but not in the running project; skip.
-			continue
-		}
-		eg.Go(func() error {
-			_, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{id}})
-			outcome := StopOutcome{Command: name}
-			if err != nil {
-				outcome.Err = fmt.Errorf("stop command %q (%s): %w", name, id, err)
-				contextkey.ValueSlogLoggerDefault(ctx).Warn("compose stop: stop failed",
-					"project", project,
-					"command", name,
-					"id", id,
-					"error", err,
-				)
-			}
-			mu.Lock()
-			outcomes = append(outcomes, outcome)
-			mu.Unlock()
-			return nil // always nil — aggregate, never short-circuit
-		})
-	}
-	_ = eg.Wait()
-	return outcomes
 }
 
 // stopAllConcurrent stops all entries concurrently and returns outcomes.

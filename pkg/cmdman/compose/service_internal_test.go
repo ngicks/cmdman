@@ -23,6 +23,7 @@ type testCmdmanSvc struct {
 	sendKeys func(context.Context, string, cmdman.SendKeysRequest) error
 	start    func(context.Context, string) error
 	wait     func(context.Context, cmdman.WaitRequest) ([]cmdman.WaitResult, error)
+	stop     func(context.Context, cmdman.StopRequest) ([]cmdman.StopResult, error)
 }
 
 func (s testCmdmanSvc) Start(ctx context.Context, idOrName string) error {
@@ -63,7 +64,13 @@ func (s testCmdmanSvc) Remove(
 	return nil, nil
 }
 
-func (s testCmdmanSvc) Stop(context.Context, cmdman.StopRequest) ([]cmdman.StopResult, error) {
+func (s testCmdmanSvc) Stop(
+	ctx context.Context,
+	req cmdman.StopRequest,
+) ([]cmdman.StopResult, error) {
+	if s.stop != nil {
+		return s.stop(ctx, req)
+	}
 	return nil, nil
 }
 
@@ -132,6 +139,8 @@ type reconcileTestEnv struct {
 	mu         sync.Mutex
 	startOrder []string
 	startCalls map[string]int
+	stopOrder  []string
+	stopCalls  map[string]int
 
 	// startHook, when set for a generated name, runs before Start returns. Use
 	// it to block, signal barriers, or return an error.
@@ -141,14 +150,19 @@ type reconcileTestEnv struct {
 	waitResult map[string]cmdman.WaitResult
 	// waitHook, when set for a generated name, runs before Wait returns.
 	waitHook map[string]func(context.Context) error
+	// stopHook, when set for a command ID, runs before Stop returns. Use it to
+	// block, signal barriers, or return an error.
+	stopHook map[string]func(context.Context) error
 }
 
 func newReconcileTestEnv() *reconcileTestEnv {
 	return &reconcileTestEnv{
 		startCalls: map[string]int{},
+		stopCalls:  map[string]int{},
 		startHook:  map[string]func(context.Context) error{},
 		waitResult: map[string]cmdman.WaitResult{},
 		waitHook:   map[string]func(context.Context) error{},
+		stopHook:   map[string]func(context.Context) error{},
 	}
 }
 
@@ -198,7 +212,33 @@ func (e *reconcileTestEnv) svc(states map[string]model.EventType) *Service {
 			}
 			return []cmdman.WaitResult{res}, nil
 		},
+		stop: func(ctx context.Context, req cmdman.StopRequest) ([]cmdman.StopResult, error) {
+			id := req.Targets[0]
+			e.mu.Lock()
+			e.stopOrder = append(e.stopOrder, id)
+			e.stopCalls[id]++
+			hook := e.stopHook[id]
+			e.mu.Unlock()
+			if hook != nil {
+				if err := hook(ctx); err != nil {
+					return nil, err
+				}
+			}
+			return nil, nil
+		},
 	}}
+}
+
+func (e *reconcileTestEnv) stopped(id string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.stopCalls[id] > 0
+}
+
+func (e *reconcileTestEnv) stopOrderList() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.stopOrder)
 }
 
 func (e *reconcileTestEnv) started(genName string) bool {
@@ -527,6 +567,146 @@ func TestReconcileFailedBranchDoesNotBlockSibling(t *testing.T) {
 	}
 	if o, _ := outcomeByCommand(outcomes, "solo"); o.Err != nil {
 		t.Fatalf("solo outcome error: %v", o.Err)
+	}
+}
+
+func stopOutcomeByCommand(outcomes []StopOutcome, name string) (StopOutcome, bool) {
+	for _, o := range outcomes {
+		if o.Command == name {
+			return o, true
+		}
+	}
+	return StopOutcome{}, false
+}
+
+// TestReconcileStopVisitsDependentsBeforeDependencies verifies the up walk stops
+// a dependent before the dependency it relies on, and that outcomes are reported
+// in that teardown order.
+func TestReconcileStopVisitsDependentsBeforeDependencies(t *testing.T) {
+	env := newReconcileTestEnv()
+	spec := reconcileSpec(
+		reconcileCmd("api"),
+		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionStarted}),
+	)
+	states := map[string]model.EventType{
+		"api":    model.EventTypeStarted,
+		"worker": model.EventTypeStarted,
+	}
+
+	outcomes, err := env.svc(states).reconcileStop(context.Background(), spec, nil)
+	if err != nil {
+		t.Fatalf("reconcileStop: %v", err)
+	}
+
+	order := env.stopOrderList()
+	iw := slices.Index(order, "id-worker")
+	ia := slices.Index(order, "id-api")
+	if iw < 0 || ia < 0 || iw > ia {
+		t.Fatalf("expected worker (dependent) stopped before api (dependency); order=%v", order)
+	}
+	if len(outcomes) != 2 || outcomes[0].Command != "worker" || outcomes[1].Command != "api" {
+		t.Fatalf("expected outcomes in teardown order [worker, api]; got %#v", outcomes)
+	}
+	for _, name := range []string{"api", "worker"} {
+		if o, _ := stopOutcomeByCommand(outcomes, name); o.Err != nil {
+			t.Fatalf("%s outcome error: %v", name, o.Err)
+		}
+	}
+}
+
+// TestReconcileStopSkipsNonRunning verifies created/exited/failed commands are
+// not stopped (a stop on them would only return monitor-connect errors).
+func TestReconcileStopSkipsNonRunning(t *testing.T) {
+	env := newReconcileTestEnv()
+	spec := reconcileSpec(reconcileCmd("alpha"), reconcileCmd("beta"), reconcileCmd("gamma"))
+	states := map[string]model.EventType{
+		"alpha": model.EventTypeExited,
+		"beta":  model.EventTypeCreated,
+		"gamma": model.EventTypeFailed,
+	}
+
+	outcomes, err := env.svc(states).reconcileStop(context.Background(), spec, nil)
+	if err != nil {
+		t.Fatalf("reconcileStop: %v", err)
+	}
+	if got := env.stopOrderList(); len(got) != 0 {
+		t.Fatalf("non-running commands must not be stopped; got stop calls %v", got)
+	}
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		if o, ok := stopOutcomeByCommand(outcomes, name); !ok || o.Err != nil {
+			t.Fatalf("%s outcome should be a clean no-op; got %#v ok=%v", name, o, ok)
+		}
+	}
+}
+
+// TestReconcileStopWithNamesIncludesDependents verifies that naming a dependency
+// pulls its recursive dependents into the closure so the dependency is not
+// stopped while a command that depends on it is still running.
+func TestReconcileStopWithNamesIncludesDependents(t *testing.T) {
+	env := newReconcileTestEnv()
+	spec := reconcileSpec(
+		reconcileCmd("api"),
+		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionStarted}),
+		reconcileCmd("solo"),
+	)
+	states := map[string]model.EventType{
+		"api":    model.EventTypeStarted,
+		"worker": model.EventTypeStarted,
+		"solo":   model.EventTypeStarted,
+	}
+
+	outcomes, err := env.svc(states).reconcileStop(context.Background(), spec, []string{"api"})
+	if err != nil {
+		t.Fatalf("reconcileStop: %v", err)
+	}
+	if !env.stopped("id-api") || !env.stopped("id-worker") {
+		t.Fatalf("naming api must also stop its dependent worker; order=%v", env.stopOrderList())
+	}
+	if env.stopped("id-solo") {
+		t.Fatalf("solo is unrelated to api and must not be stopped; order=%v", env.stopOrderList())
+	}
+	if _, ok := stopOutcomeByCommand(outcomes, "solo"); ok {
+		t.Fatalf("solo must not appear in outcomes; got %#v", outcomes)
+	}
+	order := env.stopOrderList()
+	if slices.Index(order, "id-worker") > slices.Index(order, "id-api") {
+		t.Fatalf("expected worker stopped before api; order=%v", order)
+	}
+}
+
+// TestReconcileStopContinuesPastFailedDependent verifies a dependent's stop
+// failure is recorded but does not prevent the dependency from being stopped.
+func TestReconcileStopContinuesPastFailedDependent(t *testing.T) {
+	env := newReconcileTestEnv()
+	env.stopHook["id-worker"] = func(context.Context) error {
+		return errors.New("boom")
+	}
+	spec := reconcileSpec(
+		reconcileCmd("api"),
+		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionStarted}),
+	)
+	states := map[string]model.EventType{
+		"api":    model.EventTypeStarted,
+		"worker": model.EventTypeStarted,
+	}
+
+	buf, ctx := warnLogger()
+	outcomes, err := env.svc(states).reconcileStop(ctx, spec, nil)
+	if err != nil {
+		t.Fatalf("reconcileStop: %v", err)
+	}
+	if !env.stopped("id-api") {
+		t.Fatal("api should still be stopped after worker's stop failed")
+	}
+	if o, _ := stopOutcomeByCommand(outcomes, "worker"); o.Err == nil {
+		t.Fatal("worker outcome should record the stop error")
+	}
+	if o, _ := stopOutcomeByCommand(outcomes, "api"); o.Err != nil {
+		t.Fatalf("api outcome should succeed, got %v", o.Err)
+	}
+	if log := buf.String(); !strings.Contains(log, "compose: stop failed") ||
+		!strings.Contains(log, "worker") {
+		t.Fatalf("expected a stop-failure warning mentioning worker; got:\n%s", log)
 	}
 }
 
