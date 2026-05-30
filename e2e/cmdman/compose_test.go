@@ -2,6 +2,7 @@ package cmdman_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,47 @@ import (
 	"testing"
 	"time"
 )
+
+// progressEvent mirrors one JSONL object emitted by compose up/start/stop/down
+// on a non-terminal stdout. Each object reports a command's state transition and
+// (on a terminal phase) its result.
+type progressEvent struct {
+	Op       string `json:"op"`
+	Command  string `json:"command"`
+	Phase    string `json:"phase"`
+	Terminal bool   `json:"terminal"`
+	ExitCode *int   `json:"exitCode"`
+	Error    string `json:"error"`
+}
+
+// parseProgress parses the JSONL state trace from a compose lifecycle command's
+// stdout. Non-JSON lines are skipped so the helper tolerates incidental output.
+func parseProgress(t *testing.T, stdout string) []progressEvent {
+	t.Helper()
+	var events []progressEvent
+	for line := range strings.SplitSeq(strings.TrimSpace(stdout), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var ev progressEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("parse progress line %q: %v", line, err)
+		}
+		events = append(events, ev)
+	}
+	return events
+}
+
+// progressReached reports whether command transitioned into phase in the trace.
+func progressReached(events []progressEvent, command, phase string) bool {
+	for _, ev := range events {
+		if ev.Command == command && ev.Phase == phase {
+			return true
+		}
+	}
+	return false
+}
 
 // composeBasicYAML returns a minimal compose file with two commands that
 // finish quickly (exit 0) so the test does not need to manage long-lived
@@ -153,7 +195,7 @@ func TestComposeUpIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose up #1 failed: %v\nstdout:\n%s", err, stdout)
 	}
-	if !strings.Contains(stdout, "create       alpha") {
+	if events := parseProgress(t, stdout); !progressReached(events, "alpha", "created") {
 		t.Fatalf("first up should create alpha; got:\n%s", stdout)
 	}
 
@@ -170,8 +212,9 @@ func TestComposeUpIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose up #2 failed: %v\nstdout:\n%s", err, stdout2)
 	}
-	if !strings.Contains(stdout2, "unchanged    alpha") ||
-		!strings.Contains(stdout2, "unchanged    beta") {
+	events2 := parseProgress(t, stdout2)
+	if !progressReached(events2, "alpha", "unchanged") ||
+		!progressReached(events2, "beta", "unchanged") {
 		t.Fatalf("second up should report unchanged for both; got:\n%s", stdout2)
 	}
 
@@ -227,10 +270,11 @@ func TestComposeUpRecreateOnArgsChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose up #2 failed: %v\nstdout:\n%s", err, stdout)
 	}
-	if !strings.Contains(stdout, "recreate     alpha") {
+	events := parseProgress(t, stdout)
+	if !progressReached(events, "alpha", "recreated") {
 		t.Fatalf("expected recreate for alpha; got:\n%s", stdout)
 	}
-	if !strings.Contains(stdout, "unchanged    beta") {
+	if !progressReached(events, "beta", "unchanged") {
 		t.Fatalf("expected beta unchanged; got:\n%s", stdout)
 	}
 
@@ -493,8 +537,8 @@ func TestComposeStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose stop failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "stopped      alpha") {
-		t.Fatalf("expected stopped line for alpha; got:\n%s", stdout)
+	if events := parseProgress(t, stdout); !progressReached(events, "alpha", "stopped") {
+		t.Fatalf("expected alpha to reach stopped in progress trace; got:\n%s", stdout)
 	}
 
 	for _, e := range env.lsJSON(ctx,
@@ -535,8 +579,16 @@ func TestComposeStopProjectOnly(t *testing.T) {
 		t.Fatalf("compose stop (project-only) failed: %v\nstdout:\n%s\nstderr:\n%s",
 			err, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "stopped") {
-		t.Fatalf("expected stopped line; got:\n%s", stdout)
+	events := parseProgress(t, stdout)
+	stoppedAny := false
+	for _, ev := range events {
+		if ev.Phase == "stopped" {
+			stoppedAny = true
+			break
+		}
+	}
+	if !stoppedAny {
+		t.Fatalf("expected a stopped event in the project-only stop trace; got:\n%s", stdout)
 	}
 }
 
@@ -572,6 +624,85 @@ func TestComposeDown(t *testing.T) {
 	)
 	if len(entries) != 0 {
 		t.Fatalf("expected 0 commands after down, got %d", len(entries))
+	}
+}
+
+// TestComposeProgressJSONL verifies the JSONL state trace emitted on a
+// non-terminal stdout: up reports created→started per command (with the op and
+// terminal flags set), --progress=quiet suppresses output, and down reports
+// removed events.
+func TestComposeProgressJSONL(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-progress"
+	writeComposeFile(t, wd, composeBasicYAML(project))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	composePath := filepath.Join(wd, "cmd-compose.yaml")
+
+	// up: auto mode on a piped (non-terminal) stdout resolves to JSONL.
+	stdout, stderr, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up")
+	if err != nil {
+		t.Fatalf("compose up failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	events := parseProgress(t, stdout)
+	if len(events) == 0 {
+		t.Fatalf("expected JSONL progress events on non-terminal stdout; got:\n%s", stdout)
+	}
+	for _, ev := range events {
+		if ev.Op != "up" {
+			t.Fatalf("expected op=up on every event, got %q in:\n%s", ev.Op, stdout)
+		}
+	}
+	for _, name := range []string{"alpha", "beta"} {
+		if !progressReached(events, name, "created") {
+			t.Fatalf("expected %q created event; got:\n%s", name, stdout)
+		}
+		if !progressReached(events, name, "started") {
+			t.Fatalf("expected %q started event; got:\n%s", name, stdout)
+		}
+	}
+	// Terminal phases carry the terminal flag; transient phases do not.
+	for _, ev := range events {
+		switch ev.Phase {
+		case "started", "created", "exited", "removed", "stopped", "unchanged":
+			if !ev.Terminal {
+				t.Fatalf("phase %q should be terminal; got:\n%s", ev.Phase, stdout)
+			}
+		case "starting", "creating", "stopping", "removing", "waiting":
+			if ev.Terminal {
+				t.Fatalf("phase %q should not be terminal; got:\n%s", ev.Phase, stdout)
+			}
+		}
+	}
+
+	// quiet: no progress output at all.
+	qOut, qErr, err := env.exec(ctx, "compose",
+		"--workdir", wd, "-f", composePath, "up", "--progress", "quiet")
+	if err != nil {
+		t.Fatalf("compose up --progress quiet failed: %v\nstderr:\n%s", err, qErr)
+	}
+	if strings.TrimSpace(qOut) != "" {
+		t.Fatalf("expected no stdout with --progress quiet; got:\n%s", qOut)
+	}
+
+	// down with an explicit --progress json forces JSONL and reports removals.
+	dOut, dErr, err := env.exec(ctx, "compose",
+		"--workdir", wd, "-f", composePath, "down", "--progress", "json")
+	if err != nil {
+		t.Fatalf("compose down failed: %v\nstdout:\n%s\nstderr:\n%s", err, dOut, dErr)
+	}
+	downEvents := parseProgress(t, dOut)
+	for _, name := range []string{"alpha", "beta"} {
+		if !progressReached(downEvents, name, "removed") {
+			t.Fatalf("expected %q removed event on down; got:\n%s", name, dOut)
+		}
+	}
+	for _, ev := range downEvents {
+		if ev.Op != "down" {
+			t.Fatalf("expected op=down on every down event, got %q in:\n%s", ev.Op, dOut)
+		}
 	}
 }
 
@@ -1087,9 +1218,10 @@ func TestComposeStartSubcommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose start failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "started      alpha") ||
-		!strings.Contains(stdout, "started      beta") {
-		t.Fatalf("expected started lines for alpha and beta; got:\n%s", stdout)
+	events := parseProgress(t, stdout)
+	if !progressReached(events, "alpha", "started") ||
+		!progressReached(events, "beta", "started") {
+		t.Fatalf("expected alpha and beta to reach started in progress trace; got:\n%s", stdout)
 	}
 }
 
@@ -1327,8 +1459,8 @@ func TestComposeStartFromFailedState(t *testing.T) {
 		t.Fatalf("compose start from failed should succeed: %v\nstdout:\n%s\nstderr:\n%s",
 			err, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "started      alpha") {
-		t.Fatalf("expected started line for alpha; got:\n%s", stdout)
+	if events := parseProgress(t, stdout); !progressReached(events, "alpha", "started") {
+		t.Fatalf("expected alpha to reach started in progress trace; got:\n%s", stdout)
 	}
 	env.waitForState(ctx, alphaID, "exited", 10*time.Second)
 	if code, _ := env.inspectJSON(ctx, alphaID)["exit_code"].(float64); code != 0 {

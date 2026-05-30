@@ -35,11 +35,19 @@ type cmdmanSvc interface {
 // It is testable without the CLI.
 type Service struct {
 	svc cmdmanSvc
+	// reporter receives lifecycle state-trace events during up/start/stop/down.
+	// nil disables reporting (see report).
+	reporter Reporter
 }
 
 // NewService constructs a compose.Service from an existing cmdman.Service.
-func NewService(svc *cmdman.Service) *Service {
-	return &Service{svc: svc}
+// Options such as WithReporter customize the service.
+func NewService(svc *cmdman.Service, opts ...ServiceOption) *Service {
+	s := &Service{svc: svc}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // CreateOption configures a Create operation.
@@ -140,28 +148,27 @@ func (s *Service) executeAction(
 
 	switch action.Kind {
 	case ActionUnchanged:
+		s.report(nc.Name, PhaseUnchanged, nil, nil)
 		return ActionOutcome{Command: nc.Name, Action: "unchanged"}, nil
 
 	case ActionCreate:
+		s.report(nc.Name, PhaseCreating, nil, nil)
 		req := buildCreateRequest(spec, nc, action.DesiredHash)
 		_, err := s.svc.Create(ctx, req)
 		if err != nil {
-			return ActionOutcome{
-				Command: nc.Name,
-				Action:  "create",
-				Err:     fmt.Errorf("create command %q (%s): %w", nc.Name, nc.GeneratedName, err),
-			}, nil
+			werr := fmt.Errorf("create command %q (%s): %w", nc.Name, nc.GeneratedName, err)
+			s.report(nc.Name, PhaseError, werr, nil)
+			return ActionOutcome{Command: nc.Name, Action: "create", Err: werr}, nil
 		}
+		s.report(nc.Name, PhaseCreated, nil, nil)
 		return ActionOutcome{Command: nc.Name, Action: "create"}, nil
 
 	case ActionRecreate:
 		existing := action.Existing
 		if existing == nil {
-			return ActionOutcome{
-				Command: nc.Name,
-				Action:  "skipped",
-				Err:     fmt.Errorf("recreate command %q: missing existing entry", nc.Name),
-			}, nil
+			werr := fmt.Errorf("recreate command %q: missing existing entry", nc.Name)
+			s.report(nc.Name, PhaseSkipped, werr, nil)
+			return ActionOutcome{Command: nc.Name, Action: "skipped", Err: werr}, nil
 		}
 
 		// If the command is running/starting, skip it (resolved-decision 4: no force in v1).
@@ -173,47 +180,41 @@ func (s *Service) executeAction(
 				"id", existing.ID,
 				"state", existing.State,
 			)
-			return ActionOutcome{
-				Command: nc.Name,
-				Action:  "skipped",
-				Err: fmt.Errorf(
-					"command %q is %s; recreate skipped (stop first)",
-					nc.Name,
-					existing.State,
-				),
-			}, nil
+			werr := fmt.Errorf(
+				"command %q is %s; recreate skipped (stop first)",
+				nc.Name,
+				existing.State,
+			)
+			s.report(nc.Name, PhaseSkipped, werr, nil)
+			return ActionOutcome{Command: nc.Name, Action: "skipped", Err: werr}, nil
 		}
 
+		s.report(nc.Name, PhaseRecreating, nil, nil)
 		// Remove then recreate.
 		results, err := s.svc.Remove(ctx, cmdman.RemoveRequest{
 			Targets: []string{existing.ID},
 		})
 		if err != nil {
-			return ActionOutcome{
-				Command: nc.Name,
-				Action:  "recreate",
-				Err:     fmt.Errorf("remove command %q for recreate: %w", nc.Name, err),
-			}, nil
+			werr := fmt.Errorf("remove command %q for recreate: %w", nc.Name, err)
+			s.report(nc.Name, PhaseError, werr, nil)
+			return ActionOutcome{Command: nc.Name, Action: "recreate", Err: werr}, nil
 		}
 		for _, r := range results {
 			if r.Err != nil {
-				return ActionOutcome{
-					Command: nc.Name,
-					Action:  "recreate",
-					Err:     fmt.Errorf("remove command %q for recreate: %w", nc.Name, r.Err),
-				}, nil
+				werr := fmt.Errorf("remove command %q for recreate: %w", nc.Name, r.Err)
+				s.report(nc.Name, PhaseError, werr, nil)
+				return ActionOutcome{Command: nc.Name, Action: "recreate", Err: werr}, nil
 			}
 		}
 
 		req := buildCreateRequest(spec, nc, action.DesiredHash)
 		_, err = s.svc.Create(ctx, req)
 		if err != nil {
-			return ActionOutcome{
-				Command: nc.Name,
-				Action:  "recreate",
-				Err:     fmt.Errorf("create command %q after remove: %w", nc.Name, err),
-			}, nil
+			werr := fmt.Errorf("create command %q after remove: %w", nc.Name, err)
+			s.report(nc.Name, PhaseError, werr, nil)
+			return ActionOutcome{Command: nc.Name, Action: "recreate", Err: werr}, nil
 		}
+		s.report(nc.Name, PhaseRecreated, nil, nil)
 		return ActionOutcome{Command: nc.Name, Action: "recreate"}, nil
 
 	default:

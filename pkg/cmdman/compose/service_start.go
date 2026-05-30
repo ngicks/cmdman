@@ -106,14 +106,18 @@ func (s *Service) startWithoutSpec(
 		state := e.State
 		eg.Go(func() error {
 			if state == model.EventTypeStarted || state == model.EventTypeStarting {
+				s.report(name, PhaseStarted, nil, nil)
 				ch <- StartOutcome{Command: name}
 				return nil
 			}
+			s.report(name, PhaseStarting, nil, nil)
 			if err := s.svc.Start(gctx, id); err != nil {
 				wrapped := fmt.Errorf("start command %q (%s): %w", name, id, err)
+				s.report(name, PhaseError, wrapped, nil)
 				ch <- StartOutcome{Command: name, Err: wrapped}
 				return nil
 			}
+			s.report(name, PhaseStarted, nil, nil)
 			ch <- StartOutcome{Command: name}
 			return nil
 		})

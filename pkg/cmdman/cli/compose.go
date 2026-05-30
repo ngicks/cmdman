@@ -221,74 +221,15 @@ func printActions(out io.Writer, actions []compose.ActionOutcome) []error {
 	return errs
 }
 
-// printStartOutcomes writes a status line per start outcome and returns the errors.
-func printStartOutcomes(out io.Writer, starts []compose.StartOutcome) []error {
-	var errs []error
-	for _, s := range starts {
-		status := "started"
-		if s.Err != nil {
-			status = "error"
-			errs = append(errs, s.Err)
-		}
-		printStatusLine(out, status, s.Command)
-	}
-	return errs
-}
-
-// printStopOutcomes writes a status line per stop outcome and returns the errors.
-func printStopOutcomes(out io.Writer, stops []compose.StopOutcome) []error {
-	var errs []error
-	for _, s := range stops {
-		status := "stopped"
-		if s.Err != nil {
-			status = "error"
-			errs = append(errs, s.Err)
-		}
-		printStatusLine(out, status, s.Command)
-	}
-	return errs
-}
-
 // PrintCreateResult writes a status line per create action and returns a combined
 // error when any action failed.
 func PrintCreateResult(out, errOut io.Writer, result *compose.CreateResult) error {
 	return reportErrors(errOut, "compose action", printActions(out, result.Actions))
 }
 
-// PrintUpResult writes a status line per create action and per start, then
-// returns a combined error when any operation failed.
-func PrintUpResult(out, errOut io.Writer, result *compose.UpResult) error {
-	errs := printActions(out, result.Actions)
-	errs = append(errs, printStartOutcomes(out, result.Starts)...)
-	return reportErrors(errOut, "compose operation", errs)
-}
-
-// PrintStartResult writes a status line per start outcome and returns a combined
-// error when any start failed.
-func PrintStartResult(out, errOut io.Writer, starts []compose.StartOutcome) error {
-	return reportErrors(errOut, "compose start operation", printStartOutcomes(out, starts))
-}
-
-// PrintStopResult writes a status line per stop outcome and returns a combined
-// error when any stop failed.
-func PrintStopResult(out, errOut io.Writer, stops []compose.StopOutcome) error {
-	return reportErrors(errOut, "compose stop operation", printStopOutcomes(out, stops))
-}
-
-// PrintDownResult writes a status line per stop and remove outcome and returns a
-// combined error when any operation failed.
-func PrintDownResult(out, errOut io.Writer, result *compose.DownResult) error {
-	errs := printStopOutcomes(out, result.Stops)
-	for _, r := range result.Removes {
-		status := "removed"
-		if r.Err != nil {
-			status = "error"
-			errs = append(errs, r.Err)
-		}
-		printStatusLine(out, status, r.Command)
-	}
-	return reportErrors(errOut, "compose down operation", errs)
-}
+// Note: compose up/start/stop/down no longer print a static summary here; they
+// stream a live state trace (or JSONL) through cli.ComposeProgress and derive
+// the command exit status from {Up,Start,Stop,Down}ResultErr in progress.go.
 
 // PrintSignalResult writes a status line per signal outcome and returns a
 // combined error when any signal failed.

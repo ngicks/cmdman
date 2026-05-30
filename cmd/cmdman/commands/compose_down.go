@@ -9,14 +9,20 @@ import (
 )
 
 func composeDownCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+	var (
+		flagProgress string
+	)
+
 	cmd := &cobra.Command{
 		Use:   "down [COMMAND...]",
 		Short: "Stop and remove compose commands",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeDown(cmd, rootCfg, cf, args)
+			return runComposeDown(cmd, rootCfg, cf, args, flagProgress)
 		},
 	}
+
+	cmd.Flags().StringVar(&flagProgress, "progress", "auto", cli.ProgressFlagUsage)
 
 	parent.AddCommand(cmd)
 }
@@ -26,6 +32,7 @@ func runComposeDown(
 	rootCfg *cmdman.CmdmanConfig,
 	cf *composeFlags,
 	commandNames []string,
+	progress string,
 ) error {
 	selection, err := compose.LoadOrProject(cf.normalizeOpts())
 	if err != nil {
@@ -38,12 +45,19 @@ func runComposeDown(
 	}
 	defer svc.Close()
 
-	result, err := compose.NewService(svc).Down(cmd.Context(), selection, compose.DownOption{
-		CommandNames: commandNames,
-	})
+	prog, err := resolveComposeProgress(cmd, progress, "down")
+	if err != nil {
+		return err
+	}
+	defer prog.Close()
+
+	result, err := compose.NewService(svc, compose.WithReporter(prog)).Down(
+		cmd.Context(), selection, compose.DownOption{
+			CommandNames: commandNames,
+		})
 	if err != nil {
 		return err
 	}
 
-	return cli.PrintDownResult(cmd.OutOrStdout(), cmd.ErrOrStderr(), result)
+	return cli.DownResultErr(result)
 }

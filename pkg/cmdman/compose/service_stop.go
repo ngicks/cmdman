@@ -109,6 +109,7 @@ func stopAllConcurrent(
 		id := entry.ID
 		name := cmdName
 		eg.Go(func() error {
+			s.report(name, PhaseStopping, nil, nil)
 			_, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{id}})
 			outcome := StopOutcome{Command: name}
 			if err != nil {
@@ -119,6 +120,9 @@ func stopAllConcurrent(
 					"id", id,
 					"error", err,
 				)
+				s.report(name, PhaseError, outcome.Err, nil)
+			} else {
+				s.report(name, PhaseStopped, nil, nil)
 			}
 			mu.Lock()
 			outcomes = append(outcomes, outcome)

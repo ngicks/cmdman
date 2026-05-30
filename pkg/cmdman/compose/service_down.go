@@ -183,6 +183,7 @@ func removeAllConcurrent(
 		id := entry.ID
 		name := cmdName
 		eg.Go(func() error {
+			s.report(name, PhaseRemoving, nil, nil)
 			results, err := s.svc.Remove(ctx, cmdman.RemoveRequest{
 				Targets: []string{id},
 				Force:   true,
@@ -209,6 +210,11 @@ func removeAllConcurrent(
 						break
 					}
 				}
+			}
+			if outcome.Err != nil {
+				s.report(name, PhaseError, outcome.Err, nil)
+			} else {
+				s.report(name, PhaseRemoved, nil, nil)
 			}
 			mu.Lock()
 			outcomes = append(outcomes, outcome)

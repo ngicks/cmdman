@@ -42,7 +42,35 @@ func (s *Service) reconcileStart(
 	limit := min(len(closure), reconcileWalkLimit)
 	g.walk(ctx, walkFromBegin, limit, s.upStartAction)
 
+	s.reportBlocked(g)
 	return g.startOutcomes(spec), nil
+}
+
+// reportBlocked emits a terminal error event for every in-closure command the
+// walk never acted on (blocked by an unsatisfied dependency, so the action — and
+// thus its own terminal event — never ran). Without this, blocked commands would
+// be silently absent from the state trace even though startOutcomes/stopOutcomes
+// report them with an error. The walk has finished by the time this runs.
+func (s *Service) reportBlocked(g *reconcileGraph) {
+	if s.reporter == nil {
+		return
+	}
+	type blocked struct {
+		name string
+		err  error
+	}
+	var pending []blocked
+	g.mu.Lock()
+	for _, v := range g.Vertices {
+		if v.Command == nil || !v.InClosure || !v.Blocked {
+			continue
+		}
+		pending = append(pending, blocked{name: v.Command.Name, err: v.Err})
+	}
+	g.mu.Unlock()
+	for _, b := range pending {
+		s.report(b.name, PhaseError, b.err, nil)
+	}
 }
 
 // upStartAction starts (or confirms running) a single command and, when a
@@ -61,22 +89,23 @@ func (s *Service) upStartAction(
 	// start and project-only compose start.
 	active := state == model.EventTypeStarted || state == model.EventTypeStarting
 	if !active {
+		s.report(cmd.Name, PhaseStarting, nil, nil)
 		if err := s.svc.Start(ctx, cmd.GeneratedName); err != nil {
 			contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: start failed",
 				"command", cmd.Name,
 				"generated_name", cmd.GeneratedName,
 				"error", err,
 			)
-			return actionResult{
-				State: state,
-				Err:   fmt.Errorf("start command %q (%s): %w", cmd.Name, cmd.GeneratedName, err),
-			}
+			werr := fmt.Errorf("start command %q (%s): %w", cmd.Name, cmd.GeneratedName, err)
+			s.report(cmd.Name, PhaseError, werr, nil)
+			return actionResult{State: state, Err: werr}
 		}
 	}
 
 	// No dependent waits on our termination: record started and let dependents
 	// on the started condition proceed without blocking on completion.
 	if !g.anyDependentNeedsCompletion(v.ID) {
+		s.report(cmd.Name, PhaseStarted, nil, v.Snapshot.ExitCode)
 		return actionResult{State: model.EventTypeStarted, ExitCode: v.Snapshot.ExitCode}
 	}
 
@@ -84,11 +113,13 @@ func (s *Service) upStartAction(
 	// cmdman.Service.Start returns nil even if the command exits before started
 	// is observed, so completion must come from Wait(stopped), never inferred
 	// from Start alone.
+	s.report(cmd.Name, PhaseWaiting, nil, nil)
 	results, werr := s.svc.Wait(ctx, cmdman.WaitRequest{
 		Targets:   []string{cmd.GeneratedName},
 		Condition: cmdman.WaitConditionStopped,
 	})
 	if werr != nil {
+		s.report(cmd.Name, PhaseError, werr, nil)
 		return actionResult{State: model.EventTypeStarted, Err: werr}
 	}
 
@@ -96,6 +127,7 @@ func (s *Service) upStartAction(
 	if len(results) > 0 {
 		exit = results[0].ExitCode
 		if results[0].Err != nil {
+			s.report(cmd.Name, PhaseFailed, results[0].Err, exit)
 			return actionResult{State: model.EventTypeFailed, ExitCode: exit, Err: results[0].Err}
 		}
 	}
@@ -103,8 +135,10 @@ func (s *Service) upStartAction(
 	// means a monitor/subprocess failure. completed is satisfied by either;
 	// completed_successfully additionally checks the exit code.
 	if exit != nil {
+		s.report(cmd.Name, PhaseExited, nil, exit)
 		return actionResult{State: model.EventTypeExited, ExitCode: exit}
 	}
+	s.report(cmd.Name, PhaseFailed, nil, nil)
 	return actionResult{State: model.EventTypeFailed}
 }
 
@@ -143,6 +177,7 @@ func (s *Service) reconcileStop(
 		},
 	)
 
+	s.reportBlocked(g)
 	return g.stopOutcomes(spec), nil
 }
 
@@ -159,10 +194,13 @@ func (s *Service) stopAction(
 
 	active := snap.State == model.EventTypeStarted || snap.State == model.EventTypeStarting
 	if !active || snap.ID == "" {
-		// Nothing to stop: keep the observed state for diagnostics.
+		// Nothing to stop: already terminal. Report skipped, keep the observed
+		// state for diagnostics.
+		s.report(cmd.Name, PhaseSkipped, nil, snap.ExitCode)
 		return actionResult{State: snap.State, ExitCode: snap.ExitCode}
 	}
 
+	s.report(cmd.Name, PhaseStopping, nil, nil)
 	if _, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{snap.ID}}); err != nil {
 		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: stop failed",
 			"project", project,
@@ -170,11 +208,11 @@ func (s *Service) stopAction(
 			"id", snap.ID,
 			"error", err,
 		)
-		return actionResult{
-			State: snap.State,
-			Err:   fmt.Errorf("stop command %q (%s): %w", cmd.Name, snap.ID, err),
-		}
+		werr := fmt.Errorf("stop command %q (%s): %w", cmd.Name, snap.ID, err)
+		s.report(cmd.Name, PhaseError, werr, nil)
+		return actionResult{State: snap.State, Err: werr}
 	}
+	s.report(cmd.Name, PhaseStopped, nil, snap.ExitCode)
 	return actionResult{State: model.EventTypeExited, ExitCode: snap.ExitCode}
 }
 
