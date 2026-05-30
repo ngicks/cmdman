@@ -14,9 +14,10 @@ func composePsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *compo
 	)
 
 	cmd := &cobra.Command{
-		Use:   "ps [COMMAND...]",
-		Short: "List commands in a compose project",
-		Args:  cobra.ArbitraryArgs,
+		Use:               "ps [COMMAND...]",
+		Short:             "List commands in a compose project",
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposePs(cmd, rootCfg, cf, args, flagFormat)
 		},

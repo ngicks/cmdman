@@ -19,9 +19,10 @@ func composeWaitCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *com
 	)
 
 	cmd := &cobra.Command{
-		Use:   "wait [COMMAND...]",
-		Short: "Wait for compose commands to reach a condition",
-		Args:  cobra.ArbitraryArgs,
+		Use:               "wait [COMMAND...]",
+		Short:             "Wait for compose commands to reach a condition",
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeWait(cmd, rootCfg, cf, args, flagCondition, flagInterval, flagIgnore)
 		},
@@ -33,6 +34,7 @@ func composeWaitCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *com
 		"Polling interval (default: 250ms)")
 	cmd.Flags().BoolVar(&flagIgnore, "ignore", false,
 		"Ignore commands that cannot be resolved")
+	_ = cmd.RegisterFlagCompletionFunc("condition", waitConditionCompletions)
 
 	parent.AddCommand(cmd)
 }

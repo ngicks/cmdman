@@ -23,6 +23,8 @@ default, or cmdman logs when mode: logs.
 The layout file is a YAML document with a top-level mux: section. With no
 path argument (or "-"), the spec is read from stdin.`,
 		Args: cobra.MaximumNArgs(1),
+		// The positional arg is a layout file path; the shell's default file
+		// completion is the right behavior, so ValidArgsFunction is left unset.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "-"
 			if len(args) == 1 {

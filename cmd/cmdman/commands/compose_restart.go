@@ -10,9 +10,10 @@ import (
 
 func composeRestartCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
 	cmd := &cobra.Command{
-		Use:   "restart [COMMAND...]",
-		Short: "Stop then start compose commands",
-		Args:  cobra.ArbitraryArgs,
+		Use:               "restart [COMMAND...]",
+		Short:             "Stop then start compose commands",
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeRestart(cmd, rootCfg, cf, args)
 		},

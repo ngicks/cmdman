@@ -22,9 +22,10 @@ func composeLogsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *com
 	)
 
 	cmd := &cobra.Command{
-		Use:   "logs [COMMAND...]",
-		Short: "Fetch logs from compose commands",
-		Args:  cobra.ArbitraryArgs,
+		Use:               "logs [COMMAND...]",
+		Short:             "Fetch logs from compose commands",
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeLogs(
 				cmd, rootCfg, cf, args,

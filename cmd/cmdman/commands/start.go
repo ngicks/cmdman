@@ -4,13 +4,15 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
 func startCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	cmd := &cobra.Command{
-		Use:   "start ID_OR_NAME",
-		Short: "Start a created command",
-		Args:  cobra.ExactArgs(1),
+		Use:               "start ID_OR_NAME",
+		Short:             "Start a created command",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeCommandNames(rootCfg, model.EventTypeCreated),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runStart(cmd, args, rootCfg)
 		},

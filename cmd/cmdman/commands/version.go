@@ -9,10 +9,11 @@ import (
 
 func versionCmd(parent *cobra.Command) {
 	cmd := &cobra.Command{
-		Use:   "version",
-		Short: "Print version information",
-		Args:  cobra.NoArgs,
-		RunE:  runVersion,
+		Use:               "version",
+		Short:             "Print version information",
+		Args:              cobra.NoArgs,
+		ValidArgsFunction: cobra.NoFileCompletions,
+		RunE:              runVersion,
 	}
 
 	parent.AddCommand(cmd)

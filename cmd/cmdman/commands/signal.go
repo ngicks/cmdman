@@ -13,9 +13,10 @@ func signalCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	var flagSignal string
 
 	cmd := &cobra.Command{
-		Use:   "signal -s SIGNAL ID|NAME [ID|NAME...]",
-		Short: "Send a raw signal to a running command",
-		Args:  cobra.MinimumNArgs(1),
+		Use:               "signal -s SIGNAL ID|NAME [ID|NAME...]",
+		Short:             "Send a raw signal to a running command",
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: completeCommandNames(rootCfg, runningStates...),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSignal(cmd, args, rootCfg, flagSignal)
 		},
@@ -23,6 +24,7 @@ func signalCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 
 	cmd.Flags().StringVarP(&flagSignal, "signal", "s", "", "Signal to send")
 	_ = cmd.MarkFlagRequired("signal")
+	_ = cmd.RegisterFlagCompletionFunc("signal", signalCompletions)
 
 	parent.AddCommand(cmd)
 }

@@ -23,7 +23,8 @@ cmdman attach by default, or cmdman logs when mode: logs.
 
 The compose file must contain a top-level "mux:" section; a missing section
 is an error (no synthesized default).`,
-		Args: cobra.NoArgs,
+		Args:              cobra.NoArgs,
+		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeMux(cmd, rootCfg, cf)
 		},

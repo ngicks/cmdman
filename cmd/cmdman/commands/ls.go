@@ -16,9 +16,10 @@ func lsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "ls [flags]",
-		Short: "List commands",
-		Args:  cobra.NoArgs,
+		Use:               "ls [flags]",
+		Short:             "List commands",
+		Args:              cobra.NoArgs,
+		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runLs(cmd, args, rootCfg, flagLabel, flagAll, flagQuiet, flagFormat)
 		},

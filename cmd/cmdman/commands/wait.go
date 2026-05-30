@@ -19,9 +19,10 @@ func waitCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "wait [flags] ID|NAME [ID|NAME...]",
-		Short: "Block until one or more commands stop, then print exit codes",
-		Args:  cobra.MinimumNArgs(1),
+		Use:               "wait [flags] ID|NAME [ID|NAME...]",
+		Short:             "Block until one or more commands stop, then print exit codes",
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: completeCommandNames(rootCfg),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWait(cmd, args, rootCfg, flagCondition, flagInterval, flagIgnore)
 		},
@@ -33,6 +34,7 @@ func waitCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		"Time interval between state checks")
 	cmd.Flags().BoolVar(&flagIgnore, "ignore", false,
 		"Don't fail on missing command errors")
+	_ = cmd.RegisterFlagCompletionFunc("condition", waitConditionCompletions)
 
 	parent.AddCommand(cmd)
 }

@@ -24,9 +24,10 @@ func composeEventsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *c
 	)
 
 	cmd := &cobra.Command{
-		Use:   "events [COMMAND...]",
-		Short: "Stream events for compose commands",
-		Args:  cobra.ArbitraryArgs,
+		Use:               "events [COMMAND...]",
+		Short:             "Stream events for compose commands",
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeEvents(
 				cmd, rootCfg, cf, args,

@@ -59,6 +59,10 @@ func bindCreateFlags(cmd *cobra.Command, f *createFlags) {
 		nil,
 		"Log driver option KEY=VALUE (repeatable; k8s-file: path, max-size, max-file)",
 	)
+
+	_ = cmd.RegisterFlagCompletionFunc("restart", restartPolicyCompletions)
+	_ = cmd.RegisterFlagCompletionFunc("stop-signal", signalCompletions)
+	_ = cmd.RegisterFlagCompletionFunc("log-driver", logDriverCompletions)
 }
 
 func createCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
@@ -68,6 +72,9 @@ func createCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		Use:   "create [flags] -- COMMAND [ARGS...]",
 		Short: "Create a new command without starting it",
 		Args:  cobra.MinimumNArgs(1),
+		// Positional args are an executable and its arguments; the shell's
+		// default file completion is the right behavior, so ValidArgsFunction
+		// is intentionally left unset.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCreate(cmd, args, rootCfg, &flags)
 		},

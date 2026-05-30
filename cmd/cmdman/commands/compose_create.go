@@ -14,9 +14,10 @@ func composeCreateCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *c
 	)
 
 	cmd := &cobra.Command{
-		Use:   "create [COMMAND...]",
-		Short: "Create compose commands without starting them",
-		Args:  cobra.ArbitraryArgs,
+		Use:               "create [COMMAND...]",
+		Short:             "Create compose commands without starting them",
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeCreate(cmd, rootCfg, cf, args, flagRemoveOrphan)
 		},

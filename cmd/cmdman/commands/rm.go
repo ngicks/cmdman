@@ -15,8 +15,9 @@ func rmCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "rm [flags] [ID|NAME...]",
-		Short: "Remove a stopped command",
+		Use:               "rm [flags] [ID|NAME...]",
+		Short:             "Remove a stopped command",
+		ValidArgsFunction: completeCommandNames(rootCfg),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRm(cmd, args, rootCfg, flagLabel, flagForce)
 		},

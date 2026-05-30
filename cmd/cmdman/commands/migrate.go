@@ -10,9 +10,10 @@ import (
 
 func migrateCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	cmd := &cobra.Command{
-		Use:   "migrate",
-		Short: "Run database schema migrations",
-		Args:  cobra.NoArgs,
+		Use:               "migrate",
+		Short:             "Run database schema migrations",
+		Args:              cobra.NoArgs,
+		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMigrate(cmd, args, rootCfg)
 		},

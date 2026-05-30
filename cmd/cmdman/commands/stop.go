@@ -17,9 +17,10 @@ func stopCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "stop [flags] ID|NAME [ID|NAME...]",
-		Short: "Gracefully stop a running command",
-		Args:  cobra.MinimumNArgs(1),
+		Use:               "stop [flags] ID|NAME [ID|NAME...]",
+		Short:             "Gracefully stop a running command",
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: completeCommandNames(rootCfg, runningStates...),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runStop(cmd, args, rootCfg, flagSignal, flagTimeout)
 		},
@@ -28,6 +29,7 @@ func stopCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	cmd.Flags().
 		StringVarP(&flagSignal, "signal", "s", "", "Signal to send before waiting for shutdown")
 	cmd.Flags().IntVarP(&flagTimeout, "timeout", "t", 10, "Seconds to wait before sending SIGKILL")
+	_ = cmd.RegisterFlagCompletionFunc("signal", signalCompletions)
 
 	parent.AddCommand(cmd)
 }

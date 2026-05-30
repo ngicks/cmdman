@@ -27,7 +27,8 @@ func composeSendKeysCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf 
 			"is the key sequence sent to each. Examples:\n" +
 			"  cmdman compose send-keys api worker -- C-c Enter\n" +
 			"  cmdman compose send-keys -- Enter   # broadcast to every command",
-		Args: cobra.ArbitraryArgs,
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeSendKeys(cmd, rootCfg, cf, args, flagLiteral, flagHex, flagRepeatCount)
 		},

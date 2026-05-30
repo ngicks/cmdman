@@ -14,9 +14,10 @@ func composeLsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "ls",
-		Short: "List compose projects",
-		Args:  cobra.NoArgs,
+		Use:               "ls",
+		Short:             "List compose projects",
+		Args:              cobra.NoArgs,
+		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeLs(cmd, rootCfg, flagFormat)
 		},

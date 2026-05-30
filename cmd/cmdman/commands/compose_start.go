@@ -14,15 +14,17 @@ func composeStartCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *co
 	)
 
 	cmd := &cobra.Command{
-		Use:   "start [COMMAND...]",
-		Short: "Start compose commands honoring after.Condition",
-		Args:  cobra.ArbitraryArgs,
+		Use:               "start [COMMAND...]",
+		Short:             "Start compose commands honoring after.Condition",
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeStart(cmd, rootCfg, cf, args, flagProgress)
 		},
 	}
 
 	cmd.Flags().StringVar(&flagProgress, "progress", "auto", cli.ProgressFlagUsage)
+	_ = cmd.RegisterFlagCompletionFunc("progress", progressCompletions)
 
 	parent.AddCommand(cmd)
 }

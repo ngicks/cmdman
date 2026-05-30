@@ -11,10 +11,11 @@ func monitorCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	var flagID string
 
 	cmd := &cobra.Command{
-		Use:    "__monitor",
-		Short:  "Internal monitor process (do not call directly)",
-		Hidden: true,
-		Args:   cobra.NoArgs,
+		Use:               "__monitor",
+		Short:             "Internal monitor process (do not call directly)",
+		Hidden:            true,
+		Args:              cobra.NoArgs,
+		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMonitor(cmd, args, rootCfg, flagID)
 		},

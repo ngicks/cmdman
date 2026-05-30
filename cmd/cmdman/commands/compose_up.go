@@ -15,9 +15,10 @@ func composeUpCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *compo
 	)
 
 	cmd := &cobra.Command{
-		Use:   "up [COMMAND...]",
-		Short: "Create and start compose commands (detached)",
-		Args:  cobra.ArbitraryArgs,
+		Use:               "up [COMMAND...]",
+		Short:             "Create and start compose commands (detached)",
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeUp(cmd, rootCfg, cf, args, flagRemoveOrphan, flagProgress)
 		},
@@ -26,6 +27,7 @@ func composeUpCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *compo
 	cmd.Flags().BoolVar(&flagRemoveOrphan, "remove-orphan", false,
 		"Remove stopped orphan commands (running orphans are skipped)")
 	cmd.Flags().StringVar(&flagProgress, "progress", "auto", cli.ProgressFlagUsage)
+	_ = cmd.RegisterFlagCompletionFunc("progress", progressCompletions)
 
 	parent.AddCommand(cmd)
 }

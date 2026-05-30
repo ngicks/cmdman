@@ -17,9 +17,10 @@ func restartCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "restart [flags] ID|NAME [ID|NAME...]",
-		Short: "Stop and start commands (alias of stop followed by start)",
-		Args:  cobra.MinimumNArgs(1),
+		Use:               "restart [flags] ID|NAME [ID|NAME...]",
+		Short:             "Stop and start commands (alias of stop followed by start)",
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: completeCommandNames(rootCfg, runningStates...),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRestart(cmd, args, rootCfg, flagSignal, flagTimeout)
 		},
@@ -28,6 +29,7 @@ func restartCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	cmd.Flags().
 		StringVarP(&flagSignal, "signal", "s", "", "Signal to send before waiting for shutdown")
 	cmd.Flags().IntVarP(&flagTimeout, "timeout", "t", 10, "Seconds to wait before sending SIGKILL")
+	_ = cmd.RegisterFlagCompletionFunc("signal", signalCompletions)
 
 	parent.AddCommand(cmd)
 }

@@ -24,9 +24,10 @@ func logsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "logs [flags] ID|NAME",
-		Short: "Show command output from the on-disk log file",
-		Args:  cobra.ExactArgs(1),
+		Use:               "logs [flags] ID|NAME",
+		Short:             "Show command output from the on-disk log file",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeCommandNames(rootCfg),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runLogs(
 				cmd, args, rootCfg,

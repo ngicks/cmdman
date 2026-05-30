@@ -13,9 +13,10 @@ func inspectCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "inspect ID|NAME",
-		Short: "Show merged command definition, runtime state, and exit history",
-		Args:  cobra.ExactArgs(1),
+		Use:               "inspect ID|NAME",
+		Short:             "Show merged command definition, runtime state, and exit history",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeCommandNames(rootCfg),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runInspect(cmd, args, rootCfg, flagFormat)
 		},

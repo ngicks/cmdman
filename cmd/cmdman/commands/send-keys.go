@@ -18,6 +18,17 @@ func sendKeysCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		Aliases: []string{"send"},
 		Short:   "Send key input to a running command PTY",
 		Args:    cobra.MinimumNArgs(2),
+		// Only the first positional is a command target; the rest are key names.
+		ValidArgsFunction: func(
+			cmd *cobra.Command,
+			args []string,
+			toComplete string,
+		) ([]cobra.Completion, cobra.ShellCompDirective) {
+			if len(args) > 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			return completeCommandNames(rootCfg, runningStates...)(cmd, args, toComplete)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSendKeys(cmd, args, rootCfg, flagLiteral, flagHex, flagRepeatCount)
 		},

@@ -18,6 +18,9 @@ func runCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		Use:   "run [flags] -- COMMAND [ARGS...]",
 		Short: "Create and start a new command",
 		Args:  cobra.MinimumNArgs(1),
+		// Positional args are an executable and its arguments; the shell's
+		// default file completion is the right behavior, so ValidArgsFunction
+		// is intentionally left unset.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRun(cmd, args, rootCfg, &flags, flagAttach)
 		},

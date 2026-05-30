@@ -18,9 +18,10 @@ func composeAttachCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *c
 	var flags attachFlags
 
 	cmd := &cobra.Command{
-		Use:   "attach [flags] SERVICE",
-		Short: "Attach to a running compose command's PTY",
-		Args:  cobra.ExactArgs(1),
+		Use:               "attach [flags] SERVICE",
+		Short:             "Attach to a running compose command's PTY",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeAttach(cmd, rootCfg, cf, args[0], flags)
 		},

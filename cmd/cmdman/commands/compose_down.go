@@ -14,15 +14,17 @@ func composeDownCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *com
 	)
 
 	cmd := &cobra.Command{
-		Use:   "down [COMMAND...]",
-		Short: "Stop and remove compose commands",
-		Args:  cobra.ArbitraryArgs,
+		Use:               "down [COMMAND...]",
+		Short:             "Stop and remove compose commands",
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeDown(cmd, rootCfg, cf, args, flagProgress)
 		},
 	}
 
 	cmd.Flags().StringVar(&flagProgress, "progress", "auto", cli.ProgressFlagUsage)
+	_ = cmd.RegisterFlagCompletionFunc("progress", progressCompletions)
 
 	parent.AddCommand(cmd)
 }

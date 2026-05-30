@@ -14,9 +14,10 @@ func composeInspectCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *
 	)
 
 	cmd := &cobra.Command{
-		Use:   "inspect [COMMAND...]",
-		Short: "Show merged definition, state, and exit history for compose commands",
-		Args:  cobra.ArbitraryArgs,
+		Use:               "inspect [COMMAND...]",
+		Short:             "Show merged definition, state, and exit history for compose commands",
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeInspect(cmd, rootCfg, cf, args, flagFormat)
 		},

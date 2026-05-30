@@ -14,9 +14,10 @@ func composeSignalCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *c
 	)
 
 	cmd := &cobra.Command{
-		Use:   "signal [COMMAND...]",
-		Short: "Send a signal to compose commands",
-		Args:  cobra.ArbitraryArgs,
+		Use:               "signal [COMMAND...]",
+		Short:             "Send a signal to compose commands",
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeSignal(cmd, rootCfg, cf, args, flagSignal)
 		},
@@ -26,6 +27,7 @@ func composeSignalCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *c
 		&flagSignal, "signal", "s", "",
 		"Signal to send (e.g. SIGTERM, HUP, 15); required",
 	)
+	_ = cmd.RegisterFlagCompletionFunc("signal", signalCompletions)
 
 	parent.AddCommand(cmd)
 }
