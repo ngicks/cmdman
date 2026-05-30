@@ -2,10 +2,6 @@ package compose
 
 import (
 	"context"
-	"fmt"
-
-	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
 // UpOption configures an Up operation (a Create followed by a Start), so it
@@ -39,45 +35,13 @@ func (s *Service) Up(
 		return nil, err
 	}
 
-	stateByCommand, err := s.snapshotProjectStates(ctx, spec.WorkDir, spec.Project)
+	starts, err := s.reconcileStart(ctx, spec, opts.CreateOption.CommandNames)
 	if err != nil {
 		return nil, err
 	}
-
-	restrict := resolveTargetCommands(spec, opts.CreateOption.CommandNames)
-	starts := startInDAGOrder(ctx, s.svc, spec, stateByCommand, restrict)
 
 	return &UpResult{
 		CreateResult: *createResult,
 		Starts:       starts,
 	}, nil
-}
-
-// snapshotProjectStates fetches the current state of every project-labeled
-// command so the DAG starter can apply idempotency and pre-snapshot fast paths.
-func (s *Service) snapshotProjectStates(
-	ctx context.Context,
-	workDir, project string,
-) (map[string]model.EventType, error) {
-	existing, err := s.svc.List(ctx, cmdman.ListRequest{
-		AllStates: true,
-		Labels: map[string]string{
-			LabelWorkdir: workDir,
-			LabelProject: project,
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list existing commands before start: %w", err)
-	}
-	stateByCommand := map[string]model.EventType{}
-	for _, e := range existing {
-		if e.ConfigJSON == nil {
-			continue
-		}
-		cmdName := e.ConfigJSON.Labels[LabelCommand]
-		if cmdName != "" {
-			stateByCommand[cmdName] = e.State
-		}
-	}
-	return stateByCommand, nil
 }

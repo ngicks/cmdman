@@ -1107,3 +1107,296 @@ func TestComposeEmptyProjectTarget(t *testing.T) {
 		t.Fatalf("expected empty-project log on stderr; got stderr:\n%s", stderr)
 	}
 }
+
+// ---- reconciliation: re-start, dependency conditions, concurrency -----------
+
+// composeCounterYAML produces a YAML whose single command appends one line to
+// counterPath each time it runs, so re-runs are observable by counting lines.
+func composeCounterYAML(name, counterPath string) string {
+	q := shellQuote(counterPath)
+	return fmt.Sprintf(`name: %s
+commands:
+  alpha:
+    args: [sh, -c, "echo run >> %s"]
+`, name, q)
+}
+
+// composeMissingBinYAML points the single command at scriptPath as argv[0]. When
+// scriptPath does not exist, the monitor sets state=failed; once materialised,
+// the command can be started again.
+func composeMissingBinYAML(name, scriptPath string) string {
+	return fmt.Sprintf(`name: %s
+commands:
+  alpha:
+    args: [%s]
+`, name, shellQuote(scriptPath))
+}
+
+// composeTwoSlowYAML produces two independent long-running commands that each
+// write a marker file on start, then sleep, so concurrent start-up is observable
+// via marker files rather than timing.
+func composeTwoSlowYAML(name, aMarker, bMarker string) string {
+	return fmt.Sprintf(`name: %s
+commands:
+  alpha:
+    args: [sh, -c, "echo started > %s; sleep 30"]
+  beta:
+    args: [sh, -c, "echo started > %s; sleep 30"]
+`, name, shellQuote(aMarker), shellQuote(bMarker))
+}
+
+// shellQuote single-quotes a path for embedding in a double-quoted YAML scalar.
+func shellQuote(path string) string {
+	return "'" + strings.ReplaceAll(path, "'", `'\''`) + "'"
+}
+
+// countNonEmptyLines counts non-blank lines in s.
+func countNonEmptyLines(s string) int {
+	n := 0
+	for line := range strings.SplitSeq(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// readFile returns the file contents, or "" when the file does not exist yet so
+// callers can poll for it.
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ""
+		}
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
+}
+
+// composeCommandID returns the cmdman ID of a single compose command, or "".
+func composeCommandID(ctx context.Context, e *testEnv, wd, project, command string) string {
+	for _, entry := range e.lsJSON(ctx,
+		"-l", "cmdman.compose.workdir="+wd,
+		"-l", "cmdman.compose.project="+project,
+		"-l", "cmdman.compose.command="+command,
+	) {
+		if id, ok := entry["ID"].(string); ok {
+			return id
+		}
+	}
+	return ""
+}
+
+// TestComposeUpRestartsExitedCommand verifies that a second `compose up` starts
+// a command that already exited, increasing its run count.
+func TestComposeUpRestartsExitedCommand(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-up-restart"
+	counter := filepath.Join(wd, "runs.txt")
+	writeComposeFile(t, wd, composeCounterYAML(project, counter))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	composePath := filepath.Join(wd, "cmd-compose.yaml")
+
+	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up"); err != nil {
+		t.Fatalf("first compose up failed: %v", err)
+	}
+	alphaID := composeCommandID(ctx, env, wd, project, "alpha")
+	if alphaID == "" {
+		t.Fatal("alpha command not found after first up")
+	}
+	env.waitForState(ctx, alphaID, "exited", 10*time.Second)
+	if got := countNonEmptyLines(readFile(t, counter)); got != 1 {
+		t.Fatalf("expected 1 run after first up, got %d", got)
+	}
+
+	// alpha is exited; a second up must start it again.
+	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up"); err != nil {
+		t.Fatalf("second compose up failed: %v", err)
+	}
+	waitUntil(t, 10*time.Second, func() bool {
+		return countNonEmptyLines(readFile(t, counter)) >= 2
+	}, "alpha re-ran on the second up")
+}
+
+// TestComposeStartFromFailedState verifies `compose start` re-starts a command
+// left in the failed state once its executable is fixed, mirroring cmdman start.
+func TestComposeStartFromFailedState(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-start-failed"
+	scriptPath := filepath.Join(wd, "later.sh") // does not exist yet
+	writeComposeFile(t, wd, composeMissingBinYAML(project, scriptPath))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	composePath := filepath.Join(wd, "cmd-compose.yaml")
+	if _, _, err := env.exec(
+		ctx,
+		"compose",
+		"--workdir",
+		wd,
+		"-f",
+		composePath,
+		"create",
+	); err != nil {
+		t.Fatalf("compose create failed: %v", err)
+	}
+	alphaID := composeCommandID(ctx, env, wd, project, "alpha")
+	if alphaID == "" {
+		t.Fatal("alpha command not found after create")
+	}
+
+	// First start must fail: argv[0] does not exist → failed state.
+	if _, _, err := env.exec(
+		ctx,
+		"compose",
+		"--workdir",
+		wd,
+		"-f",
+		composePath,
+		"start",
+	); err == nil {
+		t.Fatal("expected compose start to fail while the binary is missing")
+	}
+	env.waitForState(ctx, alphaID, "failed", 10*time.Second)
+
+	// Materialise the binary; start from failed must now succeed.
+	must(t, os.WriteFile(scriptPath, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+
+	stdout, stderr, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "start")
+	if err != nil {
+		t.Fatalf("compose start from failed should succeed: %v\nstdout:\n%s\nstderr:\n%s",
+			err, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "started      alpha") {
+		t.Fatalf("expected started line for alpha; got:\n%s", stdout)
+	}
+	env.waitForState(ctx, alphaID, "exited", 10*time.Second)
+	if code, _ := env.inspectJSON(ctx, alphaID)["exit_code"].(float64); code != 0 {
+		t.Fatalf("expected exit_code=0 after restart from failed, got %v", code)
+	}
+}
+
+// TestComposeUpStartedConditionDoesNotWaitForExit verifies a `started` condition
+// releases the dependent promptly while the long-running dependency keeps
+// running, rather than blocking on its termination.
+func TestComposeUpStartedConditionDoesNotWaitForExit(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-up-started"
+	writeComposeFile(
+		t,
+		wd,
+		composeAfterYAML(project),
+	) // api+worker sleep 30, worker after api started
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	composePath := filepath.Join(wd, "cmd-compose.yaml")
+	start := time.Now()
+	stdout, stderr, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up")
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("compose up failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if elapsed > 20*time.Second {
+		t.Fatalf(
+			"up blocked on the long-running dependency (%v); started condition must not wait",
+			elapsed,
+		)
+	}
+
+	// Both commands should be running concurrently; neither has exited.
+	for _, name := range []string{"api", "worker"} {
+		id := composeCommandID(ctx, env, wd, project, name)
+		if id == "" {
+			t.Fatalf("%s command not found", name)
+		}
+		env.waitForState(ctx, id, "started", 10*time.Second)
+	}
+}
+
+// TestComposeUpReRunHonorsCompletedDependency is the e2e form of the core fix: a
+// `completed` dependent must wait for the dependency's NEW run, not proceed from
+// its stale terminal state. The marker is deleted between runs; a buggy
+// implementation would let worker observe "missing".
+func TestComposeUpReRunHonorsCompletedDependency(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-up-rerun-completed"
+	markerPath := filepath.Join(wd, "marker.txt")
+	writeComposeFile(t, wd, composeDependencyMarkerYAML(project, markerPath))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	composePath := filepath.Join(wd, "cmd-compose.yaml")
+	workerLogs := func() string {
+		id := composeCommandID(ctx, env, wd, project, "worker")
+		if id == "" {
+			return ""
+		}
+		out, _, _ := env.exec(ctx, "logs", id)
+		return out
+	}
+
+	// First run: api writes the marker, worker observes it after api completes.
+	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up"); err != nil {
+		t.Fatalf("first compose up failed: %v", err)
+	}
+	waitUntil(t, 15*time.Second, func() bool {
+		return countNonEmptyLines(workerLogs()) >= 1
+	}, "worker ran once")
+
+	// Remove the marker and re-run. With the fix, up waits for api's new
+	// completion (which re-creates the marker) before starting worker.
+	must(t, os.Remove(markerPath))
+	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up"); err != nil {
+		t.Fatalf("second compose up failed: %v", err)
+	}
+	waitUntil(t, 15*time.Second, func() bool {
+		return countNonEmptyLines(workerLogs()) >= 2
+	}, "worker ran a second time")
+
+	if strings.Contains(workerLogs(), "missing") {
+		t.Fatalf("worker proceeded from api's stale terminal state; got logs:\n%s", workerLogs())
+	}
+}
+
+// TestComposeUpIndependentCommandsStartConcurrently verifies two independent
+// slow commands both begin before either could finish, asserted via marker
+// files.
+func TestComposeUpIndependentCommandsStartConcurrently(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-up-concurrent"
+	aMarker := filepath.Join(wd, "alpha.started")
+	bMarker := filepath.Join(wd, "beta.started")
+	writeComposeFile(t, wd, composeTwoSlowYAML(project, aMarker, bMarker))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	composePath := filepath.Join(wd, "cmd-compose.yaml")
+	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up"); err != nil {
+		t.Fatalf("compose up failed: %v", err)
+	}
+
+	// Both commands sleep 30s, so both markers can only coexist if both began.
+	waitUntil(t, 15*time.Second, func() bool {
+		return fileExists(aMarker) && fileExists(bMarker)
+	}, "both independent commands started")
+
+	for _, name := range []string{"alpha", "beta"} {
+		id := composeCommandID(ctx, env, wd, project, name)
+		env.waitForState(ctx, id, "started", 10*time.Second)
+	}
+}

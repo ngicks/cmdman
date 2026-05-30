@@ -57,13 +57,10 @@ func (s *Service) startWithSpec(
 		return nil, err
 	}
 
-	stateByCommand, err := s.snapshotProjectStates(ctx, spec.WorkDir, spec.Project)
+	starts, err := s.reconcileStart(ctx, spec, opts.CommandNames)
 	if err != nil {
 		return nil, err
 	}
-
-	restrict := resolveTargetCommands(spec, opts.CommandNames)
-	starts := startInDAGOrder(ctx, s.svc, spec, stateByCommand, restrict)
 	return &StartResult{Starts: starts}, nil
 }
 
