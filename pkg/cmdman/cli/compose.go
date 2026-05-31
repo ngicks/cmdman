@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"go.yaml.in/yaml/v4"
+
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/compose"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
@@ -182,6 +184,19 @@ func RenderComposeInspect(out io.Writer, outputs []*cmdman.InspectOutput, format
 		return renderJSONArray(out, outputs)
 	}
 	return renderTemplate(out, outputs, format)
+}
+
+// RenderComposeConfig writes the resolved project as a canonical compose YAML
+// document — the file's own format, fully resolved. The encoder sorts map keys
+// and Env is pre-sorted, so the output is byte-stable for a given spec.
+func RenderComposeConfig(out io.Writer, spec compose.CanonicalSpec) error {
+	enc := yaml.NewEncoder(out)
+	enc.SetIndent(2)
+	if err := enc.Encode(spec); err != nil {
+		_ = enc.Close()
+		return fmt.Errorf("encode compose config: %w", err)
+	}
+	return enc.Close()
 }
 
 // renderJSONArray writes v as an indented JSON document. A nil slice is
