@@ -11,6 +11,7 @@ available from the CLI:
 - start commands
 - stop commands
 - restart commands
+- attach commands
 - remove commands
 
 This plan is intentionally limited to the initial shape of the TUI. More flows can
@@ -42,19 +43,18 @@ The `Commands` tab is a side-by-side browser:
 +--------------------------------------+---------------------------------------+
 | Commands                             | Preview                               |
 |                                      |                                       |
-| v ⿻ api-stack                        | $ cmdman logs api-stack/web          |
+| v ⿻ local-dev             active     | $ cmdman logs local-dev/watcher      |
+|   > watcher          running         |                                       |
+|     seed-db          stopped         | 2026-05-30T09:00:00Z watching files  |
+|                                      | 2026-05-30T09:00:01Z ready           |
+| v ⿻ api-stack                        |                                       |
 |   > web              running         |                                       |
-|     worker           stopped         | 2026-05-30T09:00:00Z starting web... |
-|     migrate          exited(0)       | 2026-05-30T09:00:01Z listening :8080 |
-|                                      | 2026-05-30T09:00:05Z GET /health 200 |
+|     worker           stopped         |                                       |
+|     migrate          exited(0)       |                                       |
 | > ⿻ tools                            |                                       |
 |                                      |                                       |
-| v ⿻ local-dev                        |                                       |
-|     watcher          running         |                                       |
-|     seed-db          stopped         |                                       |
-|                                      |                                       |
 +--------------------------------------+---------------------------------------+
-| tab next  j/k move  h/l fold  / filter  enter start/stop  r restart  x remove |
+| tab next  j/k move  h/l fold  / filter  q start  e stop  r restart  a attach |
 | Ctrl+c or Ctrl+d to exit                                                v0.1.0 |
 +------------------------------------------------------------------------------+
 ```
@@ -69,8 +69,8 @@ The `Compose` tab lists compose projects found under the default directory.
 +------------------------------------------------------------------------------+
 | Compose projects in ~/.config/cmdman/compose                                  |
 |                                                                              |
-| > ⿻ api-stack                         3 commands        modified 2026-05-30   |
-|   ⿻ local-dev                         2 commands        modified 2026-05-29   |
+| > ⿻ local-dev        active           2 commands        mux: default          |
+|   ⿻ api-stack                         3 commands        mux: dashboard        |
 |   ⿻ tools                             0 commands        modified 2026-05-20   |
 |                                                                              |
 |                                                                              |
@@ -79,7 +79,7 @@ The `Compose` tab lists compose projects found under the default directory.
 |                                                                              |
 |                                                                              |
 +------------------------------------------------------------------------------+
-| tab next  j/k move  / filter  enter open commands  r refresh                  |
+| tab next  j/k move  / filter  enter open  c cycle mux  l layouts  r refresh   |
 | Ctrl+c or Ctrl+d to exit                                                v0.1.0 |
 +------------------------------------------------------------------------------+
 ```
@@ -129,15 +129,19 @@ In the `Compose` tab, filtering should match:
 Commands are gathered under compose projects. Each compose project is a foldable
 element.
 
+Projects tied to the current working directory are shown at the top before other
+projects. These rows should carry an `active` marker so users can distinguish
+the current workspace from other configured compose projects.
+
 ```text
+v ⿻ local-dev        active
+  > watcher          running
+    seed-db          stopped
 v ⿻ api-stack
   > web              running
     worker           stopped
     migrate          exited(0)
 > ⿻ tools
-v ⿻ local-dev
-    watcher          running
-    seed-db          stopped
 ```
 
 Fold state:
@@ -161,10 +165,15 @@ The `Compose` tab lists compose projects in the default compose directory.
 Initial behavior:
 
 - show one row per discovered compose project
+- show projects tied to the current working directory at the top
 - use `⿻` as the app/project marker
-- show project name, command count, and a compact metadata column
+- show project name, active marker, command count, and a compact metadata column
 - `enter` opens the selected project in the `Commands` tab by applying a project
   filter or moving selection to that project
+- `c` cycles the selected project's mux layout when the project has a `mux:`
+  section
+- `l` opens a mux layout selector for the selected project when the project has
+  a `mux:` section
 - `r` refreshes the project list
 - empty state is shown when no compose projects exist in the default directory
 
@@ -172,6 +181,51 @@ Example empty state:
 
 ```text
 No compose projects found in ~/.config/cmdman/compose.
+```
+
+### Compose Mux Layouts
+
+The `Compose` tab provides a thin wrapper over `cmdman compose mux` for projects
+that define a `mux:` section. The TUI must be started with `cmdman tui --popup`
+to use this mux-popup workflow.
+
+Mux behavior:
+
+- `c` cycles to the next mux layout for the selected project
+- `l` shows the available mux layouts for the selected project
+- `enter` selects the highlighted layout in the layout selector and shows it
+- projects without a `mux:` section show a status message instead of opening the
+  selector
+- `cmdman tui --popup` accepts an optional driver value: `--popup=tmux` or
+  `--popup=zellij`
+- if `cmdman tui --popup` is specified without a value, mux driver inference
+  chooses the popup backend
+- if the TUI was not started with `--popup`, mux layout display is rejected with
+  a status message
+- if popup mode is unavailable and the current terminal window is already split
+  into multiple panes, mux layout display is rejected with a status message
+- mux execution should use the same compose selection as the highlighted project
+
+Layout selector:
+
+```text
++------------------------------------------------------------------------------+
+| Select mux layout                                                             |
+|                                                                              |
+| project: local-dev                                                            |
+|                                                                              |
+| > default                                                                     |
+|   logs                                                                        |
+|   dashboard                                                                   |
+|                                                                              |
+| enter select    esc cancel                                                    |
++------------------------------------------------------------------------------+
+```
+
+Example rejection:
+
+```text
+Cannot show mux layout: start TUI with --popup.
 ```
 
 ### Preview Pane
@@ -214,20 +268,23 @@ h / left       fold selected project, or move focus to command list
 l / right      open selected project, or move focus to preview
 /              focus filter input
 esc            leave filter input or cancel pending action
-enter          start stopped command, stop running command
+enter          open selected item, when the active tab defines an open action
+q              start selected command
+e              stop selected command
+a              attach selected command after confirmation
 r              restart selected command
 x              remove selected command after confirmation
-q              quit
 ?              show help
 ```
 
 The active tab can add tab-specific meanings. In the `Compose` tab, `enter`
 opens the selected compose project in the `Commands` tab, and `r` refreshes the
-project list.
+project list. `c` cycles the selected project's mux layout when available, and
+`l` opens the mux layout selector.
 
 Open questions for later:
 
-- whether `enter` should always open an action menu instead of toggling
+- whether `enter` should open an action menu on command rows
 - whether preview scrolling should use focus plus `j/k`, or separate keys like
   `ctrl-d` and `ctrl-u`
 - whether project rows should be selectable or only foldable
@@ -235,6 +292,45 @@ Open questions for later:
 ## Lifecycle Actions
 
 Actions should be available from the selected command row.
+
+### Attach
+
+Attach to the selected command after confirmation.
+
+Attach should temporarily hand terminal ownership from the TUI to the command
+attach session. When the user detaches, control returns to the TUI menu at the
+previous selection.
+
+Expected TUI behavior:
+
+- `a` opens an attach confirmation popup
+- selection moves between `<yes>` and `<cancel>`
+- `enter` confirms the selected popup action
+- TUI rendering is suspended before attach starts
+- terminal state is restored for the attach session
+- detach returns to the TUI menu and redraws the active tab
+- command exit returns to the TUI menu with a status message
+- attach errors are reported in the bottom status area after the TUI redraws
+
+Confirmation layout:
+
+```text
++------------------------------------------------------------------------------+
+| Attach to command?                                                            |
+|                                                                              |
+| project: api-stack                                                            |
+| command: web                                                                  |
+|                                                                              |
+|                         <yes>        <cancel>                                 |
++------------------------------------------------------------------------------+
+```
+
+Implementation note:
+
+The existing attach primitive supports this flow. The TUI should open a session
+with `Service.OpenAttachSession` and call `cli.Attach` directly so detach keys
+return to the TUI. Do not route through the default Cobra `cmdman attach` flow,
+because that command uses sticky attach behavior unless `--auto-exit` is set.
 
 ### Start
 
@@ -272,6 +368,11 @@ Expected TUI behavior:
 
 Remove the selected command after confirmation.
 
+Expected TUI behavior:
+
+- selection moves between `<yes>` and `<cancel>`
+- `enter` confirms the selected popup action
+
 Confirmation layout:
 
 ```text
@@ -281,7 +382,7 @@ Confirmation layout:
 | project: api-stack                                                            |
 | command: web                                                                  |
 |                                                                              |
-| y confirm    n cancel                                                         |
+|                         <yes>        <cancel>                                 |
 +------------------------------------------------------------------------------+
 ```
 
@@ -301,6 +402,9 @@ View state:
 - compose project list scroll position
 - pending confirmation dialog
 - pending action per command
+- attach-in-progress state while the TUI is suspended
+- mux layout selector state
+- selected mux layout per compose project
 
 Command state:
 
@@ -316,19 +420,28 @@ Compose project state:
 - project path in the default compose directory
 - command count
 - last modified time or other compact metadata
+- whether the project is tied to the current working directory
+- available mux layouts, when the project has a `mux:` section
+- selected mux layout
 
 ## Refresh Model
 
-The first version can use periodic refresh plus direct refresh after actions.
+The TUI should prefer event-driven updates and use polling as a fallback.
 
 Expected behavior:
 
-- command list refreshes periodically
-- compose project list refreshes periodically while the `Compose` tab is active
-- selected command preview refreshes periodically
+- subscribe to the events API while the TUI is running
+- update command list state when command lifecycle events arrive
+- update the selected command preview when output/log events arrive, if available
+- periodically refresh command list state as a fallback when the event stream is
+  unavailable or reconnecting
+- periodically refresh the compose project list while the `Compose` tab is active
+- preserve active-project ordering when compose project state refreshes
 - lifecycle actions trigger an immediate refresh when they finish
 - current selection is preserved when possible
 - fold state is preserved across refreshes
+- event stream errors are reported in the bottom status area without closing the
+  TUI
 
 If the selected command disappears after refresh, selection should move to the
 nearest visible command row.
@@ -338,12 +451,20 @@ nearest visible command row.
 Add `cmdman tui` as a thin Cobra command that delegates to a package outside
 `cmd/`.
 
+`cmdman tui` must support `--popup[=tmux|zellij]` as a bool-style optional-value
+flag. When `--popup` is present without a value, use the same kind of driver
+inference as mux already uses. Mux layout actions in the TUI require this flag.
+
 Suggested package boundary:
 
 - `cmd/cmdman`: Cobra wiring only
 - `pkg/cmdman/cli`: CLI-facing command composition
 - `pkg/cmdman/tui`: TUI model, update loop, rendering, and key handling
 - existing usecase/store/log packages: command lifecycle and output data
+
+Mux actions should stay a thin wrapper around existing compose mux behavior. The
+TUI should require its own `--popup` mode for mux layout display and only reject
+multiple existing panes when popup mode is unavailable.
 
 The TUI package should be testable without a real terminal by testing model
 updates, filtering, fold behavior, and action dispatch separately from rendering.
@@ -356,8 +477,16 @@ Focus tests on behavior that can regress without a real terminal:
 - filtering keeps commands grouped under projects
 - fold state hides and reveals command rows
 - tab switching preserves tab-local selection and filter state
+- active projects tied to the current working directory sort above other projects
 - compose project list loads projects from the default directory
+- compose mux layout selector lists layouts from a project's `mux:` section
+- `cmdman tui --popup` infers a popup driver when `--popup` has no value
+- compose mux layout display rejects when TUI was not started with `--popup`
+- compose mux layout display rejects multiple existing panes only when popup mode
+  is unavailable
 - selection moves only across visible rows
 - selection is preserved across refresh when the command still exists
+- attach confirmation requires explicit confirmation
+- detach from attach returns to the previous TUI selection
 - remove confirmation requires explicit confirmation
 - lifecycle action errors are surfaced in view state
