@@ -6,6 +6,9 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,6 +51,170 @@ func (f *fakeAttachSession) Signal(context.Context, int32) error { return nil }
 func (f *fakeAttachSession) Resize(int, int) error               { return nil }
 func (f *fakeAttachSession) CloseSend() error                    { return nil }
 func (f *fakeAttachSession) Close() error                        { return nil }
+
+// scriptedSession is a cli.AttachSession that yields the bytes in chunks once
+// (one per Recv call) and then behaves like a command that exited: it returns
+// io.EOF, unless blockUntilClose is set, in which case Recv blocks until Close
+// is called (standing in for a still-running command being torn down).
+type scriptedSession struct {
+	chunks          [][]byte
+	idx             int
+	blockUntilClose bool
+	closed          chan struct{}
+	closeOnce       sync.Once
+}
+
+func newScriptedSession(blockUntilClose bool, chunks ...[]byte) *scriptedSession {
+	return &scriptedSession{
+		chunks:          chunks,
+		blockUntilClose: blockUntilClose,
+		closed:          make(chan struct{}),
+	}
+}
+
+func (s *scriptedSession) Recv() ([]byte, error) {
+	if s.idx < len(s.chunks) {
+		c := s.chunks[s.idx]
+		s.idx++
+		return c, nil
+	}
+	if s.blockUntilClose {
+		<-s.closed
+	}
+	return nil, io.EOF
+}
+
+func (s *scriptedSession) SendStdin([]byte) error              { return nil }
+func (s *scriptedSession) Signal(context.Context, int32) error { return nil }
+func (s *scriptedSession) Resize(int, int) error               { return nil }
+func (s *scriptedSession) CloseSend() error                    { return nil }
+func (s *scriptedSession) Close() error {
+	s.closeOnce.Do(func() { close(s.closed) })
+	return nil
+}
+
+// pipeWriteCloser drains an io.Pipe into a mutex-guarded buffer, mirroring the
+// real stdiopipe.Stdout: Write goes through the pipe, and Close() actually
+// closes the pipe (so writes after Close fail and the drain goroutine exits).
+// A plain bytes.Buffer with a no-op Close would mask the reattach bug because
+// its writes never fail.
+type pipeWriteCloser struct {
+	pw   *io.PipeWriter
+	mu   *sync.Mutex
+	buf  *bytes.Buffer
+	done chan struct{}
+}
+
+func newPipeWriteCloser() *pipeWriteCloser {
+	pr, pw := io.Pipe()
+	w := &pipeWriteCloser{
+		pw:   pw,
+		mu:   &sync.Mutex{},
+		buf:  &bytes.Buffer{},
+		done: make(chan struct{}),
+	}
+	go func() {
+		defer close(w.done)
+		b := make([]byte, 4096)
+		for {
+			n, err := pr.Read(b)
+			if n > 0 {
+				w.mu.Lock()
+				w.buf.Write(b[:n])
+				w.mu.Unlock()
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return w
+}
+
+func (w *pipeWriteCloser) Write(p []byte) (int, error) { return w.pw.Write(p) }
+func (w *pipeWriteCloser) Close() error                { return w.pw.Close() }
+
+func (w *pipeWriteCloser) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
+// TestAttachStickyReattachKeepsStdout verifies that output from attach
+// iterations AFTER the first still reaches the display sink. Attach closes the
+// StdoutPipe it is handed on every exit; AttachSticky reuses one display sink
+// across iterations, so it must shield that sink from Attach's close. The
+// regression it guards: the command restarts and re-attaches, but its output
+// is written into a pipe Attach already closed and silently dropped — the mux
+// pane shows nothing ("restart but no reattach").
+func TestAttachStickyReattachKeepsStdout(t *testing.T) {
+	stdin, stdout := nonTTYStdio(t)
+	stdinPipeR, stdinPipeW := io.Pipe()
+	t.Cleanup(func() { _ = stdinPipeW.Close(); _ = stdinPipeR.Close() })
+
+	sink := newPipeWriteCloser()
+
+	// State stays Running so the loop re-opens a session on each EOF without
+	// going through the wait prompt: the exact multi-iteration stdout reuse
+	// the bug lives in, minus the stdin timing of a 'r' keypress.
+	var openCount atomic.Int64
+	reached := make(chan struct{})
+	hooks := cli.StickyHooks{
+		State: func(context.Context) (cli.StickyState, error) {
+			return cli.StickyState{Running: true, Status: "started"}, nil
+		},
+		OpenSession: func(context.Context) (cli.AttachSession, error) {
+			k := openCount.Add(1)
+			switch k {
+			case 1:
+				return newScriptedSession(false, []byte("chunk-1;")), nil
+			case 2:
+				return newScriptedSession(false, []byte("chunk-2;")), nil
+			default:
+				// Third open: both prior iterations have delivered their
+				// output and EOF'd. Block here until ctx cancel tears it down.
+				close(reached)
+				return newScriptedSession(true), nil
+			}
+		},
+		Restart: func(context.Context) error { return nil },
+	}
+	opts := cli.AttachOptions{
+		Stdin:      stdin,
+		Stdout:     stdout,
+		StdinPipe:  stdinPipeR,
+		StdoutPipe: sink,
+		DetachKeys: "ctrl-p,ctrl-q",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- cli.AttachSticky(ctx, hooks, opts) }()
+
+	select {
+	case <-reached:
+	case <-time.After(3 * time.Second):
+		cancel()
+		t.Fatal("AttachSticky did not reach the third attach iteration")
+	}
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("AttachSticky did not return after ctx cancel")
+	}
+
+	// Close the sink so its drain goroutine flushes and exits, then read it.
+	_ = sink.Close()
+	<-sink.done
+
+	got := sink.String()
+	assert.Assert(t, strings.Contains(got, "chunk-1;"),
+		"first-iteration output missing; got %q", got)
+	assert.Assert(t, strings.Contains(got, "chunk-2;"),
+		"reattach output dropped — Attach closed the shared StdoutPipe; got %q", got)
+}
 
 // TestAttachStickyRecoverableAttachErrorDropsToPrompt verifies that a non-EOF
 // attach error (e.g. the monitor tearing the stream down on stop/restart) does

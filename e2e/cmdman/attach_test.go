@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -217,6 +218,107 @@ func waitAttachExit(t *testing.T, cmd *exec.Cmd, timeout time.Duration) {
 	case <-time.After(timeout):
 		t.Fatal("attach did not exit")
 	}
+}
+
+// TestAttach_RestartReattachStreamsOutput reproduces the bug where, inside a
+// sticky attach (the default and what `compose mux` panes run), pressing 'r'
+// at the wait prompt restarts the command but its output never reaches the
+// pane — "restart but no reattach". The command prints a marker shortly after
+// each start and then exits, so the first attach EOFs to the wait prompt and
+// each (re)attach has a live window to stream the marker. After 'r', the
+// marker from the restarted run must appear in the pane.
+func TestAttach_RestartReattachStreamsOutput(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	const marker = "RUNMARK"
+	id := env.run(ctx, "run", "-t", "-n", "attach-reattach",
+		"--", "/bin/sh", "-c", "sleep 0.3; echo "+marker+"; sleep 0.4")
+	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
+
+	attach := exec.CommandContext(ctx, cmdmanBin, "attach", id)
+	attach.Env = append(
+		os.Environ(),
+		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
+		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
+	)
+
+	ptmx, err := pty.Start(attach)
+	if err != nil {
+		t.Fatalf("start attach pty: %v", err)
+	}
+	defer ptmx.Close()
+
+	var mu sync.Mutex
+	var out bytes.Buffer
+	go func() {
+		b := make([]byte, 4096)
+		for {
+			n, rerr := ptmx.Read(b)
+			if n > 0 {
+				chunk := b[:n]
+				mu.Lock()
+				out.Write(chunk)
+				mu.Unlock()
+				// Answer the terminal-capability probes lipgloss/termenv emit at
+				// attach startup, the same way a real terminal would. Without a
+				// reply the probe blocks waiting for the \x1b[6n (DSR) response
+				// and the sticky prompt never renders.
+				if bytes.Contains(chunk, []byte("\x1b]11;?")) {
+					_, _ = ptmx.Write([]byte("\x1b]11;rgb:0000/0000/0000\x1b\\"))
+				}
+				if bytes.Contains(chunk, []byte("\x1b[6n")) {
+					_, _ = ptmx.Write([]byte("\x1b[1;1R"))
+				}
+			}
+			if rerr != nil {
+				return
+			}
+		}
+	}()
+	snapshot := func() (string, int) {
+		mu.Lock()
+		defer mu.Unlock()
+		return out.String(), out.Len()
+	}
+
+	// Wait for the first run to exit and the sticky restart prompt to appear.
+	promptDeadline := time.Now().Add(5 * time.Second)
+	for {
+		s, _ := snapshot()
+		if strings.Contains(s, "press 'r' to restart") {
+			break
+		}
+		if time.Now().After(promptDeadline) {
+			t.Fatalf("sticky restart prompt never appeared; output:\n%q", s)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Everything up to here (including the first run's marker) precedes mark;
+	// the reattached run's output must show up after it.
+	_, mark := snapshot()
+	if _, err := ptmx.Write([]byte("r")); err != nil {
+		t.Fatalf("send restart key: %v", err)
+	}
+
+	deadline := time.Now().Add(6 * time.Second)
+	for {
+		s, _ := snapshot()
+		if len(s) >= mark && strings.Contains(s[mark:], marker) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("reattach streamed no output after restart; "+
+				"marker %q missing from post-restart output:\n%s", marker, s[min(mark, len(s)):])
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Detach cleanly with the default detach keys (ctrl-p, ctrl-q).
+	_, _ = ptmx.Write([]byte{0x10, 0x11})
+	waitAttachExit(t, attach, 5*time.Second)
 }
 
 func extractMarkedLine(t *testing.T, text, prefix string) string {

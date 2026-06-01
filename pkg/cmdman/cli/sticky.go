@@ -60,8 +60,10 @@ const (
 //   - opts.StdinPipe is consumed by an internal multiplexer for the duration
 //     of AttachSticky. Per-iteration [Attach] calls receive sub-pipes; closing
 //     them is safe (and expected — Attach does it on exit).
-//   - opts.StdoutPipe is passed through to every iteration unchanged.
-//     Callers should NOT close opts.StdoutPipe until AttachSticky returns.
+//   - opts.StdoutPipe is the shared display sink. Each iteration writes
+//     through a private pipe that drains into it, because Attach closes the
+//     StdoutPipe it is handed on exit; the shared sink itself is never closed
+//     by AttachSticky. The caller owns opts.StdoutPipe's lifecycle.
 //   - On return, AttachSticky stops the multiplexer pump but does NOT close
 //     opts.StdinPipe; the caller owns its lifecycle.
 func AttachSticky(
@@ -116,7 +118,33 @@ func AttachSticky(
 
 		iterOpts := opts
 		iterOpts.StdinPipe = mux.subPipe()
+
+		// Attach closes the StdoutPipe it is handed on exit — its documented
+		// single-use contract. AttachSticky reuses one opts.StdoutPipe across
+		// every iteration, so letting Attach close it would leave all post-
+		// first iterations writing display output into a dead pipe: the
+		// command restarts and re-attaches at the RPC layer, yet nothing
+		// reaches the terminal — the "restart but no reattach" the mux panes
+		// hit. Hand each iteration a private pipe that drains into the shared
+		// sink, and join the drain before looping so attach output stays
+		// ordered ahead of the next wait prompt (which writes opts.Stdout
+		// directly, bypassing this pipe).
+		stdoutR, stdoutW := io.Pipe()
+		drainDone := make(chan struct{})
+		go func() {
+			defer close(drainDone)
+			_, _ = io.Copy(opts.StdoutPipe, stdoutR)
+		}()
+		iterOpts.StdoutPipe = stdoutW
+
 		err = Attach(ctx, session, iterOpts)
+
+		// Attach already closed stdoutW; closing again is harmless and covers
+		// any early Attach return. The drain goroutine then sees EOF on
+		// stdoutR and exits, after flushing into the shared sink.
+		_ = stdoutW.Close()
+		<-drainDone
+
 		switch {
 		case errors.Is(err, ErrRemoteEOF):
 			// Command exited; loop back to prompt.
