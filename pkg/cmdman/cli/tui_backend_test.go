@@ -7,9 +7,10 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/cmdman/tui"
 )
 
-func TestComposeCommandInfosFiltersStandalone(t *testing.T) {
+func TestCommandInfosIncludesStandalone(t *testing.T) {
 	entries := []store.CommandEntry{
 		{
 			ID:    "c1",
@@ -28,29 +29,37 @@ func TestComposeCommandInfosFiltersStandalone(t *testing.T) {
 			ID:    "c2",
 			Name:  "standalone-tool",
 			State: model.EventTypeExited,
-			// No compose labels -> standalone, must be dropped.
-			ConfigJSON: &model.CommandConfig{Labels: map[string]string{}},
-		},
-		{
-			ID:    "c3",
-			Name:  "half-labeled",
-			State: model.EventTypeExited,
-			// Only project label, missing workdir -> still dropped.
-			ConfigJSON: &model.CommandConfig{Labels: map[string]string{
-				compose.LabelProject: "x",
-			}},
+			// No compose labels -> standalone; keeps its own working directory.
+			ConfigJSON: &model.CommandConfig{Dir: "/work/tool"},
 		},
 	}
-	got := composeCommandInfos(entries)
-	if len(got) != 1 {
-		t.Fatalf("expected only the compose-labeled command, got %d", len(got))
+	got := commandInfos(entries)
+	if len(got) != 2 {
+		t.Fatalf("expected compose + standalone commands, got %d", len(got))
 	}
-	c := got[0]
-	if c.ID != "c1" || c.Project != "api-stack" || c.Name != "web" {
-		t.Fatalf("unexpected command info: %+v", c)
+
+	byID := map[string]tui.CommandInfo{}
+	for _, c := range got {
+		byID[c.ID] = c
 	}
-	if c.LogDriver != logdriver.DriverK8sFile {
-		t.Fatalf("log driver should propagate, got %q", c.LogDriver)
+
+	web := byID["c1"]
+	if web.Project != "api-stack" || web.Name != "web" {
+		t.Fatalf("unexpected compose command info: %+v", web)
+	}
+	if web.LogDriver != logdriver.DriverK8sFile {
+		t.Fatalf("log driver should propagate, got %q", web.LogDriver)
+	}
+
+	tool := byID["c2"]
+	if tool.Project != "" {
+		t.Fatalf("standalone command should have empty project, got %q", tool.Project)
+	}
+	if tool.Name != "standalone-tool" {
+		t.Fatalf("standalone command name = %q, want standalone-tool", tool.Name)
+	}
+	if tool.Workdir != normalizePath("/work/tool") {
+		t.Fatalf("standalone workdir = %q, want %q", tool.Workdir, normalizePath("/work/tool"))
 	}
 }
 

@@ -41,32 +41,39 @@ func newServiceBackend(svc *cmdman.Service) tui.Backend {
 
 func (b *serviceBackend) Cwd() string { return b.cwd }
 
-// ListCommands lists compose-scoped commands by requiring the compose project
-// and workdir labels; standalone commands (without those labels) are dropped.
+// ListCommands lists every command. Compose-managed commands (carrying the
+// project and workdir labels) are grouped by project; standalone commands keep
+// an empty project and group under their working directory.
 func (b *serviceBackend) ListCommands(ctx context.Context) ([]tui.CommandInfo, error) {
 	entries, err := b.svc.List(ctx, cmdman.ListRequest{AllStates: true})
 	if err != nil {
 		return nil, err
 	}
-	return composeCommandInfos(entries), nil
+	return commandInfos(entries), nil
 }
 
-// composeCommandInfos projects store entries to command rows, keeping only
-// compose-managed commands (those carrying both the project and workdir
-// labels) and dropping standalone commands.
-func composeCommandInfos(entries []store.CommandEntry) []tui.CommandInfo {
+// commandInfos projects store entries to command rows. A compose-managed
+// command (carrying both the project and workdir labels) reports its compose
+// project name and the labelled workdir; a standalone command reports an empty
+// project and falls back to its configured working directory, so it still
+// appears in the TUI rather than being dropped.
+func commandInfos(entries []store.CommandEntry) []tui.CommandInfo {
 	var out []tui.CommandInfo
 	for _, e := range entries {
 		var labels map[string]string
 		var driver logdriver.LogDriver
+		var dir string
 		if e.ConfigJSON != nil {
 			labels = e.ConfigJSON.Labels
 			driver = e.ConfigJSON.LogDriver
+			dir = e.ConfigJSON.Dir
 		}
-		project, hasProject := labels[compose.LabelProject]
+		project := labels[compose.LabelProject]
 		workdir, hasWorkdir := labels[compose.LabelWorkdir]
-		if !hasProject || !hasWorkdir {
-			continue // standalone command, out of v1 scope
+		if !hasWorkdir {
+			// Standalone (or partially-labelled) command: use its own working
+			// directory so cwd-active grouping still works.
+			workdir = dir
 		}
 		name := e.Name
 		if cmd := labels[compose.LabelCommand]; cmd != "" {

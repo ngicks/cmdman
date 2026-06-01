@@ -20,17 +20,28 @@ var (
 
 var (
 	styleTitle     = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
-	styleTabActive = lipgloss.NewStyle().Bold(true).Foreground(colorOnAcc).Background(colorBorder).Padding(0, 1)
-	styleTabIdle   = lipgloss.NewStyle().Faint(true).Padding(0, 1)
-	styleBoxTitle  = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
-	styleBorder    = lipgloss.NewStyle().Foreground(colorBorder)
-	styleActive    = lipgloss.NewStyle().Faint(true)
-	styleSelected  = lipgloss.NewStyle().Bold(true).Foreground(colorOnAcc).Background(colorBorder)
-	styleFooter    = lipgloss.NewStyle().Faint(true)
-	styleVersion   = lipgloss.NewStyle().Foreground(colorAccent)
-	stylePopup     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Padding(0, 1)
-	stylePopupBtn  = lipgloss.NewStyle().Padding(0, 1)
-	stylePopupSel  = lipgloss.NewStyle().Bold(true).Foreground(colorOnAcc).Background(colorBorder).Padding(0, 1)
+	styleTabActive = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(colorOnAcc).
+			Background(colorBorder).
+			Padding(0, 1)
+	styleTabIdle  = lipgloss.NewStyle().Faint(true).Padding(0, 1)
+	styleBoxTitle = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
+	styleBorder   = lipgloss.NewStyle().Foreground(colorBorder)
+	styleActive   = lipgloss.NewStyle().Faint(true)
+	styleSelected = lipgloss.NewStyle().Bold(true).Foreground(colorOnAcc).Background(colorBorder)
+	styleFooter   = lipgloss.NewStyle().Faint(true)
+	styleVersion  = lipgloss.NewStyle().Foreground(colorAccent)
+	stylePopup    = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorBorder).
+			Padding(0, 1)
+	stylePopupBtn = lipgloss.NewStyle().Padding(0, 1)
+	stylePopupSel = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(colorOnAcc).
+			Background(colorBorder).
+			Padding(0, 1)
 
 	// Status-marker colors mirror the compose TTY reporter so the TUI shows the
 	// same indicators compose emits to the terminal.
@@ -175,7 +186,7 @@ func (m Model) renderCommandList(title string, width, height int) string {
 	rows := m.commands.visibleRows()
 	lines := make([]string, 0, len(rows))
 	if len(rows) == 0 {
-		lines = append(lines, styleActive.Render("No compose commands."))
+		lines = append(lines, styleActive.Render("No commands."))
 	}
 	for i, r := range rows {
 		selected := i == m.commands.selected
@@ -186,7 +197,12 @@ func (m Model) renderCommandList(title string, width, height int) string {
 			if m.commands.folded(r.group) && m.commands.filter == "" {
 				glyph = ">"
 			}
-			plain = fmt.Sprintf("%s %s %s", glyph, projectMarker, g.name)
+			name := g.name
+			if name == "" {
+				// Standalone commands carry no compose project name.
+				name = "(standalone)"
+			}
+			plain = fmt.Sprintf("%s %s %s", glyph, projectMarker, name)
 			styled = plain
 			if g.active {
 				plain += "   active"
@@ -284,7 +300,8 @@ func (m Model) renderComposeBody(width, height int) string {
 func (m Model) renderFooter(width int) string {
 	var hints string
 	if m.active == tabCommands {
-		hints = "tab next  j/k move  h/l fold  / filter  s start  S stop  r restart  a attach  x remove  ? help  q quit"
+		hints = "tab next  j/k move  h/l fold  / filter  s start  S stop  r restart  " +
+			"a attach  x remove  ? help  q quit"
 	} else {
 		hints = "tab next  j/k move  / filter  enter open  c cycle mux  r refresh  ? help  q quit"
 	}
