@@ -126,7 +126,6 @@ type previewState struct {
 	lines  []string
 	status previewStatus
 	errMsg string
-	scroll int
 	stream LogStream // live Tail+Follow reader for cmdID; nil when none
 }
 

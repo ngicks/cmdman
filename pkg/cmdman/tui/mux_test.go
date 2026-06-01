@@ -15,8 +15,20 @@ func composeSeed(popupMode bool) Model {
 	m.cwd = "/work/local-dev"
 	m.active = tabCompose
 	m.setComposeRows([]composeRow{
-		{name: "local-dev", workdir: "/work/local-dev", path: "/cfg/local-dev.yaml", commands: 2, hasMux: true},
-		{name: "tools", workdir: "/other", path: "/cfg/tools.yaml", commands: 0, modified: "modified 2026-05-20"},
+		{
+			name:     "local-dev",
+			workdir:  "/work/local-dev",
+			path:     "/cfg/local-dev.yaml",
+			commands: 2,
+			hasMux:   true,
+		},
+		{
+			name:     "tools",
+			workdir:  "/other",
+			path:     "/cfg/tools.yaml",
+			commands: 0,
+			modified: "modified 2026-05-20",
+		},
 	})
 	return m
 }
@@ -25,7 +37,10 @@ func TestComposeTabShowsMuxBadge(t *testing.T) {
 	m := composeSeed(false)
 	out := m.renderComposeBody(90, 8)
 	if !strings.Contains(out, "mux") {
-		t.Fatalf("compose tab should render the mux badge for projects with a mux section:\n%s", out)
+		t.Fatalf(
+			"compose tab should render the mux badge for projects with a mux section:\n%s",
+			out,
+		)
 	}
 	if !strings.Contains(out, "modified 2026-05-20") {
 		t.Fatalf("non-mux project should show its compact metadata instead:\n%s", out)

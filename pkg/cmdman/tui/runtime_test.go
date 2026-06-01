@@ -70,9 +70,27 @@ func TestRefreshPreservesFoldFilterAndTab(t *testing.T) {
 	m.active = tabCommands
 
 	infos := []CommandInfo{
-		{ID: "1", Name: "watcher", Project: "local-dev", Workdir: "/work/local-dev", State: model.EventTypeStarted},
-		{ID: "2", Name: "seed-db", Project: "local-dev", Workdir: "/work/local-dev", State: model.EventTypeExited},
-		{ID: "3", Name: "web", Project: "api-stack", Workdir: "/work/api", State: model.EventTypeStarted},
+		{
+			ID:      "1",
+			Name:    "watcher",
+			Project: "local-dev",
+			Workdir: "/work/local-dev",
+			State:   model.EventTypeStarted,
+		},
+		{
+			ID:      "2",
+			Name:    "seed-db",
+			Project: "local-dev",
+			Workdir: "/work/local-dev",
+			State:   model.EventTypeExited,
+		},
+		{
+			ID:      "3",
+			Name:    "web",
+			Project: "api-stack",
+			Workdir: "/work/api",
+			State:   model.EventTypeStarted,
+		},
 	}
 	m, _ = m.onCommandsLoaded(commandsLoadedMsg{infos: infos})
 
@@ -144,7 +162,9 @@ func TestPreviewLineAppendsAndStaleIgnored(t *testing.T) {
 func TestPreviewReadErrorRendersErrorState(t *testing.T) {
 	m := seed()
 	m.commands.preview = previewState{cmdID: "1", status: previewLoading}
-	m, _ = m2tuple(m.onPreviewLine(previewLineMsg{cmdID: "1", err: errors.New("permission denied")}))
+	m, _ = m2tuple(
+		m.onPreviewLine(previewLineMsg{cmdID: "1", err: errors.New("permission denied")}),
+	)
 	if m.commands.preview.status != previewError {
 		t.Fatalf("a read error should set the preview error state")
 	}
@@ -158,7 +178,14 @@ func TestPreviewNoneDriverShowsNoStorage(t *testing.T) {
 	m.cwd = "/w"
 	m.setGroups([]projectGroup{
 		{name: "p", workdir: "/w", commands: []commandRow{
-			{id: "n1", name: "quiet", project: "p", workdir: "/w", state: model.EventTypeStarted, logDriver: logdriver.DriverNone},
+			{
+				id:        "n1",
+				name:      "quiet",
+				project:   "p",
+				workdir:   "/w",
+				state:     model.EventTypeStarted,
+				logDriver: logdriver.DriverNone,
+			},
 		}},
 	})
 	m.commands.selected = 1 // the command row

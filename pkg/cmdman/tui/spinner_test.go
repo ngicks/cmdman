@@ -101,7 +101,13 @@ func TestRefreshWithStartingCommandStartsSpinner(t *testing.T) {
 	// Simulate an external start cascade surfacing a starting command via a
 	// debounced re-list.
 	infos := []CommandInfo{
-		{ID: "1", Name: "watcher", Project: "local-dev", Workdir: "/work/local-dev", State: model.EventTypeStarting},
+		{
+			ID:      "1",
+			Name:    "watcher",
+			Project: "local-dev",
+			Workdir: "/work/local-dev",
+			State:   model.EventTypeStarting,
+		},
 	}
 	nm, cmd := m.Update(commandsLoadedMsg{infos: infos})
 	m = nm.(Model)

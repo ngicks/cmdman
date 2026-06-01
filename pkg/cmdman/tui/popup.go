@@ -69,7 +69,13 @@ func (p popupState) confirmed() bool { return p.choice == 0 }
 
 // openAttachPopup opens the attach confirmation, defaulting to <yes>.
 func openAttachPopup(project, command, id string) popupState {
-	return popupState{kind: popupAttach, project: project, command: command, targetID: id, choice: 0}
+	return popupState{
+		kind:     popupAttach,
+		project:  project,
+		command:  command,
+		targetID: id,
+		choice:   0,
+	}
 }
 
 // openRemovePopup opens the remove confirmation, defaulting to <cancel>. When

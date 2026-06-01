@@ -165,11 +165,29 @@ func seed() Model {
 	m.cwd = "/work/local-dev"
 	m.setGroups([]projectGroup{
 		{name: "api-stack", workdir: "/work/api", commands: []commandRow{
-			{id: "3", name: "web", project: "api-stack", workdir: "/work/api", state: model.EventTypeStarted},
+			{
+				id:      "3",
+				name:    "web",
+				project: "api-stack",
+				workdir: "/work/api",
+				state:   model.EventTypeStarted,
+			},
 		}},
 		{name: "local-dev", workdir: "/work/local-dev", commands: []commandRow{
-			{id: "1", name: "watcher", project: "local-dev", workdir: "/work/local-dev", state: model.EventTypeStarted},
-			{id: "2", name: "seed-db", project: "local-dev", workdir: "/work/local-dev", state: model.EventTypeExited},
+			{
+				id:      "1",
+				name:    "watcher",
+				project: "local-dev",
+				workdir: "/work/local-dev",
+				state:   model.EventTypeStarted,
+			},
+			{
+				id:      "2",
+				name:    "seed-db",
+				project: "local-dev",
+				workdir: "/work/local-dev",
+				state:   model.EventTypeExited,
+			},
 		}},
 	})
 	return m
@@ -221,7 +239,8 @@ func TestFilteringMatchesAndKeepsGrouping(t *testing.T) {
 	if rows[0].kind != visProject || m.commands.groups[rows[0].group].name != "local-dev" {
 		t.Fatalf("first row should be local-dev project header")
 	}
-	if rows[1].kind != visCommand || m.commands.groups[rows[1].group].commands[rows[1].cmd].name != "watcher" {
+	if rows[1].kind != visCommand ||
+		m.commands.groups[rows[1].group].commands[rows[1].cmd].name != "watcher" {
 		t.Fatalf("second row should be the watcher command")
 	}
 }
@@ -297,14 +316,36 @@ func TestSelectionPreservedAcrossRefresh(t *testing.T) {
 	}
 	// Reload with the same data in a different order.
 	infos := []CommandInfo{
-		{ID: "1", Name: "watcher", Project: "local-dev", Workdir: "/work/local-dev", State: model.EventTypeStarted},
-		{ID: "3", Name: "web", Project: "api-stack", Workdir: "/work/api", State: model.EventTypeStarted},
-		{ID: "2", Name: "seed-db", Project: "local-dev", Workdir: "/work/local-dev", State: model.EventTypeExited},
+		{
+			ID:      "1",
+			Name:    "watcher",
+			Project: "local-dev",
+			Workdir: "/work/local-dev",
+			State:   model.EventTypeStarted,
+		},
+		{
+			ID:      "3",
+			Name:    "web",
+			Project: "api-stack",
+			Workdir: "/work/api",
+			State:   model.EventTypeStarted,
+		},
+		{
+			ID:      "2",
+			Name:    "seed-db",
+			Project: "local-dev",
+			Workdir: "/work/local-dev",
+			State:   model.EventTypeExited,
+		},
 	}
 	m, _ = m.onCommandsLoaded(commandsLoadedMsg{infos: infos})
 	got, ok := m.commands.selectedCommand()
 	if !ok || got.id != "3" {
-		t.Fatalf("selection should be preserved on web (id 3) after refresh, got %+v ok=%v", got, ok)
+		t.Fatalf(
+			"selection should be preserved on web (id 3) after refresh, got %+v ok=%v",
+			got,
+			ok,
+		)
 	}
 }
 
@@ -570,7 +611,11 @@ func TestHelpOverlayOpensWithTabBindings(t *testing.T) {
 }
 
 func TestComposeFilterMatchesNameAndPath(t *testing.T) {
-	r := composeRow{name: "tools", path: "/etc/cmdman/compose/tools.yaml", modified: "modified 2026-05-20"}
+	r := composeRow{
+		name:     "tools",
+		path:     "/etc/cmdman/compose/tools.yaml",
+		modified: "modified 2026-05-20",
+	}
 	if !composeRowMatches("tools", r) {
 		t.Errorf("should match by name")
 	}
