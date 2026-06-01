@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/ngicks/cmdman/pkg/muxctl"
@@ -23,6 +24,11 @@ type RunOptions struct {
 	// defaults to SessionName ("cmdman"). Plan/mux-00: standalone mux uses
 	// "cmdman"; compose mux passes "cmdman-<project>".
 	WindowName string
+	// Layout selects a specific layout to apply instead of cycling. It accepts
+	// a layout name or a 0-based index (e.g. "2"). A name is matched first, so
+	// a layout literally named "2" wins over index 2. Empty (the default)
+	// cycles to the next layout after the one currently applied.
+	Layout string
 	// Env is the process env consulted for driver autodetection ($TMUX /
 	// $ZELLIJ). Empty defaults to os.Environ().
 	Env []string
@@ -32,9 +38,12 @@ type RunOptions struct {
 }
 
 // Run applies one layout from spec to the configured driver's cmdman-owned
-// window. The applied layout index is `(previousMarker+1) mod len(Layouts)`,
-// read back from the existing window via [muxctl.Session.StatWindow]; a fresh
-// window starts at index 0.
+// window. When opts.Layout is set, that named/indexed layout is applied
+// directly; otherwise the applied layout index is `(previousMarker+1) mod
+// len(Layouts)`, read back from the existing window via
+// [muxctl.Session.StatWindow] (a fresh window starts at index 0). Either way the
+// applied index is persisted as the window marker, so a subsequent cycling Run
+// continues from the layout just shown.
 //
 // When invoked outside a multiplexer (no $TMUX / $ZELLIJ in env), Run builds
 // the window detached and prints an attach hint
@@ -73,6 +82,17 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 		)
 	}
 
+	// Resolve an explicit layout selector up-front so a bad name/index fails
+	// before we touch the multiplexer. -1 means "cycle".
+	explicitIdx := -1
+	if opts.Layout != "" {
+		idx, err := resolveLayoutIndex(opts.Layout, spec.Layouts)
+		if err != nil {
+			return err
+		}
+		explicitIdx = idx
+	}
+
 	sess, err := tmux.New(ctx, tmux.Config{
 		Path:        spec.DriverOpt["path"],
 		Socket:      spec.DriverOpt["socket"],
@@ -83,13 +103,16 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 		return err
 	}
 
-	stat, err := sess.StatWindow(ctx, sess.WindowID())
-	if err != nil {
-		return err
-	}
-	nextIdx := 0
-	if stat.Marker >= 0 {
-		nextIdx = (stat.Marker + 1) % len(spec.Layouts)
+	nextIdx := explicitIdx
+	if nextIdx < 0 {
+		stat, err := sess.StatWindow(ctx, sess.WindowID())
+		if err != nil {
+			return err
+		}
+		nextIdx = 0
+		if stat.Marker >= 0 {
+			nextIdx = (stat.Marker + 1) % len(spec.Layouts)
+		}
 	}
 	if _, err := sess.ApplyLayout(ctx, spec.Layouts[nextIdx].Root, nextIdx); err != nil {
 		return err
@@ -99,6 +122,36 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 		fmt.Fprintf(stdout, "Attach: tmux attach -t %s\n", sessionName)
 	}
 	return nil
+}
+
+// resolveLayoutIndex resolves a layout selector to an index into layouts. A
+// name is matched first (so a layout literally named "2" wins over index 2),
+// then the selector is parsed as a 0-based index. It errors on an unknown name
+// or out-of-range index.
+func resolveLayoutIndex(selector string, layouts []muxctl.Layout) (int, error) {
+	for i, l := range layouts {
+		if l.Name == selector {
+			return i, nil
+		}
+	}
+	if n, err := strconv.Atoi(selector); err == nil {
+		if n < 0 || n >= len(layouts) {
+			return 0, fmt.Errorf(
+				"mux: layout index %d out of range [0,%d)", n, len(layouts))
+		}
+		return n, nil
+	}
+	return 0, fmt.Errorf("mux: no layout %q; available: %s",
+		selector, strings.Join(layoutNames(layouts), ", "))
+}
+
+// layoutNames returns the layout names for error/diagnostic messages.
+func layoutNames(layouts []muxctl.Layout) []string {
+	names := make([]string, len(layouts))
+	for i, l := range layouts {
+		names[i] = l.Name
+	}
+	return names
 }
 
 // resolveDriver picks the driver from spec.Driver / autodetect. Empty

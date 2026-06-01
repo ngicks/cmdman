@@ -201,6 +201,36 @@ func ListNamedProjects() ([]string, error) {
 	return names, nil
 }
 
+// MuxProject is a named compose project under the default compose dir that
+// declares a top-level mux: section, paired with its loaded spec.
+type MuxProject struct {
+	Name string
+	Spec ComposeSpec
+}
+
+// ListMuxProjects loads the named projects under the default compose dir
+// (see [ListNamedProjects]) and returns those whose compose file declares a
+// mux: section. Projects that fail to load/normalize are skipped, so a single
+// broken file does not hide the others. The result preserves the sorted name
+// order of [ListNamedProjects].
+func ListMuxProjects() ([]MuxProject, error) {
+	names, err := ListNamedProjects()
+	if err != nil {
+		return nil, err
+	}
+	var out []MuxProject
+	for _, name := range names {
+		spec, err := LoadAndNormalize(NormalizeOpts{File: name})
+		if err != nil {
+			continue
+		}
+		if spec.Mux != nil {
+			out = append(out, MuxProject{Name: name, Spec: spec})
+		}
+	}
+	return out, nil
+}
+
 // DecodeFile reads and YAML-decodes a compose file at path.
 func DecodeFile(path string) (RawComposeSpec, error) {
 	return decodeFile(path)
