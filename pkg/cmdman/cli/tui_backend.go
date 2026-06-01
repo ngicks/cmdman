@@ -93,8 +93,8 @@ func commandInfos(entries []store.CommandEntry) []tui.CommandInfo {
 }
 
 // ListProjects merges store-known project counts with never-run projects found
-// under the default compose directory. The mux badge is populated by the mux
-// layer; here HasMux is left false.
+// under the default compose directory and a compose file discovered in the
+// current working directory.
 func (b *serviceBackend) ListProjects(ctx context.Context) ([]tui.ProjectInfo, error) {
 	summaries, err := b.compose.ListProjects(ctx)
 	if err != nil {
@@ -102,11 +102,46 @@ func (b *serviceBackend) ListProjects(ctx context.Context) ([]tui.ProjectInfo, e
 	}
 	named, _ := compose.ListNamedProjects()
 	infos := mergeProjectInfos(summaries, named)
+	infos = appendCwdProject(infos)
 	// Enrich with the mux badge by parsing each project's compose file.
 	for i := range infos {
 		infos[i].HasMux = projectHasMux(infos[i].Name, infos[i].Path)
 	}
 	return infos, nil
+}
+
+// appendCwdProject ensures a compose project discoverable in the current
+// working directory shows up in the Compose tab even when it has never been
+// run and is not a named project under the compose config dir — so it can be
+// opened and its mux cycled straight from the directory it lives in. When the
+// project is already listed (by name) but lacks a compose-file path, the
+// discovered path and workdir are filled in so the mux badge, modified time,
+// and cwd-active marker resolve.
+func appendCwdProject(infos []tui.ProjectInfo) []tui.ProjectInfo {
+	sel, err := compose.LoadOrProject(compose.NormalizeOpts{})
+	if err != nil || sel.Spec == nil {
+		return infos
+	}
+	path := sel.Spec.ComposeFile
+	workdir := normalizePath(sel.WorkDir)
+	for i := range infos {
+		if infos[i].Name != sel.Project {
+			continue
+		}
+		if infos[i].Path == "" {
+			infos[i].Path = path
+		}
+		if infos[i].Workdir == "" {
+			infos[i].Workdir = workdir
+		}
+		return infos
+	}
+	return append(infos, tui.ProjectInfo{
+		Name:     sel.Project,
+		Path:     path,
+		Workdir:  workdir,
+		Modified: modifiedLabel(path),
+	})
 }
 
 // projectHasMux reports whether a compose project declares a mux: section. It

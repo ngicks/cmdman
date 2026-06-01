@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/compose"
@@ -85,5 +87,50 @@ func TestMergeProjectInfosAddsZeroCommandNamedProjects(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("never-run project should have zero commands, got %d", count)
+	}
+}
+
+const cwdComposeYAML = "name: cwdproj\ncommands:\n  a:\n    args: [echo, a]\n"
+
+func TestAppendCwdProjectAddsUnregisteredProject(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(dir, "cmd-compose.yaml"), []byte(cwdComposeYAML), 0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	got := appendCwdProject(nil)
+	if len(got) != 1 {
+		t.Fatalf("want 1 cwd project, got %d", len(got))
+	}
+	if got[0].Name != "cwdproj" {
+		t.Fatalf("name = %q, want cwdproj", got[0].Name)
+	}
+	if got[0].Workdir != normalizePath(dir) {
+		t.Fatalf("workdir = %q, want %q", got[0].Workdir, normalizePath(dir))
+	}
+	if got[0].Path == "" {
+		t.Fatal("path should be the discovered compose file")
+	}
+}
+
+func TestAppendCwdProjectFillsPathWhenAlreadyListed(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(dir, "cmd-compose.yaml"), []byte(cwdComposeYAML), 0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	// Already listed (e.g. from the store) but with no compose-file path.
+	got := appendCwdProject([]tui.ProjectInfo{{Name: "cwdproj"}})
+	if len(got) != 1 {
+		t.Fatalf("must not duplicate an already-listed project, got %d", len(got))
+	}
+	if got[0].Path == "" {
+		t.Fatal("discovered path should be filled into the existing row")
 	}
 }
