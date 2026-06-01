@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ngicks/cmdman/pkg/muxctl"
 	tmuxctl "github.com/ngicks/cmdman/pkg/muxctl/tmux"
@@ -115,6 +116,46 @@ func sortedKeys(panes map[string]muxctl.Pane) []string {
 	keys := slices.Collect(maps.Keys(panes))
 	slices.Sort(keys)
 	return keys
+}
+
+// waitForMarker polls StatWindow until the window's marker equals want or the
+// deadline passes (after which the test fails).
+func waitForMarker(t *testing.T, sess *tmuxctl.Session, want int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	var last int
+	for time.Now().Before(deadline) {
+		stat, err := sess.StatWindow(context.Background(), sess.WindowID())
+		if err != nil {
+			t.Fatalf("StatWindow: %v", err)
+		}
+		last = stat.Marker
+		if last == want {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("marker never reached %d (last %d)", want, last)
+}
+
+// tempPath returns a path named name inside a fresh per-test temp dir.
+func tempPath(t *testing.T, name string) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), name)
+}
+
+// waitForFile polls until path exists or the deadline passes; it reports
+// whether the file appeared.
+func waitForFile(path string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // loadLayout reads a YAML fixture from testdata/, decodes + validates it,

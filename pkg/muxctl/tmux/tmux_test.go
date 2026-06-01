@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ngicks/go-common/contextkey"
 
@@ -249,6 +250,47 @@ func TestApplyLayout_NegativeMarker_SkipsEmbed(t *testing.T) {
 	slices.Sort(titles)
 	if !slices.Equal(titles, []string{"a", "b"}) {
 		t.Errorf("titles = %v, want [a b]", titles)
+	}
+}
+
+// TestApplyLayout_DetachesViewersBeforeRebuild verifies that re-applying a
+// layout first sends the detach-key sequence to the live, marker-bearing
+// panes of the previous build — so a cmdman viewer gets a chance to exit
+// cleanly instead of being SIGKILLed mid-frame by respawn-pane -k.
+//
+// The leaf stands in for a viewer: it puts its pty in raw mode (so ctrl-q is
+// not swallowed as flow control), signals readiness, then blocks reading the
+// 2-byte detach sequence and touches a sentinel on receipt. The sentinel is
+// only created via the detach path; the prior teardown (kill/respawn) would
+// SIGKILL the leaf before it ever read its stdin.
+func TestApplyLayout_DetachesViewersBeforeRebuild(t *testing.T) {
+	requireTmux(t)
+	sess, _ := newSession(t, "cmdman")
+
+	ready := tempPath(t, "ready")
+	detached := tempPath(t, "detached")
+	script := "stty raw -echo 2>/dev/null; : >" + ready +
+		"; head -c 2 >/dev/null; : >" + detached
+	root := muxctl.PaneSpec{
+		Leaf: muxctl.Leaf{
+			Name: "viewer",
+			Cmd:  []string{"/bin/sh", "-c", script},
+		},
+	}
+
+	if _, err := sess.ApplyLayout(context.Background(), root, 0); err != nil {
+		t.Fatalf("first ApplyLayout: %v", err)
+	}
+	waitForMarker(t, sess, 0)
+	if !waitForFile(ready, 3*time.Second) {
+		t.Fatal("viewer never became ready")
+	}
+
+	if _, err := sess.ApplyLayout(context.Background(), root, 1); err != nil {
+		t.Fatalf("second ApplyLayout: %v", err)
+	}
+	if !waitForFile(detached, 3*time.Second) {
+		t.Fatal("viewer was not detached before rebuild (sentinel missing)")
 	}
 }
 

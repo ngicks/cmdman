@@ -45,6 +45,12 @@ func (s *Session) ApplyLayout(
 	root muxctl.PaneSpec,
 	marker int,
 ) (map[string]muxctl.Pane, error) {
+	// Detach any in-pane viewers before tearing the window down so they
+	// restore their panes and disconnect from the daemon cleanly, instead of
+	// being SIGKILLed mid-frame by respawn-pane -k (see quiesceViewers).
+	restore := s.quiesceViewers(ctx)
+	defer restore()
+
 	anchorID, err := s.resetWindow(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("tmux: reset window: %w", err)
