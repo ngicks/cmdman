@@ -42,7 +42,12 @@ func tuiCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	parent.AddCommand(cmd)
 }
 
-func runTui(cmd *cobra.Command, _ []string, rootCfg *cmdman.CmdmanConfig, popup tuiPopupFlag) error {
+func runTui(
+	cmd *cobra.Command,
+	_ []string,
+	rootCfg *cmdman.CmdmanConfig,
+	popup tuiPopupFlag,
+) error {
 	if popup.set {
 		return cli.LaunchTUIPopup(cmd.Context(), popup.value, rootCfg.DataDir, rootCfg.RuntimeDir)
 	}
