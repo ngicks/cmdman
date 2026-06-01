@@ -5,20 +5,30 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 )
 
+// Charm-ish purple palette (256-color indices degrade gracefully).
 var (
-	styleTitle     = lipgloss.NewStyle().Bold(true)
-	styleTabActive = lipgloss.NewStyle().Bold(true).Reverse(true)
-	styleTabIdle   = lipgloss.NewStyle().Faint(true)
+	colorBorder = lipgloss.Color("63")  // indigo border
+	colorAccent = lipgloss.Color("99")  // purple titles/accents
+	colorOnAcc  = lipgloss.Color("231") // near-white text on a purple fill
+)
+
+var (
+	styleTitle     = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
+	styleTabActive = lipgloss.NewStyle().Bold(true).Foreground(colorOnAcc).Background(colorBorder).Padding(0, 1)
+	styleTabIdle   = lipgloss.NewStyle().Faint(true).Padding(0, 1)
+	styleBoxTitle  = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
+	styleBorder    = lipgloss.NewStyle().Foreground(colorBorder)
 	styleActive    = lipgloss.NewStyle().Faint(true)
-	styleSelected  = lipgloss.NewStyle().Reverse(true)
+	styleSelected  = lipgloss.NewStyle().Bold(true).Foreground(colorOnAcc).Background(colorBorder)
 	styleFooter    = lipgloss.NewStyle().Faint(true)
-	styleVersion   = lipgloss.NewStyle().Faint(true)
-	stylePopup     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
+	styleVersion   = lipgloss.NewStyle().Foreground(colorAccent)
+	stylePopup     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Padding(0, 1)
 	stylePopupBtn  = lipgloss.NewStyle().Padding(0, 1)
-	stylePopupSel  = lipgloss.NewStyle().Reverse(true).Padding(0, 1)
+	stylePopupSel  = lipgloss.NewStyle().Bold(true).Foreground(colorOnAcc).Background(colorBorder).Padding(0, 1)
 )
 
 // View implements tea.Model.
@@ -36,14 +46,17 @@ func (m Model) View() string {
 	}
 
 	var b strings.Builder
+	b.WriteByte(' ')
 	b.WriteString(styleTitle.Render("cmdman tui"))
 	b.WriteByte('\n')
+	b.WriteByte(' ')
 	b.WriteString(m.renderTabBar())
 	b.WriteByte('\n')
-	b.WriteString(m.renderFilterLine())
+	b.WriteString(m.renderFilterBox(width))
 	b.WriteByte('\n')
 
-	bodyHeight := max(height-5, 1) // title, tabs, filter, 2 footer lines
+	// title(1) + tabbar(1) + filter box(3) + footer(2) = 7
+	bodyHeight := max(height-7, 3)
 	body := m.renderBody(width, bodyHeight)
 	b.WriteString(body)
 	b.WriteByte('\n')
@@ -64,15 +77,16 @@ func (m Model) renderTabBar() string {
 	parts := make([]string, 0, len(names))
 	for i, n := range names {
 		if tab(i) == m.active {
-			parts = append(parts, styleTabActive.Render(" "+n+" "))
+			parts = append(parts, styleTabActive.Render(n))
 		} else {
-			parts = append(parts, styleTabIdle.Render(" "+n+" "))
+			parts = append(parts, styleTabIdle.Render(n))
 		}
 	}
 	return strings.Join(parts, " ")
 }
 
-func (m Model) renderFilterLine() string {
+// renderFilterBox renders the filter input as a bordered "Filter" section.
+func (m Model) renderFilterBox(width int) string {
 	var filter string
 	var focused bool
 	if m.active == tabCommands {
@@ -86,7 +100,7 @@ func (m Model) renderFilterLine() string {
 	if focused {
 		cursor = "_"
 	}
-	return fmt.Sprintf("Filter: %s%s", filter, cursor)
+	return box("Filter", filter+cursor, width, 3)
 }
 
 func (m Model) renderBody(width, height int) string {
@@ -98,59 +112,65 @@ func (m Model) renderBody(width, height int) string {
 
 func (m Model) renderCommandsBody(width, height int) string {
 	leftW := width / 2
-	if leftW < 20 {
-		leftW = width
+	rightW := width - leftW
+	if rightW < 12 {
+		// Too narrow for a side-by-side preview; show the list full width.
+		return m.renderCommandList("Commands", width, height)
 	}
-	rightW := width - leftW - 1
-	left := m.renderCommandList(leftW, height)
-	if rightW < 4 {
-		return left
-	}
+	left := m.renderCommandList("Commands", leftW, height)
 	right := m.renderPreview(rightW, height)
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
 
-func (m Model) renderCommandList(width, height int) string {
+func (m Model) renderCommandList(title string, width, height int) string {
+	cw := max(width-2, 1)
+	ch := max(height-2, 1)
 	rows := m.commands.visibleRows()
 	lines := make([]string, 0, len(rows))
 	if len(rows) == 0 {
 		lines = append(lines, styleActive.Render("No compose commands."))
 	}
 	for i, r := range rows {
-		var line string
+		selected := i == m.commands.selected
+		var plain, styled string
 		if r.kind == visProject {
 			g := m.commands.groups[r.group]
 			glyph := "v"
 			if m.commands.folded(r.group) && m.commands.filter == "" {
 				glyph = ">"
 			}
-			line = fmt.Sprintf("%s %s %s", glyph, projectMarker, g.name)
+			plain = fmt.Sprintf("%s %s %s", glyph, projectMarker, g.name)
+			styled = plain
 			if g.active {
-				line += "   " + styleActive.Render("active")
+				plain += "   active"
+				styled += "   " + styleActive.Render("active")
 			}
 		} else {
 			c := m.commands.groups[r.group].commands[r.cmd]
 			prefix := "  "
-			if i == m.commands.selected {
+			if selected {
 				prefix = "> "
 			}
 			label := displayLabel(c.state, c.exitCode)
 			if c.pending != "" {
 				label = c.pending + "…"
 			}
-			line = fmt.Sprintf("  %s%-18s %s", prefix, truncate(c.name, 18), label)
+			plain = fmt.Sprintf("  %s%-18s %s", prefix, truncate(c.name, 18), label)
+			styled = plain
 		}
-		if i == m.commands.selected {
-			line = styleSelected.Render(padRight(line, width))
+		if selected {
+			// lipgloss Width pads the background to a full-width selection bar.
+			lines = append(lines, styleSelected.Width(cw).Render(truncate(plain, cw)))
 		} else {
-			line = truncate(line, width)
+			lines = append(lines, styled)
 		}
-		lines = append(lines, line)
 	}
-	return clampLines(lines, height, m.commands.selected)
+	content := clampLines(lines, ch, m.commands.selected)
+	return box(title, content, width, height)
 }
 
 func (m Model) renderPreview(width, height int) string {
+	ch := max(height-2, 1)
 	p := m.commands.preview
 	var lines []string
 	switch p.status {
@@ -168,25 +188,24 @@ func (m Model) renderPreview(width, height int) string {
 	default:
 		lines = []string{styleActive.Render("No output yet.")}
 	}
-	out := make([]string, 0, len(lines)+1)
-	out = append(out, styleActive.Render("Preview"))
-	for _, l := range lines {
-		out = append(out, truncate(l, width))
-	}
-	return clampLines(out, height, 0)
+	// box truncates each line ANSI-aware to the inner width.
+	content := clampLines(lines, ch, 0)
+	return box("Preview", content, width, height)
 }
 
 func (m Model) renderComposeBody(width, height int) string {
+	cw := max(width-2, 1)
+	ch := max(height-2, 1)
 	rows := m.compose.visibleRows()
-	lines := make([]string, 0, len(rows)+2)
-	lines = append(lines, styleActive.Render("Compose projects"))
 	if len(rows) == 0 {
-		lines = append(lines, "", styleActive.Render("No compose projects found."))
-		return clampLines(lines, height, 0)
+		content := clampLines([]string{styleActive.Render("No compose projects found.")}, ch, 0)
+		return box("Compose projects", content, width, height)
 	}
+	lines := make([]string, 0, len(rows))
 	for i, r := range rows {
+		selected := i == m.compose.selected
 		prefix := "  "
-		if i == m.compose.selected {
+		if selected {
 			prefix = "> "
 		}
 		active := "      "
@@ -200,14 +219,14 @@ func (m Model) renderComposeBody(width, height int) string {
 		}
 		line := fmt.Sprintf("%s%s %-16s %s   %-12s   %s",
 			prefix, projectMarker, truncate(r.name, 16), active, meta, badge)
-		if i == m.compose.selected {
-			line = styleSelected.Render(padRight(line, width))
+		if selected {
+			lines = append(lines, styleSelected.Width(cw).Render(truncate(line, cw)))
 		} else {
-			line = truncate(line, width)
+			lines = append(lines, line)
 		}
-		lines = append(lines, line)
 	}
-	return clampLines(lines, height, m.compose.selected+1)
+	content := clampLines(lines, ch, m.compose.selected)
+	return box("Compose projects", content, width, height)
 }
 
 func (m Model) renderFooter(width int) string {
@@ -228,6 +247,59 @@ func (m Model) renderFooter(width int) string {
 	pad := max(width-runewidth.StringWidth(left)-runewidth.StringWidth(ver), 1)
 	line2 := left + strings.Repeat(" ", pad) + verRender
 	return line1 + "\n" + line2
+}
+
+// box draws content inside a rounded purple border with title embedded in the
+// top edge. totalW and totalH are the outer dimensions including the border.
+// content is normalized to fit the inner area (totalH-2 lines, each totalW-2
+// wide), so callers do not need to pre-size it exactly.
+func box(title, content string, totalW, totalH int) string {
+	totalW = max(totalW, 2)
+	totalH = max(totalH, 2)
+	cw := totalW - 2
+	ch := totalH - 2
+
+	src := strings.Split(content, "\n")
+	out := make([]string, 0, totalH)
+	out = append(out, topBorder(title, cw))
+	bar := styleBorder.Render("│")
+	for i := range ch {
+		var l string
+		if i < len(src) {
+			l = src[i]
+		}
+		// ANSI-aware: content lines may already carry color codes, so measure
+		// and truncate with ansi helpers, not runewidth (which miscounts the
+		// escape sequences and corrupts both the content and the right border).
+		l = ansi.Truncate(l, cw, "")
+		if pad := cw - ansi.StringWidth(l); pad > 0 {
+			l += strings.Repeat(" ", pad)
+		}
+		out = append(out, bar+l+bar)
+	}
+	out = append(out, bottomBorder(cw))
+	return strings.Join(out, "\n")
+}
+
+// topBorder renders the top edge of a box, embedding title as "╭─ title ──╮".
+func topBorder(title string, cw int) string {
+	if title == "" {
+		return styleBorder.Render("╭" + strings.Repeat("─", cw) + "╮")
+	}
+	t := " " + title + " "
+	lead := 1
+	if runewidth.StringWidth(t)+lead > cw {
+		t = runewidth.Truncate(t, max(cw-lead, 0), "")
+	}
+	tw := runewidth.StringWidth(t)
+	rest := max(cw-lead-tw, 0)
+	return styleBorder.Render("╭"+strings.Repeat("─", lead)) +
+		styleBoxTitle.Render(t) +
+		styleBorder.Render(strings.Repeat("─", rest)+"╮")
+}
+
+func bottomBorder(cw int) string {
+	return styleBorder.Render("╰" + strings.Repeat("─", cw) + "╯")
 }
 
 // clampLines pads/truncates a slice of lines to exactly height lines, scrolling
@@ -257,14 +329,6 @@ func truncate(s string, w int) string {
 		return ""
 	}
 	return runewidth.Truncate(s, w, "")
-}
-
-func padRight(s string, w int) string {
-	cur := runewidth.StringWidth(s)
-	if cur >= w {
-		return runewidth.Truncate(s, w, "")
-	}
-	return s + strings.Repeat(" ", w-cur)
 }
 
 // overlay centers box content on a cleared frame. It is a simple full-redraw
