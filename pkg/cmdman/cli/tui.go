@@ -114,7 +114,10 @@ func RunTUIPopup(ctx context.Context, cfg PopupConfig) error {
 	case "tmux":
 		return runTmuxPopup(ctx, cfg, env)
 	default:
-		return fmt.Errorf("tui: popup driver %q is not implemented yet (v1 ships tmux only)", driver)
+		return fmt.Errorf(
+			"tui: popup driver %q is not implemented yet (v1 ships tmux only)",
+			driver,
+		)
 	}
 }
 
