@@ -201,7 +201,7 @@ func (m Model) onPreviewLine(msg previewLineMsg) (tea.Model, tea.Cmd) {
 		p.status = previewOK
 		p.lines = nil
 	}
-	p.lines = append(p.lines, msg.line)
+	p.lines = append(p.lines, sanitizePreviewLine(msg.line))
 	if len(p.lines) > previewMaxLines {
 		p.lines = p.lines[len(p.lines)-previewMaxLines:]
 	}
