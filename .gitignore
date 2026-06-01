@@ -43,6 +43,7 @@ apm_modules/
 
 /bin
 /cmdman
+/muxctltester
 
 /CLAUDE_*.md
 /CODEX_*.md
