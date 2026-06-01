@@ -13,6 +13,8 @@ import (
 )
 
 func muxCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+	var flagSession string
+
 	cmd := &cobra.Command{
 		Use:   "mux [path]",
 		Short: "Open a multiplexer dashboard for cmdman commands",
@@ -21,7 +23,10 @@ references a cmdman command (by ID or NAME); panes run cmdman attach by
 default, or cmdman logs when mode: logs.
 
 The layout file is a YAML document with a top-level mux: section. With no
-path argument (or "-"), the spec is read from stdin.`,
+path argument (or "-"), the spec is read from stdin.
+
+With no --session, the dashboard targets the current tmux session when run
+inside tmux, otherwise a session named "cmdman".`,
 		Args: cobra.MaximumNArgs(1),
 		// The positional arg is a layout file path; the shell's default file
 		// completion is the right behavior, so ValidArgsFunction is left unset.
@@ -30,13 +35,17 @@ path argument (or "-"), the spec is read from stdin.`,
 			if len(args) == 1 {
 				path = args[0]
 			}
-			return runMux(cmd, rootCfg, path)
+			return runMux(cmd, rootCfg, path, flagSession)
 		},
 	}
+	cmd.Flags().StringVarP(
+		&flagSession, "session", "s", "",
+		"Target tmux session (default: current session when inside tmux, else cmdman)",
+	)
 	parent.AddCommand(cmd)
 }
 
-func runMux(cmd *cobra.Command, rootCfg *cmdman.CmdmanConfig, path string) error {
+func runMux(cmd *cobra.Command, rootCfg *cmdman.CmdmanConfig, path, session string) error {
 	src, closer, err := openSpecSource(path)
 	if err != nil {
 		return err
@@ -78,7 +87,8 @@ func runMux(cmd *cobra.Command, rootCfg *cmdman.CmdmanConfig, path string) error
 	}
 
 	return mux.Run(cmd.Context(), built, mux.RunOptions{
-		Stdout: cmd.OutOrStdout(),
+		SessionName: session,
+		Stdout:      cmd.OutOrStdout(),
 	})
 }
 

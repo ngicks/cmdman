@@ -1,10 +1,49 @@
 package mux
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/ngicks/cmdman/pkg/muxctl"
 )
+
+func TestResolveSessionName(t *testing.T) {
+	okQuery := func() (string, error) { return "work", nil }
+	errQuery := func() (string, error) { return "", errors.New("not in tmux") }
+	inTmux := []string{"TMUX=/tmp/tmux-1000/default,123,0"}
+	noTmux := []string{"PATH=/usr/bin"}
+
+	t.Run("explicit override wins", func(t *testing.T) {
+		// Override is used verbatim, without querying tmux.
+		if got := resolveSessionName("custom", inTmux, func() (string, error) {
+			t.Fatal("queryCurrent must not be called when override is set")
+			return "", nil
+		}); got != "custom" {
+			t.Fatalf("got %q, want %q", got, "custom")
+		}
+	})
+
+	t.Run("outside tmux falls back to cmdman", func(t *testing.T) {
+		if got := resolveSessionName("", noTmux, func() (string, error) {
+			t.Fatal("queryCurrent must not be called outside tmux")
+			return "", nil
+		}); got != "cmdman" {
+			t.Fatalf("got %q, want %q", got, "cmdman")
+		}
+	})
+
+	t.Run("inside tmux uses current session", func(t *testing.T) {
+		if got := resolveSessionName("", inTmux, okQuery); got != "work" {
+			t.Fatalf("got %q, want %q", got, "work")
+		}
+	})
+
+	t.Run("inside tmux but query fails falls back to cmdman", func(t *testing.T) {
+		if got := resolveSessionName("", inTmux, errQuery); got != "cmdman" {
+			t.Fatalf("got %q, want %q", got, "cmdman")
+		}
+	})
+}
 
 func TestResolveLayoutIndex(t *testing.T) {
 	layouts := []muxctl.Layout{

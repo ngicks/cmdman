@@ -15,6 +15,8 @@ import (
 )
 
 func composeMuxCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+	var flagSession string
+
 	cmd := &cobra.Command{
 		Use:   "mux [layout]",
 		Short: "Open a multiplexer dashboard for a compose project",
@@ -27,14 +29,21 @@ starts at the first layout). Pass a layout name or a 0-based index to apply that
 layout directly; the choice becomes the new cycle position. A name is matched
 before an index, so a layout literally named "2" wins over index 2.
 
+With no --session, the dashboard targets the current tmux session when run
+inside tmux, otherwise a session named "cmdman".
+
 The compose file must contain a top-level "mux:" section; a missing section
 is an error (no synthesized default).`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeComposeMuxLayout(cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeMux(cmd, rootCfg, cf, args)
+			return runComposeMux(cmd, rootCfg, cf, args, flagSession)
 		},
 	}
+	cmd.Flags().StringVarP(
+		&flagSession, "session", "s", "",
+		"Target tmux session (default: current session when inside tmux, else cmdman)",
+	)
 	parent.AddCommand(cmd)
 }
 
@@ -98,6 +107,7 @@ func runComposeMux(
 	rootCfg *cmdman.CmdmanConfig,
 	cf *composeFlags,
 	args []string,
+	session string,
 ) error {
 	selection, err := compose.LoadOrProject(cf.normalizeOpts())
 	if err != nil {
@@ -152,8 +162,9 @@ func runComposeMux(
 		layout = args[0]
 	}
 	return mux.Run(cmd.Context(), built, mux.RunOptions{
-		WindowName: windowName,
-		Layout:     layout,
-		Stdout:     cmd.OutOrStdout(),
+		SessionName: session,
+		WindowName:  windowName,
+		Layout:      layout,
+		Stdout:      cmd.OutOrStdout(),
 	})
 }

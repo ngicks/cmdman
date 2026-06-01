@@ -88,6 +88,91 @@ func TestNew_WindowIDBypassesFindOrCreate(t *testing.T) {
 	}
 }
 
+// TestNew_ReusesSinglePaneCurrentWindow verifies that ReuseCurrentWindow takes
+// over the caller's current window when it has a single pane, instead of
+// creating a separate named window.
+func TestNew_ReusesSinglePaneCurrentWindow(t *testing.T) {
+	requireTmux(t)
+	socket := uniqueSocket(t)
+	t.Cleanup(func() { killServer(t, socket) })
+
+	run(t, socket, "new-session", "-d", "-s", "main", "-n", "work")
+	curID := run(t, socket, "display-message", "-t", "main:work", "-p", "#{window_id}")
+
+	sess, err := tmuxctl.New(context.Background(), tmuxctl.Config{
+		Socket:             socket,
+		SessionName:        "main",
+		WindowName:         "cmdman",
+		ReuseCurrentWindow: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if sess.WindowID() != curID {
+		t.Errorf("expected to reuse current window %s, got %s", curID, sess.WindowID())
+	}
+	if names := listWindowNames(t, socket, "main"); slices.Contains(names, "cmdman") {
+		t.Errorf("a separate cmdman window should not be created; have %v", names)
+	}
+}
+
+// TestNew_DoesNotReuseMultiPaneCurrentWindow verifies that a multi-pane,
+// non-muxctl current window is left alone and a fresh named window is built.
+func TestNew_DoesNotReuseMultiPaneCurrentWindow(t *testing.T) {
+	requireTmux(t)
+	socket := uniqueSocket(t)
+	t.Cleanup(func() { killServer(t, socket) })
+
+	run(t, socket, "new-session", "-d", "-s", "main", "-n", "work")
+	run(t, socket, "split-window", "-t", "main:work")
+	curID := run(t, socket, "display-message", "-t", "main:work", "-p", "#{window_id}")
+
+	sess, err := tmuxctl.New(context.Background(), tmuxctl.Config{
+		Socket:             socket,
+		SessionName:        "main",
+		WindowName:         "cmdman",
+		ReuseCurrentWindow: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if sess.WindowID() == curID {
+		t.Errorf("multi-pane unowned window %s must not be reused", curID)
+	}
+	if names := listWindowNames(t, socket, "main"); !slices.Contains(names, "cmdman") {
+		t.Errorf("expected a new cmdman window; have %v", names)
+	}
+}
+
+// TestNew_ReusesMarkedCurrentWindow verifies that a window we built before
+// (its panes carry the marker) is reused in place even when it is multi-pane
+// and its name does not match — so re-running cycles the layout in place.
+func TestNew_ReusesMarkedCurrentWindow(t *testing.T) {
+	requireTmux(t)
+	sess, socket := newSession(t, "cmdman-owned")
+
+	root := loadLayout(t, "horizontal-two.yaml", "")
+	if _, err := sess.ApplyLayout(context.Background(), root, 0); err != nil {
+		t.Fatalf("ApplyLayout: %v", err)
+	}
+	ownedID := sess.WindowID()
+	// Make the marked window the session's current window.
+	run(t, socket, "select-window", "-t", ownedID)
+
+	sess2, err := tmuxctl.New(context.Background(), tmuxctl.Config{
+		Socket:             socket,
+		SessionName:        "cmdman-test",
+		WindowName:         "unrelated-name",
+		ReuseCurrentWindow: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if sess2.WindowID() != ownedID {
+		t.Errorf("expected to reuse marked current window %s, got %s", ownedID, sess2.WindowID())
+	}
+}
+
 func TestApplyLayout_SingleLeaf(t *testing.T) {
 	requireTmux(t)
 	sess, socket := newSession(t, "cmdman")

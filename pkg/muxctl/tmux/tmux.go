@@ -40,6 +40,15 @@ type Config struct {
 	// and target it." When WindowID is set, SessionName/WindowName are not
 	// consulted.
 	WindowID string
+
+	// ReuseCurrentWindow, when true and WindowID is empty, applies the layout
+	// to the caller's current tmux window instead of a window found-or-created
+	// by name — but only when that current window is safe to take over (it is
+	// already muxctl-marked, already named WindowName, or has a single pane).
+	// When the current window cannot be resolved or is not safe to reuse, New
+	// falls back to find-or-create by name. Callers set this when running
+	// inside a tmux client and they have not pinned an explicit session.
+	ReuseCurrentWindow bool
 }
 
 // Session is a tmux-backed [muxctl.Session] controlling one window.
@@ -69,17 +78,24 @@ func New(ctx context.Context, cfg Config) (*Session, error) {
 		if cfg.WindowName == "" {
 			return nil, errors.New("tmux: Config.WindowName is required when WindowID is empty")
 		}
-		if err := ensureSession(ctx, e, cfg.SessionName); err != nil {
-			return nil, fmt.Errorf("tmux: ensure session %q: %w", cfg.SessionName, err)
+		if cfg.ReuseCurrentWindow {
+			if cur, ok := currentWindowToReuse(ctx, e, cfg.WindowName); ok {
+				wid = cur
+			}
 		}
-		found, err := findOrCreateWindow(ctx, e, cfg.SessionName, cfg.WindowName)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"tmux: find-or-create window %q in session %q: %w",
-				cfg.WindowName, cfg.SessionName, err,
-			)
+		if wid == "" {
+			if err := ensureSession(ctx, e, cfg.SessionName); err != nil {
+				return nil, fmt.Errorf("tmux: ensure session %q: %w", cfg.SessionName, err)
+			}
+			found, err := findOrCreateWindow(ctx, e, cfg.SessionName, cfg.WindowName)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"tmux: find-or-create window %q in session %q: %w",
+					cfg.WindowName, cfg.SessionName, err,
+				)
+			}
+			wid = found
 		}
-		wid = found
 	}
 
 	// Enable the pane-border title row so per-pane titles are visible.

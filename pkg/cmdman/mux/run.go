@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -16,13 +17,14 @@ import (
 // RunOptions configures [Run].
 type RunOptions struct {
 	// SessionName names the multiplexer session this invocation targets.
-	// Empty defaults to "cmdman". Plan/mux-00: the cmdman-created session is
-	// fixed to "cmdman"; when driving the user's current server (e.g. inside
-	// $TMUX) the session is still found-or-created by this name.
+	// When empty and the driver is tmux, the current tmux session is
+	// detected via `tmux display-message -p '#{session_name}'` (when $TMUX
+	// is set). If detection fails or we are not inside tmux, falls back to
+	// "cmdman". A non-empty value is used verbatim as an explicit override.
 	SessionName string
 	// WindowName names the cmdman-owned window within SessionName. Empty
-	// defaults to SessionName ("cmdman"). Plan/mux-00: standalone mux uses
-	// "cmdman"; compose mux passes "cmdman-<project>".
+	// defaults to SessionName. Plan/mux-00: standalone mux uses "cmdman";
+	// compose mux passes "cmdman-<project>".
 	WindowName string
 	// Layout selects a specific layout to apply instead of cycling. It accepts
 	// a layout name or a 0-based index (e.g. "2"). A name is matched first, so
@@ -41,9 +43,9 @@ type RunOptions struct {
 // window. When opts.Layout is set, that named/indexed layout is applied
 // directly; otherwise the applied layout index is `(previousMarker+1) mod
 // len(Layouts)`, read back from the existing window via
-// [muxctl.Session.StatWindow] (a fresh window starts at index 0). Either way the
-// applied index is persisted as the window marker, so a subsequent cycling Run
-// continues from the layout just shown.
+// [muxctl.Session.StatWindow] (a fresh window starts at index 0). Either way
+// the applied index is persisted as the window marker, so a subsequent cycling
+// Run continues from the layout just shown.
 //
 // When invoked outside a multiplexer (no $TMUX / $ZELLIJ in env), Run builds
 // the window detached and prints an attach hint
@@ -62,14 +64,6 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 	if env == nil {
 		env = os.Environ()
 	}
-	sessionName := opts.SessionName
-	if sessionName == "" {
-		sessionName = "cmdman"
-	}
-	windowName := opts.WindowName
-	if windowName == "" {
-		windowName = sessionName
-	}
 	stdout := opts.Stdout
 	if stdout == nil {
 		stdout = os.Stdout
@@ -81,6 +75,24 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 			"mux: driver %q is not implemented yet (v1 ships tmux only)", driver,
 		)
 	}
+
+	path, socket := spec.DriverOpt["path"], spec.DriverOpt["socket"]
+	explicitSession := opts.SessionName != ""
+	sessionName := resolveSessionName(
+		opts.SessionName,
+		env,
+		func() (string, error) { return currentTmuxSession(ctx, path, socket) },
+	)
+	windowName := opts.WindowName
+	if windowName == "" {
+		windowName = sessionName
+	}
+
+	// With no explicit --session, take over the caller's current window when it
+	// is safe to repurpose (single-pane or already ours) instead of spawning a
+	// separate window. An explicit session means "target that session", so the
+	// current-window takeover is disabled.
+	reuseCurrent := !explicitSession && envOf(env, "TMUX") != ""
 
 	// Resolve an explicit layout selector up-front so a bad name/index fails
 	// before we touch the multiplexer. -1 means "cycle".
@@ -94,10 +106,11 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 	}
 
 	sess, err := tmux.New(ctx, tmux.Config{
-		Path:        spec.DriverOpt["path"],
-		Socket:      spec.DriverOpt["socket"],
-		SessionName: sessionName,
-		WindowName:  windowName,
+		Path:               spec.DriverOpt["path"],
+		Socket:             spec.DriverOpt["socket"],
+		SessionName:        sessionName,
+		WindowName:         windowName,
+		ReuseCurrentWindow: reuseCurrent,
 	})
 	if err != nil {
 		return err
@@ -122,6 +135,50 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 		fmt.Fprintf(stdout, "Attach: tmux attach -t %s\n", sessionName)
 	}
 	return nil
+}
+
+// resolveSessionName determines the tmux session name to target.
+// When override is non-empty it is returned verbatim.
+// When inside tmux ($TMUX is set) queryCurrent is called; on success its
+// result is returned. On failure or when not inside tmux, falls back to
+// "cmdman".
+func resolveSessionName(
+	override string,
+	env []string,
+	queryCurrent func() (string, error),
+) string {
+	if override != "" {
+		return override
+	}
+	if envOf(env, "TMUX") != "" {
+		if name, err := queryCurrent(); err == nil {
+			return name
+		}
+	}
+	return "cmdman"
+}
+
+// currentTmuxSession queries the name of the currently-active tmux session by
+// running `tmux display-message -p '#{session_name}'`. tmuxPath is the tmux
+// binary path (empty → "tmux"). socket, when non-empty, is passed as -L
+// <socket> before the subcommand (mirroring tmux.Config.Socket).
+func currentTmuxSession(ctx context.Context, tmuxPath, socket string) (string, error) {
+	bin := tmuxPath
+	if bin == "" {
+		bin = "tmux"
+	}
+	args := []string{}
+	if socket != "" {
+		args = append(args, "-L", socket)
+	}
+	args = append(args, "display-message", "-p", "#{session_name}")
+	var buf strings.Builder
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Stdout = &buf
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(buf.String()), nil
 }
 
 // resolveLayoutIndex resolves a layout selector to an index into layouts. A
