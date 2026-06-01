@@ -86,26 +86,31 @@ func AttachSticky(
 		}
 
 		if !state.Running {
-			result, err := promptWait(ctx, mux, opts, state.Status)
+			done, err := waitAtPrompt(ctx, mux, hooks, opts, state.Status)
 			if err != nil {
 				return err
 			}
-			switch result {
-			case PromptRestart:
-				if err := hooks.Restart(ctx); err != nil {
-					fmt.Fprintf(opts.Stdout, "\r\nrestart failed: %v\r\n", err)
-					continue
-				}
-				continue
-			case PromptDetach:
+			if done {
 				return nil
 			}
+			continue
 		}
 
 		session, err := hooks.OpenSession(ctx)
 		if err != nil {
-			fmt.Fprintf(opts.Stdout, "\r\nopen attach session failed: %v\r\n", err)
-			// Surface the failure into the prompt loop on the next pass.
+			// Re-opening the attach stream failed (e.g. the monitor is still
+			// coming up after a restart). Surface it at the wait prompt rather
+			// than spinning, so the user can retry with 'r' or detach.
+			done, perr := waitAtPrompt(
+				ctx, mux, hooks, opts,
+				fmt.Sprintf("open attach session failed: %v", err),
+			)
+			if perr != nil {
+				return perr
+			}
+			if done {
+				return nil
+			}
 			continue
 		}
 
@@ -118,13 +123,58 @@ func AttachSticky(
 			continue
 		case errors.Is(err, ErrForceExit):
 			return err
-		case err != nil:
+		case ctx.Err() != nil:
+			// Top-level shutdown (ctx canceled): exit.
 			return err
+		case err != nil:
+			// A transient stream/transport error — e.g. the monitor tearing
+			// the attach stream down while the command is stopped or
+			// restarted — must NOT kill the sticky session and close its mux
+			// pane. Surface it and drop to the wait prompt so the user can
+			// restart ('r') or detach.
+			done, perr := waitAtPrompt(
+				ctx, mux, hooks, opts,
+				fmt.Sprintf("attach error: %v", err),
+			)
+			if perr != nil {
+				return perr
+			}
+			if done {
+				return nil
+			}
+			continue
 		default:
 			// Detach-keys path; user is done.
 			return nil
 		}
 	}
+}
+
+// waitAtPrompt shows the wait prompt and applies its outcome. It returns
+// done=true when the user chose to detach (the caller should return nil) and
+// false to keep looping. A restart request is dispatched here; a restart
+// failure is reported and treated as "stay at the prompt" on the next pass.
+func waitAtPrompt(
+	ctx context.Context,
+	mux *stdinMux,
+	hooks StickyHooks,
+	opts AttachOptions,
+	status string,
+) (done bool, err error) {
+	result, err := promptWait(ctx, mux, opts, status)
+	if err != nil {
+		return false, err
+	}
+	switch result {
+	case PromptRestart:
+		if rerr := hooks.Restart(ctx); rerr != nil {
+			fmt.Fprintf(opts.Stdout, "\r\nrestart failed: %v\r\n", rerr)
+		}
+		return false, nil
+	case PromptDetach:
+		return true, nil
+	}
+	return false, nil
 }
 
 // PromptStickyWait blocks reading stdin in raw mode for 'r' / 'R' (restart),

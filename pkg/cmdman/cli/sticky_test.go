@@ -36,6 +36,66 @@ type bufWriteCloser struct {
 
 func (*bufWriteCloser) Close() error { return nil }
 
+// fakeAttachSession is a cli.AttachSession whose Recv immediately returns a
+// configured error, standing in for a monitor stream that breaks mid-attach.
+type fakeAttachSession struct {
+	recvErr error
+}
+
+func (f *fakeAttachSession) Recv() ([]byte, error)               { return nil, f.recvErr }
+func (f *fakeAttachSession) SendStdin([]byte) error              { return nil }
+func (f *fakeAttachSession) Signal(context.Context, int32) error { return nil }
+func (f *fakeAttachSession) Resize(int, int) error               { return nil }
+func (f *fakeAttachSession) CloseSend() error                    { return nil }
+func (f *fakeAttachSession) Close() error                        { return nil }
+
+// TestAttachStickyRecoverableAttachErrorDropsToPrompt verifies that a non-EOF
+// attach error (e.g. the monitor tearing the stream down on stop/restart) does
+// NOT propagate out of AttachSticky — which would kill the viewer and close
+// its mux pane. Instead the loop drops to the wait prompt; here ctx
+// cancellation stands in for the user detaching, so the call returns the ctx
+// error rather than the raw stream error.
+func TestAttachStickyRecoverableAttachErrorDropsToPrompt(t *testing.T) {
+	stdin, stdout := nonTTYStdio(t)
+	stdinPipeR, stdinPipeW := io.Pipe()
+	t.Cleanup(func() { _ = stdinPipeW.Close(); _ = stdinPipeR.Close() })
+
+	errBoom := errors.New("rpc error: transport is closing")
+	hooks := cli.StickyHooks{
+		State: func(context.Context) (cli.StickyState, error) {
+			return cli.StickyState{Running: true, Status: "started"}, nil
+		},
+		OpenSession: func(context.Context) (cli.AttachSession, error) {
+			return &fakeAttachSession{recvErr: errBoom}, nil
+		},
+		Restart: func(context.Context) error { return nil },
+	}
+	opts := cli.AttachOptions{
+		Stdin:      stdin,
+		Stdout:     stdout,
+		StdinPipe:  stdinPipeR,
+		StdoutPipe: &bufWriteCloser{Buffer: &bytes.Buffer{}},
+		DetachKeys: "ctrl-p,ctrl-q",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- cli.AttachSticky(ctx, hooks, opts) }()
+
+	// Give the loop time to reach Attach (which errors) and drop to the prompt.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		assert.Assert(t, !errors.Is(err, errBoom),
+			"raw attach error must not propagate; got %v", err)
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(3 * time.Second):
+		t.Fatal("AttachSticky did not return after ctx cancel")
+	}
+}
+
 func TestPromptStickyWaitR(t *testing.T) {
 	t.Parallel()
 
