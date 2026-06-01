@@ -88,6 +88,17 @@ func listPaneTitles(t *testing.T, socket, windowID string) []string {
 	return strings.Split(out, "\n")
 }
 
+// listPaneMarkers returns each pane's @cmdman_marker option (empty when
+// unset) in tmux's list order for windowID.
+func listPaneMarkers(t *testing.T, socket, windowID string) []string {
+	t.Helper()
+	out := run(t, socket, "list-panes", "-t", windowID, "-F", "#{@cmdman_marker}")
+	if out == "" {
+		return nil
+	}
+	return strings.Split(out, "\n")
+}
+
 // listWindowNames returns every window name in the session.
 func listWindowNames(t *testing.T, socket, sessionName string) []string {
 	t.Helper()

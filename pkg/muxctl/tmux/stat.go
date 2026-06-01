@@ -3,33 +3,32 @@ package tmux
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/ngicks/cmdman/pkg/muxctl"
 )
 
-// markerSuffix matches a trailing "#<digits>" segment on a pane border
-// title. The base-title portion (group 1) may contain '#' freely; the
-// suffix is the stable parse anchor.
-var markerSuffix = regexp.MustCompile(`^(.*)#(\d+)$`)
-
-// StatWindow returns the muxctl-recognized embedded data parsed from the
-// border titles of the panes in windowID. The window does not have to be
-// the Session's own controlled window — callers probe other windows to
-// decide "is this someone else's muxctl window".
+// StatWindow returns the muxctl-recognized embedded data read from the panes
+// in windowID. The window does not have to be the Session's own controlled
+// window — callers probe other windows to decide "is this someone else's
+// muxctl window".
+//
+// The layout marker lives in the per-pane user option markerOption
+// ("@cmdman_marker"); the pane border title carries only the human-readable
+// pane name (see [applyState.realizeLeafAt] for why the marker moved off the
+// title).
 //
 // Parse rules (see also doc on [muxctl.WindowStat]):
 //
-//   - For each pane, the title is split into (base, marker) by stripping a
-//     trailing "#<digits>" suffix; PaneNames receives the base.
-//   - WindowStat.Marker is the marker shared by ALL panes that had one;
-//     -1 when no pane carried a parseable suffix, or panes disagree, or
-//     the window has zero panes.
+//   - PaneNames receives each pane's border title verbatim.
+//   - WindowStat.Marker is the marker shared by ALL panes that carry one; -1
+//     when no pane carries a marker, panes disagree, or the window has zero
+//     panes.
 func (s *Session) StatWindow(ctx context.Context, windowID string) (muxctl.WindowStat, error) {
 	out, err := s.exec.run(
-		ctx, "list-panes", "-t", windowID, "-F", "#{pane_title}",
+		ctx, "list-panes", "-t", windowID,
+		"-F", "#{"+markerOption+"}\t#{pane_title}",
 	)
 	if err != nil {
 		return muxctl.WindowStat{}, fmt.Errorf(
@@ -39,30 +38,25 @@ func (s *Session) StatWindow(ctx context.Context, windowID string) (muxctl.Windo
 	if out == "" {
 		return muxctl.WindowStat{Marker: -1}, nil
 	}
-	titles := strings.Split(out, "\n")
-	names := make([]string, 0, len(titles))
+	lines := strings.Split(out, "\n")
+	names := make([]string, 0, len(lines))
 	marker := -1
 	consistent := true
 	sawAnyMarker := false
-	for _, t := range titles {
-		m := markerSuffix.FindStringSubmatch(t)
-		if m == nil {
-			names = append(names, t)
-			// A pane without a marker breaks consistency with any
+	for _, line := range lines {
+		// The format is "<marker>\t<title>"; an unset option expands to "".
+		markerStr, title, _ := strings.Cut(line, "\t")
+		names = append(names, title)
+
+		n, err := strconv.Atoi(markerStr)
+		if markerStr == "" || err != nil {
+			// A pane without a (numeric) marker breaks consistency with any
 			// marker-bearing pane we have already seen.
 			if sawAnyMarker {
 				consistent = false
 			}
 			continue
 		}
-		base := m[1]
-		n, err := strconv.Atoi(m[2])
-		if err != nil {
-			// Should be impossible given the regex, but be defensive.
-			names = append(names, t)
-			continue
-		}
-		names = append(names, base)
 		if !sawAnyMarker {
 			marker = n
 			sawAnyMarker = true

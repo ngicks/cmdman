@@ -73,49 +73,43 @@ func startServer(t *testing.T) string {
 	return socket
 }
 
-// waitForAllPaneTitlesParseable polls the pane titles in window sm:0 until
-// every line has a "#<digits>" suffix, or until timeout — in which case it
-// returns the last observed titles so the test can fail with context.
-func waitForAllPaneTitlesParseable(
+// waitForAllPaneMarkers polls the @cmdman_marker option of the panes in
+// window sm:0 until every pane carries a numeric marker, or until timeout —
+// in which case it returns the last observed markers so the test can fail
+// with context.
+func waitForAllPaneMarkers(
 	t *testing.T,
 	socket string,
 	timeout time.Duration,
 ) ([]string, error) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
-	var lastTitles []string
+	var lastMarkers []string
 	for time.Now().Before(deadline) {
-		out := runTmux(t, socket, "list-panes", "-t", "sm:0", "-F", "#{pane_title}")
-		lastTitles = nil
+		out := runTmux(t, socket, "list-panes", "-t", "sm:0", "-F", "#{@cmdman_marker}")
+		lastMarkers = nil
 		if out != "" {
-			lastTitles = strings.Split(out, "\n")
+			lastMarkers = strings.Split(out, "\n")
 		}
-		allMarked := len(lastTitles) > 0
-		for _, line := range lastTitles {
-			if !markerSuffix.MatchString(line) {
-				allMarked = false
-				break
-			}
-		}
-		if allMarked {
-			return lastTitles, nil
+		if len(lastMarkers) > 0 && !slices.Contains(lastMarkers, "") {
+			return lastMarkers, nil
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
-	return lastTitles, errors.New("timeout waiting for all pane titles to carry a marker suffix")
+	return lastMarkers, errors.New("timeout waiting for all panes to carry a marker option")
 }
 
 // TestApplyInPane_PersistsMarkerOnFirstRun reproduces the user-reported
 // bug: when the tester is invoked from inside a single-pane tmux window
 // (the "single-pane fast path" → reuse), the apply must still leave the
-// pane-border title carrying the "#<marker>" suffix so subsequent runs
-// can read it back and cycle.
+// pane carrying the @cmdman_marker option so subsequent runs can read it
+// back and cycle.
 //
 // Reproduction strategy: pre-build the tester, send-keys its invocation
-// into a tmux pane running /bin/sh, then wait for the pane titles to
-// carry the marker suffix. Pre-fix: the respawn-pane kills the tester's
-// process group before select-pane -T runs, the title never gets the
-// suffix, and the wait times out.
+// into a tmux pane running /bin/sh, then wait for the pane to carry the
+// marker option. Pre-fix: the respawn-pane kills the tester's process
+// group before the marker is set, the option never lands, and the wait
+// times out.
 func TestApplyInPane_PersistsMarkerOnFirstRun(t *testing.T) {
 	requireTmux(t)
 	bin := buildTester(t)
@@ -125,17 +119,21 @@ func TestApplyInPane_PersistsMarkerOnFirstRun(t *testing.T) {
 	// Tell the shell in the pane to run the tester and write a sentinel
 	// line on completion so timeout vs success is distinguishable. The
 	// sentinel is best-effort — if the tester dies during respawn it
-	// never runs, and the test relies on the title-polling timeout to
+	// never runs, and the test relies on the marker-polling timeout to
 	// surface the bug.
 	cmdLine := bin + " " + fixture + "; echo TESTER_DONE"
 	runTmux(t, socket, "send-keys", "-t", "sm:0.0", cmdLine, "Enter")
 
-	titles, err := waitForAllPaneTitlesParseable(t, socket, 5*time.Second)
+	markers, err := waitForAllPaneMarkers(t, socket, 5*time.Second)
 	if err != nil {
-		t.Fatalf("first-run pane titles never carried a marker suffix; last titles=%v: %v",
-			titles, err)
+		t.Fatalf("first-run panes never carried a marker option; last markers=%v: %v",
+			markers, err)
 	}
-	if !slices.Equal(titles, []string{"only#0"}) {
-		t.Errorf("titles = %v, want [only#0]", titles)
+	if !slices.Equal(markers, []string{"0"}) {
+		t.Errorf("markers = %v, want [0]", markers)
+	}
+	titles := runTmux(t, socket, "list-panes", "-t", "sm:0", "-F", "#{pane_title}")
+	if titles != "only" {
+		t.Errorf("title = %q, want %q", titles, "only")
 	}
 }

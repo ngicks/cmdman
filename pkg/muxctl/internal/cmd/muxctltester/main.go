@@ -33,7 +33,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -310,29 +309,23 @@ func (t tmuxExec) run(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// markerSuffix matches a trailing "#<digits>" segment on a pane title.
-// Mirrors the parse in pkg/muxctl/tmux/stat.go; duplicated here so the
-// tester can probe "is this window muxctl-owned" without first having
-// to construct a muxctl.Session (which would side-effect the window by
-// turning on pane-border-status).
-var markerSuffix = regexp.MustCompile(`#(\d+)$`)
-
-// windowMarker reports the marker embedded in windowID's pane titles.
+// windowMarker reports the marker recorded on windowID's panes via the
+// @cmdman_marker per-pane option. Mirrors the read in pkg/muxctl/tmux/stat.go;
+// duplicated here so the tester can probe "is this window muxctl-owned"
+// without first having to construct a muxctl.Session (which would side-effect
+// the window by turning on pane-border-status).
+//
 // Returns (marker, true) only when every pane carries the SAME marker;
 // returns (-1, false) when no marker is present, panes disagree, or the
 // window has no panes / fails to list.
 func (t tmuxExec) windowMarker(ctx context.Context, windowID string) (int, bool) {
-	out, err := t.run(ctx, "list-panes", "-t", windowID, "-F", "#{pane_title}")
+	out, err := t.run(ctx, "list-panes", "-t", windowID, "-F", "#{@cmdman_marker}")
 	if err != nil || out == "" {
 		return -1, false
 	}
 	marker := -1
 	for line := range strings.SplitSeq(out, "\n") {
-		m := markerSuffix.FindStringSubmatch(line)
-		if m == nil {
-			return -1, false
-		}
-		n, err := strconv.Atoi(m[1])
+		n, err := strconv.Atoi(line)
 		if err != nil {
 			return -1, false
 		}

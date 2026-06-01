@@ -212,9 +212,10 @@ func TestApplyLayout_CmdOptTitleOverridesName(t *testing.T) {
 	}
 }
 
-// TestApplyLayout_EmbedsMarkerInTitles verifies that a non-negative
-// marker is appended to every pane's border title as "#<marker>".
-func TestApplyLayout_EmbedsMarkerInTitles(t *testing.T) {
+// TestApplyLayout_RecordsMarkerOption verifies that a non-negative marker is
+// recorded on every pane via the @cmdman_marker per-pane option, while the
+// pane border title carries only the plain pane name.
+func TestApplyLayout_RecordsMarkerOption(t *testing.T) {
 	requireTmux(t)
 	sess, socket := newSession(t, "cmdman")
 
@@ -224,9 +225,13 @@ func TestApplyLayout_EmbedsMarkerInTitles(t *testing.T) {
 	}
 	titles := listPaneTitles(t, socket, sess.WindowID())
 	slices.Sort(titles)
-	want := []string{"a#7", "b#7"}
-	if !slices.Equal(titles, want) {
-		t.Errorf("titles = %v, want %v", titles, want)
+	if !slices.Equal(titles, []string{"a", "b"}) {
+		t.Errorf("titles = %v, want [a b]", titles)
+	}
+	markers := listPaneMarkers(t, socket, sess.WindowID())
+	slices.Sort(markers)
+	if !slices.Equal(markers, []string{"7", "7"}) {
+		t.Errorf("markers = %v, want [7 7]", markers)
 	}
 }
 
@@ -248,8 +253,8 @@ func TestApplyLayout_NegativeMarker_SkipsEmbed(t *testing.T) {
 }
 
 // TestApplyLayout_PreservesHashesInBaseTitle verifies that base titles
-// (cmd_opt.title or leaf name) can contain '#' freely: the parser
-// anchors on the TRAILING "#<digits>" only.
+// (cmd_opt.title or leaf name) can contain '#' freely: storing the marker in
+// a per-pane option (rather than a title suffix) keeps the title verbatim.
 func TestApplyLayout_PreservesHashesInBaseTitle(t *testing.T) {
 	requireTmux(t)
 	sess, socket := newSession(t, "cmdman")
@@ -266,8 +271,8 @@ func TestApplyLayout_PreservesHashesInBaseTitle(t *testing.T) {
 		t.Fatalf("ApplyLayout: %v", err)
 	}
 	titles := listPaneTitles(t, socket, sess.WindowID())
-	if !slices.Equal(titles, []string{"weird#name#5#3"}) {
-		t.Errorf("titles = %v, want [weird#name#5#3]", titles)
+	if !slices.Equal(titles, []string{"weird#name#5"}) {
+		t.Errorf("titles = %v, want [weird#name#5]", titles)
 	}
 
 	// StatWindow must round-trip: marker=3, name="weird#name#5".
@@ -335,12 +340,12 @@ func TestStatWindow_InconsistentMarkers_ReturnsMinusOne(t *testing.T) {
 	if _, err := sess.ApplyLayout(context.Background(), root, 1); err != nil {
 		t.Fatalf("ApplyLayout: %v", err)
 	}
-	// Manually rewrite one pane's title with a different marker.
+	// Manually rewrite one pane's marker option to a different value.
 	ids := listPaneIDs(t, socket, sess.WindowID())
 	if len(ids) < 2 {
 		t.Fatalf("expected at least 2 panes, got %d", len(ids))
 	}
-	run(t, socket, "select-pane", "-t", ids[0], "-T", "a#9")
+	run(t, socket, "set-option", "-p", "-t", ids[0], "@cmdman_marker", "9")
 
 	stat, err := sess.StatWindow(context.Background(), sess.WindowID())
 	if err != nil {

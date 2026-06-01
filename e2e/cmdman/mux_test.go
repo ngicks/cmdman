@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -92,53 +91,43 @@ func tmuxPaneField(t *testing.T, socket, windowID, field string) []string {
 	return strings.Split(out, "\n")
 }
 
-// markerSuffix matches the trailing "#<digits>" layout marker muxctl embeds in
-// pane border titles.
-var markerSuffix = regexp.MustCompile(`#(\d+)$`)
-
-// stripMarker splits a pane title into its base name and embedded layout
-// marker. A title with no "#<digits>" suffix yields marker -1.
-func stripMarker(title string) (base string, marker int) {
-	m := markerSuffix.FindStringSubmatch(title)
-	if m == nil {
-		return title, -1
-	}
-	n, _ := strconv.Atoi(m[1])
-	return strings.TrimSuffix(title, "#"+m[1]), n
-}
-
-// windowPaneBases returns the sorted base pane names (markers stripped) of
-// windowID.
+// windowPaneBases returns the sorted pane border titles of windowID. The layout
+// marker lives in the @cmdman_marker per-pane option, so titles are the plain
+// pane names.
 func windowPaneBases(t *testing.T, socket, windowID string) []string {
 	t.Helper()
 	titles := tmuxPaneField(t, socket, windowID, "#{pane_title}")
-	bases := make([]string, 0, len(titles))
-	for _, ti := range titles {
-		base, _ := stripMarker(ti)
-		bases = append(bases, base)
-	}
+	bases := slices.Clone(titles)
 	slices.Sort(bases)
 	return bases
 }
 
-// windowMarker returns the layout marker shared by every pane in windowID,
-// failing the test if the panes disagree (which would mean ApplyLayout did not
-// tag them uniformly).
+// windowMarker returns the layout marker shared by every pane in windowID (read
+// from the @cmdman_marker per-pane option), failing the test if the panes
+// disagree (which would mean ApplyLayout did not tag them uniformly). A pane
+// with no marker option yields -1.
 func windowMarker(t *testing.T, socket, windowID string) int {
 	t.Helper()
-	titles := tmuxPaneField(t, socket, windowID, "#{pane_title}")
-	if len(titles) == 0 {
+	values := tmuxPaneField(t, socket, windowID, "#{@cmdman_marker}")
+	if len(values) == 0 {
 		t.Fatalf("window %s has no panes", windowID)
 	}
 	marker := -2
-	for _, ti := range titles {
-		_, m := stripMarker(ti)
+	for _, v := range values {
+		m := -1
+		if v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				t.Fatalf("non-numeric @cmdman_marker %q", v)
+			}
+			m = n
+		}
 		if marker == -2 {
 			marker = m
 			continue
 		}
 		if m != marker {
-			t.Fatalf("inconsistent layout markers across panes: %v", titles)
+			t.Fatalf("inconsistent layout markers across panes: %v", values)
 		}
 	}
 	return marker

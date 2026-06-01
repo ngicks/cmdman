@@ -22,9 +22,9 @@ import (
 //
 //  3. Walk root depth-first:
 //
-//     - At a leaf, respawn the anchor pane with the leaf's argv and set
-//     its pane-border title to "<base>#<marker>" (or just "<base>" when
-//     marker < 0), where <base> is CmdOpt["title"] or the leaf name.
+//     - At a leaf, respawn the anchor pane with the leaf's argv, set its
+//     pane-border title to <base> (CmdOpt["title"] or the leaf name), and
+//     record the marker in the per-pane option markerOption.
 //     - At a container, peel each non-last child off the anchor with
 //     split-window (in node.Dir, taking cells[i] of the anchor's split
 //     dim); the last child takes over the anchor.
@@ -32,9 +32,9 @@ import (
 //  4. Select the focused pane (first leaf with Focus=true; otherwise the
 //     first leaf in document order).
 //
-// marker is an opaque non-negative int that is embedded in every pane's
-// border title (see [Session.StatWindow] for the read side). Pass < 0 to
-// skip embedding.
+// marker is an opaque non-negative int that is stored on every pane via the
+// per-pane option markerOption (see [Session.StatWindow] for the read side).
+// Pass < 0 to skip recording it (and clear any stale value).
 //
 // If a child's computed cell budget is < 1, the child is skipped and the
 // dropped pane names are emitted via the context-scoped logger
@@ -125,21 +125,43 @@ func (st *applyState) materialize(anchorID string, node muxctl.PaneSpec, w, h in
 	return nil
 }
 
+// markerOption is the per-pane tmux user option that records the applied
+// layout index, read back by [Session.StatWindow] to cycle layouts. It
+// replaces the older scheme of appending "#<marker>" to the pane border
+// title, which overloaded display text (the pane name) with control state.
+//
+// NOTE: per-pane user options ("@name", set/read with the -p flag) are a
+// tmux-specific feature. A future zellij or wezterm driver has no equivalent
+// and would need a different mechanism to persist the layout marker across
+// invocations — e.g. a sidecar file keyed by session/window, or that driver's
+// own native pane metadata.
+const markerOption = "@cmdman_marker"
+
 func (st *applyState) realizeLeafAt(paneID string, leaf muxctl.PaneSpec) error {
-	// Set the pane-border title BEFORE respawning. respawn-pane -k SIGHUPs
-	// the existing in-pane process tree; when the caller (e.g. the
+	// Set the pane title and marker option BEFORE respawning. respawn-pane -k
+	// SIGHUPs the existing in-pane process tree; when the caller (e.g. the
 	// muxctltester) is running inside that pane, it can die before any
-	// follow-up tmux command lands. Setting the title first lets it
-	// persist regardless — tmux per-pane state survives respawn-pane.
-	base := cmp.Or(leaf.CmdOpt["title"], leaf.Name)
-	title := base
-	if st.marker >= 0 {
-		title = base + "#" + strconv.Itoa(st.marker)
-	}
+	// follow-up tmux command lands. Setting them first lets them persist
+	// regardless — tmux per-pane state survives respawn-pane.
+	title := cmp.Or(leaf.CmdOpt["title"], leaf.Name)
 	if _, err := st.s.exec.run(
 		st.ctx, "select-pane", "-t", paneID, "-T", title,
 	); err != nil {
 		return fmt.Errorf("tmux: set pane title for %s: %w", paneID, err)
+	}
+	if st.marker >= 0 {
+		if _, err := st.s.exec.run(
+			st.ctx, "set-option", "-p", "-t", paneID,
+			markerOption, strconv.Itoa(st.marker),
+		); err != nil {
+			return fmt.Errorf("tmux: set marker option for %s: %w", paneID, err)
+		}
+	} else {
+		// Clear any stale marker so a marker-less apply leaves the pane in a
+		// clean state (best-effort: the option may not exist yet).
+		_, _ = st.s.exec.run(
+			st.ctx, "set-option", "-p", "-u", "-t", paneID, markerOption,
+		)
 	}
 	if err := st.s.respawnPane(st.ctx, paneID, leaf.Cmd); err != nil {
 		return fmt.Errorf("tmux: respawn pane %s with %v: %w", paneID, leaf.Cmd, err)
