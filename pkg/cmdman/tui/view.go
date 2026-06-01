@@ -197,12 +197,7 @@ func (m Model) renderCommandList(title string, width, height int) string {
 			if m.commands.folded(r.group) && m.commands.filter == "" {
 				glyph = ">"
 			}
-			name := g.name
-			if name == "" {
-				// Standalone commands carry no compose project name.
-				name = "(standalone)"
-			}
-			plain = fmt.Sprintf("%s %s %s", glyph, projectMarker, name)
+			plain = fmt.Sprintf("%s %s %s", glyph, projectMarker, g.name)
 			styled = plain
 			if g.active {
 				plain += "   active"
@@ -214,6 +209,12 @@ func (m Model) renderCommandList(title string, width, height int) string {
 			if selected {
 				prefix = "> "
 			}
+			// Commands under a project header are indented beneath it; standalone
+			// commands (no project name) sit at the top level with no header.
+			indent := "  "
+			if m.commands.groups[r.group].name == "" {
+				indent = ""
+			}
 			label := displayLabel(c.state, c.exitCode)
 			if c.pending != "" {
 				label = c.pending + "…"
@@ -222,8 +223,8 @@ func (m Model) renderCommandList(title string, width, height int) string {
 			// command name, so a start cascade is visible as it progresses.
 			glyph := statusGlyph(c.state, c.pending, m.spinner)
 			name := truncate(c.name, 16)
-			plain = fmt.Sprintf("  %s%s %-16s %s", prefix, glyph, name, label)
-			styled = fmt.Sprintf("  %s%s %-16s %s", prefix,
+			plain = fmt.Sprintf("%s%s%s %-16s %s", indent, prefix, glyph, name, label)
+			styled = fmt.Sprintf("%s%s%s %-16s %s", indent, prefix,
 				statusStyle(c.state, c.pending).Render(glyph), name, label)
 		}
 		if selected {

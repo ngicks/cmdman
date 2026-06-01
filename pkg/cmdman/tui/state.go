@@ -187,10 +187,14 @@ func (c *commandsTab) visibleRows() []visRow {
 		if filtering && !projMatch && len(matched) == 0 {
 			continue
 		}
-		rows = append(rows, visRow{kind: visProject, group: gi})
-		// When filtering, force-expand so matches are visible; otherwise honor fold.
-		if !filtering && c.folded(gi) {
-			continue
+		// Standalone commands carry no compose project name; list them directly
+		// without a (foldable) group header.
+		if g.name != "" {
+			rows = append(rows, visRow{kind: visProject, group: gi})
+			// When filtering, force-expand so matches are visible; otherwise honor fold.
+			if !filtering && c.folded(gi) {
+				continue
+			}
 		}
 		for _, ci := range matched {
 			rows = append(rows, visRow{kind: visCommand, group: gi, cmd: ci})

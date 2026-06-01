@@ -293,6 +293,38 @@ func TestFoldHidesAndRevealsRows(t *testing.T) {
 	}
 }
 
+func TestStandaloneCommandsHaveNoGroupHeader(t *testing.T) {
+	m := seed()
+	// A standalone command carries no compose project name (empty name group).
+	m.setGroups(append(m.commands.groups, projectGroup{
+		name:    "",
+		workdir: "/work/loose",
+		commands: []commandRow{
+			{id: "9", name: "loose", workdir: "/work/loose", state: model.EventTypeStarted},
+		},
+	}))
+	rows := m.commands.visibleRows()
+	var standaloneCmds, standaloneHeaders int
+	for _, r := range rows {
+		g := m.commands.groups[r.group]
+		if g.name != "" {
+			continue
+		}
+		switch r.kind {
+		case visProject:
+			standaloneHeaders++
+		case visCommand:
+			standaloneCmds++
+		}
+	}
+	if standaloneHeaders != 0 {
+		t.Fatalf("standalone group should not emit a header row, got %d", standaloneHeaders)
+	}
+	if standaloneCmds != 1 {
+		t.Fatalf("standalone command should still be listed, got %d", standaloneCmds)
+	}
+}
+
 func TestSelectionMovesOnlyAcrossVisibleRows(t *testing.T) {
 	m := seed()
 	m.commands.setFolded(0, true) // hide local-dev's commands
