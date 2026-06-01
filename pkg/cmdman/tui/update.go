@@ -37,6 +37,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onPreviewLine(msg)
 	case attachDoneMsg:
 		return m.onAttachDone(msg)
+	case muxDoneMsg:
+		return m.onMuxDone(msg)
 	case statusMsg:
 		m.status = msg.text
 		return m, nil

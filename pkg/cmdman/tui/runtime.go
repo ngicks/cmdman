@@ -108,6 +108,9 @@ type previewLineMsg struct {
 // starting or cancelling the live log reader as needed. It returns a command to
 // open a new reader, or nil when nothing changed.
 func (m *Model) reconcilePreview() tea.Cmd {
+	if m.active != tabCommands {
+		return nil // preview is a Commands-tab concern; leave it as-is
+	}
 	c, ok := m.commands.selectedCommand()
 	if !ok {
 		m.stopPreview()

@@ -86,6 +86,12 @@ type Backend interface {
 	// returns an outcome ("detached" or "exited") plus any real error. It is
 	// invoked from a released-terminal context (tea.Exec).
 	Attach(ctx context.Context, id string) (outcome string, err error)
+
+	// CycleMux cycles the mux layout for a compose project by invoking the
+	// existing compose mux path. The TUI does not track layout state; mux owns
+	// its persisted tmux window marker. projectName identifies the project and
+	// composeFile (may be empty) is its compose file path.
+	CycleMux(ctx context.Context, projectName, composeFile string) error
 }
 
 // EventSignal is one lifecycle change cue. A non-nil Err is a local event-tail
@@ -127,6 +133,10 @@ type Options struct {
 	// AltScreen runs the program in the alternate screen buffer. Direct mode
 	// uses the alternate screen; popup mode may opt out.
 	AltScreen bool
+	// PopupMode indicates the TUI runs inside a multiplexer popup. In popup
+	// mode, mux layout actions rearrange the underlying window safely; in
+	// direct mode they would clobber the TUI, so they require a warning first.
+	PopupMode bool
 }
 
 // Run starts the TUI program and blocks until it exits.
@@ -146,9 +156,10 @@ func Run(ctx context.Context, opts Options) error {
 // New constructs the root model.
 func New(opts Options) Model {
 	return Model{
-		backend: opts.Backend,
-		version: opts.Version,
-		active:  tabCommands,
+		backend:   opts.Backend,
+		version:   opts.Version,
+		popupMode: opts.PopupMode,
+		active:    tabCommands,
 		commands: commandsTab{
 			fold:  map[string]bool{},
 			focus: paneList,

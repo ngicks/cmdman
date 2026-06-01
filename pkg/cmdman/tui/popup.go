@@ -15,6 +15,7 @@ const (
 	popupAttach
 	popupRemove
 	popupForceRemove
+	popupMuxWarn
 )
 
 // popupState is the pending confirmation dialog. Confirmation popups use a
@@ -25,6 +26,7 @@ type popupState struct {
 	project  string
 	command  string
 	targetID string
+	path     string // compose file path (mux warn popup)
 	// choice selects between the action button (0) and <cancel> (1).
 	choice int
 }
@@ -40,6 +42,8 @@ func (p popupState) actionLabel() string {
 		return "<yes>"
 	case popupForceRemove:
 		return "<force remove>"
+	case popupMuxWarn:
+		return "<continue>"
 	default:
 		return "<yes>"
 	}
@@ -53,6 +57,8 @@ func (p popupState) title() string {
 		return "Remove command?"
 	case popupForceRemove:
 		return "Force remove running command?"
+	case popupMuxWarn:
+		return "Rearrange the current tmux window?"
 	default:
 		return ""
 	}
@@ -77,6 +83,11 @@ func openRemovePopup(project, command, id string, running bool) popupState {
 	return popupState{kind: kind, project: project, command: command, targetID: id, choice: 1}
 }
 
+// openMuxWarnPopup opens the non-popup mux warning, defaulting to <cancel>.
+func openMuxWarnPopup(project, path string) popupState {
+	return popupState{kind: popupMuxWarn, project: project, path: path, choice: 1}
+}
+
 // toggleChoice moves the popup selection between the action button and <cancel>.
 func (p *popupState) toggleChoice() {
 	if p.choice == 0 {
@@ -92,10 +103,16 @@ func (m Model) renderPopup() string {
 	var b strings.Builder
 	b.WriteString(p.title())
 	b.WriteString("\n\n")
-	fmt.Fprintf(&b, "project: %s\n", p.project)
-	fmt.Fprintf(&b, "command: %s\n", p.command)
-	if p.kind == popupForceRemove {
-		b.WriteString("\nThis sends SIGKILL before removing the command.\n")
+	if p.kind == popupMuxWarn {
+		fmt.Fprintf(&b, "project: %s\n", p.project)
+		b.WriteString("\nShowing a mux layout will rearrange the current tmux window,\n")
+		b.WriteString("including this TUI. Continue?\n")
+	} else {
+		fmt.Fprintf(&b, "project: %s\n", p.project)
+		fmt.Fprintf(&b, "command: %s\n", p.command)
+		if p.kind == popupForceRemove {
+			b.WriteString("\nThis sends SIGKILL before removing the command.\n")
+		}
 	}
 	b.WriteByte('\n')
 
@@ -138,6 +155,7 @@ func (m Model) renderHelp() string {
 		b.WriteString("\nCompose mux\n")
 		b.WriteString("  enter  open project in Commands tab\n")
 		b.WriteString("  c      cycle mux layout\n")
+		b.WriteString("  l      specific layout (cycle-only for now)\n")
 		b.WriteString("  r      refresh project list\n")
 	}
 	b.WriteString("\nPopups\n")

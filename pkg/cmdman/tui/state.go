@@ -1,9 +1,10 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
@@ -57,6 +58,8 @@ type Model struct {
 
 	events    EventStream // lifecycle change-signal subscription
 	reloadGen int         // debounce generation for event-triggered re-list
+
+	popupMode bool // running inside a multiplexer popup
 
 	quitting bool
 }
@@ -292,11 +295,11 @@ func (m *Model) setGroups(groups []projectGroup) {
 	for i := range groups {
 		groups[i].active = groups[i].workdir != "" && groups[i].workdir == m.cwd
 	}
-	sort.SliceStable(groups, func(i, j int) bool {
-		if groups[i].active != groups[j].active {
-			return groups[i].active // active first
+	slices.SortStableFunc(groups, func(a, b projectGroup) int {
+		if a.active != b.active {
+			return boolFirst(a.active) // active first
 		}
-		return groups[i].name < groups[j].name
+		return cmp.Compare(a.name, b.name)
 	})
 	m.commands.groups = groups
 	m.commands.clampSelection()
@@ -307,16 +310,26 @@ func (m *Model) setComposeRows(rows []composeRow) {
 	for i := range rows {
 		rows[i].active = rows[i].workdir != "" && rows[i].workdir == m.cwd
 	}
-	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].active != rows[j].active {
-			return rows[i].active
+	slices.SortStableFunc(rows, func(a, b composeRow) int {
+		if a.active != b.active {
+			return boolFirst(a.active)
 		}
-		return rows[i].name < rows[j].name
+		return cmp.Compare(a.name, b.name)
 	})
 	m.compose.rows = rows
 	if m.compose.selected >= len(m.compose.visibleRows()) {
 		m.compose.selected = 0
 	}
+}
+
+// boolFirst returns -1 when v is true so that active entries sort before
+// inactive ones in a stable three-way comparator. Only call it when the two
+// compared booleans differ.
+func boolFirst(v bool) int {
+	if v {
+		return -1
+	}
+	return 1
 }
 
 // displayLabel maps a persisted state to a friendly display label. All logic

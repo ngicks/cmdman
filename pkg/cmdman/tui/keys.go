@@ -71,6 +71,9 @@ func (m Model) confirmPopup() (tea.Model, tea.Cmd) {
 		force := p.kind == popupForceRemove
 		m.setPending(p.targetID, "removing")
 		return m, m.removeCmd(p.targetID, p.command, force)
+	case popupMuxWarn:
+		m.status = fmt.Sprintf("cycling mux for %s…", p.project)
+		return m, m.cycleMuxCmd(p.project, p.path)
 	}
 	return m, nil
 }
@@ -308,18 +311,7 @@ func (m Model) onComposeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = "refreshing projects…"
 		return m, m.loadProjectsCmd()
 	case "c":
-		// Mux cycle is wired by the mux layer; the core shell reports it is
-		// not yet available.
-		row, ok := m.compose.selectedComposeRow()
-		if !ok {
-			return m, nil
-		}
-		if !row.hasMux {
-			m.status = fmt.Sprintf("%s has no mux section", row.name)
-			return m, nil
-		}
-		m.status = "mux cycle: not available yet"
-		return m, nil
+		return m.cycleMux()
 	case "l":
 		m.status = "Specific layout selection is not available yet; use c to cycle layouts."
 		return m, nil

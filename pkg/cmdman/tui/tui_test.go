@@ -29,6 +29,9 @@ type fakeBackend struct {
 	attachIDs   []string
 	attachOut   string
 	attachErr   error
+
+	muxCycled []string // project names passed to CycleMux
+	muxErr    error
 }
 
 func (f *fakeBackend) ListCommands(context.Context) ([]CommandInfo, error) { return f.cmds, nil }
@@ -71,6 +74,11 @@ func (f *fakeBackend) Logs(_ context.Context, _ string, _ int) (LogStream, error
 func (f *fakeBackend) Attach(_ context.Context, id string) (string, error) {
 	f.attachIDs = append(f.attachIDs, id)
 	return f.attachOut, f.attachErr
+}
+
+func (f *fakeBackend) CycleMux(_ context.Context, projectName, _ string) error {
+	f.muxCycled = append(f.muxCycled, projectName)
+	return f.muxErr
 }
 
 type fakeLogStream struct {

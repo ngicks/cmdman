@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/compose"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
+	"github.com/ngicks/cmdman/pkg/cmdman/mux"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"github.com/ngicks/cmdman/pkg/cmdman/tui"
 )
@@ -92,7 +94,27 @@ func (b *serviceBackend) ListProjects(ctx context.Context) ([]tui.ProjectInfo, e
 		return nil, err
 	}
 	named, _ := compose.ListNamedProjects()
-	return mergeProjectInfos(summaries, named), nil
+	infos := mergeProjectInfos(summaries, named)
+	// Enrich with the mux badge by parsing each project's compose file.
+	for i := range infos {
+		infos[i].HasMux = projectHasMux(infos[i].Name, infos[i].Path)
+	}
+	return infos, nil
+}
+
+// projectHasMux reports whether a compose project declares a mux: section. It
+// loads the project's compose file; failures and never-loadable projects
+// report false (no badge).
+func projectHasMux(name, composeFile string) bool {
+	opts := compose.NormalizeOpts{File: composeFile}
+	if composeFile == "" {
+		opts.File = name
+	}
+	sel, err := compose.LoadOrProject(opts)
+	if err != nil || sel.Spec == nil {
+		return false
+	}
+	return sel.Spec.Mux != nil
 }
 
 // mergeProjectInfos merges store-known project summaries with never-run named
@@ -260,6 +282,54 @@ func (b *serviceBackend) Attach(ctx context.Context, id string) (string, error) 
 	default:
 		return "", err
 	}
+}
+
+// CycleMux cycles the mux layout for a compose project via the existing compose
+// mux path (compose.LoadOrProject + mux.Build + mux.Run). mux owns its layout
+// state through a persisted tmux window marker; the TUI keeps none.
+func (b *serviceBackend) CycleMux(ctx context.Context, projectName, composeFile string) error {
+	opts := compose.NormalizeOpts{File: composeFile}
+	if composeFile == "" {
+		opts.File = projectName
+	}
+	selection, err := compose.LoadOrProject(opts)
+	if err != nil {
+		return err
+	}
+	if selection.Spec == nil {
+		return fmt.Errorf("mux: no compose file found for project %q", projectName)
+	}
+	if selection.Spec.Mux == nil {
+		return fmt.Errorf("mux: project %q has no mux section", projectName)
+	}
+	spec := *selection.Spec.Mux
+
+	cfg := b.svc.Config()
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("mux: locate cmdman binary: %w", err)
+	}
+	resolver := func(ctx context.Context, leafName string) (string, error) {
+		return b.compose.ResolveCommandID(ctx, selection, leafName)
+	}
+	built, err := mux.Build(ctx, spec, resolver, mux.PaneArgvOpts{
+		Executable: exe,
+		DataDir:    cfg.DataDir,
+		RuntimeDir: cfg.RuntimeDir,
+	})
+	if err != nil {
+		return err
+	}
+	windowName := "cmdman"
+	if selection.Project != "" {
+		windowName = "cmdman-" + selection.Project
+	}
+	// Discard mux's stdout hint so it never bleeds into the TUI surface; the
+	// TUI runs inside tmux so mux prints nothing anyway.
+	return mux.Run(ctx, built, mux.RunOptions{
+		WindowName: windowName,
+		Stdout:     io.Discard,
+	})
 }
 
 // newCancelStdin wraps os.Stdin in a cancelable reader so that Attach's

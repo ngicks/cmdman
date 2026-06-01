@@ -21,6 +21,7 @@ func RunTUI(ctx context.Context, svc *cmdman.Service) error {
 		Backend:   newServiceBackend(svc),
 		Version:   cmdman.Version,
 		AltScreen: true,
+		PopupMode: false,
 	})
 }
 
@@ -45,6 +46,7 @@ func RunTUIChild(ctx context.Context, svc *cmdman.Service, ipcPath string) error
 		Backend:   newServiceBackend(svc),
 		Version:   cmdman.Version,
 		AltScreen: true,
+		PopupMode: true,
 	})
 	if err != nil {
 		send(ipcMessage{Kind: ipcError, Error: err.Error()})
