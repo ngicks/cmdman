@@ -114,6 +114,32 @@ func upd(m Model, msg tea.Msg) (Model, tea.Cmd) {
 	return nm.(Model), cmd
 }
 
+// drain executes a command, recursively flattening tea.Batch results into the
+// leaf messages it produces.
+func drain(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var out []tea.Msg
+		for _, c := range batch {
+			out = append(out, drain(c)...)
+		}
+		return out
+	}
+	return []tea.Msg{msg}
+}
+
+func firstActionDone(msgs []tea.Msg) (actionDoneMsg, bool) {
+	for _, m := range msgs {
+		if d, ok := m.(actionDoneMsg); ok {
+			return d, true
+		}
+	}
+	return actionDoneMsg{}, false
+}
+
 // selectCmd selects the visible row at idx and marks its command's preview as
 // already established, so reconcilePreview is a no-op and the command returned
 // by a subsequent key press is the lifecycle action alone (not batched with a
@@ -444,10 +470,9 @@ func TestRemoveRequiresExplicitConfirmation(t *testing.T) {
 	if cmd == nil {
 		t.Fatalf("confirming <yes> should dispatch a remove command")
 	}
-	msg := cmd()
-	done, ok := msg.(actionDoneMsg)
+	done, ok := firstActionDone(drain(cmd))
 	if !ok || done.verb != "remove" {
-		t.Fatalf("expected a remove actionDoneMsg, got %#v", msg)
+		t.Fatalf("expected a remove actionDoneMsg")
 	}
 	fb := m.backend.(*fakeBackend)
 	if len(fb.removed) != 1 || fb.removed[0] != "2" {
@@ -465,9 +490,9 @@ func TestStartDispatchesForStoppedCommand(t *testing.T) {
 	if got := m.pendingOf("2"); got != "starting" {
 		t.Fatalf("start should set pending marker, got %q", got)
 	}
-	msg := cmd()
-	if done, ok := msg.(actionDoneMsg); !ok || done.verb != "start" {
-		t.Fatalf("expected start actionDoneMsg, got %#v", msg)
+	done, ok := firstActionDone(drain(cmd))
+	if !ok || done.verb != "start" {
+		t.Fatalf("expected start actionDoneMsg")
 	}
 	fb := m.backend.(*fakeBackend)
 	if len(fb.started) != 1 || fb.started[0] != "2" {

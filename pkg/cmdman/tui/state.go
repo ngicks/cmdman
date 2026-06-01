@@ -61,6 +61,9 @@ type Model struct {
 
 	popupMode bool // running inside a multiplexer popup
 
+	spinner  int  // animation frame for in-progress status markers
+	spinning bool // whether the spinner ticker is currently running
+
 	quitting bool
 }
 

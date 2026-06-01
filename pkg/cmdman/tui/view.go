@@ -7,6 +7,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
+
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
 // Charm-ish purple palette (256-color indices degrade gracefully).
@@ -29,7 +31,52 @@ var (
 	stylePopup     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Padding(0, 1)
 	stylePopupBtn  = lipgloss.NewStyle().Padding(0, 1)
 	stylePopupSel  = lipgloss.NewStyle().Bold(true).Foreground(colorOnAcc).Background(colorBorder).Padding(0, 1)
+
+	// Status-marker colors mirror the compose TTY reporter so the TUI shows the
+	// same indicators compose emits to the terminal.
+	styleMarkProgress = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // in progress
+	styleMarkPending  = lipgloss.NewStyle().Foreground(lipgloss.Color("6")) // created (ready)
+	styleMarkOK       = lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // running/exited
+	styleMarkErr      = lipgloss.NewStyle().Foreground(lipgloss.Color("1")) // failed
 )
+
+// statusGlyph returns the single-cell status marker for a command, matching the
+// compose progress reporter: spinner while in progress, ◌ created, ● running,
+// ✔ exited, ✘ failed.
+func statusGlyph(state model.EventType, pending string, frame int) string {
+	if pending != "" || state == model.EventTypeStarting {
+		return spinnerFrames[frame%len(spinnerFrames)]
+	}
+	switch state {
+	case model.EventTypeCreated:
+		return "◌"
+	case model.EventTypeStarted:
+		return "●"
+	case model.EventTypeExited:
+		return "✔"
+	case model.EventTypeFailed:
+		return "✘"
+	default:
+		return " "
+	}
+}
+
+// statusStyle returns the color style paired with statusGlyph.
+func statusStyle(state model.EventType, pending string) lipgloss.Style {
+	if pending != "" || state == model.EventTypeStarting {
+		return styleMarkProgress
+	}
+	switch state {
+	case model.EventTypeCreated:
+		return styleMarkPending
+	case model.EventTypeStarted, model.EventTypeExited:
+		return styleMarkOK
+	case model.EventTypeFailed:
+		return styleMarkErr
+	default:
+		return lipgloss.NewStyle()
+	}
+}
 
 // View implements tea.Model.
 func (m Model) View() string {
@@ -155,8 +202,13 @@ func (m Model) renderCommandList(title string, width, height int) string {
 			if c.pending != "" {
 				label = c.pending + "…"
 			}
-			plain = fmt.Sprintf("  %s%-18s %s", prefix, truncate(c.name, 18), label)
-			styled = plain
+			// Status marker (same indicators as compose) to the left of the
+			// command name, so a start cascade is visible as it progresses.
+			glyph := statusGlyph(c.state, c.pending, m.spinner)
+			name := truncate(c.name, 16)
+			plain = fmt.Sprintf("  %s%s %-16s %s", prefix, glyph, name, label)
+			styled = fmt.Sprintf("  %s%s %-16s %s", prefix,
+				statusStyle(c.state, c.pending).Render(glyph), name, label)
 		}
 		if selected {
 			// lipgloss Width pads the background to a full-width selection bar.

@@ -20,7 +20,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case commandsLoadedMsg:
 		nm, cmd := m.onCommandsLoaded(msg)
-		return nm, cmd
+		scmd := (&nm).maybeStartSpinner()
+		return nm, tea.Batch(cmd, scmd)
 	case projectsLoadedMsg:
 		return m.onProjectsLoaded(msg), nil
 	case actionDoneMsg:
@@ -39,19 +40,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onAttachDone(msg)
 	case muxDoneMsg:
 		return m.onMuxDone(msg)
+	case spinnerTickMsg:
+		return m.onSpinnerTick()
 	case statusMsg:
 		m.status = msg.text
 		return m, nil
 	case tea.KeyMsg:
 		nm, cmd := m.onKey(msg)
-		// Reconcile the preview after any key that may have moved the
-		// selected command (navigation, fold, tab switch, filter edits).
 		m2 := nm.(Model)
+		// Reconcile the preview after any key that may have moved the selected
+		// command, and (re)start the spinner if a key kicked off an action.
 		pcmd := (&m2).reconcilePreview()
-		if pcmd != nil {
-			return m2, tea.Batch(cmd, pcmd)
-		}
-		return m2, cmd
+		scmd := (&m2).maybeStartSpinner()
+		return m2, tea.Batch(cmd, pcmd, scmd)
 	}
 	return m, nil
 }
