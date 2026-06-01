@@ -65,10 +65,8 @@ func (m Model) confirmPopup() (tea.Model, tea.Cmd) {
 	}
 	switch p.kind {
 	case popupAttach:
-		// The terminal handoff is wired by the runtime layer; the core shell
-		// only owns the confirmation.
-		m.status = fmt.Sprintf("attach %s: not available yet", p.command)
-		return m, nil
+		m.status = fmt.Sprintf("attaching to %s…", p.command)
+		return m, m.startAttach(p.targetID, p.command)
 	case popupRemove, popupForceRemove:
 		force := p.kind == popupForceRemove
 		m.setPending(p.targetID, "removing")

@@ -75,7 +75,48 @@ type Backend interface {
 	// Remove removes a command. force sends SIGKILL before removal and is
 	// required when the command is running.
 	Remove(ctx context.Context, id string, force bool) error
+
+	// Events subscribes to lifecycle change signals. Each signal is a cue to
+	// re-list; the stream is a local event-log tail, not a network stream.
+	Events(ctx context.Context) (EventStream, error)
+	// Logs opens a Tail+Follow reader for the preview pane. tail sizes the
+	// initial snapshot.
+	Logs(ctx context.Context, id string, tail int) (LogStream, error)
+	// Attach hands the terminal to an attach session for the command and
+	// returns an outcome ("detached" or "exited") plus any real error. It is
+	// invoked from a released-terminal context (tea.Exec).
+	Attach(ctx context.Context, id string) (outcome string, err error)
 }
+
+// EventSignal is one lifecycle change cue. A non-nil Err is a local event-tail
+// error to surface in the footer without closing the TUI.
+type EventSignal struct {
+	Err error
+}
+
+// EventStream delivers lifecycle change signals until closed.
+type EventStream interface {
+	Signals() <-chan EventSignal
+	Close() error
+}
+
+// LogLine is one preview line; a non-nil Err is a read error to surface.
+type LogLine struct {
+	Text string
+	Err  error
+}
+
+// LogStream delivers preview lines (Tail snapshot then Follow) until closed.
+type LogStream interface {
+	Lines() <-chan LogLine
+	Close() error
+}
+
+// Attach outcomes.
+const (
+	AttachDetached = "detached"
+	AttachExited   = "exited"
+)
 
 // Options configures a TUI run.
 type Options struct {

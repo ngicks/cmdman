@@ -23,6 +23,12 @@ type fakeBackend struct {
 	restarted   []string
 	removed     []string
 	removeForce map[string]bool
+
+	logStreams  []*fakeLogStream // one per Logs call
+	eventStream *fakeEventStream
+	attachIDs   []string
+	attachOut   string
+	attachErr   error
 }
 
 func (f *fakeBackend) ListCommands(context.Context) ([]CommandInfo, error) { return f.cmds, nil }
@@ -49,9 +55,66 @@ func (f *fakeBackend) Remove(_ context.Context, id string, force bool) error {
 	return nil
 }
 
+func (f *fakeBackend) Events(context.Context) (EventStream, error) {
+	if f.eventStream == nil {
+		f.eventStream = &fakeEventStream{ch: make(chan EventSignal, 1)}
+	}
+	return f.eventStream, nil
+}
+
+func (f *fakeBackend) Logs(_ context.Context, _ string, _ int) (LogStream, error) {
+	ls := &fakeLogStream{ch: make(chan LogLine, 16)}
+	f.logStreams = append(f.logStreams, ls)
+	return ls, nil
+}
+
+func (f *fakeBackend) Attach(_ context.Context, id string) (string, error) {
+	f.attachIDs = append(f.attachIDs, id)
+	return f.attachOut, f.attachErr
+}
+
+type fakeLogStream struct {
+	ch     chan LogLine
+	closed bool
+}
+
+func (s *fakeLogStream) Lines() <-chan LogLine { return s.ch }
+func (s *fakeLogStream) Close() error {
+	if !s.closed {
+		s.closed = true
+		close(s.ch)
+	}
+	return nil
+}
+
+type fakeEventStream struct {
+	ch     chan EventSignal
+	closed bool
+}
+
+func (s *fakeEventStream) Signals() <-chan EventSignal { return s.ch }
+func (s *fakeEventStream) Close() error {
+	if !s.closed {
+		s.closed = true
+		close(s.ch)
+	}
+	return nil
+}
+
 func upd(m Model, msg tea.Msg) (Model, tea.Cmd) {
 	nm, cmd := m.Update(msg)
 	return nm.(Model), cmd
+}
+
+// selectCmd selects the visible row at idx and marks its command's preview as
+// already established, so reconcilePreview is a no-op and the command returned
+// by a subsequent key press is the lifecycle action alone (not batched with a
+// preview-open command).
+func selectCmd(m *Model, idx int) {
+	m.commands.selected = idx
+	if c, ok := m.commands.selectedCommand(); ok {
+		m.commands.preview.cmdID = c.id
+	}
 }
 
 func kr(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
@@ -64,7 +127,7 @@ var (
 
 // seed builds a model with two projects; local-dev is the cwd-tied project.
 func seed() Model {
-	m := New(Options{Backend: &fakeBackend{}})
+	m := New(Options{Backend: &fakeBackend{cwd: "/work/local-dev"}})
 	m.cwd = "/work/local-dev"
 	m.setGroups([]projectGroup{
 		{name: "api-stack", workdir: "/work/api", commands: []commandRow{
@@ -204,7 +267,7 @@ func TestSelectionPreservedAcrossRefresh(t *testing.T) {
 		{ID: "3", Name: "web", Project: "api-stack", Workdir: "/work/api", State: model.EventTypeStarted},
 		{ID: "2", Name: "seed-db", Project: "local-dev", Workdir: "/work/local-dev", State: model.EventTypeExited},
 	}
-	m = m.onCommandsLoaded(commandsLoadedMsg{infos: infos})
+	m, _ = m.onCommandsLoaded(commandsLoadedMsg{infos: infos})
 	got, ok := m.commands.selectedCommand()
 	if !ok || got.id != "3" {
 		t.Fatalf("selection should be preserved on web (id 3) after refresh, got %+v ok=%v", got, ok)
@@ -276,7 +339,7 @@ func TestEnterDoesNotToggleLifecycle(t *testing.T) {
 	m := seed()
 	fb := m.backend.(*fakeBackend)
 	// Select a command row (watcher under local-dev: rows[1]).
-	m.commands.selected = 1
+	selectCmd(&m, 1)
 	if _, ok := m.commands.selectedCommand(); !ok {
 		t.Fatalf("precondition: a command row should be selected")
 	}
@@ -355,7 +418,7 @@ func TestRunningRemoveShowsForceConfirmation(t *testing.T) {
 
 func TestRemoveRequiresExplicitConfirmation(t *testing.T) {
 	m := seed()
-	m.commands.selected = 2 // seed-db, exited
+	selectCmd(&m, 2) // seed-db, exited
 	m, _ = upd(m, kr("x"))
 	// Default is cancel; enter cancels without removing.
 	m, cmd := upd(m, kEnter)
@@ -386,7 +449,7 @@ func TestRemoveRequiresExplicitConfirmation(t *testing.T) {
 
 func TestStartDispatchesForStoppedCommand(t *testing.T) {
 	m := seed()
-	m.commands.selected = 2 // seed-db, exited
+	selectCmd(&m, 2) // seed-db, exited
 	m, cmd := upd(m, kr("s"))
 	if cmd == nil {
 		t.Fatalf("s on a stopped command should dispatch start")
@@ -406,7 +469,7 @@ func TestStartDispatchesForStoppedCommand(t *testing.T) {
 
 func TestStartIgnoredForRunningCommand(t *testing.T) {
 	m := seed()
-	m.commands.selected = 1 // watcher, running
+	selectCmd(&m, 1) // watcher, running
 	m, cmd := upd(m, kr("s"))
 	if cmd != nil {
 		t.Fatalf("s on a running command should not dispatch start")
@@ -418,12 +481,12 @@ func TestStartIgnoredForRunningCommand(t *testing.T) {
 
 func TestStopOnlyForRunningCommand(t *testing.T) {
 	m := seed()
-	m.commands.selected = 2 // seed-db, exited
+	selectCmd(&m, 2) // seed-db, exited
 	m, cmd := upd(m, kr("S"))
 	if cmd != nil {
 		t.Fatalf("S on a stopped command should not dispatch stop")
 	}
-	m.commands.selected = 1 // watcher, running
+	selectCmd(&m, 1) // watcher, running
 	m, cmd = upd(m, kr("S"))
 	if cmd == nil {
 		t.Fatalf("S on a running command should dispatch stop")

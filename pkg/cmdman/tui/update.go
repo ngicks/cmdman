@@ -8,7 +8,7 @@ import (
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.loadCommandsCmd(), m.loadProjectsCmd())
+	return tea.Batch(m.loadCommandsCmd(), m.loadProjectsCmd(), m.subscribeEventsCmd())
 }
 
 // Update implements tea.Model.
@@ -19,34 +19,56 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case commandsLoadedMsg:
-		return m.onCommandsLoaded(msg), nil
+		nm, cmd := m.onCommandsLoaded(msg)
+		return nm, cmd
 	case projectsLoadedMsg:
 		return m.onProjectsLoaded(msg), nil
 	case actionDoneMsg:
 		return m.onActionDone(msg)
+	case eventsSubscribedMsg:
+		return m.onEventsSubscribed(msg)
+	case eventSignalMsg:
+		return m.onEventSignal(msg)
+	case reloadTickMsg:
+		return m.onReloadTick(msg)
+	case previewOpenedMsg:
+		return m.onPreviewOpened(msg)
+	case previewLineMsg:
+		return m.onPreviewLine(msg)
+	case attachDoneMsg:
+		return m.onAttachDone(msg)
 	case statusMsg:
 		m.status = msg.text
 		return m, nil
 	case tea.KeyMsg:
-		return m.onKey(msg)
+		nm, cmd := m.onKey(msg)
+		// Reconcile the preview after any key that may have moved the
+		// selected command (navigation, fold, tab switch, filter edits).
+		m2 := nm.(Model)
+		pcmd := (&m2).reconcilePreview()
+		if pcmd != nil {
+			return m2, tea.Batch(cmd, pcmd)
+		}
+		return m2, cmd
 	}
 	return m, nil
 }
 
-func (m Model) onCommandsLoaded(msg commandsLoadedMsg) Model {
+func (m Model) onCommandsLoaded(msg commandsLoadedMsg) (Model, tea.Cmd) {
 	if m.backend != nil {
 		m.cwd = m.backend.Cwd()
 	}
 	if msg.err != nil {
 		m.status = fmt.Sprintf("list error: %v", msg.err)
-		return m
+		return m, nil
 	}
 	prevID, _ := m.commands.selectedCommand()
 	m.setGroups(groupFromInfos(msg.infos))
 	if prevID.id != "" {
 		m.selectCommandByID(prevID.id)
 	}
-	return m
+	pcmd := (&m).reconcilePreview()
+	return m, pcmd
 }
 
 func (m Model) onProjectsLoaded(msg projectsLoadedMsg) Model {

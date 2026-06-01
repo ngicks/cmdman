@@ -55,6 +55,9 @@ type Model struct {
 	status string // transient status/error message in the footer
 	cwd    string // normalized working directory for active detection
 
+	events    EventStream // lifecycle change-signal subscription
+	reloadGen int         // debounce generation for event-triggered re-list
+
 	quitting bool
 }
 
@@ -118,6 +121,7 @@ type previewState struct {
 	status previewStatus
 	errMsg string
 	scroll int
+	stream LogStream // live Tail+Follow reader for cmdID; nil when none
 }
 
 type previewStatus int

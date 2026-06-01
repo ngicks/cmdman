@@ -18,7 +18,7 @@ import (
 // RunTUI runs the interactive TUI directly in the current terminal.
 func RunTUI(ctx context.Context, svc *cmdman.Service) error {
 	return tui.Run(ctx, tui.Options{
-		Backend:   tui.NewServiceBackend(svc),
+		Backend:   newServiceBackend(svc),
 		Version:   cmdman.Version,
 		AltScreen: true,
 	})
@@ -42,7 +42,7 @@ func RunTUIChild(ctx context.Context, svc *cmdman.Service, ipcPath string) error
 	}
 	send(ipcMessage{Kind: ipcStarted})
 	err := tui.Run(ctx, tui.Options{
-		Backend:   tui.NewServiceBackend(svc),
+		Backend:   newServiceBackend(svc),
 		Version:   cmdman.Version,
 		AltScreen: true,
 	})
