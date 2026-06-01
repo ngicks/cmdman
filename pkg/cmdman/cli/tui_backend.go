@@ -251,9 +251,13 @@ func (e *eventStream) pump() {
 func (e *eventStream) Signals() <-chan tui.EventSignal { return e.ch }
 func (e *eventStream) Close() error                    { return e.sub.Close() }
 
-// Logs opens a Tail+Follow reader and streams its lines.
+// Logs opens a sticky Tail+Follow reader and streams its lines. Sticky keeps
+// the preview live across command restarts: when the running instance exits, a
+// meta line records it and the reader resumes on the next start — so the
+// preview keeps showing live output without the user re-selecting the command
+// (a plain Follow reader would stop at the first exit and never reconnect).
 func (b *serviceBackend) Logs(ctx context.Context, id string, tail int) (tui.LogStream, error) {
-	rdr, err := b.svc.Logs(ctx, cmdman.LogsRequest{IDOrName: id, Tail: tail, Follow: true})
+	rdr, err := b.svc.Logs(ctx, cmdman.LogsRequest{IDOrName: id, Tail: tail, Sticky: true})
 	if err != nil {
 		return nil, err
 	}
