@@ -6,4 +6,4 @@ package cmdman
 //
 // Edit by hand only when the release helper is unavailable (e.g. cherry-pick
 // of a release commit).
-const Version = "v0.0.7"
+const Version = "v0.0.8-devel"
