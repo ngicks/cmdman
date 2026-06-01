@@ -53,15 +53,18 @@ func killServer(t *testing.T, socket string) {
 }
 
 // newSession constructs a Session against a fresh per-test tmux server and
-// registers cleanup to kill the server when the test ends.
+// registers cleanup to kill the server when the test ends. It wires the
+// ctrl-p,ctrl-q detach sequence (in tmux send-keys syntax) so tests exercising
+// the graceful-detach path on re-apply behave like the real cmdman caller.
 func newSession(t *testing.T, windowName string) (*tmuxctl.Session, string) {
 	t.Helper()
 	socket := uniqueSocket(t)
 	t.Cleanup(func() { killServer(t, socket) })
 	sess, err := tmuxctl.New(context.Background(), tmuxctl.Config{
-		Socket:      socket,
-		SessionName: "cmdman-test",
-		WindowName:  windowName,
+		Socket:           socket,
+		SessionName:      "cmdman-test",
+		WindowName:       windowName,
+		ViewerDetachKeys: []string{"C-p", "C-q"},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

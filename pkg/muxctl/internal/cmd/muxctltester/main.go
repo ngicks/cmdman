@@ -102,6 +102,10 @@ func run() error {
 	sess, err := tmux.New(ctx, tmux.Config{
 		Socket:   *socketFlag,
 		WindowID: target.windowID,
+		// Mirror cmdman's default --detach-keys (ctrl-p,ctrl-q) in tmux
+		// send-keys syntax so re-applying a layout detaches cmdman viewers
+		// gracefully, matching the real mux caller.
+		ViewerDetachKeys: []string{"C-p", "C-q"},
 	})
 	if err != nil {
 		return fmt.Errorf("tmux.New: %w", err)

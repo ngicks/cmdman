@@ -39,6 +39,15 @@ type RunOptions struct {
 	Stdout io.Writer
 }
 
+// viewerDetachKeys is the tmux send-keys sequence that makes the in-pane
+// cmdman viewers detach gracefully before the mux driver rebuilds the window
+// (instead of being SIGKILLed mid-frame). [build.go] spawns the attach / logs
+// viewers without overriding their --detach-keys, so they honor cmdman's
+// default (ctrl-p,ctrl-q); this is that same sequence in tmux send-keys
+// syntax. It is the mux layer's job to know what its viewers respond to — the
+// muxctl driver is told via [tmux.Config.ViewerDetachKeys].
+var viewerDetachKeys = []string{"C-p", "C-q"}
+
 // Run applies one layout from spec to the configured driver's cmdman-owned
 // window. When opts.Layout is set, that named/indexed layout is applied
 // directly; otherwise the applied layout index is `(previousMarker+1) mod
@@ -111,6 +120,7 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 		SessionName:        sessionName,
 		WindowName:         windowName,
 		ReuseCurrentWindow: reuseCurrent,
+		ViewerDetachKeys:   viewerDetachKeys,
 	})
 	if err != nil {
 		return err

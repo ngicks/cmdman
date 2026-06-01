@@ -6,14 +6,6 @@ import (
 	"time"
 )
 
-// viewerDetachKeys is the tmux key sequence sent to in-pane cmdman viewers to
-// make them detach gracefully before the window is rebuilt. It mirrors
-// cmdman's default --detach-keys (ctrl-p,ctrl-q); the mux family spawns
-// attach/logs viewers without overriding that default, so this is the active
-// sequence. A viewer that does not honor it is handled by the bounded wait
-// below falling through to the respawn-pane -k teardown.
-var viewerDetachKeys = []string{"C-p", "C-q"}
-
 // quiesceDeadline bounds how long quiesceViewers waits for detached viewers to
 // exit before giving up and letting ApplyLayout tear the panes down anyway.
 const quiesceDeadline = 750 * time.Millisecond
@@ -37,12 +29,20 @@ const quiesceDeadline = 750 * time.Millisecond
 // after their viewers exit so ApplyLayout can respawn into them; the returned
 // restore func turns it back off.
 //
+// The detach key sequence is caller-provided ([Config.ViewerDetachKeys]): the
+// driver does not know which keys a given caller's viewers honor. When the
+// caller supplies none, there is nothing to send, so this is a no-op and the
+// panes are left for the respawn-pane -k teardown.
+//
 // Best-effort and bounded: only panes we previously applied (carrying the
 // marker option) and still live are detached, so a first run with just the
 // initial shell pane is a no-op. Panes whose viewer does not exit within
 // quiesceDeadline are left for the respawn-pane -k teardown.
 func (s *Session) quiesceViewers(ctx context.Context) func() {
 	noop := func() {}
+	if len(s.cfg.ViewerDetachKeys) == 0 {
+		return noop
+	}
 	panes, err := s.listViewerPanes(ctx)
 	if err != nil || len(panes) == 0 {
 		return noop
@@ -53,7 +53,7 @@ func (s *Session) quiesceViewers(ctx context.Context) func() {
 		return noop
 	}
 	for _, id := range panes {
-		args := append([]string{"send-keys", "-t", id}, viewerDetachKeys...)
+		args := append([]string{"send-keys", "-t", id}, s.cfg.ViewerDetachKeys...)
 		_, _ = s.exec.run(ctx, args...)
 	}
 	s.waitPanesDead(ctx, panes)

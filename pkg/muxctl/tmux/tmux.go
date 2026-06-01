@@ -49,6 +49,20 @@ type Config struct {
 	// falls back to find-or-create by name. Callers set this when running
 	// inside a tmux client and they have not pinned an explicit session.
 	ReuseCurrentWindow bool
+
+	// ViewerDetachKeys is the tmux send-keys key sequence (e.g.
+	// {"C-p", "C-q"}) that ApplyLayout sends to the in-pane viewers of a
+	// previous build to make them detach gracefully before the window is torn
+	// down and rebuilt. It MUST match the detach sequence those viewers
+	// actually honor, expressed in tmux send-keys syntax.
+	//
+	// The driver does not assume any particular sequence: it differs per caller
+	// (the viewers a caller spawns, and the --detach-keys they were given) and
+	// per future driver, so the caller owns it. Empty disables graceful
+	// detach — ApplyLayout tears the old panes down with respawn-pane -k
+	// directly, which SIGKILLs the in-pane processes mid-frame (see
+	// quiesceViewers for why that is undesirable for cmdman viewers).
+	ViewerDetachKeys []string
 }
 
 // Session is a tmux-backed [muxctl.Session] controlling one window.
