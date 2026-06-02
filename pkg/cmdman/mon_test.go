@@ -265,6 +265,7 @@ func TestMonitorSubscribeCapturesOffsetAndLiveRecordsUnderLock(t *testing.T) {
 		outputBridge:      newBroadcaster[logdriver.LogLine](),
 		stateChangeBridge: newBroadcaster[monitorStateChange](),
 		logWriter:         testOffsetWriter{offset: "before"},
+		terminalState:     newTerminalPaneState(),
 	}
 
 	sub := m.subscribeOutput(false)
@@ -294,6 +295,23 @@ func TestMonitorSubscribeCapturesOffsetAndLiveRecordsUnderLock(t *testing.T) {
 		t.Fatalf("second subscriber unexpectedly received old line %q", line.Line)
 	default:
 	}
+}
+
+func TestMonitorSubscribeWithScrollbackIncludesTerminalModeReplay(t *testing.T) {
+	m := &Monitor{
+		ring:              newRingBuffer(16),
+		outputBridge:      newBroadcaster[logdriver.LogLine](),
+		stateChangeBridge: newBroadcaster[monitorStateChange](),
+		terminalState:     newTerminalPaneState(),
+	}
+	m.terminalState.Observe([]byte("\x1b[?1000;1006;2004h"))
+	_, _ = m.ring.Write([]byte("tail-only\n"))
+
+	sub := m.subscribeOutput(true)
+	defer sub.Unsub()
+
+	assert.Equal(t, string(sub.Scrollback), "tail-only\n")
+	assert.Equal(t, string(sub.TerminalMode), "\x1b[?1000;1006;2004h")
 }
 
 func TestMonitorStateChangeBroadcastsTerminalStateAndCloses(t *testing.T) {

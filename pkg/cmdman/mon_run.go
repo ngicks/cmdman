@@ -148,6 +148,7 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	}()
 	m.outputMu.Lock()
 	m.logWriter = logWriter
+	m.terminalState.reset()
 	m.outputMu.Unlock()
 	defer func() {
 		m.outputMu.Lock()
@@ -253,6 +254,9 @@ func (m *Monitor) logCommandOutput(stream logdriver.Stream, data []byte) {
 	lines := logdriver.SplitLogLines(time.Now(), stream, data)
 	m.outputMu.Lock()
 	defer m.outputMu.Unlock()
+	if m.cfg.Tty {
+		m.terminalState.Observe(data)
+	}
 	m.ring.Write(data)
 	for _, line := range lines {
 		if m.logWriter != nil {

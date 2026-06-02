@@ -56,6 +56,7 @@ type Monitor struct {
 	outputBridge      *broadcaster[logdriver.LogLine]
 	stateChangeBridge *broadcaster[monitorStateChange]
 	logWriter         logdriver.Writer
+	terminalState     *terminalPaneState
 
 	grpcServer *grpc.Server
 	sockPath   string
@@ -117,6 +118,7 @@ func newMonitor(
 		Logger:            logger,
 		outputBridge:      newBroadcaster[logdriver.LogLine](),
 		stateChangeBridge: newBroadcaster[monitorStateChange](),
+		terminalState:     newTerminalPaneState(),
 		store:             st,
 		cfg:               commandCfg,
 		evtLog:            evtLog,

@@ -23,6 +23,7 @@ type monitorSubscription struct {
 	unsubState   func()
 	Offset       any
 	Scrollback   []byte
+	TerminalMode []byte
 }
 
 func (s monitorSubscription) Unsub() {
@@ -49,6 +50,7 @@ func (m *Monitor) subscribeOutput(scrollback bool) monitorSubscription {
 	}
 	if scrollback {
 		sub.Scrollback = m.ring.Bytes()
+		sub.TerminalMode = m.terminalState.Replay()
 	}
 	sub.StateChanges, sub.unsubState = m.subscribeStateChange()
 	return sub
@@ -60,6 +62,11 @@ func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) err
 
 	if len(sub.Scrollback) > 0 {
 		if err := stream.Send(&pb.AttachResponse{Stdout: sub.Scrollback}); err != nil {
+			return err
+		}
+	}
+	if len(sub.TerminalMode) > 0 {
+		if err := stream.Send(&pb.AttachResponse{Stdout: sub.TerminalMode}); err != nil {
 			return err
 		}
 	}

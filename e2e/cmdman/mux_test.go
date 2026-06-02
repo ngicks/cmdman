@@ -274,10 +274,20 @@ func TestMux_AttachPaneExposesApplicationMouseFlags(t *testing.T) {
 		"-t",
 		"-n",
 		"mouseapp",
+		"--scrollback-bytes",
+		"64",
 		"--",
 		"/bin/sh",
 		"-c",
-		`printf '\033[?1000h\033[?1006h\033[?2004h'; sleep 300`,
+		strings.Join([]string{
+			`printf '\033[?1000h\033[?1006h\033[?2004h'`,
+			`i=0`,
+			`while [ "$i" -lt 20 ]; do`,
+			`echo "filler-$i-filler-$i-filler-$i"`,
+			`i=$((i+1))`,
+			`done`,
+			`sleep 300`,
+		}, "\n"),
 	)
 	t.Cleanup(func() { env.cleanupCommand(ctx, "mouseapp") })
 	env.waitForState(ctx, "mouseapp", "started", defaultTimeout)
