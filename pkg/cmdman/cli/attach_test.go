@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -66,7 +67,7 @@ func TestParseDetachKeys(t *testing.T) {
 
 func TestDetachKeys_ProxyDetectsSequence(t *testing.T) {
 	input := []byte("hello\x10\x11")
-	r := term.NewEscapeProxy(bytes.NewReader(input), []byte{0x10, 0x11})
+	r := newDetachKeyReader(bytes.NewReader(input), []byte{0x10, 0x11})
 
 	buf := make([]byte, 1024)
 	var output []byte
@@ -91,7 +92,7 @@ func TestDetachKeys_ProxyDetectsSequence(t *testing.T) {
 
 func TestDetachKeys_ProxyPartialMatchFlush(t *testing.T) {
 	input := []byte("\x10a")
-	r := term.NewEscapeProxy(bytes.NewReader(input), []byte{0x10, 0x11})
+	r := newDetachKeyReader(bytes.NewReader(input), []byte{0x10, 0x11})
 
 	var output []byte
 	buf := make([]byte, 1024)
@@ -113,7 +114,7 @@ func TestDetachKeys_ProxyPartialMatchFlush(t *testing.T) {
 
 func TestDetachKeys_ProxyNoSequence(t *testing.T) {
 	input := []byte("hello world")
-	r := term.NewEscapeProxy(bytes.NewReader(input), []byte{0x10, 0x11})
+	r := newDetachKeyReader(bytes.NewReader(input), []byte{0x10, 0x11})
 
 	data, err := io.ReadAll(r)
 	assert.NilError(t, err)
@@ -122,7 +123,7 @@ func TestDetachKeys_ProxyNoSequence(t *testing.T) {
 
 func TestDetachKeys_ProxyOnlySequence(t *testing.T) {
 	input := []byte{0x10, 0x11}
-	r := term.NewEscapeProxy(bytes.NewReader(input), []byte{0x10, 0x11})
+	r := newDetachKeyReader(bytes.NewReader(input), []byte{0x10, 0x11})
 
 	buf := make([]byte, 1024)
 	n, err := r.Read(buf)
@@ -131,9 +132,61 @@ func TestDetachKeys_ProxyOnlySequence(t *testing.T) {
 	assert.Assert(t, ok)
 }
 
+func TestPumpStdinToStream_ForwardsMultilineBracketedPaste(t *testing.T) {
+	input := []byte("\x1b[200~first\nsecond\nthird\n\x1b[201~")
+	session := &recordingAttachSession{}
+	errCh := make(chan error, 1)
+
+	pumpStdinToStream(bytes.NewReader(input), session, []byte{0x10, 0x11}, errCh)
+
+	assert.Equal(t, string(session.stdin), string(input))
+	assert.Equal(t, len(errCh), 0)
+}
+
+func TestPumpStdinToStream_ForwardsBeforeDetach(t *testing.T) {
+	session := &recordingAttachSession{}
+	errCh := make(chan error, 1)
+
+	pumpStdinToStream(bytes.NewReader([]byte("hello\x10\x11")), session, []byte{0x10, 0x11}, errCh)
+
+	assert.Equal(t, string(session.stdin), "hello")
+	err := <-errCh
+	_, ok := errors.AsType[term.EscapeError](err)
+	assert.Assert(t, ok)
+}
+
 func TestRestoreDisplayModes(t *testing.T) {
 	var buf bytes.Buffer
 	restoreDisplayModes(&buf)
 
 	assert.Equal(t, buf.String(), displayModeResetSeq)
+}
+
+type recordingAttachSession struct {
+	stdin []byte
+}
+
+func (s *recordingAttachSession) Recv() ([]byte, error) {
+	return nil, io.EOF
+}
+
+func (s *recordingAttachSession) SendStdin(data []byte) error {
+	s.stdin = append(s.stdin, data...)
+	return nil
+}
+
+func (s *recordingAttachSession) Signal(context.Context, int32) error {
+	return nil
+}
+
+func (s *recordingAttachSession) Resize(int, int) error {
+	return nil
+}
+
+func (s *recordingAttachSession) CloseSend() error {
+	return nil
+}
+
+func (s *recordingAttachSession) Close() error {
+	return nil
 }

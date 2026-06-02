@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -279,7 +280,7 @@ func pumpStdinToStream(
 ) {
 	r := stdin
 	if len(detachKeys) > 0 {
-		r = term.NewEscapeProxy(stdin, detachKeys)
+		r = newDetachKeyReader(stdin, detachKeys)
 	}
 	buf := make([]byte, 32*1024)
 	for {
@@ -299,6 +300,81 @@ func pumpStdinToStream(
 			return
 		}
 	}
+}
+
+type detachKeyReader struct {
+	r         *bufio.Reader
+	detachKey []byte
+	match     int
+	pending   []byte
+	detached  bool
+}
+
+func newDetachKeyReader(r io.Reader, detachKeys []byte) io.Reader {
+	return &detachKeyReader{
+		r:         bufio.NewReaderSize(r, 32*1024),
+		detachKey: append([]byte(nil), detachKeys...),
+	}
+}
+
+func (r *detachKeyReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+
+	var n int
+	for n < len(p) {
+		if len(r.pending) > 0 {
+			copied := copy(p[n:], r.pending)
+			n += copied
+			r.pending = r.pending[copied:]
+			continue
+		}
+		if r.detached {
+			return n, term.EscapeError{}
+		}
+
+		b, err := r.r.ReadByte()
+		if err == nil {
+			if r.scanByte(b) {
+				return n, term.EscapeError{}
+			}
+			continue
+		}
+		if r.match > 0 {
+			r.pending = append(r.pending, r.detachKey[:r.match]...)
+			r.match = 0
+			continue
+		}
+		if n > 0 {
+			return n, nil
+		}
+		return 0, err
+	}
+	return n, nil
+}
+
+func (r *detachKeyReader) scanByte(b byte) bool {
+	if b == r.detachKey[r.match] {
+		r.match++
+		if r.match == len(r.detachKey) {
+			r.detached = true
+			r.match = 0
+			return true
+		}
+		return false
+	}
+
+	if r.match > 0 {
+		r.pending = append(r.pending, r.detachKey[:r.match]...)
+		r.match = 0
+		if b == r.detachKey[0] {
+			r.match = 1
+			return false
+		}
+	}
+	r.pending = append(r.pending, b)
+	return false
 }
 
 func sendResize(session AttachSession, stdout *os.File) {

@@ -254,6 +254,66 @@ func TestMux_BuildsPanesBoundToCommands(t *testing.T) {
 	}
 }
 
+// TestMux_AttachPaneExposesApplicationMouseFlags verifies the same machinery
+// plain tmux uses for neovim-style mouse pass-through: once the in-pane
+// application emits mouse-enable sequences, tmux marks the pane with
+// mouse_any_flag / mouse_sgr_flag so its default Mouse*Pane bindings choose
+// send-keys -M instead of handling the event as a tmux action.
+func TestMux_AttachPaneExposesApplicationMouseFlags(t *testing.T) {
+	t.Parallel()
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	socket := muxSocket(t)
+	t.Cleanup(func() { killTmuxServer(t, socket) })
+
+	env.run(
+		ctx,
+		"run",
+		"-t",
+		"-n",
+		"mouseapp",
+		"--",
+		"/bin/sh",
+		"-c",
+		`printf '\033[?1000h\033[?1006h\033[?2004h'; sleep 300`,
+	)
+	t.Cleanup(func() { env.cleanupCommand(ctx, "mouseapp") })
+	env.waitForState(ctx, "mouseapp", "started", defaultTimeout)
+
+	specPath := writeSpecFile(t, fmt.Sprintf(`mux:
+  driver: tmux
+  driver_opt:
+    socket: %s
+  layouts:
+    - name: editor
+      root:
+        command: mouseapp
+`, socket))
+
+	if _, stderr, err := env.muxExec(ctx, "mux", specPath); err != nil {
+		t.Fatalf("cmdman mux failed: %v\nstderr:\n%s", err, stderr)
+	}
+	wid := tmuxWindowID(t, socket, "cmdman")
+
+	deadline := time.Now().Add(3 * time.Second)
+	var last []string
+	for time.Now().Before(deadline) {
+		last = tmuxPaneField(
+			t,
+			socket,
+			wid,
+			"#{mouse_any_flag}\t#{mouse_sgr_flag}\t#{pane_in_mode}",
+		)
+		if len(last) == 1 && last[0] == "1\t1\t0" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("pane mouse flags never reflected application mouse mode; last=%v", last)
+}
+
 // cycleMuxYAML has two layouts of different shape: "wide" (two panes) and
 // "solo" (a single-leaf root). Re-running mux must advance the embedded marker
 // and switch the window to the next layout.
