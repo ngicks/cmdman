@@ -122,6 +122,64 @@ func New(ctx context.Context, cfg Config) (*Session, error) {
 	return &Session{cfg: cfg, exec: e, windowID: wid}, nil
 }
 
+// OpenExisting locates an already-existing cmdman-owned window WITHOUT creating
+// one and WITHOUT mutating any window option (in particular it does not enable
+// pane-border-status the way [New] does). It is the entry point for teardown
+// operations such as [Session.Detach] that must act only on a window cmdman
+// already built — never spawn a stray one.
+//
+// ok is false (with a nil error and nil Session) when no such window is found,
+// so callers can no-op instead of creating one. Resolution:
+//
+//   - cfg.WindowID != "" targets that window directly.
+//   - otherwise, when cfg.ReuseCurrentWindow is set and the caller's current
+//     window carries the muxctl marker on every pane, that window is used.
+//     Unlike New, an unmarked current window is NOT taken over: detach must act
+//     only on a provably muxctl-owned window, never repurpose an arbitrary
+//     single-pane window the user happens to be sitting in.
+//   - otherwise the window named cfg.WindowName in cfg.SessionName is looked up
+//     (find-only). A missing session or window yields ok=false rather than an
+//     error: from a teardown caller's view, "no session/window" simply means
+//     "nothing to detach".
+func OpenExisting(ctx context.Context, cfg Config) (*Session, bool, error) {
+	e := newExecutor(cfg.Path, cfg.Socket)
+
+	var wid string
+	switch {
+	case cfg.WindowID != "":
+		wid = cfg.WindowID
+	default:
+		if cfg.ReuseCurrentWindow {
+			if cur, ok := currentWindowIfMarked(ctx, e); ok {
+				wid = cur
+			}
+		}
+		if wid == "" {
+			if cfg.SessionName == "" || cfg.WindowName == "" {
+				return nil, false, nil
+			}
+			// A missing session means there is nothing to detach: treat it as a
+			// clean no-op rather than surfacing tmux's "can't find session".
+			if _, err := e.run(ctx, "has-session", "-t", "="+cfg.SessionName); err != nil {
+				return nil, false, nil
+			}
+			found, ok, err := findWindow(ctx, e, cfg.SessionName, cfg.WindowName)
+			if err != nil {
+				return nil, false, fmt.Errorf(
+					"tmux: find window %q in session %q: %w",
+					cfg.WindowName, cfg.SessionName, err,
+				)
+			}
+			if !ok {
+				return nil, false, nil
+			}
+			wid = found
+		}
+	}
+
+	return &Session{cfg: cfg, exec: e, windowID: wid}, true, nil
+}
+
 // WindowID returns the tmux @id of the cmdman-owned window. Useful for
 // callers (and tests) that want to query the window outside the driver.
 func (s *Session) WindowID() string {
@@ -156,6 +214,31 @@ func ensureSession(ctx context.Context, e *executor, name string) error {
 	return nil
 }
 
+// findWindow looks up a window by exact name within the session and returns
+// its @id. ok is false (with a nil error) when no such window exists. It never
+// creates a window — see findOrCreateWindow for the create-on-miss variant.
+func findWindow(
+	ctx context.Context,
+	e *executor,
+	sessionName, windowName string,
+) (string, bool, error) {
+	out, err := e.run(
+		ctx,
+		"list-windows", "-t", sessionName,
+		"-F", "#{window_id}\t#{window_name}",
+	)
+	if err != nil {
+		return "", false, err
+	}
+	for line := range strings.SplitSeq(out, "\n") {
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) == 2 && parts[1] == windowName {
+			return parts[0], true, nil
+		}
+	}
+	return "", false, nil
+}
+
 // findOrCreateWindow looks up a window by exact name within the session
 // and returns its @id. If no such window exists, one is created
 // (detached, with a default shell pane) and its @id is returned.
@@ -164,21 +247,12 @@ func findOrCreateWindow(
 	e *executor,
 	sessionName, windowName string,
 ) (string, error) {
-	out, err := e.run(
-		ctx,
-		"list-windows", "-t", sessionName,
-		"-F", "#{window_id}\t#{window_name}",
-	)
-	if err != nil {
+	if id, ok, err := findWindow(ctx, e, sessionName, windowName); err != nil {
 		return "", err
+	} else if ok {
+		return id, nil
 	}
-	for line := range strings.SplitSeq(out, "\n") {
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) == 2 && parts[1] == windowName {
-			return parts[0], nil
-		}
-	}
-	out, err = e.run(
+	out, err := e.run(
 		ctx,
 		"new-window", "-d", "-t", sessionName,
 		"-n", windowName,

@@ -54,6 +54,26 @@ func shouldReuseUnmarkedWindow(curName, ownedName string, panes int) bool {
 	return curName == ownedName || panes <= 1
 }
 
+// currentWindowIfMarked returns the caller's current window id when that window
+// carries the muxctl marker on every pane (i.e. it is a dashboard a previous
+// ApplyLayout built). Unlike currentWindowToReuse it never accepts an unmarked
+// window: teardown callers (e.g. [Session.Detach] via [OpenExisting]) must act
+// only on a provably muxctl-owned window, not repurpose an arbitrary one.
+func currentWindowIfMarked(ctx context.Context, e *executor) (string, bool) {
+	out, err := e.run(ctx, "display-message", "-p", "#{window_id}")
+	if err != nil {
+		return "", false
+	}
+	id := strings.TrimSpace(out)
+	if id == "" {
+		return "", false
+	}
+	if windowIsMarked(ctx, e, id) {
+		return id, true
+	}
+	return "", false
+}
+
 // windowIsMarked reports whether every pane of windowID carries a numeric
 // @cmdman_marker option — i.e. the window was built by a previous ApplyLayout.
 func windowIsMarked(ctx context.Context, e *executor, windowID string) bool {

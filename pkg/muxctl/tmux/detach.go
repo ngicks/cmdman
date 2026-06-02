@@ -2,9 +2,74 @@ package tmux
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 )
+
+// Detach tears the cmdman-owned window down to a single clean shell pane and
+// removes the driver state this Session installed, restoring the window to
+// roughly the state it had before cmdman touched it: it gracefully detaches the
+// in-pane viewers, collapses the window to one pane running a fresh shell, and
+// unsets the per-pane @cmdman_marker option and the window's pane-border-status.
+//
+// Like ApplyLayout and Close, Detach MUST NOT stop any process the panes were
+// observing — the viewers it tears down are disposable (the supervised commands
+// live in the cmdman daemon). It is the explicit "I'm done with this dashboard,
+// give me my window back" operation, distinct from Close (which kills the whole
+// window, undesirable when the window was the caller's own current window).
+func (s *Session) Detach(ctx context.Context) error {
+	// Detach the in-pane viewers first so they restore their panes and
+	// disconnect from the daemon cleanly, instead of being SIGKILLed mid-frame
+	// by respawn-pane -k (see quiesceViewers). remain-on-exit keeps the panes
+	// alive after their viewers exit; the deferred restore turns it back off
+	// once the anchor is a clean shell again.
+	restore := s.quiesceViewers(ctx)
+	defer restore()
+
+	anchorID, err := s.resetWindow(ctx)
+	if err != nil {
+		return fmt.Errorf("tmux: reset window: %w", err)
+	}
+
+	// Clear the layout marker on the surviving anchor (best-effort: the option
+	// may already be absent on a window that never had a layout applied).
+	_, _ = s.exec.run(ctx, "set-option", "-p", "-u", "-t", anchorID, markerOption)
+
+	// Respawn the anchor with a fresh shell. An explicit argv is required:
+	// respawn-pane with no command re-runs the pane's previous command — here
+	// the viewer we are tearing down. respawn-pane -k revives the anchor even
+	// when its viewer already exited under remain-on-exit.
+	if err := s.respawnPane(ctx, anchorID, []string{s.defaultShell(ctx)}); err != nil {
+		return fmt.Errorf("tmux: respawn shell in anchor pane %s: %w", anchorID, err)
+	}
+
+	// Clear the pane title ApplyLayout set (best-effort).
+	_, _ = s.exec.run(ctx, "select-pane", "-t", anchorID, "-T", "")
+
+	// Unset the window-level pane-border-status that New enabled, reverting it
+	// to the inherited (global) default.
+	if _, err := s.exec.run(
+		ctx, "set-option", "-w", "-u", "-t", s.windowID, "pane-border-status",
+	); err != nil {
+		return fmt.Errorf("tmux: unset pane-border-status: %w", err)
+	}
+	return nil
+}
+
+// defaultShell returns the shell tmux would spawn for a fresh pane: the
+// server's default-shell option, falling back to /bin/sh. The driver stays
+// env-pure (it queries tmux rather than reading $SHELL), so the restored pane
+// matches what a plain tmux new-window would give.
+func (s *Session) defaultShell(ctx context.Context) string {
+	out, err := s.exec.run(ctx, "show-options", "-gv", "default-shell")
+	if err == nil {
+		if sh := strings.TrimSpace(out); sh != "" {
+			return sh
+		}
+	}
+	return "/bin/sh"
+}
 
 // quiesceDeadline bounds how long quiesceViewers waits for detached viewers to
 // exit before giving up and letting ApplyLayout tear the panes down anyway.

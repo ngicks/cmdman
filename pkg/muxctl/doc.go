@@ -9,9 +9,10 @@
 //
 //   - The runtime: [Session] and [Pane] interfaces. Drivers under
 //     pkg/muxctl/<driver> implement these (only tmux is planned today). The
-//     Session interface is intentionally minimal — ApplyLayout and Close —
-//     so that driver-specific concerns (session reuse, sockets, dedicated
-//     servers, ...) live in each driver's constructor, not on the interface.
+//     Session interface is intentionally minimal — ApplyLayout, Close, and
+//     StatWindow — so that driver-specific concerns (session reuse, sockets,
+//     dedicated servers, teardown/detach, ...) live in each driver's
+//     constructor or driver-specific methods, not on the interface.
 //     A Session controls one cmdman-owned window; switching among named
 //     layouts is repeated ApplyLayout calls on that window.
 //

@@ -15,7 +15,10 @@ import (
 )
 
 func composeMuxCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
-	var flagSession string
+	var (
+		flagSession string
+		flagDetach  bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "mux [layout]",
@@ -32,17 +35,26 @@ before an index, so a layout literally named "2" wins over index 2.
 With no --session, the dashboard targets the current tmux session when run
 inside tmux, otherwise a session named "cmdman".
 
+With --detach, the dashboard window is torn down instead of opened (the layout
+argument is ignored): the in-pane viewers are detached, the window collapses to
+a single clean pane, and the tmux options cmdman set are cleared. The supervised
+commands keep running.
+
 The compose file must contain a top-level "mux:" section; a missing section
 is an error (no synthesized default).`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeComposeMuxLayout(cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeMux(cmd, rootCfg, cf, args, flagSession)
+			return runComposeMux(cmd, rootCfg, cf, args, flagSession, flagDetach)
 		},
 	}
 	cmd.Flags().StringVarP(
 		&flagSession, "session", "s", "",
 		"Target tmux session (default: current session when inside tmux, else cmdman)",
+	)
+	cmd.Flags().BoolVar(
+		&flagDetach, "detach", false,
+		"Tear down the dashboard: restore the window to one clean pane and clear cmdman's tmux options",
 	)
 	parent.AddCommand(cmd)
 }
@@ -108,24 +120,27 @@ func runComposeMux(
 	cf *composeFlags,
 	args []string,
 	session string,
+	detach bool,
 ) error {
-	selection, err := compose.LoadOrProject(cf.normalizeOpts())
+	selection, err := resolveComposeMuxSelection(cf)
 	if err != nil {
 		return err
 	}
-	if selection.Spec == nil {
-		// No explicit project (-f) or CWD compose file: fall back to the sole
-		// default-dir project that has a mux: section, when unambiguous.
-		selection, err = uniqueMuxSelection()
-		if err != nil {
-			return err
-		}
-	}
-	if selection.Spec == nil || selection.Spec.Mux == nil {
-		return errors.New(`compose mux: missing "mux:" section in compose file`)
-	}
-
 	spec := *selection.Spec.Mux
+	windowName := composeMuxWindowName(selection)
+
+	if detach {
+		// Detach needs no cmdman service or leaf resolution — only the spec's
+		// driver / driver_opt and the project-derived window name. The layout
+		// argument is irrelevant to teardown and is ignored.
+		return mux.Detach(cmd.Context(), mux.DetachOptions{
+			Driver:      spec.Driver,
+			DriverOpt:   spec.DriverOpt,
+			SessionName: session,
+			WindowName:  windowName,
+			Stdout:      cmd.OutOrStdout(),
+		})
+	}
 
 	svc, err := cmdmanService(rootCfg)
 	if err != nil {
@@ -153,10 +168,6 @@ func runComposeMux(
 		return err
 	}
 
-	windowName := "cmdman"
-	if selection.Project != "" {
-		windowName = "cmdman-" + selection.Project
-	}
 	var layout string
 	if len(args) > 0 {
 		layout = args[0]
@@ -167,4 +178,36 @@ func runComposeMux(
 		Layout:      layout,
 		Stdout:      cmd.OutOrStdout(),
 	})
+}
+
+// resolveComposeMuxSelection loads the compose project for the mux subcommand,
+// falling back to the sole default-dir project that has a "mux:" section when
+// no explicit project (-f) or CWD compose file is given. It errors when the
+// resolved project has no "mux:" section.
+func resolveComposeMuxSelection(cf *composeFlags) (compose.ProjectSelection, error) {
+	selection, err := compose.LoadOrProject(cf.normalizeOpts())
+	if err != nil {
+		return compose.ProjectSelection{}, err
+	}
+	if selection.Spec == nil {
+		selection, err = uniqueMuxSelection()
+		if err != nil {
+			return compose.ProjectSelection{}, err
+		}
+	}
+	if selection.Spec == nil || selection.Spec.Mux == nil {
+		return compose.ProjectSelection{}, errors.New(
+			`compose mux: missing "mux:" section in compose file`,
+		)
+	}
+	return selection, nil
+}
+
+// composeMuxWindowName derives the cmdman-owned window name for a compose
+// project: "cmdman-<project>", or plain "cmdman" when the project is unnamed.
+func composeMuxWindowName(selection compose.ProjectSelection) string {
+	if selection.Project != "" {
+		return "cmdman-" + selection.Project
+	}
+	return "cmdman"
 }

@@ -514,3 +514,160 @@ func writeSpecFile(t *testing.T, content string) string {
 	must(t, os.WriteFile(path, []byte(content), 0o644))
 	return path
 }
+
+// tmuxWindowOption returns the window-scoped value of a tmux option, tolerating
+// errors by returning "" (an unset option is what the detach assertions check).
+func tmuxWindowOption(t *testing.T, socket, windowID, name string) string {
+	t.Helper()
+	out, err := exec.Command(
+		"tmux", "-L", socket,
+		"show-options", "-w", "-t", windowID, "-v", name,
+	).CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestMux_DetachRestoresWindowAndKeepsCommands runs `cmdman mux <file>` then
+// `cmdman mux --detach <file>` and verifies the full detach path: the window
+// survives but collapses to a single clean pane, the tmux options cmdman set
+// (pane-border-status, @cmdman_marker) are cleared, and — the load-bearing
+// disposable-viewer guarantee — every supervised command is still running with
+// an unchanged pid.
+func TestMux_DetachRestoresWindowAndKeepsCommands(t *testing.T) {
+	t.Parallel()
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	socket := muxSocket(t)
+	t.Cleanup(func() { killTmuxServer(t, socket) })
+
+	names := []string{"api", "worker", "cache"}
+	pids := map[string]float64{}
+	for _, name := range names {
+		env.run(ctx, "run", "-n", name, "--", "/bin/sh", "-c", "sleep 300")
+		t.Cleanup(func() { env.cleanupCommand(ctx, name) })
+		env.waitForState(ctx, name, "started", defaultTimeout)
+		pids[name] = env.livePID(ctx, name)
+	}
+
+	specPath := writeSpecFile(t, standaloneMuxYAML(socket))
+
+	// Build the dashboard: three panes, pane-border-status enabled.
+	if _, stderr, err := env.muxExec(ctx, "mux", specPath); err != nil {
+		t.Fatalf("cmdman mux failed: %v\nstderr:\n%s", err, stderr)
+	}
+	wid := tmuxWindowID(t, socket, "cmdman")
+	if got := len(tmuxPaneField(t, socket, wid, "#{pane_title}")); got != 3 {
+		t.Fatalf("want 3 panes before detach, got %d", got)
+	}
+	if got := tmuxWindowOption(t, socket, wid, "pane-border-status"); got != "top" {
+		t.Fatalf("pane-border-status before detach = %q, want top", got)
+	}
+
+	// Detach: restore the window.
+	if stdout, stderr, err := env.muxExec(ctx, "mux", "--detach", specPath); err != nil {
+		t.Fatalf("cmdman mux --detach failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	// The owned window survives (restored, not killed) ...
+	if got := tmuxWindowID(t, socket, "cmdman"); got != wid {
+		t.Fatalf("window id changed across detach: %s vs %s", wid, got)
+	}
+	// ... collapsed to a single pane ...
+	// Count by pane_id, not pane_title: detach clears the restored pane's title.
+	if got := len(tmuxPaneField(t, socket, wid, "#{pane_id}")); got != 1 {
+		t.Fatalf("want 1 pane after detach, got %d", got)
+	}
+	// ... with cmdman's tmux options cleared.
+	for _, m := range tmuxPaneField(t, socket, wid, "#{@cmdman_marker}") {
+		if m != "" {
+			t.Errorf("after detach, pane still carries a marker: %q", m)
+		}
+	}
+	if got := tmuxWindowOption(t, socket, wid, "pane-border-status"); got == "top" {
+		t.Errorf("pane-border-status still %q after detach; want it cleared", got)
+	}
+
+	// The disposable-viewer guarantee: commands keep running, untouched.
+	for _, name := range names {
+		if info := env.inspectJSON(ctx, name); info["state"] != "started" {
+			t.Errorf("after detach %s state = %v, want started", name, info["state"])
+		}
+		if got := env.livePID(ctx, name); got != pids[name] {
+			t.Errorf("after detach %s pid changed %v -> %v (restarted, not left alone)",
+				name, pids[name], got)
+		}
+	}
+}
+
+// TestComposeMux_DetachRestoresWindow verifies `cmdman compose mux --detach`
+// restores the project-named window (cmdman-<project>) to a single clean pane
+// while the backing services keep running.
+func TestComposeMux_DetachRestoresWindow(t *testing.T) {
+	t.Parallel()
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	wd := composeWorkdir(t)
+	project := "muxdetach"
+	socket := muxSocket(t)
+	t.Cleanup(func() { killTmuxServer(t, socket) })
+	composePath := writeComposeFile(t, wd, composeMuxYAML(project, socket))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	if _, stderr, err := env.exec(
+		ctx, "compose", "--workdir", wd, "-f", composePath, "up",
+	); err != nil {
+		t.Fatalf("compose up failed: %v\nstderr:\n%s", err, stderr)
+	}
+	for _, e := range env.lsJSON(ctx,
+		"-l", "cmdman.compose.workdir="+wd,
+		"-l", "cmdman.compose.project="+project,
+	) {
+		env.waitForState(ctx, e["ID"].(string), "started", defaultTimeout)
+	}
+
+	if _, stderr, err := env.muxExec(
+		ctx, "compose", "--workdir", wd, "-f", composePath, "mux",
+	); err != nil {
+		t.Fatalf("compose mux failed: %v\nstderr:\n%s", err, stderr)
+	}
+	window := "cmdman-" + project
+	wid := tmuxWindowID(t, socket, window)
+	if got := len(tmuxPaneField(t, socket, wid, "#{pane_title}")); got != 2 {
+		t.Fatalf("want 2 panes before detach, got %d", got)
+	}
+
+	if stdout, stderr, err := env.muxExec(
+		ctx, "compose", "--workdir", wd, "-f", composePath, "mux", "--detach",
+	); err != nil {
+		t.Fatalf("compose mux --detach failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	if got := tmuxWindowID(t, socket, window); got != wid {
+		t.Fatalf("window id changed across detach: %s vs %s", wid, got)
+	}
+	// Count by pane_id, not pane_title: detach clears the restored pane's title.
+	if got := len(tmuxPaneField(t, socket, wid, "#{pane_id}")); got != 1 {
+		t.Fatalf("want 1 pane after detach, got %d", got)
+	}
+	if got := tmuxWindowOption(t, socket, wid, "pane-border-status"); got == "top" {
+		t.Errorf("pane-border-status still %q after detach; want it cleared", got)
+	}
+	// The backing services keep running (compose commands are addressed by their
+	// generated ID, found via the project labels — service names are not direct
+	// cmdman names).
+	for _, e := range env.lsJSON(ctx,
+		"-l", "cmdman.compose.workdir="+wd,
+		"-l", "cmdman.compose.project="+project,
+	) {
+		id := e["ID"].(string)
+		if info := env.inspectJSON(ctx, id); info["state"] != "started" {
+			t.Errorf("after detach %s state = %v, want started", id, info["state"])
+		}
+	}
+}
