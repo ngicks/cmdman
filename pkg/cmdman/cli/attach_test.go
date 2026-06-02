@@ -9,8 +9,8 @@ import (
 	"slices"
 	"syscall"
 	"testing"
+	"time"
 
-	"github.com/moby/term"
 	"gotest.tools/v3/assert"
 )
 
@@ -77,7 +77,7 @@ func TestDetachKeys_ProxyDetectsSequence(t *testing.T) {
 		if n > 0 {
 			output = append(output, buf[:n]...)
 		}
-		if _, ok := errors.AsType[term.EscapeError](err); ok {
+		if errors.Is(err, errDetach) {
 			detached = true
 			break
 		}
@@ -101,7 +101,7 @@ func TestDetachKeys_ProxyPartialMatchFlush(t *testing.T) {
 		if n > 0 {
 			output = append(output, buf[:n]...)
 		}
-		if _, ok := errors.AsType[term.EscapeError](err); ok {
+		if errors.Is(err, errDetach) {
 			t.Fatal("should not detach")
 		}
 		if err != nil {
@@ -127,9 +127,101 @@ func TestDetachKeys_ProxyOnlySequence(t *testing.T) {
 
 	buf := make([]byte, 1024)
 	n, err := r.Read(buf)
-	_, ok := errors.AsType[term.EscapeError](err)
+	ok := errors.Is(err, errDetach)
 	assert.Equal(t, n, 0)
 	assert.Assert(t, ok)
+}
+
+// drainDetachKeyReader reads r to completion through a fixed-size buffer,
+// exercising the cross-Read carry of partial matches and pending overflow. It
+// returns everything forwarded and whether the detach sequence was hit.
+func drainDetachKeyReader(t *testing.T, r io.Reader, bufSize int) (string, bool) {
+	t.Helper()
+	var out []byte
+	buf := make([]byte, bufSize)
+	for {
+		n, err := r.Read(buf)
+		out = append(out, buf[:n]...)
+		if err == nil {
+			continue
+		}
+		if errors.Is(err, errDetach) {
+			return string(out), true
+		}
+		assert.Equal(t, err, io.EOF)
+		return string(out), false
+	}
+}
+
+func TestDetachKeyReader_ReassemblesThroughTinyBuffer(t *testing.T) {
+	// A single-byte buffer forces every partial-match carry and pending spill
+	// to cross a Read boundary.
+	for _, bufSize := range []int{1, 2, 3, 7, 4096} {
+		input := []byte("a\x10b\x10\x10\x11rest")
+		out, detached := drainDetachKeyReader(
+			t,
+			newDetachKeyReader(bytes.NewReader(input), []byte{0x10, 0x11}),
+			bufSize,
+		)
+		// The first 0x10 is a lone false start (followed by 'b'); the second
+		// 0x10 is also a false start (followed by 0x10); the final 0x10,0x11
+		// is the detach sequence, so "rest" is never forwarded.
+		assert.Equal(t, out, "a\x10b\x10", "bufSize=%d", bufSize)
+		assert.Assert(t, detached, "bufSize=%d", bufSize)
+	}
+}
+
+func TestDetachKeyReader_ForwardsTrailingPartialMatchAtEOF(t *testing.T) {
+	for _, bufSize := range []int{1, 1024} {
+		input := []byte("done\x10")
+		out, detached := drainDetachKeyReader(
+			t,
+			newDetachKeyReader(bytes.NewReader(input), []byte{0x10, 0x11}),
+			bufSize,
+		)
+		assert.Equal(t, out, "done\x10", "bufSize=%d", bufSize)
+		assert.Assert(t, !detached, "bufSize=%d", bufSize)
+	}
+}
+
+// TestDetachKeyReader_ReturnsAvailableWithoutBlocking guards the io.Reader
+// contract against a blocking source (a real pipe/terminal, unlike the
+// bytes.Reader the other tests use): a single byte must come back promptly
+// rather than stalling while the reader tries to fill the whole buffer.
+func TestDetachKeyReader_ReturnsAvailableWithoutBlocking(t *testing.T) {
+	pr, pw := io.Pipe()
+	t.Cleanup(func() { _ = pr.Close() })
+	r := newDetachKeyReader(pr, []byte{0x10, 0x11})
+
+	go func() { _, _ = pw.Write([]byte("r")) }()
+
+	type result struct {
+		n   int
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		buf := make([]byte, 32*1024)
+		n, err := r.Read(buf)
+		done <- result{n, err}
+	}()
+
+	select {
+	case got := <-done:
+		assert.NilError(t, got.err)
+		assert.Equal(t, got.n, 1)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Read blocked instead of returning the available byte")
+	}
+}
+
+func TestDetachKeyReader_EmptyKeysIsPassthrough(t *testing.T) {
+	input := []byte("\x10\x11anything")
+	r := newDetachKeyReader(bytes.NewReader(input), nil)
+
+	data, err := io.ReadAll(r)
+	assert.NilError(t, err)
+	assert.Equal(t, string(data), string(input))
 }
 
 func TestPumpStdinToStream_ForwardsMultilineBracketedPaste(t *testing.T) {
@@ -151,7 +243,7 @@ func TestPumpStdinToStream_ForwardsBeforeDetach(t *testing.T) {
 
 	assert.Equal(t, string(session.stdin), "hello")
 	err := <-errCh
-	_, ok := errors.AsType[term.EscapeError](err)
+	ok := errors.Is(err, errDetach)
 	assert.Assert(t, ok)
 }
 

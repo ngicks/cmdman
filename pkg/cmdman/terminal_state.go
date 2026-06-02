@@ -2,9 +2,31 @@ package cmdman
 
 import (
 	"bytes"
-	"sort"
+	"slices"
 	"strconv"
 )
+
+// replayableModes is the allowlist of DEC private modes worth replaying on
+// attach: input-affecting modes (cursor-key mode, mouse tracking, focus
+// reporting, bracketed paste) that a re-attaching multiplexer must observe to
+// rebuild its pane flags. Output/screen modes (alternate-screen 47/1047/1049,
+// cursor visibility 25, synchronized output 2026, ...) are deliberately
+// excluded: re-emitting them after the scrollback could switch buffers or
+// clear the screen the client was just sent.
+var replayableModes = map[int]bool{
+	1:    true, // DECCKM application cursor keys
+	9:    true, // X10 mouse
+	1000: true, // X11/VT200 mouse
+	1001: true, // highlight mouse tracking
+	1002: true, // button-event mouse
+	1003: true, // any-event mouse
+	1004: true, // focus in/out reporting
+	1005: true, // UTF-8 mouse encoding
+	1006: true, // SGR mouse encoding
+	1015: true, // urxvt mouse encoding
+	1016: true, // SGR-pixels mouse encoding
+	2004: true, // bracketed paste
+}
 
 // terminalPaneState tracks terminal modes that multiplexers such as tmux infer
 // from pane output rather than from process state. Replaying the active modes
@@ -31,11 +53,11 @@ func (s *terminalPaneState) Observe(p []byte) {
 func (s *terminalPaneState) Replay() []byte {
 	var modes []int
 	for mode, enabled := range s.decPrivate {
-		if enabled {
+		if enabled && replayableModes[mode] {
 			modes = append(modes, mode)
 		}
 	}
-	sort.Ints(modes)
+	slices.Sort(modes)
 
 	var out []byte
 	if len(modes) > 0 {
@@ -59,6 +81,11 @@ func (s *terminalPaneState) Replay() []byte {
 func (s *terminalPaneState) reset() {
 	clear(s.decPrivate)
 	s.appKeypad = false
+	// Drop any half-parsed escape sequence too. reset() is reused as the
+	// per-run hook (Monitor.runOnce) on a long-lived state, so a previous run
+	// that ended mid-sequence must not bleed into the next run's parsing.
+	s.parser.state = terminalParseNormal
+	s.parser.csi = s.parser.csi[:0]
 }
 
 type terminalStateParser struct {

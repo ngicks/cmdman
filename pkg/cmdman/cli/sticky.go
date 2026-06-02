@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-
-	"github.com/moby/term"
 )
 
 // StickyState is what [AttachSticky] reads between attach attempts to decide
@@ -247,10 +245,7 @@ func promptWait(
 	sub := mux.subPipe()
 	defer sub.Close()
 
-	var rdr io.Reader = sub
-	if len(detachKeys) > 0 {
-		rdr = term.NewEscapeProxy(sub, detachKeys)
-	}
+	rdr := newDetachKeyReader(sub, detachKeys)
 
 	resultCh := make(chan PromptResult, 1)
 	errCh := make(chan error, 1)
@@ -265,7 +260,7 @@ func promptWait(
 				}
 			}
 			if err != nil {
-				if _, isEscape := errors.AsType[term.EscapeError](err); isEscape {
+				if errors.Is(err, errDetach) {
 					resultCh <- PromptDetach
 					return
 				}

@@ -5,6 +5,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -29,6 +30,13 @@ var ErrForceExit = errors.New("attach: force exit requested")
 // the detach-keys path (which still returns nil) so the sticky-attach loop
 // in [AttachSticky] can prompt the user for restart.
 var ErrRemoteEOF = errors.New("attach: remote stream closed")
+
+// errDetach is the sentinel [detachKeyReader] returns once the detach-key
+// sequence is seen. It is package-internal: both the attach and sticky-prompt
+// readers signal detach with it, and callers consume it as a graceful exit
+// (Attach swallows it, the prompt maps it to [PromptDetach]) so it never
+// escapes the package.
+var errDetach = errors.New("attach: detach-keys pressed")
 
 // forwardedSignals are forwarded to the remote command during an attach
 // session.
@@ -156,7 +164,7 @@ func Attach(ctx context.Context, session AttachSession, opts AttachOptions) erro
 	var exitErr error
 	select {
 	case err := <-errCh:
-		_, isEscape := errors.AsType[term.EscapeError](err)
+		isEscape := errors.Is(err, errDetach)
 		switch {
 		case isEscape:
 			// User pressed detach-keys; treat as a graceful exit.
@@ -302,6 +310,12 @@ func pumpStdinToStream(
 	}
 }
 
+// detachKeyReader wraps stdin and scans for the detach-key sequence, returning
+// errDetach once the full sequence is seen. Bytes that partially matched
+// the sequence but then diverged are forwarded verbatim, in order. Literal
+// (non-matching) bytes are copied straight into the caller's buffer; pending is
+// only ever the bounded overflow from flushing a matched prefix that did not
+// fit, so it never grows past len(detachKey).
 type detachKeyReader struct {
 	r         *bufio.Reader
 	detachKey []byte
@@ -311,6 +325,9 @@ type detachKeyReader struct {
 }
 
 func newDetachKeyReader(r io.Reader, detachKeys []byte) io.Reader {
+	if len(detachKeys) == 0 {
+		return r
+	}
 	return &detachKeyReader{
 		r:         bufio.NewReaderSize(r, 32*1024),
 		detachKey: append([]byte(nil), detachKeys...),
@@ -322,59 +339,100 @@ func (r *detachKeyReader) Read(p []byte) (int, error) {
 		return 0, nil
 	}
 
-	var n int
-	for n < len(p) {
-		if len(r.pending) > 0 {
-			copied := copy(p[n:], r.pending)
-			n += copied
+	n := 0
+	if len(r.pending) > 0 {
+		copied := copy(p, r.pending)
+		n += copied
+		if copied < len(r.pending) {
 			r.pending = r.pending[copied:]
-			continue
+			return n, nil
 		}
-		if r.detached {
-			return n, term.EscapeError{}
+		r.pending = r.pending[:0]
+	}
+	if r.detached {
+		return n, errDetach
+	}
+
+	for n < len(p) {
+		// Respect io.Reader semantics: once we have bytes for the caller and
+		// nothing more is immediately buffered, return instead of blocking on
+		// another ReadByte to fill p. Any partial match is carried in r.match
+		// across calls, so this never drops or reorders input. Without this a
+		// single keystroke would stall until the buffer filled or detach hit.
+		if n > 0 && r.r.Buffered() == 0 {
+			return n, nil
+		}
+
+		// Fast path: with no partial match in progress, bulk-copy the run of
+		// already-buffered bytes up to the next possible detach-key start.
+		if r.match == 0 && r.r.Buffered() > 0 {
+			chunk, _ := r.r.Peek(r.r.Buffered())
+			run := chunk
+			if i := bytes.IndexByte(chunk, r.detachKey[0]); i >= 0 {
+				run = chunk[:i]
+			}
+			if len(run) > 0 {
+				copied := copy(p[n:], run)
+				_, _ = r.r.Discard(copied)
+				n += copied
+				continue
+			}
 		}
 
 		b, err := r.r.ReadByte()
-		if err == nil {
-			if r.scanByte(b) {
-				return n, term.EscapeError{}
+		if err != nil {
+			if r.match > 0 {
+				n = r.emit(p, n, r.detachKey[:r.match])
+				r.match = 0
+			}
+			if n > 0 {
+				return n, nil
+			}
+			return 0, err
+		}
+
+		if b == r.detachKey[r.match] {
+			r.match++
+			if r.match == len(r.detachKey) {
+				r.match = 0
+				r.detached = true
+				return n, errDetach
 			}
 			continue
 		}
+
+		// b diverges from detachKey[r.match]: flush the matched prefix, then
+		// reconsider b as either the start of a fresh match or a literal byte.
 		if r.match > 0 {
-			r.pending = append(r.pending, r.detachKey[:r.match]...)
+			matched := r.match
 			r.match = 0
-			continue
+			n = r.emit(p, n, r.detachKey[:matched])
+			if b == r.detachKey[0] {
+				r.match = 1
+				if len(r.pending) > 0 || n == len(p) {
+					return n, nil
+				}
+				continue
+			}
 		}
-		if n > 0 {
+		if len(r.pending) > 0 || n == len(p) {
+			r.pending = append(r.pending, b)
 			return n, nil
 		}
-		return 0, err
+		p[n] = b
+		n++
 	}
 	return n, nil
 }
 
-func (r *detachKeyReader) scanByte(b byte) bool {
-	if b == r.detachKey[r.match] {
-		r.match++
-		if r.match == len(r.detachKey) {
-			r.detached = true
-			r.match = 0
-			return true
-		}
-		return false
+// emit copies src into p starting at offset n, spilling any remainder that does
+// not fit into r.pending, and returns the new offset.
+func (r *detachKeyReader) emit(p []byte, n int, src []byte) int {
+	copied := copy(p[n:], src)
+	if copied < len(src) {
+		r.pending = append(r.pending, src[copied:]...)
 	}
-
-	if r.match > 0 {
-		r.pending = append(r.pending, r.detachKey[:r.match]...)
-		r.match = 0
-		if b == r.detachKey[0] {
-			r.match = 1
-			return false
-		}
-	}
-	r.pending = append(r.pending, b)
-	return false
+	return n + copied
 }
 
 func sendResize(session AttachSession, stdout *os.File) {
