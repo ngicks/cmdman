@@ -12,7 +12,7 @@ import (
 	"text/template"
 
 	"github.com/mattn/go-runewidth"
-	"github.com/moby/term"
+	"golang.org/x/term"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
@@ -143,11 +143,11 @@ func terminalWidth(out io.Writer) int {
 	if !ok {
 		return 0
 	}
-	ws, err := term.GetWinsize(f.Fd())
-	if err != nil || ws == nil {
+	width, _, err := term.GetSize(int(f.Fd()))
+	if err != nil {
 		return 0
 	}
-	return int(ws.Width)
+	return width
 }
 
 // renderTemplate applies format to each item in turn, newline-terminated — the

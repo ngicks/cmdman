@@ -44,12 +44,27 @@ func TestParseDetachKeys(t *testing.T) {
 		{"ctrl-a", []byte{0x01}, false},
 		{"ctrl-z", []byte{0x1a}, false},
 		{"ctrl-P,ctrl-Q", []byte{0x10, 0x11}, false},
+		// tmux-style C- prefix, case-insensitive, mixable with ctrl-.
+		{"C-p,C-q", []byte{0x10, 0x11}, false},
+		{"c-a", []byte{0x01}, false},
+		{"ctrl-p,C-q", []byte{0x10, 0x11}, false},
+		// control-range edges: @=0x00, [=ESC 0x1b, _=0x1f.
+		{"ctrl-@", []byte{0x00}, false},
+		{"C-@", []byte{0x00}, false},
+		{"ctrl-[", []byte{0x1b}, false},
+		{"C-[", []byte{0x1b}, false},
+		{"ctrl-_", []byte{0x1f}, false},
+		// bare single char stays literal (distinct from its control form).
 		{"a", []byte{'a'}, false},
 		{"a,b,c", []byte{'a', 'b', 'c'}, false},
+		{"@", []byte{'@'}, false},
 		{"", nil, false},
 		{"ctrl-", nil, true},
 		{"ctrl-ab", nil, true},
 		{"ctrl-1", nil, true},
+		{"C-", nil, true},
+		{"C-ab", nil, true},
+		{"c-1", nil, true},
 	}
 
 	for _, tt := range tests {

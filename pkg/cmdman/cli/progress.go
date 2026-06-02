@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/moby/term"
+	"golang.org/x/term"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/compose"
 )
@@ -90,7 +90,7 @@ func isTerminalWriter(out io.Writer) bool {
 	if !ok {
 		return false
 	}
-	return term.IsTerminal(f.Fd())
+	return term.IsTerminal(int(f.Fd()))
 }
 
 // quietReporter discards every event.

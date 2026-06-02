@@ -10,7 +10,6 @@ require (
 	github.com/creack/pty/v2 v2.0.1
 	github.com/dustin/go-humanize v1.0.1
 	github.com/mattn/go-runewidth v0.0.16
-	github.com/moby/term v0.5.2
 	github.com/muesli/cancelreader v0.2.2
 	github.com/ngicks/go-common/contextkey v0.2.0
 	github.com/ngicks/go-iterator-helper v0.0.23
@@ -18,6 +17,7 @@ require (
 	go.yaml.in/yaml/v4 v4.0.0-rc.4
 	golang.org/x/sync v0.19.0
 	golang.org/x/sys v0.42.0
+	golang.org/x/term v0.37.0
 	google.golang.org/grpc v1.78.0
 	google.golang.org/protobuf v1.36.11
 	gotest.tools/v3 v3.5.2
@@ -25,7 +25,6 @@ require (
 )
 
 require (
-	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd // indirect

@@ -16,7 +16,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/moby/term"
+	"golang.org/x/term"
 )
 
 // ErrForceExit indicates the user pressed the force-exit signal sequence
@@ -200,22 +200,22 @@ func setupRawTerminal(noStdin bool, stdin, stdout *os.File) func() {
 	if noStdin {
 		return func() {}
 	}
-	stdinFd := stdin.Fd()
+	stdinFd := int(stdin.Fd())
 	if !term.IsTerminal(stdinFd) {
 		return func() {}
 	}
-	savedState, err := term.SetRawTerminal(stdinFd)
+	savedState, err := term.MakeRaw(stdinFd)
 	if err != nil {
 		return func() {}
 	}
 	return sync.OnceFunc(func() {
-		_ = term.RestoreTerminal(stdinFd, savedState)
+		_ = term.Restore(stdinFd, savedState)
 		// stdin and stdout can differ in odd half-interactive setups
 		// such as `cmd attach ID | tee out.log`: stdin is still the
 		// user's tty, so termios restore is valid, while stdout is a
 		// pipe, so writing display-reset escapes there would just emit
 		// junk into the pipeline.
-		if term.IsTerminal(stdout.Fd()) {
+		if term.IsTerminal(int(stdout.Fd())) {
 			restoreDisplayModes(stdout)
 		}
 	})
@@ -442,13 +442,69 @@ func sendResize(session AttachSession, stdout *os.File) {
 	}
 }
 
-// parseDetachKeys parses a detach-key sequence string (e.g. "ctrl-p,ctrl-q")
-// into the raw byte sequence that signals detach.
+// ctrlKeyBytes maps the key part of a control-key token (the character after a
+// "ctrl-"/"c-" prefix) to the ASCII control byte it produces: the 0x00..0x1f
+// block, i.e. @ a-z [ \ ] ^ _. Keys are lower-cased because parseDetachKeys
+// lower-cases input before lookup. Edit this table to add or change a mapping.
+var ctrlKeyBytes = map[byte]byte{
+	'@': 0x00,
+	'a': 0x01, 'b': 0x02, 'c': 0x03, 'd': 0x04, 'e': 0x05, 'f': 0x06, 'g': 0x07,
+	'h': 0x08, 'i': 0x09, 'j': 0x0a, 'k': 0x0b, 'l': 0x0c, 'm': 0x0d, 'n': 0x0e, 'o': 0x0f,
+	'p': 0x10, 'q': 0x11, 'r': 0x12, 's': 0x13, 't': 0x14, 'u': 0x15, 'v': 0x16, 'w': 0x17,
+	'x': 0x18, 'y': 0x19, 'z': 0x1a,
+	'[': 0x1b, '\\': 0x1c, ']': 0x1d, '^': 0x1e, '_': 0x1f,
+}
+
+// detachKeyPrefixes is the nested lookup table for "<prefix><key>" detach
+// tokens: the outer key is the spelled prefix, the inner table maps the single
+// key character to its byte. ctrl- and the tmux-style C- share one inner table,
+// so teaching the parser a new spelling is a single extra row. (Lower-cased;
+// see parseDetachKeys.)
+var detachKeyPrefixes = map[string]map[byte]byte{
+	"ctrl-": ctrlKeyBytes,
+	"c-":    ctrlKeyBytes,
+}
+
+// parseDetachKeys parses a detach-key sequence string into the raw byte
+// sequence that signals detach. Tokens are comma-separated; each is either a
+// single literal character or a control key spelled "ctrl-<c>" or the tmux-
+// style "C-<c>" (case-insensitive), where <c> is one of @ A-Z [ \ ] ^ _ (the
+// 0x00..0x1f control range). An empty string disables detach.
+//
+// e.g. "ctrl-p,ctrl-q" and "C-p,C-q" both parse to {0x10, 0x11}.
 func parseDetachKeys(detachKeys string) ([]byte, error) {
 	if detachKeys == "" {
 		return nil, nil
 	}
-	return term.ToBytes(strings.ToLower(detachKeys))
+	var codes []byte
+	for token := range strings.SplitSeq(strings.ToLower(detachKeys), ",") {
+		code, err := parseDetachKeyToken(token)
+		if err != nil {
+			return nil, err
+		}
+		codes = append(codes, code)
+	}
+	return codes, nil
+}
+
+// parseDetachKeyToken resolves one token through the nested prefix/key table. A
+// single character is a literal byte; otherwise the token splits into its last
+// character (the key) and everything before it (the prefix), and both must hit
+// the table. token is assumed already lower-cased.
+func parseDetachKeyToken(token string) (byte, error) {
+	if len(token) == 1 {
+		return token[0], nil
+	}
+	prefix, key := token[:len(token)-1], token[len(token)-1]
+	keys, ok := detachKeyPrefixes[prefix]
+	if !ok {
+		return 0, fmt.Errorf("invalid detach key %q", token)
+	}
+	code, ok := keys[key]
+	if !ok {
+		return 0, fmt.Errorf("detach key %q is not a control character", token)
+	}
+	return code, nil
 }
 
 // restoreDisplayModes resets tty-driven display state that the attached
