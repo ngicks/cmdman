@@ -41,7 +41,7 @@ func (s *Service) Remove(ctx context.Context, req RemoveRequest) ([]RemoveResult
 			Err: err,
 		})
 		if err == nil {
-			s.emitEvent(model.Event{
+			s.emitEvent(ctx, model.Event{
 				Time: time.Now().UTC(),
 				Type: model.EventTypeRemoved,
 				ID:   id,

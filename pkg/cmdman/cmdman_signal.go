@@ -27,7 +27,7 @@ func (s *Service) Signal(ctx context.Context, idOrName string, sig int32) error 
 		return fmt.Errorf("signal command %s: %w", idOrName, err)
 	}
 
-	s.emitEvent(model.Event{
+	s.emitEvent(ctx, model.Event{
 		Time: time.Now().UTC(),
 		Type: model.EventTypeSignaled,
 		ID:   idOrName,

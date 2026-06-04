@@ -66,7 +66,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 		return nil, fmt.Errorf("insert state: %w", err)
 	}
 
-	s.emitEvent(model.Event{
+	s.emitEvent(ctx, model.Event{
 		Time:  time.Now().UTC(),
 		Type:  model.EventTypeCreated,
 		ID:    id,

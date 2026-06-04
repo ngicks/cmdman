@@ -84,7 +84,7 @@ func (s *Service) stop(
 		return err
 	}
 
-	s.emitEvent(model.Event{
+	s.emitEvent(ctx, model.Event{
 		Time: time.Now().UTC(),
 		Type: model.EventTypeStopped,
 		ID:   id,

@@ -9,13 +9,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"sync"
 
 	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/go-common/contextkey"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -69,15 +69,17 @@ func (s *Service) eventLog() (*eventlog.Writer, error) {
 }
 
 // emitEvent appends an event best-effort. Failures are logged but do not
-// fail the calling operation.
-func (s *Service) emitEvent(e model.Event) {
+// fail the calling operation. The logger is derived from ctx.
+func (s *Service) emitEvent(ctx context.Context, e model.Event) {
 	w, err := s.eventLog()
 	if err != nil {
-		slog.Default().Warn("eventlog: open writer", "error", err)
+		contextkey.ValueSlogLoggerDefault(ctx).
+			WarnContext(ctx, "eventlog: open writer", "error", err)
 		return
 	}
 	if err := w.Append(e); err != nil {
-		slog.Default().Warn("eventlog: append", "type", e.Type, "id", e.ID, "error", err)
+		contextkey.ValueSlogLoggerDefault(ctx).
+			WarnContext(ctx, "eventlog: append", "type", e.Type, "id", e.ID, "error", err)
 	}
 }
 
