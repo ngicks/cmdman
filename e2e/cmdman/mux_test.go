@@ -139,10 +139,22 @@ func windowMarker(t *testing.T, socket, windowID string) int {
 // regardless of whether the test process itself is running inside tmux. The
 // target server is still the dedicated driver_opt.socket from the spec.
 func (e *testEnv) muxExec(ctx context.Context, args ...string) (string, string, error) {
+	return e.muxExecInDir(ctx, "", args...)
+}
+
+// muxExecInDir is muxExec with the child process run in dir ("" inherits the
+// test process cwd). A controlled cwd exercises `compose mux`'s no-`-f`
+// auto-selection of the cwd compose file.
+func (e *testEnv) muxExecInDir(
+	ctx context.Context,
+	dir string,
+	args ...string,
+) (string, string, error) {
 	e.t.Helper()
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, cmdmanBin, args...)
+	cmd.Dir = dir
 	base := slices.DeleteFunc(os.Environ(), func(s string) bool {
 		return strings.HasPrefix(s, "TMUX=") || strings.HasPrefix(s, "ZELLIJ=")
 	})
@@ -573,6 +585,74 @@ func TestComposeMux_MissingSectionErrors(t *testing.T) {
 	combined := stdout + "\n" + stderr
 	if !strings.Contains(combined, "mux:") || !strings.Contains(combined, "missing") {
 		t.Fatalf("expected a missing-mux-section error; got stdout=%q stderr=%q", stdout, stderr)
+	}
+}
+
+// TestComposeMux_NoFileAutoSelectsCwdFile verifies the headline behavior: from a
+// project directory holding a cmd-compose.yaml with a mux: section, `cmdman
+// compose mux` needs neither -f nor --workdir. The cwd compose file is the sole
+// mux compose associated with the directory, so it is unambiguous and gets
+// auto-selected.
+func TestComposeMux_NoFileAutoSelectsCwdFile(t *testing.T) {
+	t.Parallel()
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	wd := composeWorkdir(t)
+	project := "muxauto"
+	socket := muxSocket(t)
+	t.Cleanup(func() { killTmuxServer(t, socket) })
+	composePath := writeComposeFile(t, wd, composeMuxYAML(project, socket))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	// Bring the services up (explicit flags; this step is not under test).
+	if _, stderr, err := env.exec(
+		ctx, "compose", "--workdir", wd, "-f", composePath, "up",
+	); err != nil {
+		t.Fatalf("compose up failed: %v\nstderr:\n%s", err, stderr)
+	}
+	for _, e := range env.lsJSON(ctx,
+		"-l", "cmdman.compose.workdir="+wd,
+		"-l", "cmdman.compose.project="+project,
+	) {
+		env.waitForState(ctx, e["ID"].(string), "started", defaultTimeout)
+	}
+
+	// The behavior under test: no -f, no --workdir, just run from the project dir.
+	stdout, stderr, err := env.muxExecInDir(ctx, wd, "compose", "mux")
+	if err != nil {
+		t.Fatalf("compose mux (no -f) failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "tmux attach -t cmdman") {
+		t.Fatalf("expected attach hint on stdout; got:\n%s", stdout)
+	}
+	wid := tmuxWindowID(t, socket, "cmdman-"+project)
+	if got, want := windowPaneBases(t, socket, wid), []string{
+		"alpha", "beta",
+	}; !slices.Equal(got, want) {
+		t.Fatalf("pane base names = %v, want %v", got, want)
+	}
+}
+
+// TestComposeMux_NoFileNoneAssociatedErrors verifies that `cmdman compose mux`
+// with no -f, run from a directory with no associated mux compose, fails asking
+// for -f rather than guessing.
+func TestComposeMux_NoFileNoneAssociatedErrors(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+
+	stdout, stderr, err := env.muxExecInDir(ctx, wd, "compose", "mux")
+	if err == nil {
+		t.Fatalf("expected failure; stdout=%q stderr=%q", stdout, stderr)
+	}
+	combined := stdout + "\n" + stderr
+	if !strings.Contains(combined, "associated with this directory") ||
+		!strings.Contains(combined, "-f") {
+		t.Fatalf("expected a 'no associated mux compose' error asking for -f; "+
+			"got stdout=%q stderr=%q", stdout, stderr)
 	}
 }
 

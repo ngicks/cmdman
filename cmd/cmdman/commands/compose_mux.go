@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -70,7 +69,7 @@ func completeComposeMuxLayout(cf *composeFlags) cobra.CompletionFunc {
 		if len(args) != 0 {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		selection, err := compose.LoadOrProject(cf.normalizeOpts())
+		selection, err := resolveComposeMuxSelection(cf)
 		if err != nil || selection.Spec == nil || selection.Spec.Mux == nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
@@ -79,38 +78,6 @@ func completeComposeMuxLayout(cf *composeFlags) cobra.CompletionFunc {
 			names = append(names, l.Name)
 		}
 		return names, cobra.ShellCompDirectiveNoFileComp
-	}
-}
-
-// uniqueMuxSelection auto-selects the sole default-dir compose project that has
-// a mux: section, for `compose mux` invocations with no explicit project (-f)
-// and no CWD compose file. It errors when none or more than one project has a
-// mux: section (the ambiguous case).
-func uniqueMuxSelection() (compose.ProjectSelection, error) {
-	projects, err := compose.ListMuxProjects()
-	if err != nil {
-		return compose.ProjectSelection{}, err
-	}
-	switch len(projects) {
-	case 0:
-		return compose.ProjectSelection{}, errors.New(
-			`compose mux: no compose file found, and no project with a "mux:" section ` +
-				"in the default compose dir; pass -f <file|project>")
-	case 1:
-		p := projects[0]
-		return compose.ProjectSelection{
-			Spec:    &p.Spec,
-			WorkDir: p.Spec.WorkDir,
-			Project: p.Spec.Project,
-		}, nil
-	default:
-		names := make([]string, len(projects))
-		for i, p := range projects {
-			names[i] = p.Name
-		}
-		return compose.ProjectSelection{}, fmt.Errorf(
-			`compose mux: multiple projects have a "mux:" section (%s); select one with -f`,
-			strings.Join(names, ", "))
 	}
 }
 
@@ -180,20 +147,19 @@ func runComposeMux(
 	})
 }
 
-// resolveComposeMuxSelection loads the compose project for the mux subcommand,
-// falling back to the sole default-dir project that has a "mux:" section when
-// no explicit project (-f) or CWD compose file is given. It errors when the
-// resolved project has no "mux:" section.
+// resolveComposeMuxSelection resolves the compose project for the mux
+// subcommand. An explicit -f/--file loads exactly that project; without it the
+// project is auto-selected from the composes associated with the current
+// directory that declare a "mux:" section (see compose.SelectMuxProject).
+// Either way the resolved project must declare a "mux:" section.
 func resolveComposeMuxSelection(cf *composeFlags) (compose.ProjectSelection, error) {
-	selection, err := compose.LoadOrProject(cf.normalizeOpts())
+	opts := cf.normalizeOpts()
+	if opts.File == "" {
+		return compose.SelectMuxProject(opts)
+	}
+	selection, err := compose.LoadOrProject(opts)
 	if err != nil {
 		return compose.ProjectSelection{}, err
-	}
-	if selection.Spec == nil {
-		selection, err = uniqueMuxSelection()
-		if err != nil {
-			return compose.ProjectSelection{}, err
-		}
 	}
 	if selection.Spec == nil || selection.Spec.Mux == nil {
 		return compose.ProjectSelection{}, errors.New(

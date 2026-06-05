@@ -2,10 +2,12 @@ package compose
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
@@ -169,6 +171,84 @@ func LoadOrProject(opts NormalizeOpts) (ProjectSelection, error) {
 		WorkDir: workDir,
 		Project: opts.ProjectName,
 	}, nil
+}
+
+// SelectMuxProject auto-selects the compose project for `compose mux` when the
+// caller gives no explicit -f. The candidate set is every compose "associated
+// with the current working directory" that declares a top-level mux: section:
+//
+//   - the cwd compose file (cmd-compose.yaml/.yml), when present; and
+//   - every named project under the default compose dir (see ListMuxProjects)
+//     whose resolved work_dir equals the cwd.
+//
+// It returns the sole candidate's selection, erroring when none or more than
+// one associated compose declares a mux: section (the ambiguous case). opts
+// carries the caller's --workdir / --project-name overrides for the cwd file;
+// opts.File must be empty, since an explicit -f bypasses this auto-selection.
+func SelectMuxProject(opts NormalizeOpts) (ProjectSelection, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ProjectSelection{}, fmt.Errorf("get working directory: %w", err)
+	}
+	cwd = filepath.Clean(cwd)
+
+	type muxCandidate struct {
+		label string
+		sel   ProjectSelection
+	}
+	var candidates []muxCandidate
+
+	// The cwd compose file (cmd-compose.yaml/.yml), when it declares mux:.
+	// LoadOrProject returns Spec==nil (no error) when no cwd file exists, and
+	// surfaces a real error when a present file fails to load.
+	cwdSel, err := LoadOrProject(opts)
+	if err != nil {
+		return ProjectSelection{}, err
+	}
+	if cwdSel.Spec != nil && cwdSel.Spec.Mux != nil {
+		candidates = append(candidates, muxCandidate{
+			label: filepath.Base(cwdSel.Spec.ComposeFile),
+			sel:   cwdSel,
+		})
+	}
+
+	// Named projects under the default compose dir whose work_dir is the cwd.
+	projects, err := ListMuxProjects()
+	if err != nil {
+		return ProjectSelection{}, err
+	}
+	for _, p := range projects {
+		if filepath.Clean(p.Spec.WorkDir) != cwd {
+			continue
+		}
+		spec := p.Spec
+		candidates = append(candidates, muxCandidate{
+			label: p.Name,
+			sel: ProjectSelection{
+				Spec:    &spec,
+				WorkDir: spec.WorkDir,
+				Project: spec.Project,
+			},
+		})
+	}
+
+	switch len(candidates) {
+	case 0:
+		return ProjectSelection{}, errors.New(
+			`compose mux: no compose with a "mux:" section is associated with this ` +
+				"directory; pass -f <file|project>")
+	case 1:
+		return candidates[0].sel, nil
+	default:
+		labels := make([]string, len(candidates))
+		for i, c := range candidates {
+			labels[i] = c.label
+		}
+		return ProjectSelection{}, fmt.Errorf(
+			`compose mux: multiple composes associated with this directory have a `+
+				`"mux:" section (%s); select one with -f`,
+			strings.Join(labels, ", "))
+	}
 }
 
 // projectLabels builds the List label filter for a project selection. WorkDir
