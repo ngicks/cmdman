@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 
@@ -167,7 +168,7 @@ func BuildLabels(
 	cmd Command,
 	configHash string,
 ) map[string]string {
-	labels := make(map[string]string, len(cmd.Labels)+6)
+	labels := make(map[string]string, len(cmd.Labels)+7)
 	maps.Copy(labels, cmd.Labels)
 	labels[LabelProject] = spec.Project
 	labels[LabelCommand] = cmd.Name
@@ -175,5 +176,12 @@ func BuildLabels(
 	labels[LabelVersion] = LabelVersionValue
 	labels[LabelWorkdir] = spec.WorkDir
 	labels[LabelFile] = spec.ComposeFile
+	if len(cmd.After) > 0 {
+		after, err := json.Marshal(cmd.After)
+		if err != nil {
+			panic(fmt.Sprintf("compose: marshal normalized after label: %v", err))
+		}
+		labels[LabelAfter] = string(after)
+	}
 	return labels
 }

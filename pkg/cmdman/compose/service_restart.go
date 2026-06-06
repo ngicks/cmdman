@@ -37,8 +37,8 @@ type RestartOutcome struct {
 //   - Orphans (project-labeled commands absent from YAML) are skipped with a warning,
 //     consistent with create/up convergence semantics.
 //
-// When no Spec is loaded:
-//   - Both stop and start phases run fully concurrently.
+// When no Spec is loaded, the dependency graph is reconstructed from stored
+// compose labels.
 //
 // Per resolved-decision 21, failures are aggregated; every command is attempted.
 func (s *Service) Restart(
@@ -57,9 +57,6 @@ func (s *Service) Restart(
 	if err := validateCommandNames(opts.CommandNames, selection.Spec, entries); err != nil {
 		return nil, err
 	}
-	if len(opts.CommandNames) > 0 {
-		entries = filterByCommandNames(entries, opts.CommandNames)
-	}
 
 	if len(entries) == 0 {
 		contextkey.ValueSlogLoggerDefault(ctx).Warn(
@@ -72,9 +69,25 @@ func (s *Service) Restart(
 	}
 
 	if selection.Spec != nil {
+		if len(opts.CommandNames) > 0 {
+			entries = filterByCommandNames(entries, opts.CommandNames)
+		}
 		return s.restartWithSpec(ctx, selection, entries)
 	}
-	return s.restartWithoutSpec(ctx, selection, entries)
+	spec, ok, err := reconstructProjectFromMeta(selection, entries)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf(
+			"compose restart: stored dependency graph is ambiguous; pass -f or --project-name",
+		)
+	}
+	selection.Spec = &spec
+	if len(opts.CommandNames) > 0 {
+		entries = filterByCommandNames(entries, opts.CommandNames)
+	}
+	return s.restartWithSpec(ctx, selection, entries)
 }
 
 // restartWithSpec restarts using DAG ordering (reverse stop, forward start).
@@ -155,83 +168,6 @@ func (s *Service) restartWithSpec(
 		}
 	}
 
-	return &RestartResult{Restarts: restarts}, nil
-}
-
-// restartWithoutSpec restarts all entries concurrently (both stop and start phases).
-func (s *Service) restartWithoutSpec(
-	ctx context.Context,
-	selection ProjectSelection,
-	entries []cmdmanEntry,
-) (*RestartResult, error) {
-	outByID := make(map[string]*RestartOutcome, len(entries))
-	nameByID := make(map[string]string, len(entries))
-	for _, e := range entries {
-		name := ""
-		if e.ConfigJSON != nil {
-			name = e.ConfigJSON.Labels[LabelCommand]
-		}
-		outByID[e.ID] = &RestartOutcome{Command: name}
-		nameByID[e.ID] = name
-	}
-
-	// Stop phase: concurrent.
-	var (
-		stopMu sync.Mutex
-	)
-	stopEg, _ := errgroup.WithContext(ctx)
-	for _, entry := range entries {
-		id := entry.ID
-		name := nameByID[id]
-		stopEg.Go(func() error {
-			_, stopErr := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{id}})
-			if stopErr != nil {
-				contextkey.ValueSlogLoggerDefault(ctx).Warn("compose restart: stop failed",
-					"project", selection.Project,
-					"command", name,
-					"id", id,
-					"error", stopErr,
-				)
-			}
-			stopMu.Lock()
-			outByID[id].StopErr = stopErr
-			stopMu.Unlock()
-			return nil
-		})
-	}
-	_ = stopEg.Wait()
-
-	// Start phase: concurrent.
-	var (
-		startMu sync.Mutex
-	)
-	startEg, _ := errgroup.WithContext(ctx)
-	for _, entry := range entries {
-		id := entry.ID
-		name := entry.Name // generated name for cmdman.Service.Start
-		cmdName := nameByID[id]
-		startEg.Go(func() error {
-			startErr := s.svc.Start(ctx, name)
-			if startErr != nil {
-				contextkey.ValueSlogLoggerDefault(ctx).Warn("compose restart: start failed",
-					"project", selection.Project,
-					"command", cmdName,
-					"id", id,
-					"error", startErr,
-				)
-			}
-			startMu.Lock()
-			outByID[id].StartErr = startErr
-			startMu.Unlock()
-			return nil
-		})
-	}
-	_ = startEg.Wait()
-
-	var restarts []RestartOutcome
-	for _, entry := range entries {
-		restarts = append(restarts, *outByID[entry.ID])
-	}
 	return &RestartResult{Restarts: restarts}, nil
 }
 

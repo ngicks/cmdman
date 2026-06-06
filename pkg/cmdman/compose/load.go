@@ -712,15 +712,8 @@ func normalizeAfter(cmdName string, after map[string]AfterSpec) ([]AfterSpec, er
 		if spec.Condition == "" {
 			spec.Condition = ConditionCompleted
 		}
-		switch spec.Condition {
-		case ConditionCompleted, ConditionStarted, ConditionCompletedSuccessfully:
-		default:
-			return nil, fmt.Errorf(
-				"dependency %q has unknown condition %q"+
-					" (allowed: completed, started, completed_successfully)",
-				n,
-				spec.Condition,
-			)
+		if err := spec.Validate(); err != nil {
+			return nil, err
 		}
 		result = append(result, spec)
 	}

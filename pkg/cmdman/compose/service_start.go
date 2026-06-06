@@ -4,19 +4,15 @@ import (
 	"context"
 	"fmt"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/go-common/contextkey"
 )
 
 // StartOption configures a Start operation.
 type StartOption struct {
 	// CommandNames optionally narrows the start to a subset of commands. When
-	// a compose file is loaded, dependencies of the named commands are pulled
-	// in automatically. When no compose file is loaded, names match
-	// LabelCommand directly with no dependency expansion.
+	// a compose file or stored dependency graph is available, dependencies of
+	// the named commands are pulled in automatically.
 	CommandNames []string
 }
 
@@ -33,9 +29,8 @@ type StartOutcome struct {
 	Err error
 }
 
-// Start starts commands selected by the project selection, honoring after.Condition
-// when a compose file is loaded. With no compose file (project-only mode), starts
-// the named commands concurrently with no dependency awareness.
+// Start starts commands selected by the project selection, honoring
+// after.Condition from either a loaded compose file or stored compose labels.
 func (s *Service) Start(
 	ctx context.Context,
 	selection ProjectSelection,
@@ -80,9 +75,6 @@ func (s *Service) startWithoutSpec(
 	if err := validateCommandNames(opts.CommandNames, nil, entries); err != nil {
 		return nil, err
 	}
-	if len(opts.CommandNames) > 0 {
-		entries = filterByCommandNames(entries, opts.CommandNames)
-	}
 	if len(entries) == 0 {
 		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose start: no commands found for project",
 			"project", selection.Project,
@@ -92,43 +84,18 @@ func (s *Service) startWithoutSpec(
 		return &StartResult{}, nil
 	}
 
-	var (
-		results  []StartOutcome
-		eg, gctx = errgroup.WithContext(ctx)
-		ch       = make(chan StartOutcome, len(entries))
-	)
-	for _, e := range entries {
-		cmdName := ""
-		if e.ConfigJSON != nil {
-			cmdName = e.ConfigJSON.Labels[LabelCommand]
-		}
-		id, name := e.ID, cmdName
-		state := e.State
-		eg.Go(func() error {
-			if state == model.EventTypeStarted || state == model.EventTypeStarting {
-				s.report(name, PhaseStarted, nil, nil)
-				ch <- StartOutcome{Command: name}
-				return nil
-			}
-			s.report(name, PhaseStarting, nil, nil)
-			if err := s.svc.Start(gctx, id); err != nil {
-				wrapped := fmt.Errorf("start command %q (%s): %w", name, id, err)
-				s.report(name, PhaseError, wrapped, nil)
-				ch <- StartOutcome{Command: name, Err: wrapped}
-				return nil
-			}
-			s.report(name, PhaseStarted, nil, nil)
-			ch <- StartOutcome{Command: name}
-			return nil
-		})
+	spec, ok, err := reconstructProjectFromMeta(selection, entries)
+	if err != nil {
+		return nil, err
 	}
-	_ = eg.Wait()
-	close(ch)
-	for o := range ch {
-		results = append(results, o)
+	if !ok {
+		return nil, fmt.Errorf(
+			"compose start: stored dependency graph is ambiguous; pass -f or --project-name",
+		)
 	}
-	if results == nil {
-		results = []StartOutcome{}
+	starts, err := s.reconcileStart(ctx, spec, opts.CommandNames)
+	if err != nil {
+		return nil, err
 	}
-	return &StartResult{Starts: results}, nil
+	return &StartResult{Starts: starts}, nil
 }

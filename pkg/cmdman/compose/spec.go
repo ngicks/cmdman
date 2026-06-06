@@ -3,6 +3,8 @@
 package compose
 
 import (
+	"fmt"
+
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/mux"
@@ -19,6 +21,7 @@ const (
 	LabelVersion    = "cmdman.compose.version"
 	LabelWorkdir    = "cmdman.compose.workdir"
 	LabelFile       = "cmdman.compose.file"
+	LabelAfter      = "cmdman.compose.after"
 
 	LabelVersionValue = "1"
 )
@@ -31,6 +34,18 @@ const (
 	ConditionStarted               AfterCondition = "started"
 	ConditionCompletedSuccessfully AfterCondition = "completed_successfully"
 )
+
+func (c AfterCondition) Validate() error {
+	switch c {
+	case ConditionCompleted, ConditionStarted, ConditionCompletedSuccessfully:
+		return nil
+	default:
+		return fmt.Errorf(
+			"unknown condition %q (allowed: completed, started, completed_successfully)",
+			c,
+		)
+	}
+}
 
 // ---- Raw YAML structs -------------------------------------------------------
 
@@ -77,8 +92,19 @@ type EnvFileSpec struct {
 // AfterSpec is the dependency specification for a command.
 // Name is filled from the map key during normalization.
 type AfterSpec struct {
-	Name      string         // filled from map key during normalization
-	Condition AfterCondition `yaml:"condition"` // defaults to "completed"
+	Name string `yaml:"name" json:"name"`
+	// Condition defaults to "completed".
+	Condition AfterCondition `yaml:"condition" json:"condition"`
+}
+
+func (a AfterSpec) Validate() error {
+	if a.Name == "" {
+		return fmt.Errorf("dependency name is empty")
+	}
+	if err := a.Condition.Validate(); err != nil {
+		return fmt.Errorf("dependency %q: %w", a.Name, err)
+	}
+	return nil
 }
 
 // ---- Normalized model -------------------------------------------------------

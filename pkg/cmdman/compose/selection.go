@@ -19,8 +19,8 @@ type cmdmanEntry = store.CommandEntry
 // (compose file), or WorkDir plus an optional Project. An empty Project selects
 // every command in WorkDir (cwd-based query).
 type ProjectSelection struct {
-	// Spec is non-nil when a compose file was loaded. When set, DAG ordering is
-	// available for stop/restart.
+	// Spec is non-nil when a compose file was loaded. When absent, operations
+	// reconstruct dependency order from stored compose labels when possible.
 	Spec *ComposeSpec
 	// WorkDir is the effective work directory (resolved: --workdir > YAML work_dir > CWD).
 	WorkDir string

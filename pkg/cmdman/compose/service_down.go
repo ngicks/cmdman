@@ -32,9 +32,8 @@ type RemoveOutcome struct {
 
 // Down stops and then removes project-labeled commands.
 //
-// Stop phase: same ordering as Stop (reverse-dependency up walk when Spec is
-// loaded; concurrent otherwise). Remove phase: fully concurrent after all stops
-// complete.
+// Stop phase: same ordering as Stop (reverse-dependency up walk). Remove
+// phase: fully concurrent after all stops complete.
 //
 // With no command names and a loaded Spec, Down is the destructive whole-project
 // teardown: because selection is by the (workdir, project) label pair, it also
@@ -60,6 +59,22 @@ func (s *Service) Down(
 		return nil, err
 	}
 
+	spec := selection.Spec
+	if spec == nil {
+		stored, ok, err := reconstructProjectFromMeta(selection, allEntries)
+		if err != nil {
+			return nil, err
+		}
+		if !ok && len(allEntries) > 0 {
+			return nil, fmt.Errorf(
+				"compose down: stored dependency graph is ambiguous; pass -f or --project-name",
+			)
+		}
+		if ok {
+			spec = &stored
+		}
+	}
+
 	selected := allEntries
 	if len(opts.CommandNames) > 0 {
 		selected = filterByCommandNames(allEntries, opts.CommandNames)
@@ -77,26 +92,26 @@ func (s *Service) Down(
 		stops         []StopOutcome
 		removeTargets []cmdmanEntry
 	)
-	if selection.Spec != nil {
+	if spec != nil {
 		// Stop the declared closure (named + recursive dependents) in
 		// reverse-dependency order via the reconcile graph.
-		stops, err = s.reconcileStop(ctx, *selection.Spec, opts.CommandNames)
+		stops, err = s.reconcileStop(ctx, *spec, opts.CommandNames)
 		if err != nil {
 			return nil, err
 		}
 		if len(opts.CommandNames) == 0 {
 			// Whole-project teardown: also stop running orphans, remove everything.
 			stops = append(
-				stops,
-				s.stopOrphans(ctx, allEntries, *selection.Spec, selection.Project)...)
+				stops, s.stopOrphans(ctx, allEntries, *spec, selection.Project)...)
 			removeTargets = allEntries
 		} else {
 			// Scoped teardown: remove exactly the stopped closure.
-			closure := resolveStopTargetCommands(*selection.Spec, opts.CommandNames)
+			closure := resolveStopTargetCommands(*spec, opts.CommandNames)
 			removeTargets = filterEntriesInClosure(allEntries, closure)
 		}
 	} else {
-		// No spec: stop running entries concurrently, remove the selected set.
+		// No reconstructable graph: stop running entries concurrently, remove
+		// the selected set.
 		stops = stopAllConcurrent(ctx, s, runningEntries(selected), selection.Project)
 		removeTargets = selected
 	}

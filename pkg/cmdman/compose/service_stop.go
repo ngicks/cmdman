@@ -37,7 +37,8 @@ type StopOutcome struct {
 // dependency is never stopped while a command that depends on it is still
 // running.
 //
-// When no Spec is loaded, all selected commands stop concurrently.
+// When no Spec is loaded, the dependency graph is reconstructed from stored
+// compose labels.
 //
 // An empty resolved target set is not an error: the caller should emit a
 // structured-log event and return nil.
@@ -56,12 +57,8 @@ func (s *Service) Stop(
 		return nil, fmt.Errorf("list project commands: %w", err)
 	}
 
-	// Filter by command names when provided.
 	if err := validateCommandNames(opts.CommandNames, selection.Spec, entries); err != nil {
 		return nil, err
-	}
-	if len(opts.CommandNames) > 0 {
-		entries = filterByCommandNames(entries, opts.CommandNames)
 	}
 
 	if len(entries) == 0 {
@@ -75,14 +72,24 @@ func (s *Service) Stop(
 
 	var stops []StopOutcome
 	if selection.Spec != nil {
-		// Spec available: reverse-dependency order via the reconcile graph.
 		stops, err = s.reconcileStop(ctx, *selection.Spec, opts.CommandNames)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		// No spec: all concurrent.
-		stops = stopAllConcurrent(ctx, s, entries, selection.Project)
+		spec, ok, err := reconstructProjectFromMeta(selection, entries)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf(
+				"compose stop: stored dependency graph is ambiguous; pass -f or --project-name",
+			)
+		}
+		stops, err = s.reconcileStop(ctx, spec, opts.CommandNames)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &StopResult{Stops: stops}, nil

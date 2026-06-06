@@ -240,6 +240,56 @@ func (e *reconcileTestEnv) svc(states map[string]model.EventType) *Service {
 	}}
 }
 
+func (e *reconcileTestEnv) svcEntries(entries []store.CommandEntry) *Service {
+	return &Service{svc: testCmdmanSvc{
+		list: func(_ context.Context, _ cmdman.ListRequest) ([]store.CommandEntry, error) {
+			return entries, nil
+		},
+		start: func(ctx context.Context, genName string) error {
+			e.mu.Lock()
+			e.startOrder = append(e.startOrder, genName)
+			e.startCalls[genName]++
+			hook := e.startHook[genName]
+			e.mu.Unlock()
+			if hook != nil {
+				return hook(ctx)
+			}
+			return nil
+		},
+		wait: func(ctx context.Context, req cmdman.WaitRequest) ([]cmdman.WaitResult, error) {
+			genName := req.Targets[0]
+			e.mu.Lock()
+			hook := e.waitHook[genName]
+			res, ok := e.waitResult[genName]
+			e.mu.Unlock()
+			if hook != nil {
+				if err := hook(ctx); err != nil {
+					return nil, err
+				}
+			}
+			if !ok {
+				zero := 0
+				res = cmdman.WaitResult{ID: genName, ExitCode: &zero}
+			}
+			return []cmdman.WaitResult{res}, nil
+		},
+		stop: func(ctx context.Context, req cmdman.StopRequest) ([]cmdman.StopResult, error) {
+			id := req.Targets[0]
+			e.mu.Lock()
+			e.stopOrder = append(e.stopOrder, id)
+			e.stopCalls[id]++
+			hook := e.stopHook[id]
+			e.mu.Unlock()
+			if hook != nil {
+				if err := hook(ctx); err != nil {
+					return nil, err
+				}
+			}
+			return nil, nil
+		},
+	}}
+}
+
 func (e *reconcileTestEnv) stopped(id string) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -273,6 +323,26 @@ func reconcileSpec(cmds ...Command) ComposeSpec {
 	return ComposeSpec{Project: "proj", WorkDir: "/wd", Commands: cmds}
 }
 
+func storedGraphEntry(
+	name string,
+	state model.EventType,
+	after ...AfterSpec,
+) store.CommandEntry {
+	labels := BuildLabels(
+		reconcileSpec(reconcileCmd(name, after...)),
+		reconcileCmd(name, after...),
+		"sha256:test",
+	)
+	return store.CommandEntry{
+		ID:    "id-" + name,
+		Name:  "gen-" + name,
+		State: state,
+		ConfigJSON: &model.CommandConfig{
+			Labels: labels,
+		},
+	}
+}
+
 func outcomeByCommand(outcomes []StartOutcome, name string) (StartOutcome, bool) {
 	for _, o := range outcomes {
 		if o.Command == name {
@@ -280,6 +350,82 @@ func outcomeByCommand(outcomes []StartOutcome, name string) (StartOutcome, bool)
 		}
 	}
 	return StartOutcome{}, false
+}
+
+func TestBuildLabelsStoresAfterMetadata(t *testing.T) {
+	labels := BuildLabels(
+		reconcileSpec(
+			reconcileCmd("api"),
+			reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionStarted}),
+		),
+		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionStarted}),
+		"sha256:test",
+	)
+	raw := labels[LabelAfter]
+	if raw == "" {
+		t.Fatal("expected stored after label")
+	}
+	after, err := decodeAfterLabel(raw)
+	if err != nil {
+		t.Fatalf("decode stored after: %v", err)
+	}
+	if !slices.EqualFunc(
+		after,
+		[]AfterSpec{{Name: "api", Condition: ConditionStarted}},
+		func(a, b AfterSpec) bool {
+			return a.Name == b.Name && a.Condition == b.Condition
+		},
+	) {
+		t.Fatalf("unexpected stored after: %#v", after)
+	}
+}
+
+func TestStartWithoutSpecUsesStoredAfterDependencies(t *testing.T) {
+	env := newReconcileTestEnv()
+	entries := []store.CommandEntry{
+		storedGraphEntry("api", model.EventTypeCreated),
+		storedGraphEntry("worker", model.EventTypeCreated,
+			AfterSpec{Name: "api", Condition: ConditionStarted}),
+	}
+
+	result, err := env.svcEntries(entries).Start(
+		context.Background(),
+		ProjectSelection{WorkDir: "/wd", Project: "proj"},
+		StartOption{CommandNames: []string{"worker"}},
+	)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if got, want := env.order(), []string{"gen-api", "gen-worker"}; !slices.Equal(got, want) {
+		t.Fatalf("start order = %v, want %v", got, want)
+	}
+	if len(result.Starts) != 2 {
+		t.Fatalf("expected dependency and target outcomes, got %#v", result.Starts)
+	}
+}
+
+func TestStopWithoutSpecUsesStoredAfterDependents(t *testing.T) {
+	env := newReconcileTestEnv()
+	entries := []store.CommandEntry{
+		storedGraphEntry("api", model.EventTypeStarted),
+		storedGraphEntry("worker", model.EventTypeStarted,
+			AfterSpec{Name: "api", Condition: ConditionStarted}),
+	}
+
+	result, err := env.svcEntries(entries).Stop(
+		context.Background(),
+		ProjectSelection{WorkDir: "/wd", Project: "proj"},
+		StopOption{CommandNames: []string{"api"}},
+	)
+	if err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if got, want := env.stopOrderList(), []string{"id-worker", "id-api"}; !slices.Equal(got, want) {
+		t.Fatalf("stop order = %v, want %v", got, want)
+	}
+	if len(result.Stops) != 2 {
+		t.Fatalf("expected dependent and target outcomes, got %#v", result.Stops)
+	}
 }
 
 // TestReconcileStartedConditionStartsDependentWithoutWaitingForExit verifies a
