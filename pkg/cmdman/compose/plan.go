@@ -14,8 +14,8 @@ const (
 	// ActionCreate means the command does not exist and must be created.
 	ActionCreate ActionKind = "create"
 	// ActionRecreate means the command exists but its config hash has changed;
-	// it must be deleted and re-created (stopped commands only; running commands
-	// are reported as conflicts by the caller).
+	// it must be deleted and re-created. A running command is stopped first by the
+	// caller before the remove + create.
 	ActionRecreate ActionKind = "recreate"
 	// ActionUnchanged means the command exists and its config hash matches desired.
 	ActionUnchanged ActionKind = "unchanged"

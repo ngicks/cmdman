@@ -24,6 +24,8 @@ type testCmdmanSvc struct {
 	start    func(context.Context, string) error
 	wait     func(context.Context, cmdman.WaitRequest) ([]cmdman.WaitResult, error)
 	stop     func(context.Context, cmdman.StopRequest) ([]cmdman.StopResult, error)
+	create   func(context.Context, cmdman.CreateRequest) (*cmdman.CreateResult, error)
+	remove   func(context.Context, cmdman.RemoveRequest) ([]cmdman.RemoveResult, error)
 }
 
 func (s testCmdmanSvc) Start(ctx context.Context, idOrName string) error {
@@ -53,14 +55,23 @@ func (s testCmdmanSvc) List(
 	return nil, nil
 }
 
-func (s testCmdmanSvc) Create(context.Context, cmdman.CreateRequest) (*cmdman.CreateResult, error) {
+func (s testCmdmanSvc) Create(
+	ctx context.Context,
+	req cmdman.CreateRequest,
+) (*cmdman.CreateResult, error) {
+	if s.create != nil {
+		return s.create(ctx, req)
+	}
 	return nil, nil
 }
 
 func (s testCmdmanSvc) Remove(
-	context.Context,
-	cmdman.RemoveRequest,
+	ctx context.Context,
+	req cmdman.RemoveRequest,
 ) ([]cmdman.RemoveResult, error) {
+	if s.remove != nil {
+		return s.remove(ctx, req)
+	}
 	return nil, nil
 }
 

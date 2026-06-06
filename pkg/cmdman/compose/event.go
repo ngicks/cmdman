@@ -37,9 +37,9 @@ const (
 	PhaseRemoved Phase = "removed"
 
 	// Terminal, any phase. PhaseSkipped marks a command that needed no action
-	// (e.g. an already-terminal command on stop, or a running command whose
-	// recreate was declined). PhaseFailed marks a monitored process that ended
-	// without an exit code. PhaseError marks a failed compose operation step.
+	// (e.g. an already-terminal command on stop, or a running orphan left in
+	// place). PhaseFailed marks a monitored process that ended without an exit
+	// code. PhaseError marks a failed compose operation step.
 	PhaseSkipped Phase = "skipped"
 	PhaseFailed  Phase = "failed"
 	PhaseError   Phase = "error"

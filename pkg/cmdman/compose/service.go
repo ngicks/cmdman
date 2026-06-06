@@ -171,22 +171,31 @@ func (s *Service) executeAction(
 			return ActionOutcome{Command: nc.Name, Action: "skipped", Err: werr}, nil
 		}
 
-		// If the command is running/starting, skip it (resolved-decision 4: no force in v1).
+		// A running/starting command is stopped before it can be removed and
+		// recreated. The stop is surfaced as its own stopping → stopped step in the
+		// trace so the user sees the command go down before it comes back. A stop
+		// failure aborts the recreate (the still-running command must not be
+		// removed out from under its live monitor).
 		if existing.State == model.EventTypeStarted || existing.State == model.EventTypeStarting {
-			contextkey.ValueSlogLoggerDefault(ctx).Warn(
-				"compose: changed command is running; skipping recreate",
+			contextkey.ValueSlogLoggerDefault(ctx).Info(
+				"compose: stopping changed command before recreate",
 				"project", spec.Project,
 				"command", nc.Name,
 				"id", existing.ID,
 				"state", existing.State,
 			)
-			werr := fmt.Errorf(
-				"command %q is %s; recreate skipped (stop first)",
-				nc.Name,
-				existing.State,
-			)
-			s.report(nc.Name, PhaseSkipped, werr, nil)
-			return ActionOutcome{Command: nc.Name, Action: "skipped", Err: werr}, nil
+			s.report(nc.Name, PhaseStopping, nil, nil)
+			if err := s.stopForRecreate(ctx, existing.ID); err != nil {
+				werr := fmt.Errorf(
+					"stop command %q (%s) for recreate: %w",
+					nc.Name,
+					existing.ID,
+					err,
+				)
+				s.report(nc.Name, PhaseError, werr, nil)
+				return ActionOutcome{Command: nc.Name, Action: "recreate", Err: werr}, nil
+			}
+			s.report(nc.Name, PhaseStopped, nil, nil)
 		}
 
 		s.report(nc.Name, PhaseRecreating, nil, nil)
@@ -220,6 +229,24 @@ func (s *Service) executeAction(
 	default:
 		return ActionOutcome{}, fmt.Errorf("unknown action kind %q", action.Kind)
 	}
+}
+
+// stopForRecreate stops a running command and waits for it to terminate so its
+// store entry can be safely removed and recreated. It honors the command's
+// configured stop signal and the default stop timeout (SIGTERM, then SIGKILL on
+// timeout). The first error — from the call itself or any per-target result — is
+// returned so the caller can abort the recreate.
+func (s *Service) stopForRecreate(ctx context.Context, id string) error {
+	results, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{id}})
+	if err != nil {
+		return err
+	}
+	for _, r := range results {
+		if r.Err != nil {
+			return r.Err
+		}
+	}
+	return nil
 }
 
 // buildCreateRequest constructs a cmdman.CreateRequest from a Command

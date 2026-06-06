@@ -296,6 +296,77 @@ func TestComposeUpRecreateOnArgsChange(t *testing.T) {
 	}
 }
 
+// TestComposeUpRecreateRunningCommand verifies that `compose up` recreates a
+// command whose config changed even while it is still running: the live instance
+// is stopped first (surfaced as stopping → stopped in the progress trace), then
+// removed, recreated, and started again under a fresh ID.
+func TestComposeUpRecreateRunningCommand(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-recreate-running"
+	composePath := writeComposeFile(t, wd, composeRecreateRunningYAML(project, "30"))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up"); err != nil {
+		t.Fatalf("compose up #1 failed: %v", err)
+	}
+
+	// Wait until alpha is actually running so the recreate is forced to stop it.
+	alphaID := func() string {
+		for _, e := range env.lsJSON(ctx,
+			"-l", "cmdman.compose.command=alpha",
+			"-l", "cmdman.compose.project="+project,
+		) {
+			return e["ID"].(string)
+		}
+		return ""
+	}
+	idBefore := alphaID()
+	if idBefore == "" {
+		t.Fatalf("alpha was not created by up #1")
+	}
+	env.waitForState(ctx, idBefore, "started", 5*time.Second)
+
+	// Change alpha's args so its config hash differs, forcing a recreate while
+	// the command is still running.
+	must(t, os.WriteFile(composePath, []byte(composeRecreateRunningYAML(project, "31")), 0o644))
+
+	stdout, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up")
+	if err != nil {
+		t.Fatalf("compose up #2 failed: %v\nstdout:\n%s", err, stdout)
+	}
+
+	// The progress trace must show the running instance going down (stopping →
+	// stopped) before it is recreated and started again.
+	events := parseProgress(t, stdout)
+	for _, phase := range []string{"stopping", "stopped", "recreated", "started"} {
+		if !progressReached(events, "alpha", phase) {
+			t.Fatalf("expected alpha to reach %q during recreate; got:\n%s", phase, stdout)
+		}
+	}
+
+	idAfter := alphaID()
+	if idAfter == "" {
+		t.Fatalf("alpha missing after recreate")
+	}
+	if idAfter == idBefore {
+		t.Fatalf("alpha id should have changed after recreate: still %s", idAfter)
+	}
+	env.waitForState(ctx, idAfter, "started", 5*time.Second)
+}
+
+// composeRecreateRunningYAML returns a one-command compose file whose single
+// long-running command sleeps for the given duration. Varying the duration
+// changes the config hash, which is enough to force a recreate.
+func composeRecreateRunningYAML(name, sleep string) string {
+	return fmt.Sprintf(`name: %s
+commands:
+  alpha:
+    args: [sleep, %q]
+`, name, sleep)
+}
+
 // composeSingleYAML returns a minimal compose file with one command (alpha only).
 func composeSingleYAML(name string) string {
 	return fmt.Sprintf(`name: %s
