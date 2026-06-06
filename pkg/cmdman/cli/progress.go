@@ -107,8 +107,8 @@ type progressLine struct {
 	Command  string `json:"command"`
 	Phase    string `json:"phase"`
 	Terminal bool   `json:"terminal"`
-	ExitCode *int   `json:"exitCode,omitempty"`
-	Error    string `json:"error,omitempty"`
+	ExitCode *int   `json:"exitCode,omitzero"`
+	Error    string `json:"error,omitzero"`
 }
 
 // jsonReporter writes one JSON object per event, newline-delimited (JSONL).

@@ -12,14 +12,14 @@ import (
 // InspectOutput is the merged command definition, state, and history.
 type InspectOutput struct {
 	ID          string               `json:"id"`
-	Name        string               `json:"name,omitempty"`
+	Name        string               `json:"name,omitzero"`
 	Config      *model.CommandConfig `json:"config"`
 	State       model.EventType      `json:"state"`
-	ExitCode    *int                 `json:"exit_code,omitempty"`
+	ExitCode    *int                 `json:"exit_code,omitzero"`
 	StateJSON   *model.CommandState  `json:"state_detail"`
-	ExitHistory []store.ExitRecord   `json:"exit_history,omitempty"`
-	ConfigPath  string               `json:"config_path,omitempty"`
-	LiveStatus  *LiveStatusInfo      `json:"live_status,omitempty"`
+	ExitHistory []store.ExitRecord   `json:"exit_history,omitzero"`
+	ConfigPath  string               `json:"config_path,omitzero"`
+	LiveStatus  *LiveStatusInfo      `json:"live_status,omitzero"`
 }
 
 // LiveStatusInfo is the live status from the monitor gRPC Status RPC.

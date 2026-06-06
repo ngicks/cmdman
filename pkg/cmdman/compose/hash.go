@@ -46,14 +46,14 @@ type hashCanonical struct {
 	Dir             string            `json:"dir"`
 	Env             []string          `json:"env"` // sorted KEY=VALUE; env_file + env: merged
 	RestartPolicy   string            `json:"restart_policy"`
-	MaxRetries      int               `json:"max_retries,omitempty"`
+	MaxRetries      int               `json:"max_retries,omitzero"`
 	StopSignal      string            `json:"stop_signal"`
 	Tty             bool              `json:"tty"`
 	ScrollbackBytes int               `json:"scrollback_bytes"`
 	LogDriver       string            `json:"log_driver"`
-	LogOpts         map[string]string `json:"log_opts,omitempty"`
-	UserLabels      map[string]string `json:"user_labels,omitempty"`
-	After           []hashAfterSpec   `json:"after,omitempty"`
+	LogOpts         map[string]string `json:"log_opts,omitzero"`
+	UserLabels      map[string]string `json:"user_labels,omitzero"`
+	After           []hashAfterSpec   `json:"after,omitzero"`
 }
 
 type hashAfterSpec struct {

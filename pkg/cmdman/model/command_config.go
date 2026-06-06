@@ -13,16 +13,16 @@ type CommandConfig struct {
 	// Argv is the command and its arguments.
 	Argv []string `json:"argv"`
 	// Dir is the working directory for the command.
-	Dir string `json:"dir,omitempty"`
+	Dir string `json:"dir,omitzero"`
 	// Env is environment variables for the command.
-	Env []string `json:"env,omitempty"`
+	Env []string `json:"env,omitzero"`
 	// RestartPolicy is one of "no", "on-failure", "always".
 	RestartPolicy RestartPolicy `json:"restart_policy"`
 	// MaxRetries caps the number of automatic restarts under the "on-failure"
 	// policy. Zero means unlimited. It is only valid with "on-failure".
-	MaxRetries int `json:"max_retries,omitempty"`
+	MaxRetries int `json:"max_retries,omitzero"`
 	// StopSignal is the default signal used by stop when no override is provided.
-	StopSignal string `json:"stop_signal,omitempty"`
+	StopSignal string `json:"stop_signal,omitzero"`
 	// Tty controls whether the command is attached to a pseudo-terminal.
 	Tty bool `json:"tty"`
 	// ScrollbackBytes is the scrollback buffer size in bytes.
@@ -31,11 +31,11 @@ type CommandConfig struct {
 	LogDriver logdriver.LogDriver `json:"log_driver"`
 	// LogOpts is a driver-specific bag of options, mirroring podman's
 	// `--log-opt KEY=VALUE` mechanism. Valid keys depend on LogDriver.
-	LogOpts map[string]string `json:"log_opts,omitempty"`
+	LogOpts map[string]string `json:"log_opts,omitzero"`
 	// Labels are user-defined key-value metadata.
-	Labels map[string]string `json:"labels,omitempty"`
+	Labels map[string]string `json:"labels,omitzero"`
 	// Annotations are system metadata (e.g., auto-remove).
-	Annotations map[string]string `json:"annotations,omitempty"`
+	Annotations map[string]string `json:"annotations,omitzero"`
 	// CommandDir is the per-command directory path.
 	CommandDir string `json:"command_dir"`
 }
@@ -111,15 +111,15 @@ func (c *CommandConfig) BackfillDefaults() {
 // CommandState stores mutable runtime fields in CommandState.JSON.
 type CommandState struct {
 	// MonitorPID is the PID of the monitor process.
-	MonitorPID int `json:"monitor_pid,omitempty"`
+	MonitorPID int `json:"monitor_pid,omitzero"`
 	// SocketPath is the Unix socket path for the monitor gRPC server.
-	SocketPath string `json:"socket_path,omitempty"`
+	SocketPath string `json:"socket_path,omitzero"`
 	// StartedAt is the RFC3339 timestamp when the command started.
-	StartedAt string `json:"started_at,omitempty"`
+	StartedAt string `json:"started_at,omitzero"`
 	// FinishedAt is the RFC3339 timestamp when the command finished.
-	FinishedAt string `json:"finished_at,omitempty"`
+	FinishedAt string `json:"finished_at,omitzero"`
 	// RestartCount is how many times the command has been restarted.
 	RestartCount int `json:"restart_count"`
 	// Error contains error details when the command is in failed state.
-	Error string `json:"error,omitempty"`
+	Error string `json:"error,omitzero"`
 }

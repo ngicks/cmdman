@@ -217,7 +217,7 @@ func runTmuxPopup(ctx context.Context, cfg PopupConfig, env []string) error {
 // never travels over this channel.
 type ipcMessage struct {
 	Kind  string `json:"kind"`
-	Error string `json:"error,omitempty"`
+	Error string `json:"error,omitzero"`
 }
 
 const (

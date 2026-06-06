@@ -14,7 +14,7 @@ import (
 type ProjectSummary struct {
 	Project     string `json:"project"`
 	WorkDir     string `json:"workdir"`
-	ComposeFile string `json:"compose_file,omitempty"`
+	ComposeFile string `json:"compose_file,omitzero"`
 	Commands    int    `json:"commands"`
 	Running     int    `json:"running"`
 	Exited      int    `json:"exited"`
@@ -27,8 +27,8 @@ type CommandStatus struct {
 	ID       string          `json:"id"`
 	Name     string          `json:"name"`
 	State    model.EventType `json:"state"`
-	ExitCode *int            `json:"exit_code,omitempty"`
-	Argv     []string        `json:"argv,omitempty"`
+	ExitCode *int            `json:"exit_code,omitzero"`
+	Argv     []string        `json:"argv,omitzero"`
 }
 
 // ListProjects returns every compose project known to the cmdman store.
