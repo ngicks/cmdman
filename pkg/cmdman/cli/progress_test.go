@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -171,6 +172,58 @@ func TestTTYReporterFailureIsSticky(t *testing.T) {
 	if strings.Contains(out, "Running") {
 		t.Fatalf("a failed command must not be repainted as Running:\n%q", out)
 	}
+}
+
+// TestTTYReporterKeepsStepMilestones verifies that a command moving through
+// several lifecycle steps keeps each settled milestone on its own line. A
+// recreated-then-restarted command emits stopping→stopped→recreating→recreated→
+// starting→running; the final frame must show "Stopped", "Recreated", and
+// "Running" each still visible (not collapsed to the latest phase), while the
+// transient phases have collapsed onto their step's line.
+func TestTTYReporterKeepsStepMilestones(t *testing.T) {
+	var buf bytes.Buffer
+	r := newTTYReporter(&buf)
+
+	for _, p := range []compose.Phase{
+		compose.PhaseStopping, compose.PhaseStopped,
+		compose.PhaseRecreating, compose.PhaseRecreated,
+		compose.PhaseStarting, compose.PhaseRunning,
+	} {
+		r.Report(compose.Event{Command: "api", Phase: p})
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	final := lastFrame(buf.String())
+	// Every settled milestone stays visible on its own line.
+	for _, want := range []string{"Stopped", "Recreated", "Running"} {
+		if !strings.Contains(final, want) {
+			t.Errorf("final frame missing milestone %q:\n%q", want, final)
+		}
+	}
+	// Transient phases collapsed onto their step's line, leaving only the result.
+	for _, gone := range []string{"Stopping", "Recreating", "Starting"} {
+		if strings.Contains(final, gone) {
+			t.Errorf("final frame still shows transient phase %q:\n%q", gone, final)
+		}
+	}
+	// Three milestones => three lines for the one command.
+	if got := strings.Count(final, "api"); got != 3 {
+		t.Errorf("expected 3 milestone lines for api, got %d:\n%q", got, final)
+	}
+}
+
+// lastFrame returns the body of the renderer's final in-place repaint:
+// everything after the last cursor-up-to-top control it emits at the start of
+// each frame. Earlier frames (including transient phases mid-step) precede it.
+func lastFrame(out string) string {
+	cursorUp := regexp.MustCompile(`\x1b\[\d+A`)
+	locs := cursorUp.FindAllStringIndex(out, -1)
+	if len(locs) == 0 {
+		return out
+	}
+	return out[locs[len(locs)-1][1]:]
 }
 
 func TestProgressMarkerByCategory(t *testing.T) {

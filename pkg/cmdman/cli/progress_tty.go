@@ -12,12 +12,18 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/compose"
 )
 
-// ttyReporter renders a live, inline (no alt-screen) state trace: one line per
-// command, repainted in place as events arrive. It deliberately avoids a TUI
-// framework — a full framework (bubbletea) queries the terminal at process
-// startup for the whole binary, which corrupts the PTY of sibling subcommands
-// such as `compose attach`. This renderer only touches the terminal while it is
-// actually running.
+// ttyReporter renders a live, inline (no alt-screen) state trace, repainted in
+// place as events arrive. It deliberately avoids a TUI framework — a full
+// framework (bubbletea) queries the terminal at process startup for the whole
+// binary, which corrupts the PTY of sibling subcommands such as `compose
+// attach`. This renderer only touches the terminal while it is actually running.
+//
+// A command moves through one or more lifecycle steps (stop, recreate, start,
+// remove, …). Each step gets its own line: while the step is in flight its
+// transient phase (e.g. "starting") owns the line and collapses onto it when the
+// step settles (e.g. "running"), but a settled milestone is never overwritten by
+// the next step — so a recreated-then-started command keeps "recreated",
+// "stopped", and "running" each visible rather than only its latest phase.
 //
 // Events arrive from the reconcile walk's goroutines via Report; a background
 // ticker animates the spinner on in-progress lines. Both paths repaint under the
@@ -26,10 +32,10 @@ import (
 type ttyReporter struct {
 	mu       sync.Mutex
 	out      io.Writer
-	order    []string
-	byName   map[string]progressEntry
+	order    []string                   // command names in first-seen order
+	lines    map[string][]progressEntry // per-command lifecycle-step lines
 	frame    int
-	drawn    int // command lines currently on screen
+	drawn    int // total lines currently on screen
 	closed   bool
 	stopTick chan struct{}
 	tickDone chan struct{}
@@ -38,7 +44,7 @@ type ttyReporter struct {
 func newTTYReporter(out io.Writer) *ttyReporter {
 	r := &ttyReporter{
 		out:      out,
-		byName:   map[string]progressEntry{},
+		lines:    map[string][]progressEntry{},
 		stopTick: make(chan struct{}),
 		tickDone: make(chan struct{}),
 	}
@@ -52,23 +58,31 @@ func (r *ttyReporter) Report(ev compose.Event) {
 	if r.closed {
 		return
 	}
-	existing, seen := r.byName[ev.Command]
-	if !seen {
-		r.order = append(r.order, ev.Command)
-	} else if existing.phase.Failed() {
-		// A failure is sticky: once a command has failed during this operation,
-		// keep that failure (its kind and detail) on the line instead of letting a
-		// later non-failure phase repaint it as success. Collapsing to the latest
-		// phase otherwise hides the failure — e.g. a recreate whose stop failed is
-		// masked by the idempotent "running" the start phase reports for the
-		// still-running command, leaving a green line with a non-zero exit and no
-		// visible cause.
-		return
-	}
-	r.byName[ev.Command] = progressEntry{
+	entry := progressEntry{
 		phase: ev.Phase,
 		err:   errString(ev.Err),
 		exit:  ev.ExitCode,
+	}
+	steps := r.lines[ev.Command]
+	switch {
+	case len(steps) == 0:
+		r.order = append(r.order, ev.Command)
+		r.lines[ev.Command] = []progressEntry{entry}
+	case steps[len(steps)-1].phase.Failed():
+		// A failure is sticky: once a step has failed during this operation, keep
+		// that failure (its kind and detail) as the command's terminal outcome
+		// instead of trailing it with a later success line — e.g. the idempotent
+		// "running" the start walk reports for a command whose recreate-stop
+		// failed, which would otherwise read as a clean restart and hide the cause.
+		return
+	case steps[len(steps)-1].phase.Terminal():
+		// The previous step reached a terminal milestone; this event opens a new
+		// step on its own line, leaving the milestone visible above it.
+		r.lines[ev.Command] = append(steps, entry)
+	default:
+		// The current step is still in flight; refine it in place (transient →
+		// transient, or transient → terminal collapses onto the same line).
+		steps[len(steps)-1] = entry
 	}
 	r.render()
 }
@@ -110,25 +124,32 @@ func (r *ttyReporter) animate() {
 
 // render repaints the whole block in place. The caller holds r.mu. It moves the
 // cursor up over the previously drawn lines, then clears and rewrites each line,
-// so a repaint costs no scrollback. order only grows, so the up-count always
-// matches what is on screen.
+// so a repaint costs no scrollback. The line count only grows (steps are
+// appended, never removed), so the up-count always matches what is on screen.
 func (r *ttyReporter) render() {
 	var b strings.Builder
 	if r.drawn > 0 {
 		fmt.Fprintf(&b, "\x1b[%dA", r.drawn) // cursor up to the top of the block
 	}
+	total := 0
 	for _, name := range r.order {
-		b.WriteString("\r\x1b[2K") // carriage return + clear entire line
-		b.WriteString(renderProgressLine(name, r.byName[name], r.frame))
-		b.WriteByte('\n')
+		for _, e := range r.lines[name] {
+			b.WriteString("\r\x1b[2K") // carriage return + clear entire line
+			b.WriteString(renderProgressLine(name, e, r.frame))
+			b.WriteByte('\n')
+			total++
+		}
 	}
-	r.drawn = len(r.order)
+	r.drawn = total
 	_, _ = io.WriteString(r.out, b.String())
 }
 
+// hasInProgress reports whether any command's current step is still in flight.
+// Only the last line of a command can be transient; earlier lines are settled
+// milestones.
 func (r *ttyReporter) hasInProgress() bool {
-	for _, e := range r.byName {
-		if !e.phase.Terminal() {
+	for _, steps := range r.lines {
+		if n := len(steps); n > 0 && !steps[n-1].phase.Terminal() {
 			return true
 		}
 	}
