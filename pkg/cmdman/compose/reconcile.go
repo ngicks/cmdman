@@ -510,7 +510,7 @@ func (g *reconcileGraph) evalDownEdgeLocked(
 			return edgeBlocked, fmt.Sprintf("dependency %q failed: %v", p.ID, p.Err)
 		}
 		switch cond {
-		case ConditionStarted:
+		case ConditionRunning:
 			return edgeSatisfied, ""
 		case ConditionCompleted:
 			if isTerminalState(p.State) {
@@ -535,8 +535,8 @@ func (g *reconcileGraph) evalDownEdgeLocked(
 	// Out-of-closure dependency: judge by the pre-run snapshot only.
 	snap := p.Snapshot
 	switch cond {
-	case ConditionStarted:
-		if snap.State == model.EventTypeStarted || snap.State == model.EventTypeStarting {
+	case ConditionRunning:
+		if snap.State == model.EventTypeRunning || snap.State == model.EventTypeStarting {
 			return edgeSatisfied, ""
 		}
 		return edgeBlocked, fmt.Sprintf(

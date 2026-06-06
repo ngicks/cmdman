@@ -29,7 +29,7 @@ func waitCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	}
 
 	cmd.Flags().StringVarP(&flagCondition, "condition", "c", string(cmdman.WaitConditionStopped),
-		"Condition to wait on (stopped|created|starting|started|exited|failed)")
+		"Condition to wait on (stopped|created|starting|running|exited|failed)")
 	cmd.Flags().DurationVarP(&flagInterval, "interval", "i", 250*time.Millisecond,
 		"Time interval between state checks")
 	cmd.Flags().BoolVar(&flagIgnore, "ignore", false,

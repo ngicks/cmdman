@@ -12,7 +12,7 @@ import (
 
 // runningStates are the states in which a command owns a live monitor / PTY and
 // can be attached to, signalled, or stopped.
-var runningStates = []model.EventType{model.EventTypeStarting, model.EventTypeStarted}
+var runningStates = []model.EventType{model.EventTypeStarting, model.EventTypeRunning}
 
 // completeCommandNames returns a [cobra.CompletionFunc] that completes a command
 // target (NAME, falling back to ID) from the cmdman store. When states is
@@ -188,7 +188,7 @@ var waitConditionCompletions = cobra.FixedCompletions(
 		string(model.EventTypeStopped),
 		string(model.EventTypeCreated),
 		string(model.EventTypeStarting),
-		string(model.EventTypeStarted),
+		string(model.EventTypeRunning),
 		string(model.EventTypeExited),
 		string(model.EventTypeFailed),
 	},

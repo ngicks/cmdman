@@ -132,7 +132,7 @@ func TestRestart_AlwaysStoppedBySignal(t *testing.T) {
 	id := env.run(ctx, "run", "-n", "always-sleep", "--restart", "always",
 		"--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, "always-sleep", "started", defaultTimeout)
+	env.waitForState(ctx, "always-sleep", "running", defaultTimeout)
 
 	// Stopping it should terminate it despite always-restart policy.
 	env.run(ctx, "stop", "always-sleep")

@@ -57,7 +57,7 @@ func (s *Service) restart(
 	if err != nil {
 		return fmt.Errorf("get command state: %w", err)
 	}
-	if state == model.EventTypeStarting || state == model.EventTypeStarted {
+	if state == model.EventTypeStarting || state == model.EventTypeRunning {
 		if err := s.stop(ctx, st, id, signalOverride, timeout); err != nil {
 			return fmt.Errorf("stop: %w", err)
 		}

@@ -68,7 +68,7 @@ func (s *Service) ListProjects(ctx context.Context) ([]ProjectSummary, error) {
 		}
 		summary.Commands++
 		switch entry.State {
-		case model.EventTypeStarted:
+		case model.EventTypeRunning:
 			summary.Running++
 		case model.EventTypeExited:
 			summary.Exited++

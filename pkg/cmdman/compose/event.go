@@ -21,9 +21,9 @@ const (
 	// Transient (start phase).
 	PhaseStarting Phase = "starting"
 	PhaseWaiting  Phase = "waiting"
-	// Terminal (start phase). PhaseExited is reported when a started command was
+	// Terminal (start phase). PhaseExited is reported when a running command was
 	// awaited to completion (an after.Condition needed its terminal state).
-	PhaseStarted Phase = "started"
+	PhaseRunning Phase = "running"
 	PhaseExited  Phase = "exited"
 
 	// Transient (stop / down stop phase).

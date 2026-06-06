@@ -42,7 +42,7 @@ func (s *Service) Start(ctx context.Context, idOrName string) error {
 	if _, err := SpawnMonitor(s.cfg, id); err != nil {
 		return fmt.Errorf("spawn monitor: %w", err)
 	}
-	if finalState, err := WaitForState(st, id, model.EventTypeStarted, 100); err != nil {
+	if finalState, err := WaitForState(st, id, model.EventTypeRunning, 100); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}

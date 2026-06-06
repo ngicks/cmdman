@@ -22,7 +22,7 @@ type WaitRequest struct {
 
 // WaitResult reports per-command outcome of a Wait operation.
 // ExitCode is nil when the command has not exited (e.g. when waiting for a
-// non-terminal condition such as "started") or when the command has been
+// non-terminal condition such as "running") or when the command has been
 // removed from the store before any exit code was recorded.
 type WaitResult struct {
 	ID       string
@@ -37,7 +37,7 @@ const (
 	WaitConditionStopped  = model.EventTypeStopped
 	WaitConditionCreated  = model.EventTypeCreated
 	WaitConditionStarting = model.EventTypeStarting
-	WaitConditionStarted  = model.EventTypeStarted
+	WaitConditionRunning  = model.EventTypeRunning
 	WaitConditionExited   = model.EventTypeExited
 	WaitConditionFailed   = model.EventTypeFailed
 )
@@ -86,7 +86,7 @@ func (s *Service) Wait(ctx context.Context, req WaitRequest) ([]WaitResult, erro
 func validWaitCondition(c model.EventType) bool {
 	switch c {
 	case WaitConditionStopped, WaitConditionCreated, WaitConditionStarting,
-		WaitConditionStarted, WaitConditionExited, WaitConditionFailed:
+		WaitConditionRunning, WaitConditionExited, WaitConditionFailed:
 		return true
 	}
 	return false

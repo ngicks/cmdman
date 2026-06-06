@@ -170,7 +170,7 @@ func seed() Model {
 				name:    "web",
 				project: "api-stack",
 				workdir: "/work/api",
-				state:   model.EventTypeStarted,
+				state:   model.EventTypeRunning,
 			},
 		}},
 		{name: "local-dev", workdir: "/work/local-dev", commands: []commandRow{
@@ -179,7 +179,7 @@ func seed() Model {
 				name:    "watcher",
 				project: "local-dev",
 				workdir: "/work/local-dev",
-				state:   model.EventTypeStarted,
+				state:   model.EventTypeRunning,
 			},
 			{
 				id:      "2",
@@ -215,7 +215,7 @@ func TestDisplayLabels(t *testing.T) {
 		code  *int
 		want  string
 	}{
-		{model.EventTypeStarted, nil, "running"},
+		{model.EventTypeRunning, nil, "running"},
 		{model.EventTypeStarting, nil, "starting"},
 		{model.EventTypeCreated, nil, "created"},
 		{model.EventTypeExited, nil, "exited"},
@@ -259,7 +259,7 @@ func TestFilteringMatchesStatusLabel(t *testing.T) {
 	m := seed()
 	m.commands.filter = "running"
 	rows := m.commands.visibleRows()
-	// "running" is the display label for started commands: watcher and web.
+	// "running" is the display label for running commands: watcher and web.
 	cmds := 0
 	for _, r := range rows {
 		if r.kind == visCommand {
@@ -300,7 +300,7 @@ func TestStandaloneCommandsHaveNoGroupHeader(t *testing.T) {
 		name:    "",
 		workdir: "/work/loose",
 		commands: []commandRow{
-			{id: "9", name: "loose", workdir: "/work/loose", state: model.EventTypeStarted},
+			{id: "9", name: "loose", workdir: "/work/loose", state: model.EventTypeRunning},
 		},
 	}))
 	rows := m.commands.visibleRows()
@@ -353,14 +353,14 @@ func TestSelectionPreservedAcrossRefresh(t *testing.T) {
 			Name:    "watcher",
 			Project: "local-dev",
 			Workdir: "/work/local-dev",
-			State:   model.EventTypeStarted,
+			State:   model.EventTypeRunning,
 		},
 		{
 			ID:      "3",
 			Name:    "web",
 			Project: "api-stack",
 			Workdir: "/work/api",
-			State:   model.EventTypeStarted,
+			State:   model.EventTypeRunning,
 		},
 		{
 			ID:      "2",
@@ -508,7 +508,7 @@ func TestRunningRemoveShowsForceConfirmation(t *testing.T) {
 	m := seed()
 	m.commands.selected = 1 // watcher, running
 	c, _ := m.commands.selectedCommand()
-	if c.state != model.EventTypeStarted {
+	if c.state != model.EventTypeRunning {
 		t.Fatalf("precondition: watcher should be running")
 	}
 	m, _ = upd(m, kr("x"))

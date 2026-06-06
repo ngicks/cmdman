@@ -122,12 +122,12 @@ func (s *Service) Down(
 	return &DownResult{Stops: stops, Removes: removes}, nil
 }
 
-// runningEntries returns the entries with a live monitor (started/starting),
+// runningEntries returns the entries with a live monitor (running/starting),
 // the only states Service.Stop can gracefully stop.
 func runningEntries(entries []cmdmanEntry) []cmdmanEntry {
 	out := make([]cmdmanEntry, 0, len(entries))
 	for _, e := range entries {
-		if e.State == model.EventTypeStarted || e.State == model.EventTypeStarting {
+		if e.State == model.EventTypeRunning || e.State == model.EventTypeStarting {
 			out = append(out, e)
 		}
 	}

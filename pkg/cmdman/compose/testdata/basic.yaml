@@ -30,4 +30,4 @@ commands:
       - ./cmd/worker
     after:
       api:
-        condition: started
+        condition: running

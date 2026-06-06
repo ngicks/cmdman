@@ -60,7 +60,7 @@ func TestJSONReporterEmitsJSONL(t *testing.T) {
 
 	exit := 2
 	r.Report(compose.Event{Command: "api", Phase: compose.PhaseStarting})
-	r.Report(compose.Event{Command: "api", Phase: compose.PhaseStarted})
+	r.Report(compose.Event{Command: "api", Phase: compose.PhaseRunning})
 	r.Report(compose.Event{Command: "worker", Phase: compose.PhaseExited, ExitCode: &exit})
 	r.Report(compose.Event{
 		Command: "db",
@@ -95,8 +95,8 @@ func TestJSONReporterEmitsJSONL(t *testing.T) {
 	if got[0].Phase != "starting" || got[0].Terminal {
 		t.Errorf("starting line wrong: %+v", got[0])
 	}
-	if got[1].Phase != "started" || !got[1].Terminal {
-		t.Errorf("started line wrong: %+v", got[1])
+	if got[1].Phase != "running" || !got[1].Terminal {
+		t.Errorf("running line wrong: %+v", got[1])
 	}
 	// Exit code surfaced on terminal exited phase.
 	if got[2].Phase != "exited" || got[2].ExitCode == nil || *got[2].ExitCode != 2 {
@@ -118,14 +118,14 @@ func TestTTYReporterRendersTrace(t *testing.T) {
 
 	r.Report(compose.Event{Command: "api", Phase: compose.PhaseStarting})
 	r.Report(compose.Event{Command: "worker", Phase: compose.PhaseStarting})
-	r.Report(compose.Event{Command: "api", Phase: compose.PhaseStarted})
+	r.Report(compose.Event{Command: "api", Phase: compose.PhaseRunning})
 	if err := r.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
 	out := buf.String()
 	// Both commands and their latest phase labels appear in the repainted block.
-	for _, want := range []string{"api", "worker", "Starting", "Started"} {
+	for _, want := range []string{"api", "worker", "Starting", "Running"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected %q in rendered trace:\n%q", want, out)
 		}
@@ -141,7 +141,7 @@ func TestTTYReporterRendersTrace(t *testing.T) {
 // operation, a later non-failure phase does not repaint it as success: the final
 // frame keeps the failure kind and detail visible. This is the case the original
 // report hit — a recreate whose stop failed was masked by the idempotent
-// "started" the start phase reports for the still-running command.
+// "running" the start phase reports for the still-running command.
 func TestTTYReporterFailureIsSticky(t *testing.T) {
 	var buf bytes.Buffer
 	r := newTTYReporter(&buf)
@@ -153,9 +153,9 @@ func TestTTYReporterFailureIsSticky(t *testing.T) {
 		Phase:   compose.PhaseError,
 		Err:     errors.New(`stop command "shell" for recreate: monitor unreachable`),
 	})
-	// The start phase later reports the still-running command as started; this
+	// The start phase later reports the still-running command as running; this
 	// must not overwrite the failure.
-	r.Report(compose.Event{Command: "shell", Phase: compose.PhaseStarted, ExitCode: &exit})
+	r.Report(compose.Event{Command: "shell", Phase: compose.PhaseRunning, ExitCode: &exit})
 	if err := r.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -167,9 +167,9 @@ func TestTTYReporterFailureIsSticky(t *testing.T) {
 	if !strings.Contains(out, "monitor unreachable") {
 		t.Fatalf("expected the failure detail (its kind) in trace:\n%q", out)
 	}
-	// The masked "started" phase must never have been rendered.
-	if strings.Contains(out, "Started") {
-		t.Fatalf("a failed command must not be repainted as Started:\n%q", out)
+	// The masked "running" phase must never have been rendered.
+	if strings.Contains(out, "Running") {
+		t.Fatalf("a failed command must not be repainted as Running:\n%q", out)
 	}
 }
 
@@ -180,7 +180,7 @@ func TestProgressMarkerByCategory(t *testing.T) {
 		compose.PhaseCreated:   "◌", // pending
 		compose.PhaseRecreated: "◌",
 		compose.PhaseUnchanged: "◌",
-		compose.PhaseStarted:   "●", // running
+		compose.PhaseRunning:   "●", // running
 		compose.PhaseExited:    "✔", // completed
 		compose.PhaseStopped:   "✔",
 		compose.PhaseRemoved:   "✔",

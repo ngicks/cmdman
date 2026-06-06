@@ -14,7 +14,7 @@ func TestStatusGlyphMatchesComposeMarkers(t *testing.T) {
 		want    string
 	}{
 		{model.EventTypeCreated, "", "◌"},
-		{model.EventTypeStarted, "", "●"},
+		{model.EventTypeRunning, "", "●"},
 		{model.EventTypeExited, "", "✔"},
 		{model.EventTypeFailed, "", "✘"},
 	}

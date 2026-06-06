@@ -27,7 +27,7 @@ func TestEvents_ReplayHistorical(t *testing.T) {
 		t.Fatalf("events output empty for id %q", id)
 	}
 	gotTypes := collectEventTypes(t, stdout)
-	wantPresent := []string{"created", "starting", "started", "exited"}
+	wantPresent := []string{"created", "starting", "running", "exited"}
 	for _, w := range wantPresent {
 		if _, ok := gotTypes[w]; !ok {
 			t.Errorf("expected event type %q in output, got types %v\nraw:\n%s",
@@ -95,7 +95,7 @@ func TestEvents_FollowLivePublishes(t *testing.T) {
 		// earlier events should also have been delivered — assert
 		// that to guard against regressions in the fresh-log path.
 		if _, ok := gotTypes["exited"]; ok {
-			for _, w := range []string{"created", "starting", "started", "exited"} {
+			for _, w := range []string{"created", "starting", "running", "exited"} {
 				if _, ok := gotTypes[w]; !ok {
 					t.Fatalf("expected event type %q in live output; got %v\nraw:\n%s",
 						w, sortedKeys(gotTypes), string(buf))

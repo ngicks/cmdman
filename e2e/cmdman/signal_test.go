@@ -13,7 +13,7 @@ func TestSignal_DoesNotDisableRestartPolicy(t *testing.T) {
 	id := env.run(ctx, "run", "-n", "signal-restart", "--restart", "always",
 		"--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, "signal-restart", "started", defaultTimeout)
+	env.waitForState(ctx, "signal-restart", "running", defaultTimeout)
 
 	env.run(ctx, "signal", "-s", "SIGTERM", "signal-restart")
 
@@ -21,7 +21,7 @@ func TestSignal_DoesNotDisableRestartPolicy(t *testing.T) {
 		info := env.inspectJSON(ctx, "signal-restart")
 		history, _ := info["exit_history"].([]any)
 		state, _ := info["state"].(string)
-		return len(history) >= 1 && state == "started"
+		return len(history) >= 1 && state == "running"
 	}, "signal should allow restart policy to restart the command")
 }
 
@@ -33,7 +33,7 @@ func TestStop_DisablesRestartPolicy(t *testing.T) {
 	id := env.run(ctx, "run", "-n", "stop-restart", "--restart", "always",
 		"--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, "stop-restart", "started", defaultTimeout)
+	env.waitForState(ctx, "stop-restart", "running", defaultTimeout)
 
 	env.run(ctx, "stop", "stop-restart")
 	env.waitForState(ctx, "stop-restart", "exited", defaultTimeout)

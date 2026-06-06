@@ -68,7 +68,7 @@ func stickyStateFor(
 // Running is true only when the command is observably alive.
 func renderStickyState(state model.EventType, exitCode *int) cli.StickyState {
 	switch state {
-	case model.EventTypeStarted, model.EventTypeStarting:
+	case model.EventTypeRunning, model.EventTypeStarting:
 		return cli.StickyState{Running: true, Status: string(state)}
 	case model.EventTypeExited, model.EventTypeFailed:
 		if exitCode != nil {

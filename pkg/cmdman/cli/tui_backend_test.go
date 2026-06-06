@@ -17,7 +17,7 @@ func TestCommandInfosIncludesStandalone(t *testing.T) {
 		{
 			ID:    "c1",
 			Name:  "generated-web",
-			State: model.EventTypeStarted,
+			State: model.EventTypeRunning,
 			ConfigJSON: &model.CommandConfig{
 				Labels: map[string]string{
 					compose.LabelProject: "api-stack",

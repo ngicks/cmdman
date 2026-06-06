@@ -61,7 +61,7 @@ func statusGlyph(state model.EventType, pending string, frame int) string {
 	switch state {
 	case model.EventTypeCreated:
 		return "◌"
-	case model.EventTypeStarted:
+	case model.EventTypeRunning:
 		return "●"
 	case model.EventTypeExited:
 		return "✔"
@@ -80,7 +80,7 @@ func statusStyle(state model.EventType, pending string) lipgloss.Style {
 	switch state {
 	case model.EventTypeCreated:
 		return styleMarkPending
-	case model.EventTypeStarted, model.EventTypeExited:
+	case model.EventTypeRunning, model.EventTypeExited:
 		return styleMarkOK
 	case model.EventTypeFailed:
 		return styleMarkErr

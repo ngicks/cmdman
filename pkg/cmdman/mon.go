@@ -303,28 +303,28 @@ func (m *Monitor) publishStateChange(state model.EventType, exitCode int) {
 }
 
 func isMonitorActiveState(state model.EventType) bool {
-	return state == model.EventTypeStarting || state == model.EventTypeStarted
+	return state == model.EventTypeStarting || state == model.EventTypeRunning
 }
 
 func (m *Monitor) setRunning() {
 	m.stateJSON.StartedAt = time.Now().UTC().Format(time.RFC3339)
 	// Append the event before flipping the DB state so observers polling
-	// state cannot see "started" without the corresponding event on disk.
+	// state cannot see "running" without the corresponding event on disk.
 	m.emitEvent(model.Event{
 		Time:  time.Now().UTC(),
-		Type:  model.EventTypeStarted,
+		Type:  model.EventTypeRunning,
 		ID:    m.ID,
-		State: model.EventTypeStarted,
+		State: model.EventTypeRunning,
 	})
 	if err := m.store.UpdateCommandState(
 		m.ID,
-		model.EventTypeStarted,
+		model.EventTypeRunning,
 		nil,
 		m.stateJSON,
 	); err != nil {
 		m.Logger.Error("update state to running failed", slog.String("error", err.Error()))
 	}
-	m.publishStateChange(model.EventTypeStarted, 0)
+	m.publishStateChange(model.EventTypeRunning, 0)
 }
 
 func (m *Monitor) setExited(exitCode int) {

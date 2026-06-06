@@ -83,7 +83,7 @@ func markMonitorDied(
 }
 
 func isStaleCheckState(state model.EventType) bool {
-	return state == model.EventTypeStarting || state == model.EventTypeStarted
+	return state == model.EventTypeStarting || state == model.EventTypeRunning
 }
 
 func isStaleMonitor(stateJSON *model.CommandState) bool {

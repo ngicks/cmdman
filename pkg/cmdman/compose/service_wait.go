@@ -15,7 +15,7 @@ type WaitOption struct {
 	// CommandNames optionally narrows the target set to specific compose command names.
 	CommandNames []string
 	// Condition is the wait condition (default "stopped").
-	// Valid values: "stopped", "created", "starting", "started", "exited", "failed".
+	// Valid values: "stopped", "created", "starting", "running", "exited", "failed".
 	Condition model.EventType
 	// Interval is the polling interval (default: 250ms when zero).
 	Interval time.Duration

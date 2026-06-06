@@ -143,7 +143,7 @@ func TestServiceSendKeys(t *testing.T) {
 	for time.Now().Before(deadline) {
 		state, _, stateJSON, err := st.GetCommandState(id)
 		assert.NilError(t, err)
-		if state == model.EventTypeStarted && stateJSON.SocketPath != "" {
+		if state == model.EventTypeRunning && stateJSON.SocketPath != "" {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)

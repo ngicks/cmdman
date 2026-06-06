@@ -5,10 +5,10 @@ commands:
     args: [echo, a]
     after:
       b:
-        condition: started
+        condition: running
 
   b:
     args: [echo, b]
     after:
       a:
-        condition: started
+        condition: running

@@ -53,7 +53,7 @@ func TestRm_RunningCommandFails(t *testing.T) {
 	id := env.run(ctx, "run", "-n", "running-rm", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
 
-	env.waitForState(ctx, "running-rm", "started", defaultTimeout)
+	env.waitForState(ctx, "running-rm", "running", defaultTimeout)
 
 	// Removing a running command without --force prints an error per-command
 	// but the rm command itself still returns 0 (it processes each target independently).
@@ -61,14 +61,14 @@ func TestRm_RunningCommandFails(t *testing.T) {
 
 	// The error message should appear in stdout or stderr.
 	combined := stdout + " " + stderr
-	if !strings.Contains(strings.ToLower(combined), "started") &&
+	if !strings.Contains(strings.ToLower(combined), "running") &&
 		!strings.Contains(strings.ToLower(combined), "force") {
 		t.Logf("expected error about running command, got stdout=%q stderr=%q", stdout, stderr)
 	}
 
 	// The command should still exist (not removed).
 	info := env.inspectJSON(ctx, "running-rm")
-	if info["state"] != "started" {
+	if info["state"] != "running" {
 		t.Errorf("expected command to still be running, got %v", info["state"])
 	}
 }
@@ -79,7 +79,7 @@ func TestRm_ForceRunningCommand(t *testing.T) {
 	env := newTestEnv(t)
 
 	id := env.run(ctx, "run", "-n", "force-rm", "--", "/bin/sh", "-c", "sleep 300")
-	env.waitForState(ctx, "force-rm", "started", defaultTimeout)
+	env.waitForState(ctx, "force-rm", "running", defaultTimeout)
 
 	// Force remove the running command.
 	env.run(ctx, "rm", "-f", "force-rm")

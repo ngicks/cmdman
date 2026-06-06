@@ -77,7 +77,7 @@ func TestDefaultLsFormatAligns(t *testing.T) {
 		{
 			ID:         "a1b2c3d4e5f6aaaa",
 			Name:       "web",
-			State:      model.EventTypeStarted,
+			State:      model.EventTypeRunning,
 			ConfigJSON: &model.CommandConfig{Argv: []string{"/usr/bin/node"}},
 		},
 		{

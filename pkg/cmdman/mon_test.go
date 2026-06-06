@@ -243,7 +243,7 @@ func TestStaleEntryCleanup(t *testing.T) {
 	assert.NilError(t, st.InsertCommandConfig("stale-1", "", cfg))
 	// Set a PID that's definitely not alive (PID 1 is init, but use a very high PID).
 	stateJSON := &model.CommandState{MonitorPID: 99999999}
-	assert.NilError(t, st.InsertCommandState("stale-1", model.EventTypeStarted, stateJSON))
+	assert.NilError(t, st.InsertCommandState("stale-1", model.EventTypeRunning, stateJSON))
 
 	cfgForCleanup, err := (CmdmanConfig{
 		DataDir:            t.TempDir(),
@@ -323,7 +323,7 @@ func TestMonitorStateChangeBroadcastsTerminalStateAndCloses(t *testing.T) {
 		Env:        testEnv(),
 		CommandDir: t.TempDir(),
 	}))
-	assert.NilError(t, st.InsertCommandState(id, model.EventTypeStarted, &model.CommandState{}))
+	assert.NilError(t, st.InsertCommandState(id, model.EventTypeRunning, &model.CommandState{}))
 
 	m := &Monitor{
 		ID:                id,

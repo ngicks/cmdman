@@ -16,7 +16,7 @@ func TestLifecycle_RunStopRm(t *testing.T) {
 	id := env.run(ctx, "run", "-n", "lifecycle-cmd", "--", "/bin/sh", "-c", "sleep 300")
 
 	// Step 2: Wait for running state.
-	env.waitForState(ctx, "lifecycle-cmd", "started", defaultTimeout)
+	env.waitForState(ctx, "lifecycle-cmd", "running", defaultTimeout)
 
 	// Step 3: Verify it appears in ls.
 	entries := env.lsJSON(ctx)
@@ -24,7 +24,7 @@ func TestLifecycle_RunStopRm(t *testing.T) {
 	for _, e := range entries {
 		if e["Name"] == "lifecycle-cmd" {
 			found = true
-			if e["State"] != "started" {
+			if e["State"] != "running" {
 				t.Errorf("expected state=running in ls, got %v", e["State"])
 			}
 		}
@@ -35,7 +35,7 @@ func TestLifecycle_RunStopRm(t *testing.T) {
 
 	// Step 4: Inspect while running.
 	info := env.inspectJSON(ctx, "lifecycle-cmd")
-	if info["state"] != "started" {
+	if info["state"] != "running" {
 		t.Errorf("expected state=running in inspect, got %v", info["state"])
 	}
 	liveStatus, _ := info["live_status"].(map[string]any)
@@ -173,9 +173,9 @@ func TestLifecycle_MultipleCommands(t *testing.T) {
 		env.cleanupCommand(ctx, id3)
 	})
 
-	env.waitForState(ctx, id1, "started", defaultTimeout)
-	env.waitForState(ctx, id2, "started", defaultTimeout)
-	env.waitForState(ctx, id3, "started", defaultTimeout)
+	env.waitForState(ctx, id1, "running", defaultTimeout)
+	env.waitForState(ctx, id2, "running", defaultTimeout)
+	env.waitForState(ctx, id3, "running", defaultTimeout)
 
 	// All three should appear in ls.
 	entries := env.lsJSON(ctx, "-l", "group=multi")

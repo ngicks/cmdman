@@ -26,10 +26,10 @@ const (
 	// iteration. It is also the persisted state while the subprocess is being
 	// started.
 	EventTypeStarting EventType = "starting"
-	// EventTypeStarted is published when the command subprocess has been
-	// spawned and is observable as started. It is also the persisted started
+	// EventTypeRunning is published when the command subprocess has been
+	// spawned and is observable as running. It is also the persisted running
 	// state.
-	EventTypeStarted EventType = "started"
+	EventTypeRunning EventType = "running"
 	// EventTypeExited is published when the command subprocess exits cleanly.
 	// It is also the persisted exited state.
 	EventTypeExited EventType = "exited"
@@ -49,7 +49,7 @@ const (
 func IsEventType(s string) bool {
 	switch EventType(s) {
 	case EventTypeCreated, EventTypeRemoved,
-		EventTypeStarting, EventTypeStarted,
+		EventTypeStarting, EventTypeRunning,
 		EventTypeExited, EventTypeFailed,
 		EventTypeStopped, EventTypeSignaled:
 		return true

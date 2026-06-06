@@ -57,7 +57,7 @@ func rmOne(_ context.Context, cfg CmdmanConfig, st *store.Store, id string, forc
 		return err
 	}
 
-	if state == model.EventTypeStarted || state == model.EventTypeStarting {
+	if state == model.EventTypeRunning || state == model.EventTypeStarting {
 		if !force {
 			return fmt.Errorf("command is %s, use --force to remove", state)
 		}

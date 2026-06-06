@@ -12,7 +12,7 @@ import (
 // whether to call OpenSession again or jump straight to the wait prompt.
 type StickyState struct {
 	// Running is true when the command is currently startable into an attach
-	// session (Starting or Started). When false, AttachSticky skips OpenSession
+	// session (Starting or Running). When false, AttachSticky skips OpenSession
 	// for this iteration and goes straight to the wait prompt.
 	Running bool
 	// Status is the human-readable status line shown in the wait prompt

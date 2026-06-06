@@ -84,7 +84,7 @@ func TestInotifyWatcherFiresOnRotation(t *testing.T) {
 	for range 20 {
 		assert.NilError(
 			t,
-			wr.Append(model.Event{Time: time.Now().UTC(), Type: model.EventTypeStarted, ID: "x"}),
+			wr.Append(model.Event{Time: time.Now().UTC(), Type: model.EventTypeRunning, ID: "x"}),
 		)
 	}
 

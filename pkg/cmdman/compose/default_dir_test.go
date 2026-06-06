@@ -18,9 +18,9 @@ func writeFile(t *testing.T, path, content string) {
 	assert.NilError(t, os.WriteFile(path, []byte(content), 0o644))
 }
 
-// ---- ${CMDMAN_COMPOSE_FILE} interpolation -----------------------------------
+// ---- compose path variable interpolation ------------------------------------
 
-func TestComposeFileInterpolation(t *testing.T) {
+func TestComposePathInterpolation(t *testing.T) {
 	root := t.TempDir()
 	projDir := filepath.Join(root, "proj")
 	writeFile(t, filepath.Join(projDir, "app.env"), "APP_KEY=fromfile\n")
@@ -32,10 +32,12 @@ commands:
     args:
       - echo
       - ${CMDMAN_COMPOSE_FILE}
+      - ${CMDMAN_COMPOSE_DIR}
     env_file:
-      - path: ${CMDMAN_COMPOSE_FILE}/../app.env
+      - path: ${CMDMAN_COMPOSE_DIR}/app.env
     env:
       - SELF=${CMDMAN_COMPOSE_FILE}
+      - SELF_DIR=${CMDMAN_COMPOSE_DIR}
 `
 	yamlPath := filepath.Join(projDir, "compose.yaml")
 	writeFile(t, yamlPath, yamlContent)
@@ -50,22 +52,25 @@ commands:
 
 	// args see the compose file's absolute path.
 	assert.Equal(t, spec.Commands[0].Args[1], yamlPath)
+	// args can also reference the compose file's directory directly.
+	assert.Equal(t, spec.Commands[0].Args[2], projDir)
 	// the env_file referenced relative to the compose file was loaded.
 	envMap := envSliceToMap(spec.Commands[0].Env)
 	assert.Equal(t, envMap["APP_KEY"], "fromfile")
 	// env: entries can reference the variable too.
 	assert.Equal(t, envMap["SELF"], yamlPath)
+	assert.Equal(t, envMap["SELF_DIR"], projDir)
 }
 
-// work_dir may be expressed relative to the compose file, which makes a named
+// work_dir may be expressed relative to the compose dir, which makes a named
 // project's identity independent of the invocation CWD.
-func TestComposeFileInterpolation_WorkDir(t *testing.T) {
+func TestComposePathInterpolation_WorkDir(t *testing.T) {
 	root := t.TempDir()
 	projDir := filepath.Join(root, "proj")
 	yamlPath := filepath.Join(projDir, "compose.yaml")
 	writeFile(t, yamlPath, `
 name: wd
-work_dir: ${CMDMAN_COMPOSE_FILE}/..
+work_dir: ${CMDMAN_COMPOSE_DIR}
 commands:
   app:
     args: [echo, hi]

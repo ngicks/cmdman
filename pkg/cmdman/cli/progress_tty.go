@@ -60,7 +60,7 @@ func (r *ttyReporter) Report(ev compose.Event) {
 		// keep that failure (its kind and detail) on the line instead of letting a
 		// later non-failure phase repaint it as success. Collapsing to the latest
 		// phase otherwise hides the failure — e.g. a recreate whose stop failed is
-		// masked by the idempotent "started" the start phase reports for the
+		// masked by the idempotent "running" the start phase reports for the
 		// still-running command, leaving a green line with a non-zero exit and no
 		// visible cause.
 		return
@@ -175,7 +175,7 @@ func renderProgressLine(name string, e progressEntry, frame int) string {
 //
 //	in progress  ⠹  spinner (dim)        creating/recreating/starting/waiting/stopping/removing
 //	pending      ◌  cyan                 created/recreated/unchanged (ready, not running)
-//	running      ●  green                started
+//	running      ●  green                running
 //	completed    ✔  green                exited/stopped/removed
 //	skipped      ⊘  yellow               skipped
 //	failed       ✘  red                  error/failed
@@ -189,7 +189,7 @@ func progressMarker(p compose.Phase, frame int) string {
 		return styleWarn.Render("⊘")
 	case isPendingPhase(p):
 		return stylePending.Render("◌")
-	case p == compose.PhaseStarted:
+	case p == compose.PhaseRunning:
 		return styleOK.Render("●")
 	default: // completed: exited, stopped, removed
 		return styleOK.Render("✔")

@@ -26,7 +26,7 @@ type LogsRequest struct {
 	// Sticky keeps the follow stream alive across command restarts: when the
 	// running instance exits, an injected MetaPrefix-tagged line records the
 	// exit (or other terminal state), and the reader waits for the next
-	// `EventTypeStarted` on this command via the event log before resuming.
+	// `EventTypeRunning` on this command via the event log before resuming.
 	// Sticky implies Follow. Detach by canceling ctx.
 	Sticky bool
 	// MetaPrefix is the line prefix used for sticky meta-event lines. Empty
@@ -41,7 +41,7 @@ type LogsRequest struct {
 //
 // With Sticky=true the reader keeps producing across command restarts:
 // after each run's stream EOFs, an injected meta line records the exit,
-// and the reader waits for the next `EventTypeStarted` event before
+// and the reader waits for the next `EventTypeRunning` event before
 // resuming. Cancel ctx to stop a sticky reader.
 func (s *Service) Logs(ctx context.Context, req LogsRequest) (logdriver.Reader, error) {
 	if req.Sticky {
@@ -186,11 +186,11 @@ func (s *Service) runStickyStreaming(
 }
 
 // waitForStart subscribes to the event log and returns when the next
-// EventTypeStarted event for id arrives, or when ctx is canceled.
+// EventTypeRunning event for id arrives, or when ctx is canceled.
 func (s *Service) waitForStart(ctx context.Context, id string) error {
 	sub, err := s.Events(ctx, EventsRequest{
 		IDFilter:   []string{id},
-		TypeFilter: []model.EventType{model.EventTypeStarted},
+		TypeFilter: []model.EventType{model.EventTypeRunning},
 	})
 	if err != nil {
 		return fmt.Errorf("sticky logs: subscribe events: %w", err)
@@ -291,7 +291,7 @@ func (s *Service) streamLogs(
 		sendRecordErr(ctx, out, fmt.Errorf("get command state: %w", err))
 		return
 	}
-	if state != model.EventTypeStarting && state != model.EventTypeStarted {
+	if state != model.EventTypeStarting && state != model.EventTypeRunning {
 		return
 	}
 

@@ -35,7 +35,7 @@ func (s *Store) ListCommands(allStates bool, labels map[string]string) ([]Comman
 			args,
 			string(model.EventTypeCreated),
 			string(model.EventTypeStarting),
-			string(model.EventTypeStarted),
+			string(model.EventTypeRunning),
 		)
 	}
 

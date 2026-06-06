@@ -66,7 +66,7 @@ type Backend interface {
 	// cannot be determined.
 	Cwd() string
 
-	// Start starts a command that is not currently started or starting.
+	// Start starts a command that is not currently running or starting.
 	Start(ctx context.Context, id string) error
 	// Stop stops a running command using service defaults for signal/timeout.
 	Stop(ctx context.Context, id string) error

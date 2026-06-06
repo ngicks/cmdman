@@ -338,26 +338,14 @@ func boolFirst(v bool) int {
 	return 1
 }
 
-// displayLabel maps a persisted state to a friendly display label. All logic
-// elsewhere uses the real state values; this is presentation only.
+// displayLabel maps a persisted state to a friendly display label. The label is
+// the state value itself, except an exited command annotates its exit code. All
+// logic elsewhere uses the real state values; this is presentation only.
 func displayLabel(state model.EventType, exitCode *int) string {
-	switch state {
-	case model.EventTypeStarted:
-		return "running"
-	case model.EventTypeStarting:
-		return "starting"
-	case model.EventTypeCreated:
-		return "created"
-	case model.EventTypeExited:
-		if exitCode != nil {
-			return fmt.Sprintf("exited(%d)", *exitCode)
-		}
-		return "exited"
-	case model.EventTypeFailed:
-		return "failed"
-	default:
-		return string(state)
+	if state == model.EventTypeExited && exitCode != nil {
+		return fmt.Sprintf("exited(%d)", *exitCode)
 	}
+	return string(state)
 }
 
 // groupFromInfos builds project groups from flat command infos, grouping by

@@ -212,7 +212,7 @@ func TestRun_DuplicateName(t *testing.T) {
 	env.run(ctx, "run", "-n", "unique-name", "--", "/bin/sh", "-c", "sleep 60")
 	t.Cleanup(func() { env.cleanupCommand(ctx, "unique-name") })
 
-	env.waitForState(ctx, "unique-name", "started", defaultTimeout)
+	env.waitForState(ctx, "unique-name", "running", defaultTimeout)
 
 	// Running another command with the same name should fail.
 	stdout, stderr, err := env.exec(

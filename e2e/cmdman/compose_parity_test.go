@@ -191,7 +191,7 @@ func TestComposeEvents(t *testing.T) {
 
 	out := env.run(ctx, "compose", "--workdir", wd, "-f", composePath, "events", "--no-follow")
 	gotTypes := collectEventTypes(t, out)
-	for _, w := range []string{"created", "started", "exited"} {
+	for _, w := range []string{"created", "running", "exited"} {
 		if _, ok := gotTypes[w]; !ok {
 			t.Fatalf("expected event type %q in compose events; got %v\nraw:\n%s",
 				w, sortedKeys(gotTypes), out)
@@ -226,7 +226,7 @@ func TestComposeSendKeys(t *testing.T) {
 			"-l", "cmdman.compose.command="+name,
 			"-l", "cmdman.compose.project="+project,
 		) {
-			env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
+			env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
 		}
 	}
 
@@ -329,7 +329,7 @@ func TestComposeAttachDetach(t *testing.T) {
 	if alphaID == "" {
 		t.Fatal("alpha command not found after compose up")
 	}
-	env.waitForState(ctx, alphaID, "started", defaultTimeout)
+	env.waitForState(ctx, alphaID, "running", defaultTimeout)
 
 	attach := exec.CommandContext(ctx, cmdmanBin,
 		"compose", "--workdir", wd, "-f", composePath, "attach", "alpha")
@@ -352,5 +352,5 @@ func TestComposeAttachDetach(t *testing.T) {
 
 	waitAttachExit(t, attach, 3*time.Second)
 	// The command must still be running after a detach.
-	env.waitForState(ctx, alphaID, "started", defaultTimeout)
+	env.waitForState(ctx, alphaID, "running", defaultTimeout)
 }

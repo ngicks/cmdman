@@ -176,7 +176,7 @@ func (s *Service) executeAction(
 		// trace so the user sees the command go down before it comes back. A stop
 		// failure aborts the recreate (the still-running command must not be
 		// removed out from under its live monitor).
-		if existing.State == model.EventTypeStarted || existing.State == model.EventTypeStarting {
+		if existing.State == model.EventTypeRunning || existing.State == model.EventTypeStarting {
 			contextkey.ValueSlogLoggerDefault(ctx).Info(
 				"compose: stopping changed command before recreate",
 				"project", spec.Project,

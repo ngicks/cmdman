@@ -48,7 +48,7 @@ func TestWriterRotation(t *testing.T) {
 	for range 20 {
 		assert.NilError(t, w.Append(model.Event{
 			Time: time.Now().UTC(),
-			Type: model.EventTypeStarted,
+			Type: model.EventTypeRunning,
 			ID:   "cmd",
 		}))
 	}
@@ -85,14 +85,14 @@ func TestWriterRotationRemovesOldArchive(t *testing.T) {
 
 	// First rotation produces .1 with content A.
 	for range 10 {
-		assert.NilError(t, w.Append(model.Event{Time: time.Now().UTC(), Type: model.EventTypeStarted, ID: "A"}))
+		assert.NilError(t, w.Append(model.Event{Time: time.Now().UTC(), Type: model.EventTypeRunning, ID: "A"}))
 	}
 	firstArchive, err := os.ReadFile(path + ArchiveSuffix)
 	assert.NilError(t, err)
 
 	// Second rotation produces .1 with content B; old A must be gone.
 	for range 10 {
-		assert.NilError(t, w.Append(model.Event{Time: time.Now().UTC(), Type: model.EventTypeStarted, ID: "B"}))
+		assert.NilError(t, w.Append(model.Event{Time: time.Now().UTC(), Type: model.EventTypeRunning, ID: "B"}))
 	}
 	secondArchive, err := os.ReadFile(path + ArchiveSuffix)
 	assert.NilError(t, err)
@@ -121,7 +121,7 @@ func TestWriterConcurrentAppend(t *testing.T) {
 			for range perWriter {
 				_ = w.Append(model.Event{
 					Time: time.Now().UTC(),
-					Type: model.EventTypeStarted,
+					Type: model.EventTypeRunning,
 					ID:   string(rune('a' + i)),
 				})
 			}
@@ -136,7 +136,7 @@ func TestWriterConcurrentAppend(t *testing.T) {
 	for _, ln := range lines {
 		var ev model.Event
 		assert.NilError(t, json.Unmarshal(ln, &ev), "line %q must be valid JSON", string(ln))
-		assert.Equal(t, ev.Type, model.EventTypeStarted)
+		assert.Equal(t, ev.Type, model.EventTypeRunning)
 	}
 }
 
@@ -170,7 +170,7 @@ func TestReaderFollowWithRotation(t *testing.T) {
 		for range n {
 			_ = w.Append(model.Event{
 				Time: time.Now().UTC(),
-				Type: model.EventTypeStarted,
+				Type: model.EventTypeRunning,
 				ID:   "x",
 			})
 			time.Sleep(5 * time.Millisecond)
@@ -187,7 +187,7 @@ func TestReaderFollowWithRotation(t *testing.T) {
 			if rec.Err != nil {
 				t.Fatalf("reader error: %v", rec.Err)
 			}
-			assert.Equal(t, rec.Event.Type, model.EventTypeStarted)
+			assert.Equal(t, rec.Event.Type, model.EventTypeRunning)
 			got++
 		case <-ctx.Done():
 			t.Fatalf("timed out at %d events", got)
@@ -232,7 +232,7 @@ func TestReaderFromEndFreshLog(t *testing.T) {
 	for range n {
 		assert.NilError(t, w.Append(model.Event{
 			Time: time.Now().UTC(),
-			Type: model.EventTypeStarted,
+			Type: model.EventTypeRunning,
 			ID:   "x",
 		}))
 	}
@@ -247,7 +247,7 @@ func TestReaderFromEndFreshLog(t *testing.T) {
 			if rec.Err != nil {
 				t.Fatalf("reader error: %v", rec.Err)
 			}
-			assert.Equal(t, rec.Event.Type, model.EventTypeStarted)
+			assert.Equal(t, rec.Event.Type, model.EventTypeRunning)
 			got++
 		case <-ctx.Done():
 			t.Fatalf("timed out at %d events", got)
@@ -293,14 +293,14 @@ func TestReaderReplaysArchive(t *testing.T) {
 	for i := range preRot {
 		assert.NilError(t, w.Append(model.Event{
 			Time: now.Add(time.Duration(i) * time.Second),
-			Type: model.EventTypeStarted,
+			Type: model.EventTypeRunning,
 			ID:   fmt.Sprintf("pre%02d", i),
 		}))
 	}
 	for i := range postRot {
 		assert.NilError(t, w.Append(model.Event{
 			Time: now.Add(time.Duration(preRot+i) * time.Second),
-			Type: model.EventTypeStarted,
+			Type: model.EventTypeRunning,
 			ID:   fmt.Sprintf("post%02d", i),
 		}))
 	}
@@ -354,7 +354,7 @@ func TestReaderMarkerlessArchiveReadsActive(t *testing.T) {
 	// Hand-craft an archive without a rotation marker.
 	archiveLine, err := marshalEvent(model.Event{
 		Time: time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC),
-		Type: model.EventTypeStarted,
+		Type: model.EventTypeRunning,
 		ID:   "archived",
 	})
 	assert.NilError(t, err)
@@ -363,7 +363,7 @@ func TestReaderMarkerlessArchiveReadsActive(t *testing.T) {
 	// Active file has one event too.
 	activeLine, err := marshalEvent(model.Event{
 		Time: time.Date(2026, 5, 21, 12, 1, 0, 0, time.UTC),
-		Type: model.EventTypeStarted,
+		Type: model.EventTypeRunning,
 		ID:   "active",
 	})
 	assert.NilError(t, err)
@@ -413,7 +413,7 @@ func TestReaderRecoversIntermediateArchive(t *testing.T) {
 	for i := range 3 {
 		b, err := marshalEvent(model.Event{
 			Time: now.Add(time.Duration(i) * time.Second),
-			Type: model.EventTypeStarted,
+			Type: model.EventTypeRunning,
 			ID:   fmt.Sprintf("intermediate%d", i),
 		})
 		assert.NilError(t, err)
@@ -428,7 +428,7 @@ func TestReaderRecoversIntermediateArchive(t *testing.T) {
 	for i := range 3 {
 		b, err := marshalEvent(model.Event{
 			Time: now.Add(time.Duration(20+i) * time.Second),
-			Type: model.EventTypeStarted,
+			Type: model.EventTypeRunning,
 			ID:   fmt.Sprintf("active%d", i),
 		})
 		assert.NilError(t, err)
@@ -491,7 +491,7 @@ func TestReaderDoesNotReplayArchiveTwiceWhenActiveMissing(t *testing.T) {
 	now := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
 	archiveLine, err := marshalEvent(model.Event{
 		Time: now,
-		Type: model.EventTypeStarted,
+		Type: model.EventTypeRunning,
 		ID:   "archived",
 	})
 	assert.NilError(t, err)
@@ -534,7 +534,7 @@ func TestReaderDoesNotReplayArchiveTwiceWhenActiveMissing(t *testing.T) {
 	assert.NilError(t, err)
 	assert.NilError(t, w.Append(model.Event{
 		Time: now.Add(2 * time.Second),
-		Type: model.EventTypeStarted,
+		Type: model.EventTypeRunning,
 		ID:   "active",
 	}))
 
@@ -564,7 +564,7 @@ func TestReaderSkipsBlankLines(t *testing.T) {
 
 	good, err := marshalEvent(model.Event{
 		Time: time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC),
-		Type: model.EventTypeStarted,
+		Type: model.EventTypeRunning,
 		ID:   "real",
 	})
 	assert.NilError(t, err)

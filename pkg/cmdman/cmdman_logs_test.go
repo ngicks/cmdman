@@ -127,7 +127,7 @@ func waitForCommandRunning(t *testing.T, cfg CmdmanConfig, id string) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		state, _, stateJSON, err := st.GetCommandState(id)
-		if err == nil && state == model.EventTypeStarted && stateJSON.SocketPath != "" {
+		if err == nil && state == model.EventTypeRunning && stateJSON.SocketPath != "" {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)

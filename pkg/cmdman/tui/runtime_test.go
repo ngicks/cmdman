@@ -75,7 +75,7 @@ func TestRefreshPreservesFoldFilterAndTab(t *testing.T) {
 			Name:    "watcher",
 			Project: "local-dev",
 			Workdir: "/work/local-dev",
-			State:   model.EventTypeStarted,
+			State:   model.EventTypeRunning,
 		},
 		{
 			ID:      "2",
@@ -89,7 +89,7 @@ func TestRefreshPreservesFoldFilterAndTab(t *testing.T) {
 			Name:    "web",
 			Project: "api-stack",
 			Workdir: "/work/api",
-			State:   model.EventTypeStarted,
+			State:   model.EventTypeRunning,
 		},
 	}
 	m, _ = m.onCommandsLoaded(commandsLoadedMsg{infos: infos})
@@ -183,7 +183,7 @@ func TestPreviewNoneDriverShowsNoStorage(t *testing.T) {
 				name:      "quiet",
 				project:   "p",
 				workdir:   "/w",
-				state:     model.EventTypeStarted,
+				state:     model.EventTypeRunning,
 				logDriver: logdriver.DriverNone,
 			},
 		}},

@@ -84,10 +84,10 @@ func (s *Service) upStartAction(
 	cmd := v.Command
 	state := v.Snapshot.State
 
-	// Idempotency: starting/started are already active. created/exited/failed
+	// Idempotency: starting/running are already active. created/exited/failed
 	// (and any unexpected/absent state) get a Start, matching low-level cmdman
 	// start and project-only compose start.
-	active := state == model.EventTypeStarted || state == model.EventTypeStarting
+	active := state == model.EventTypeRunning || state == model.EventTypeStarting
 	if !active {
 		s.report(cmd.Name, PhaseStarting, nil, nil)
 		if err := s.svc.Start(ctx, cmd.GeneratedName); err != nil {
@@ -102,15 +102,15 @@ func (s *Service) upStartAction(
 		}
 	}
 
-	// No dependent waits on our termination: record started and let dependents
-	// on the started condition proceed without blocking on completion.
+	// No dependent waits on our termination: record running and let dependents
+	// on the running condition proceed without blocking on completion.
 	if !g.anyDependentNeedsCompletion(v.ID) {
-		s.report(cmd.Name, PhaseStarted, nil, v.Snapshot.ExitCode)
-		return actionResult{State: model.EventTypeStarted, ExitCode: v.Snapshot.ExitCode}
+		s.report(cmd.Name, PhaseRunning, nil, v.Snapshot.ExitCode)
+		return actionResult{State: model.EventTypeRunning, ExitCode: v.Snapshot.ExitCode}
 	}
 
 	// A completion edge depends on us: observe the terminal state of this run.
-	// cmdman.Service.Start returns nil even if the command exits before started
+	// cmdman.Service.Start returns nil even if the command exits before running
 	// is observed, so completion must come from Wait(stopped), never inferred
 	// from Start alone.
 	s.report(cmd.Name, PhaseWaiting, nil, nil)
@@ -120,7 +120,7 @@ func (s *Service) upStartAction(
 	})
 	if werr != nil {
 		s.report(cmd.Name, PhaseError, werr, nil)
-		return actionResult{State: model.EventTypeStarted, Err: werr}
+		return actionResult{State: model.EventTypeRunning, Err: werr}
 	}
 
 	var exit *int
@@ -182,7 +182,7 @@ func (s *Service) reconcileStop(
 }
 
 // stopAction stops a single command. Only a command with a live monitor
-// (starting/started) is stopped; created/exited/failed are already terminal and
+// (starting/running) is stopped; created/exited/failed are already terminal and
 // a stop on them would only return monitor-connect errors, so they are no-ops.
 func (s *Service) stopAction(
 	ctx context.Context,
@@ -192,7 +192,7 @@ func (s *Service) stopAction(
 	cmd := v.Command
 	snap := v.Snapshot
 
-	active := snap.State == model.EventTypeStarted || snap.State == model.EventTypeStarting
+	active := snap.State == model.EventTypeRunning || snap.State == model.EventTypeStarting
 	if !active || snap.ID == "" {
 		// Nothing to stop: already terminal. Report skipped, keep the observed
 		// state for diagnostics.

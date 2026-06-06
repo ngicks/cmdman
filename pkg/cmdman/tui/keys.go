@@ -232,7 +232,7 @@ func (m Model) startSelected() (tea.Model, tea.Cmd) {
 		m.status = "select a command"
 		return m, nil
 	}
-	if c.state == model.EventTypeStarted || c.state == model.EventTypeStarting {
+	if c.state == model.EventTypeRunning || c.state == model.EventTypeStarting {
 		m.status = fmt.Sprintf("%s is already running", c.name)
 		return m, nil
 	}
@@ -250,7 +250,7 @@ func (m Model) stopSelected() (tea.Model, tea.Cmd) {
 		m.status = "select a command"
 		return m, nil
 	}
-	if c.state != model.EventTypeStarted && c.state != model.EventTypeStarting {
+	if c.state != model.EventTypeRunning && c.state != model.EventTypeStarting {
 		m.status = fmt.Sprintf("%s is not running", c.name)
 		return m, nil
 	}
@@ -292,7 +292,7 @@ func (m Model) removeSelected() (tea.Model, tea.Cmd) {
 		m.status = "select a command"
 		return m, nil
 	}
-	running := c.state == model.EventTypeStarted || c.state == model.EventTypeStarting
+	running := c.state == model.EventTypeRunning || c.state == model.EventTypeStarting
 	m.popup = openRemovePopup(c.project, c.name, c.id, running)
 	return m, nil
 }

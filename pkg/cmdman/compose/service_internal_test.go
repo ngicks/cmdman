@@ -356,9 +356,9 @@ func TestBuildLabelsStoresAfterMetadata(t *testing.T) {
 	labels := BuildLabels(
 		reconcileSpec(
 			reconcileCmd("api"),
-			reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionStarted}),
+			reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionRunning}),
 		),
-		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionStarted}),
+		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionRunning}),
 		"sha256:test",
 	)
 	raw := labels[LabelAfter]
@@ -371,7 +371,7 @@ func TestBuildLabelsStoresAfterMetadata(t *testing.T) {
 	}
 	if !slices.EqualFunc(
 		after,
-		[]AfterSpec{{Name: "api", Condition: ConditionStarted}},
+		[]AfterSpec{{Name: "api", Condition: ConditionRunning}},
 		func(a, b AfterSpec) bool {
 			return a.Name == b.Name && a.Condition == b.Condition
 		},
@@ -385,7 +385,7 @@ func TestStartWithoutSpecUsesStoredAfterDependencies(t *testing.T) {
 	entries := []store.CommandEntry{
 		storedGraphEntry("api", model.EventTypeCreated),
 		storedGraphEntry("worker", model.EventTypeCreated,
-			AfterSpec{Name: "api", Condition: ConditionStarted}),
+			AfterSpec{Name: "api", Condition: ConditionRunning}),
 	}
 
 	result, err := env.svcEntries(entries).Start(
@@ -407,9 +407,9 @@ func TestStartWithoutSpecUsesStoredAfterDependencies(t *testing.T) {
 func TestStopWithoutSpecUsesStoredAfterDependents(t *testing.T) {
 	env := newReconcileTestEnv()
 	entries := []store.CommandEntry{
-		storedGraphEntry("api", model.EventTypeStarted),
-		storedGraphEntry("worker", model.EventTypeStarted,
-			AfterSpec{Name: "api", Condition: ConditionStarted}),
+		storedGraphEntry("api", model.EventTypeRunning),
+		storedGraphEntry("worker", model.EventTypeRunning,
+			AfterSpec{Name: "api", Condition: ConditionRunning}),
 	}
 
 	result, err := env.svcEntries(entries).Stop(
@@ -428,10 +428,10 @@ func TestStopWithoutSpecUsesStoredAfterDependents(t *testing.T) {
 	}
 }
 
-// TestReconcileStartedConditionStartsDependentWithoutWaitingForExit verifies a
-// "started" dependency releases its dependent as soon as the dependency starts,
+// TestReconcileRunningConditionStartsDependentWithoutWaitingForExit verifies a
+// "running" dependency releases its dependent as soon as the dependency starts,
 // without waiting for it to terminate, and without Wait being called for it.
-func TestReconcileStartedConditionStartsDependentWithoutWaitingForExit(t *testing.T) {
+func TestReconcileRunningConditionStartsDependentWithoutWaitingForExit(t *testing.T) {
 	env := newReconcileTestEnv()
 	apiStarted := make(chan struct{})
 	releaseAPI := make(chan struct{})
@@ -443,7 +443,7 @@ func TestReconcileStartedConditionStartsDependentWithoutWaitingForExit(t *testin
 
 	spec := reconcileSpec(
 		reconcileCmd("api"),
-		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionStarted}),
+		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionRunning}),
 	)
 	states := map[string]model.EventType{
 		"api":    model.EventTypeCreated,
@@ -617,13 +617,13 @@ func TestReconcileRestartsExitedAndFailed(t *testing.T) {
 	}
 }
 
-// TestReconcileSkipsActiveCommands verifies starting/started commands are not
+// TestReconcileSkipsActiveCommands verifies starting/running commands are not
 // re-started.
 func TestReconcileSkipsActiveCommands(t *testing.T) {
 	env := newReconcileTestEnv()
 	spec := reconcileSpec(reconcileCmd("alpha"), reconcileCmd("beta"))
 	states := map[string]model.EventType{
-		"alpha": model.EventTypeStarted,
+		"alpha": model.EventTypeRunning,
 		"beta":  model.EventTypeStarting,
 	}
 
@@ -691,7 +691,7 @@ func TestReconcileFailedBranchDoesNotBlockSibling(t *testing.T) {
 
 	spec := reconcileSpec(
 		reconcileCmd("api"),
-		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionStarted}),
+		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionRunning}),
 		reconcileCmd("solo"),
 	)
 	states := map[string]model.EventType{
@@ -743,11 +743,11 @@ func TestReconcileStopVisitsDependentsBeforeDependencies(t *testing.T) {
 	env := newReconcileTestEnv()
 	spec := reconcileSpec(
 		reconcileCmd("api"),
-		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionStarted}),
+		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionRunning}),
 	)
 	states := map[string]model.EventType{
-		"api":    model.EventTypeStarted,
-		"worker": model.EventTypeStarted,
+		"api":    model.EventTypeRunning,
+		"worker": model.EventTypeRunning,
 	}
 
 	outcomes, err := env.svc(states).reconcileStop(context.Background(), spec, nil)
@@ -803,13 +803,13 @@ func TestReconcileStopWithNamesIncludesDependents(t *testing.T) {
 	env := newReconcileTestEnv()
 	spec := reconcileSpec(
 		reconcileCmd("api"),
-		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionStarted}),
+		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionRunning}),
 		reconcileCmd("solo"),
 	)
 	states := map[string]model.EventType{
-		"api":    model.EventTypeStarted,
-		"worker": model.EventTypeStarted,
-		"solo":   model.EventTypeStarted,
+		"api":    model.EventTypeRunning,
+		"worker": model.EventTypeRunning,
+		"solo":   model.EventTypeRunning,
 	}
 
 	outcomes, err := env.svc(states).reconcileStop(context.Background(), spec, []string{"api"})
@@ -840,11 +840,11 @@ func TestReconcileStopContinuesPastFailedDependent(t *testing.T) {
 	}
 	spec := reconcileSpec(
 		reconcileCmd("api"),
-		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionStarted}),
+		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionRunning}),
 	)
 	states := map[string]model.EventType{
-		"api":    model.EventTypeStarted,
-		"worker": model.EventTypeStarted,
+		"api":    model.EventTypeRunning,
+		"worker": model.EventTypeRunning,
 	}
 
 	buf, ctx := warnLogger()
@@ -981,7 +981,7 @@ func TestListProjectsGroupsComposeCommands(t *testing.T) {
 					"project-a",
 					"/tmp/a",
 					"/tmp/a/cmd-compose.yaml",
-					model.EventTypeStarted,
+					model.EventTypeRunning,
 				),
 				buildTestProjectEntry(
 					"id-2",

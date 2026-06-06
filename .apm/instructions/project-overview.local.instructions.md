@@ -36,7 +36,7 @@ Two process roles per command:
 - Re-execs the *same binary* with the hidden `__monitor --id <id>` subcommand.
 - `detachProcess` (`detach_posix.go`) sets `Setsid=true` and redirects stdio → `/dev/null`;
   CLI calls `cmd.Process.Release()` to orphan it, then polls the SQLite store (every 50 ms)
-  for the state to flip `starting` → `started`.
+  for the state to flip `starting` → `running`.
 
 **Monitor lifecycle** (`mon_run.go`, `mon.go`):
 - `RunMonitor` opens the store, takes an exclusive `flock` on a PID file (dedupe guard),

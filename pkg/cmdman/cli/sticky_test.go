@@ -161,7 +161,7 @@ func TestAttachStickyReattachKeepsStdout(t *testing.T) {
 	reached := make(chan struct{})
 	hooks := cli.StickyHooks{
 		State: func(context.Context) (cli.StickyState, error) {
-			return cli.StickyState{Running: true, Status: "started"}, nil
+			return cli.StickyState{Running: true, Status: "running"}, nil
 		},
 		OpenSession: func(context.Context) (cli.AttachSession, error) {
 			k := openCount.Add(1)
@@ -230,7 +230,7 @@ func TestAttachStickyRecoverableAttachErrorDropsToPrompt(t *testing.T) {
 	errBoom := errors.New("rpc error: transport is closing")
 	hooks := cli.StickyHooks{
 		State: func(context.Context) (cli.StickyState, error) {
-			return cli.StickyState{Running: true, Status: "started"}, nil
+			return cli.StickyState{Running: true, Status: "running"}, nil
 		},
 		OpenSession: func(context.Context) (cli.AttachSession, error) {
 			return &fakeAttachSession{recvErr: errBoom}, nil

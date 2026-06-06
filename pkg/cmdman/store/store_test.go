@@ -172,9 +172,9 @@ func TestListCommandsWithLabels(t *testing.T) {
 	}
 
 	assert.NilError(t, st.InsertCommandConfig("id-1", "web", cfg1))
-	assert.NilError(t, st.InsertCommandState("id-1", model.EventTypeStarted, &model.CommandState{}))
+	assert.NilError(t, st.InsertCommandState("id-1", model.EventTypeRunning, &model.CommandState{}))
 	assert.NilError(t, st.InsertCommandConfig("id-2", "api", cfg2))
-	assert.NilError(t, st.InsertCommandState("id-2", model.EventTypeStarted, &model.CommandState{}))
+	assert.NilError(t, st.InsertCommandState("id-2", model.EventTypeRunning, &model.CommandState{}))
 
 	entries, err := st.ListCommands(true, map[string]string{"app": "web"})
 	assert.NilError(t, err)

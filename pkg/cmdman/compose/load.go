@@ -31,8 +31,12 @@ const namedComposeFile = "compose.yaml"
 // ENV_CMDMAN_COMPOSE_FILE is the interpolation variable exposing the absolute
 // path of the compose file being loaded. Compose authors reference it to locate
 // resources (env files, configs) next to the compose file, e.g.
-// `env_file: ["${CMDMAN_COMPOSE_FILE}/../app.env"]`.
+// `env_file: ["${CMDMAN_COMPOSE_DIR}/app.env"]`.
 const ENV_CMDMAN_COMPOSE_FILE = "CMDMAN_COMPOSE_FILE"
+
+// ENV_CMDMAN_COMPOSE_DIR is the interpolation variable exposing the absolute
+// directory path containing the compose file being loaded.
+const ENV_CMDMAN_COMPOSE_DIR = "CMDMAN_COMPOSE_DIR"
 
 // NormalizeOpts holds caller-supplied overrides for Normalize.
 type NormalizeOpts struct {
@@ -305,12 +309,14 @@ func Normalize(
 	}
 	composeFilePath = filepath.Clean(composeFilePath)
 
-	// baseEnv is the OS environment plus CMDMAN_COMPOSE_FILE, used as the base
-	// for every interpolation in this spec (work_dir, dirs, env files, env:,
-	// args, log opts). CMDMAN_COMPOSE_FILE is interpolation-only: it never lands
-	// in a command's stored Env unless an author copies it through env:.
+	// baseEnv is the OS environment plus compose path variables, used as the
+	// base for every interpolation in this spec (work_dir, dirs, env files,
+	// env:, args, log opts). The compose path variables are interpolation-only:
+	// they never land in a command's stored Env unless an author copies them
+	// through env:.
 	baseEnv := osEnvMap()
 	baseEnv[ENV_CMDMAN_COMPOSE_FILE] = composeFilePath
+	baseEnv[ENV_CMDMAN_COMPOSE_DIR] = filepath.Dir(composeFilePath)
 	baseLookup := buildLookup(baseEnv)
 
 	// effective work directory
@@ -489,7 +495,7 @@ func buildCommandEnv(
 		if ef.Required != nil {
 			required = *ef.Required
 		}
-		// env_file paths interpolate against OS env + CMDMAN_COMPOSE_FILE +
+		// env_file paths interpolate against OS env + compose path variables +
 		// prior env_file keys, so a project can point at a dot env file living
 		// next to its compose file.
 		interpPath, interpErr := template.Substitute(
@@ -606,7 +612,6 @@ func mapToEnvSlice(env map[string]string) []string {
 }
 
 // resolvePath resolves p relative to workDir. Absolute paths are cleaned (so
-// "${CMDMAN_COMPOSE_FILE}/../x" collapses the file component away) but otherwise
 // used as-is. Empty p returns workDir.
 func resolvePath(workDir, p string) string {
 	if p == "" {

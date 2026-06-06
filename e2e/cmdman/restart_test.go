@@ -14,14 +14,14 @@ func TestRestartCmd_Running(t *testing.T) {
 
 	id := env.run(ctx, "run", "-n", "restart-running", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
-	env.waitForState(ctx, "restart-running", "started", defaultTimeout)
+	env.waitForState(ctx, "restart-running", "running", defaultTimeout)
 
 	before := env.inspectJSON(ctx, "restart-running")
 	beforeDetail, _ := before["state_detail"].(map[string]any)
 	beforePID, _ := beforeDetail["monitor_pid"].(float64)
 
 	env.run(ctx, "restart", "restart-running")
-	env.waitForState(ctx, "restart-running", "started", defaultTimeout)
+	env.waitForState(ctx, "restart-running", "running", defaultTimeout)
 
 	after := env.inspectJSON(ctx, "restart-running")
 	afterDetail, _ := after["state_detail"].(map[string]any)
@@ -102,12 +102,12 @@ func TestRestartCmd_Multiple(t *testing.T) {
 		env.cleanupCommand(ctx, id1)
 		env.cleanupCommand(ctx, id2)
 	})
-	env.waitForState(ctx, "restart-multi-1", "started", defaultTimeout)
-	env.waitForState(ctx, "restart-multi-2", "started", defaultTimeout)
+	env.waitForState(ctx, "restart-multi-1", "running", defaultTimeout)
+	env.waitForState(ctx, "restart-multi-2", "running", defaultTimeout)
 
 	env.run(ctx, "restart", "restart-multi-1", "restart-multi-2")
-	env.waitForState(ctx, "restart-multi-1", "started", defaultTimeout)
-	env.waitForState(ctx, "restart-multi-2", "started", defaultTimeout)
+	env.waitForState(ctx, "restart-multi-1", "running", defaultTimeout)
+	env.waitForState(ctx, "restart-multi-2", "running", defaultTimeout)
 
 	for _, name := range []string{"restart-multi-1", "restart-multi-2"} {
 		info := env.inspectJSON(ctx, name)

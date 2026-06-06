@@ -42,7 +42,7 @@ func TestWait_BlocksUntilExit(t *testing.T) {
 	id := env.run(ctx, "run", "-n", "wait-target", "--", "/bin/sh", "-c", "sleep 1; exit 7")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
 
-	env.waitForState(ctx, "wait-target", "started", defaultTimeout)
+	env.waitForState(ctx, "wait-target", "running", defaultTimeout)
 
 	start := time.Now()
 	stdout := env.run(ctx, "wait", "wait-target")
@@ -115,7 +115,7 @@ func TestWait_ConditionRunning(t *testing.T) {
 	id := env.run(ctx, "run", "-n", "wait-running", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
 
-	stdout := env.run(ctx, "wait", "-c", "started", "wait-running")
+	stdout := env.run(ctx, "wait", "-c", "running", "wait-running")
 	if stdout != "0" {
 		t.Errorf("expected stdout %q for running condition, got %q", "0", stdout)
 	}

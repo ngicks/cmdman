@@ -40,7 +40,7 @@ func before(order []string, a, b string) bool {
 func TestBuildReconcileGraphVirtualEdges(t *testing.T) {
 	spec := reconcileSpec(
 		reconcileCmd("api"),
-		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionStarted}),
+		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionRunning}),
 	)
 	g := buildReconcileGraph(spec, nil, fullClosure(spec))
 
@@ -56,8 +56,8 @@ func TestBuildReconcileGraphVirtualEdges(t *testing.T) {
 	if _, ok := worker.Parents[beginVertex]; !ok {
 		t.Fatal("worker should have begin as a parent")
 	}
-	if edge, ok := worker.Parents["api"]; !ok || edge.Condition != ConditionStarted {
-		t.Fatalf("worker should depend on api with started condition, got %#v", worker.Parents)
+	if edge, ok := worker.Parents["api"]; !ok || edge.Condition != ConditionRunning {
+		t.Fatalf("worker should depend on api with running condition, got %#v", worker.Parents)
 	}
 	// api's children: end + worker.
 	if _, ok := g.Vertices["api"].Children["worker"]; !ok {
@@ -72,8 +72,8 @@ func TestWalkUpVisitsDependentsBeforeDependencies(t *testing.T) {
 	// Linear chain a -> b -> c (c depends on b depends on a) plus an independent d.
 	spec := reconcileSpec(
 		reconcileCmd("a"),
-		reconcileCmd("b", AfterSpec{Name: "a", Condition: ConditionStarted}),
-		reconcileCmd("c", AfterSpec{Name: "b", Condition: ConditionStarted}),
+		reconcileCmd("b", AfterSpec{Name: "a", Condition: ConditionRunning}),
+		reconcileCmd("c", AfterSpec{Name: "b", Condition: ConditionRunning}),
 		reconcileCmd("d"),
 	)
 	g := buildReconcileGraph(spec, nil, fullClosure(spec))
@@ -97,8 +97,8 @@ func TestWalkUpVisitsDependentsBeforeDependencies(t *testing.T) {
 func TestWalkDownVisitsDependenciesBeforeDependents(t *testing.T) {
 	spec := reconcileSpec(
 		reconcileCmd("a"),
-		reconcileCmd("b", AfterSpec{Name: "a", Condition: ConditionStarted}),
-		reconcileCmd("c", AfterSpec{Name: "b", Condition: ConditionStarted}),
+		reconcileCmd("b", AfterSpec{Name: "a", Condition: ConditionRunning}),
+		reconcileCmd("c", AfterSpec{Name: "b", Condition: ConditionRunning}),
 	)
 	g := buildReconcileGraph(spec, nil, fullClosure(spec))
 
@@ -118,12 +118,12 @@ func TestWalkDownVisitsDependenciesBeforeDependents(t *testing.T) {
 func TestWalkDownClosureExcludesUntargetedCommands(t *testing.T) {
 	spec := reconcileSpec(
 		reconcileCmd("api"),
-		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionStarted}),
+		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionRunning}),
 	)
 	// Only worker is targeted; api is out of closure but already running.
 	closure := map[string]struct{}{"worker": {}}
 	snaps := map[string]commandSnapshot{
-		"api": {State: model.EventTypeStarted},
+		"api": {State: model.EventTypeRunning},
 	}
 	g := buildReconcileGraph(spec, snaps, closure)
 

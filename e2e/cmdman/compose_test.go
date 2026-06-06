@@ -326,7 +326,7 @@ func TestComposeUpRecreateRunningCommand(t *testing.T) {
 	if idBefore == "" {
 		t.Fatalf("alpha was not created by up #1")
 	}
-	env.waitForState(ctx, idBefore, "started", 5*time.Second)
+	env.waitForState(ctx, idBefore, "running", 5*time.Second)
 
 	// Change alpha's args so its config hash differs, forcing a recreate while
 	// the command is still running.
@@ -340,7 +340,7 @@ func TestComposeUpRecreateRunningCommand(t *testing.T) {
 	// The progress trace must show the running instance going down (stopping →
 	// stopped) before it is recreated and started again.
 	events := parseProgress(t, stdout)
-	for _, phase := range []string{"stopping", "stopped", "recreated", "started"} {
+	for _, phase := range []string{"stopping", "stopped", "recreated", "running"} {
 		if !progressReached(events, "alpha", phase) {
 			t.Fatalf("expected alpha to reach %q during recreate; got:\n%s", phase, stdout)
 		}
@@ -353,7 +353,7 @@ func TestComposeUpRecreateRunningCommand(t *testing.T) {
 	if idAfter == idBefore {
 		t.Fatalf("alpha id should have changed after recreate: still %s", idAfter)
 	}
-	env.waitForState(ctx, idAfter, "started", 5*time.Second)
+	env.waitForState(ctx, idAfter, "running", 5*time.Second)
 }
 
 // composeRecreateRunningYAML returns a one-command compose file whose single
@@ -528,7 +528,7 @@ func TestComposeRunningOrphanSkipped(t *testing.T) {
 		t.Fatalf("expected 1 command after up, got %d", len(entries))
 	}
 	alphaID := entries[0]["ID"].(string)
-	env.waitForState(ctx, alphaID, "started", 10*time.Second)
+	env.waitForState(ctx, alphaID, "running", 10*time.Second)
 
 	// Clean up alpha on test exit.
 	t.Cleanup(func() {
@@ -559,7 +559,7 @@ func TestComposeRunningOrphanSkipped(t *testing.T) {
 	// A "skipped" line must appear in stdout (summary) or a warning in stderr.
 	hasSkippedInSummary := strings.Contains(stdout, "skipped") || strings.Contains(stdout, "error")
 	hasSkippedInLog := strings.Contains(stderr, "skipping removal") ||
-		strings.Contains(stderr, "started")
+		strings.Contains(stderr, "running")
 	if !hasSkippedInSummary && !hasSkippedInLog {
 		t.Fatalf(
 			"expected skipped indicator in stdout or stderr;\nstdout:\n%s\nstderr:\n%s",
@@ -570,7 +570,7 @@ func TestComposeRunningOrphanSkipped(t *testing.T) {
 }
 
 // composeAfterYAML produces a YAML with two long-running commands where
-// `worker` declares `after: api` with the `started` condition (so up doesn't
+// `worker` declares `after: api` with the `running` condition (so up doesn't
 // wait for api to terminate before starting worker).
 func composeAfterYAML(name string) string {
 	return fmt.Sprintf(`name: %s
@@ -581,7 +581,7 @@ commands:
     args: [sleep, "30"]
     after:
       api:
-        condition: started
+        condition: running
 `, name)
 }
 
@@ -603,7 +603,7 @@ func TestComposeStop(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
+		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
 	}
 
 	stdout, stderr, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "stop")
@@ -642,7 +642,7 @@ func TestComposeStopProjectOnly(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
+		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
 	}
 
 	// Second invocation: project + workdir only, no -f.
@@ -701,7 +701,7 @@ func TestComposeDown(t *testing.T) {
 }
 
 // TestComposeProgressJSONL verifies the JSONL state trace emitted on a
-// non-terminal stdout: up reports created→started per command (with the op and
+// non-terminal stdout: up reports created→running per command (with the op and
 // terminal flags set), --progress=quiet suppresses output, and down reports
 // removed events.
 func TestComposeProgressJSONL(t *testing.T) {
@@ -732,14 +732,14 @@ func TestComposeProgressJSONL(t *testing.T) {
 		if !progressReached(events, name, "created") {
 			t.Fatalf("expected %q created event; got:\n%s", name, stdout)
 		}
-		if !progressReached(events, name, "started") {
-			t.Fatalf("expected %q started event; got:\n%s", name, stdout)
+		if !progressReached(events, name, "running") {
+			t.Fatalf("expected %q running event; got:\n%s", name, stdout)
 		}
 	}
 	// Terminal phases carry the terminal flag; transient phases do not.
 	for _, ev := range events {
 		switch ev.Phase {
-		case "started", "created", "exited", "removed", "stopped", "unchanged":
+		case "running", "created", "exited", "removed", "stopped", "unchanged":
 			if !ev.Terminal {
 				t.Fatalf("phase %q should be terminal; got:\n%s", ev.Phase, stdout)
 			}
@@ -871,7 +871,7 @@ func TestComposeRestart(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
+		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
 	}
 
 	stdout, stderr, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "restart")
@@ -888,7 +888,7 @@ func TestComposeRestart(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
+		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
 	}
 }
 
@@ -910,7 +910,7 @@ func TestComposeReverseDepOrderStop(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
+		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
 	}
 
 	// Stop should walk the DAG in reverse: worker before api.
@@ -950,7 +950,7 @@ func TestComposeStopByNameStopsDependents(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
+		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
 	}
 
 	// Stop only the dependency by name; its dependent must be torn down too.
@@ -1021,7 +1021,7 @@ func TestComposeSignal(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
+		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
 	}
 
 	stdout, stderr, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath,
@@ -1156,7 +1156,7 @@ func TestComposeLogsFollowStockThenLive(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "started", 5*time.Second)
+		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
 	}
 	// Both stored lines must be persisted before following, so the follow starts
 	// while the commands are quiet.
@@ -1292,9 +1292,9 @@ func TestComposeStartSubcommand(t *testing.T) {
 		t.Fatalf("compose start failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 	events := parseProgress(t, stdout)
-	if !progressReached(events, "alpha", "started") ||
-		!progressReached(events, "beta", "started") {
-		t.Fatalf("expected alpha and beta to reach started in progress trace; got:\n%s", stdout)
+	if !progressReached(events, "alpha", "running") ||
+		!progressReached(events, "beta", "running") {
+		t.Fatalf("expected alpha and beta to reach running in progress trace; got:\n%s", stdout)
 	}
 }
 
@@ -1532,8 +1532,8 @@ func TestComposeStartFromFailedState(t *testing.T) {
 		t.Fatalf("compose start from failed should succeed: %v\nstdout:\n%s\nstderr:\n%s",
 			err, stdout, stderr)
 	}
-	if events := parseProgress(t, stdout); !progressReached(events, "alpha", "started") {
-		t.Fatalf("expected alpha to reach started in progress trace; got:\n%s", stdout)
+	if events := parseProgress(t, stdout); !progressReached(events, "alpha", "running") {
+		t.Fatalf("expected alpha to reach running in progress trace; got:\n%s", stdout)
 	}
 	env.waitForState(ctx, alphaID, "exited", 10*time.Second)
 	if code, _ := env.inspectJSON(ctx, alphaID)["exit_code"].(float64); code != 0 {
@@ -1541,14 +1541,14 @@ func TestComposeStartFromFailedState(t *testing.T) {
 	}
 }
 
-// TestComposeUpStartedConditionDoesNotWaitForExit verifies a `started` condition
+// TestComposeUpRunningConditionDoesNotWaitForExit verifies a `running` condition
 // releases the dependent promptly while the long-running dependency keeps
 // running, rather than blocking on its termination.
-func TestComposeUpStartedConditionDoesNotWaitForExit(t *testing.T) {
+func TestComposeUpRunningConditionDoesNotWaitForExit(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnv(t)
 	wd := composeWorkdir(t)
-	project := "tc-up-started"
+	project := "tc-up-running"
 	writeComposeFile(
 		t,
 		wd,
@@ -1565,7 +1565,7 @@ func TestComposeUpStartedConditionDoesNotWaitForExit(t *testing.T) {
 	}
 	if elapsed > 20*time.Second {
 		t.Fatalf(
-			"up blocked on the long-running dependency (%v); started condition must not wait",
+			"up blocked on the long-running dependency (%v); running condition must not wait",
 			elapsed,
 		)
 	}
@@ -1576,7 +1576,7 @@ func TestComposeUpStartedConditionDoesNotWaitForExit(t *testing.T) {
 		if id == "" {
 			t.Fatalf("%s command not found", name)
 		}
-		env.waitForState(ctx, id, "started", 10*time.Second)
+		env.waitForState(ctx, id, "running", 10*time.Second)
 	}
 }
 
@@ -1651,6 +1651,6 @@ func TestComposeUpIndependentCommandsStartConcurrently(t *testing.T) {
 
 	for _, name := range []string{"alpha", "beta"} {
 		id := composeCommandID(ctx, env, wd, project, name)
-		env.waitForState(ctx, id, "started", 10*time.Second)
+		env.waitForState(ctx, id, "running", 10*time.Second)
 	}
 }

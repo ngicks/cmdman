@@ -31,17 +31,17 @@ type AfterCondition string
 
 const (
 	ConditionCompleted             AfterCondition = "completed"
-	ConditionStarted               AfterCondition = "started"
+	ConditionRunning               AfterCondition = "running"
 	ConditionCompletedSuccessfully AfterCondition = "completed_successfully"
 )
 
 func (c AfterCondition) Validate() error {
 	switch c {
-	case ConditionCompleted, ConditionStarted, ConditionCompletedSuccessfully:
+	case ConditionCompleted, ConditionRunning, ConditionCompletedSuccessfully:
 		return nil
 	default:
 		return fmt.Errorf(
-			"unknown condition %q (allowed: completed, started, completed_successfully)",
+			"unknown condition %q (allowed: completed, running, completed_successfully)",
 			c,
 		)
 	}

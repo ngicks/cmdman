@@ -209,7 +209,7 @@ func TestMux_BuildsPanesBoundToCommands(t *testing.T) {
 	for _, name := range []string{"api", "worker", "cache"} {
 		env.run(ctx, "run", "-n", name, "--", "/bin/sh", "-c", "sleep 300")
 		t.Cleanup(func() { env.cleanupCommand(ctx, name) })
-		env.waitForState(ctx, name, "started", defaultTimeout)
+		env.waitForState(ctx, name, "running", defaultTimeout)
 		ids[name] = env.inspectJSON(ctx, name)["id"].(string)
 	}
 
@@ -302,7 +302,7 @@ func TestMux_AttachPaneExposesApplicationMouseFlags(t *testing.T) {
 		}, "\n"),
 	)
 	t.Cleanup(func() { env.cleanupCommand(ctx, "mouseapp") })
-	env.waitForState(ctx, "mouseapp", "started", defaultTimeout)
+	env.waitForState(ctx, "mouseapp", "running", defaultTimeout)
 
 	specPath := writeSpecFile(t, fmt.Sprintf(`mux:
   driver: tmux
@@ -373,7 +373,7 @@ func TestMux_CyclesToNextLayoutOnRerun(t *testing.T) {
 	for _, name := range []string{"api", "worker"} {
 		env.run(ctx, "run", "-n", name, "--", "/bin/sh", "-c", "sleep 300")
 		t.Cleanup(func() { env.cleanupCommand(ctx, name) })
-		env.waitForState(ctx, name, "started", defaultTimeout)
+		env.waitForState(ctx, name, "running", defaultTimeout)
 	}
 
 	specPath := writeSpecFile(t, cycleMuxYAML(socket))
@@ -438,7 +438,7 @@ func TestMux_KillingSessionLeavesCommandRunning(t *testing.T) {
 
 	env.run(ctx, "run", "-n", "solo", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, "solo") })
-	env.waitForState(ctx, "solo", "started", defaultTimeout)
+	env.waitForState(ctx, "solo", "running", defaultTimeout)
 	pidBefore := env.livePID(ctx, "solo")
 
 	specPath := writeSpecFile(t, singleMuxYAML(socket))
@@ -457,7 +457,7 @@ func TestMux_KillingSessionLeavesCommandRunning(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	info := env.inspectJSON(ctx, "solo")
-	if info["state"] != "started" {
+	if info["state"] != "running" {
 		t.Fatalf(
 			"killing the mux session changed command state to %v; mux must be view-only",
 			info["state"],
@@ -541,7 +541,7 @@ func TestComposeMux_BuildsPanesForServices(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "started", defaultTimeout)
+		env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
 	}
 
 	stdout, stderr, err := env.muxExec(ctx, "compose", "--workdir", wd, "-f", composePath, "mux")
@@ -616,7 +616,7 @@ func TestComposeMux_NoFileAutoSelectsCwdFile(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "started", defaultTimeout)
+		env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
 	}
 
 	// The behavior under test: no -f, no --workdir, just run from the project dir.
@@ -699,7 +699,7 @@ func TestMux_DetachRestoresWindowAndKeepsCommands(t *testing.T) {
 	for _, name := range names {
 		env.run(ctx, "run", "-n", name, "--", "/bin/sh", "-c", "sleep 300")
 		t.Cleanup(func() { env.cleanupCommand(ctx, name) })
-		env.waitForState(ctx, name, "started", defaultTimeout)
+		env.waitForState(ctx, name, "running", defaultTimeout)
 		pids[name] = env.livePID(ctx, name)
 	}
 
@@ -743,8 +743,8 @@ func TestMux_DetachRestoresWindowAndKeepsCommands(t *testing.T) {
 
 	// The disposable-viewer guarantee: commands keep running, untouched.
 	for _, name := range names {
-		if info := env.inspectJSON(ctx, name); info["state"] != "started" {
-			t.Errorf("after detach %s state = %v, want started", name, info["state"])
+		if info := env.inspectJSON(ctx, name); info["state"] != "running" {
+			t.Errorf("after detach %s state = %v, want running", name, info["state"])
 		}
 		if got := env.livePID(ctx, name); got != pids[name] {
 			t.Errorf("after detach %s pid changed %v -> %v (restarted, not left alone)",
@@ -778,7 +778,7 @@ func TestComposeMux_DetachRestoresWindow(t *testing.T) {
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
 	) {
-		env.waitForState(ctx, e["ID"].(string), "started", defaultTimeout)
+		env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
 	}
 
 	if _, stderr, err := env.muxExec(
@@ -816,8 +816,8 @@ func TestComposeMux_DetachRestoresWindow(t *testing.T) {
 		"-l", "cmdman.compose.project="+project,
 	) {
 		id := e["ID"].(string)
-		if info := env.inspectJSON(ctx, id); info["state"] != "started" {
-			t.Errorf("after detach %s state = %v, want started", id, info["state"])
+		if info := env.inspectJSON(ctx, id); info["state"] != "running" {
+			t.Errorf("after detach %s state = %v, want running", id, info["state"])
 		}
 	}
 }
