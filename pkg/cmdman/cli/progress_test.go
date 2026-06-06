@@ -137,6 +137,42 @@ func TestTTYReporterRendersTrace(t *testing.T) {
 	}
 }
 
+// TestTTYReporterFailureIsSticky verifies that once a command fails during an
+// operation, a later non-failure phase does not repaint it as success: the final
+// frame keeps the failure kind and detail visible. This is the case the original
+// report hit — a recreate whose stop failed was masked by the idempotent
+// "started" the start phase reports for the still-running command.
+func TestTTYReporterFailureIsSticky(t *testing.T) {
+	var buf bytes.Buffer
+	r := newTTYReporter(&buf)
+
+	exit := 0
+	r.Report(compose.Event{Command: "shell", Phase: compose.PhaseStopping})
+	r.Report(compose.Event{
+		Command: "shell",
+		Phase:   compose.PhaseError,
+		Err:     errors.New(`stop command "shell" for recreate: monitor unreachable`),
+	})
+	// The start phase later reports the still-running command as started; this
+	// must not overwrite the failure.
+	r.Report(compose.Event{Command: "shell", Phase: compose.PhaseStarted, ExitCode: &exit})
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "✘") {
+		t.Fatalf("expected failure glyph in trace:\n%q", out)
+	}
+	if !strings.Contains(out, "monitor unreachable") {
+		t.Fatalf("expected the failure detail (its kind) in trace:\n%q", out)
+	}
+	// The masked "started" phase must never have been rendered.
+	if strings.Contains(out, "Started") {
+		t.Fatalf("a failed command must not be repainted as Started:\n%q", out)
+	}
+}
+
 func TestProgressMarkerByCategory(t *testing.T) {
 	// Each status category gets a distinct glyph. lipgloss emits no color codes
 	// to a non-terminal test stdout, so the marker is the bare glyph.

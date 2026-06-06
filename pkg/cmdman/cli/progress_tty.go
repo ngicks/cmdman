@@ -52,8 +52,18 @@ func (r *ttyReporter) Report(ev compose.Event) {
 	if r.closed {
 		return
 	}
-	if _, seen := r.byName[ev.Command]; !seen {
+	existing, seen := r.byName[ev.Command]
+	if !seen {
 		r.order = append(r.order, ev.Command)
+	} else if existing.phase.Failed() {
+		// A failure is sticky: once a command has failed during this operation,
+		// keep that failure (its kind and detail) on the line instead of letting a
+		// later non-failure phase repaint it as success. Collapsing to the latest
+		// phase otherwise hides the failure — e.g. a recreate whose stop failed is
+		// masked by the idempotent "started" the start phase reports for the
+		// still-running command, leaving a green line with a non-zero exit and no
+		// visible cause.
+		return
 	}
 	r.byName[ev.Command] = progressEntry{
 		phase: ev.Phase,
