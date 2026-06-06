@@ -227,7 +227,7 @@ func TestComposeUpIdempotent(t *testing.T) {
 		name := e["Name"].(string)
 		if idsBefore[name] != e["ID"].(string) {
 			t.Fatalf("command %q id changed across idempotent up: was %s, now %s",
-				name, idsBefore[name], e["id"])
+				name, idsBefore[name], e["ID"])
 		}
 	}
 }
@@ -1536,7 +1536,7 @@ func TestComposeStartFromFailedState(t *testing.T) {
 		t.Fatalf("expected alpha to reach running in progress trace; got:\n%s", stdout)
 	}
 	env.waitForState(ctx, alphaID, "exited", 10*time.Second)
-	if code, _ := env.inspectJSON(ctx, alphaID)["exit_code"].(float64); code != 0 {
+	if code, _ := env.inspectJSON(ctx, alphaID)["ExitCode"].(float64); code != 0 {
 		t.Fatalf("expected exit_code=0 after restart from failed, got %v", code)
 	}
 }

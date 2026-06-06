@@ -12,9 +12,14 @@ func (s *Store) InsertCommandExitCode(id string, exitCode int) error {
 }
 
 // ExitRecord represents an entry in CommandExitCode.
+//
+// Its fields are read from SQL columns (not a JSON blob); the only JSON
+// rendering is as part of the CLI inspect output, which is consumed by Go
+// `--format` templates. It therefore carries no json field-name tags, so
+// `{{json .}}` and `{{.Field}}` agree on the Go field names.
 type ExitRecord struct {
-	Timestamp string `json:"timestamp"`
-	ExitCode  int    `json:"exit_code"`
+	Timestamp string
+	ExitCode  int
 }
 
 // GetExitHistory retrieves exit code history for a command.

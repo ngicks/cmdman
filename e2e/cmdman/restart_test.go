@@ -17,14 +17,14 @@ func TestRestartCmd_Running(t *testing.T) {
 	env.waitForState(ctx, "restart-running", "running", defaultTimeout)
 
 	before := env.inspectJSON(ctx, "restart-running")
-	beforeDetail, _ := before["state_detail"].(map[string]any)
+	beforeDetail, _ := before["StateJSON"].(map[string]any)
 	beforePID, _ := beforeDetail["monitor_pid"].(float64)
 
 	env.run(ctx, "restart", "restart-running")
 	env.waitForState(ctx, "restart-running", "running", defaultTimeout)
 
 	after := env.inspectJSON(ctx, "restart-running")
-	afterDetail, _ := after["state_detail"].(map[string]any)
+	afterDetail, _ := after["StateJSON"].(map[string]any)
 	afterPID, _ := afterDetail["monitor_pid"].(float64)
 
 	if beforePID == afterPID {
@@ -34,7 +34,7 @@ func TestRestartCmd_Running(t *testing.T) {
 		)
 	}
 
-	history, _ := after["exit_history"].([]any)
+	history, _ := after["ExitHistory"].([]any)
 	if len(history) < 1 {
 		t.Errorf("expected at least 1 exit_history entry after restart, got %d", len(history))
 	}
@@ -55,7 +55,7 @@ func TestRestartCmd_Exited(t *testing.T) {
 	env.waitForState(ctx, "restart-exited", "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, "restart-exited")
-	history, _ := info["exit_history"].([]any)
+	history, _ := info["ExitHistory"].([]any)
 	if len(history) != 2 {
 		t.Errorf("expected 2 exit_history entries after restart, got %d", len(history))
 	}
@@ -83,7 +83,7 @@ func TestRestartCmd_Failed(t *testing.T) {
 	env.waitForState(ctx, "restart-failed", "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, "restart-failed")
-	exitCode, _ := info["exit_code"].(float64)
+	exitCode, _ := info["ExitCode"].(float64)
 	if exitCode != 0 {
 		t.Errorf("expected exit_code=0 after restart from failed, got %v", exitCode)
 	}
@@ -111,7 +111,7 @@ func TestRestartCmd_Multiple(t *testing.T) {
 
 	for _, name := range []string{"restart-multi-1", "restart-multi-2"} {
 		info := env.inspectJSON(ctx, name)
-		history, _ := info["exit_history"].([]any)
+		history, _ := info["ExitHistory"].([]any)
 		if len(history) < 1 {
 			t.Errorf("%s: expected at least 1 exit_history entry after restart, got %d",
 				name, len(history))

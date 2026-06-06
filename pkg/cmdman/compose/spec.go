@@ -51,42 +51,42 @@ func (c AfterCondition) Validate() error {
 
 // RawComposeSpec is the top-level raw YAML model.
 type RawComposeSpec struct {
-	Name     string                `yaml:"name"`
-	WorkDir  string                `yaml:"work_dir"`
-	Commands map[string]RawCommand `yaml:"commands"`
+	Name     string                `yaml:"name" json:"name"`
+	WorkDir  string                `yaml:"work_dir" json:"work_dir"`
+	Commands map[string]RawCommand `yaml:"commands" json:"commands"`
 	// Mux is the embedded cmdman mux layout, decoded straight into the
 	// cmdman-layer spec type (nil when the file has no "mux:" section). Its
 	// leaves still carry project-scoped service names; `cmdman compose mux`
 	// resolves those to commands at run time. Storing a typed *mux.Spec
 	// (rather than a raw yaml node or bytes) keeps any decoder-specific type
 	// off this struct, so the spec format is not pinned to YAML.
-	Mux *mux.Spec `yaml:"mux,omitempty"`
+	Mux *mux.Spec `yaml:"mux,omitempty" json:"mux,omitzero"`
 	// Unknown captures unrecognized top-level keys so Normalize can warn about them.
-	Unknown map[string]any `yaml:",inline"`
+	Unknown map[string]any `yaml:",inline" json:"-"`
 }
 
 // RawCommand is the raw YAML shape for a single command.
 type RawCommand struct {
-	Dir             string               `yaml:"dir"`
-	Args            []string             `yaml:"args"`
-	Env             []string             `yaml:"env"`
-	EnvFile         []EnvFileSpec        `yaml:"env_file"`
-	Labels          map[string]string    `yaml:"labels"`
-	RestartPolicy   string               `yaml:"restart_policy"`
-	StopSignal      string               `yaml:"stop_signal"`
-	Tty             bool                 `yaml:"tty"`
-	ScrollbackBytes int                  `yaml:"scrollback_bytes"`
-	LogDriver       string               `yaml:"log_driver"`
-	LogOpts         map[string]string    `yaml:"log_opts"`
-	After           map[string]AfterSpec `yaml:"after"`
+	Dir             string               `yaml:"dir" json:"dir"`
+	Args            []string             `yaml:"args" json:"args"`
+	Env             []string             `yaml:"env" json:"env"`
+	EnvFile         []EnvFileSpec        `yaml:"env_file" json:"env_file"`
+	Labels          map[string]string    `yaml:"labels" json:"labels"`
+	RestartPolicy   string               `yaml:"restart_policy" json:"restart_policy"`
+	StopSignal      string               `yaml:"stop_signal" json:"stop_signal"`
+	Tty             bool                 `yaml:"tty" json:"tty"`
+	ScrollbackBytes int                  `yaml:"scrollback_bytes" json:"scrollback_bytes"`
+	LogDriver       string               `yaml:"log_driver" json:"log_driver"`
+	LogOpts         map[string]string    `yaml:"log_opts" json:"log_opts"`
+	After           map[string]AfterSpec `yaml:"after" json:"after"`
 	// Unknown captures unrecognized per-command keys so Normalize can warn about them.
-	Unknown map[string]any `yaml:",inline"`
+	Unknown map[string]any `yaml:",inline" json:"-"`
 }
 
 // EnvFileSpec describes an env file to load for a command.
 type EnvFileSpec struct {
-	Path     string `yaml:"path"`
-	Required *bool  `yaml:"required"` // pointer so we can detect absence; defaults to true
+	Path     string `yaml:"path" json:"path"`
+	Required *bool  `yaml:"required" json:"required"` //nolint:lll // pointer so we can detect absence; defaults to true
 }
 
 // AfterSpec is the dependency specification for a command.

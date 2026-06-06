@@ -154,7 +154,7 @@ func TestLabels_InspectShowsLabels(t *testing.T) {
 	env.waitForState(ctx, id, "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, id)
-	cfg, _ := info["config"].(map[string]any)
+	cfg, _ := info["Config"].(map[string]any)
 	labels, _ := cfg["labels"].(map[string]any)
 
 	if labels["service"] != "api" {

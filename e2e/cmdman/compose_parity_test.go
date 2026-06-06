@@ -74,7 +74,7 @@ func TestComposeFormatJSON(t *testing.T) {
 		}
 	}
 
-	// ps --format json: an array of command statuses with snake_case keys.
+	// ps --format json: an array of command statuses with CamelCase keys.
 	psArr := parseJSONArray(t,
 		env.run(ctx, "compose", "--workdir", wd, "-f", composePath, "ps", "--format", "json"))
 	if len(psArr) != 2 {
@@ -82,8 +82,8 @@ func TestComposeFormatJSON(t *testing.T) {
 	}
 	states := map[string]string{}
 	for _, e := range psArr {
-		cmd, _ := e["command"].(string)
-		st, _ := e["state"].(string)
+		cmd, _ := e["Command"].(string)
+		st, _ := e["State"].(string)
 		states[cmd] = st
 	}
 	if states["alpha"] != "exited" || states["beta"] != "exited" {
@@ -101,10 +101,10 @@ func TestComposeFormatJSON(t *testing.T) {
 	lsArr := parseJSONArray(t, env.run(ctx, "compose", "ls", "--format", "json"))
 	found := false
 	for _, p := range lsArr {
-		if p["project"] == project {
+		if p["Project"] == project {
 			found = true
-			if got, _ := p["commands"].(float64); got != 2 {
-				t.Fatalf("expected 2 commands for project, got %v", p["commands"])
+			if got, _ := p["Commands"].(float64); got != 2 {
+				t.Fatalf("expected 2 commands for project, got %v", p["Commands"])
 			}
 		}
 	}
@@ -143,7 +143,7 @@ func TestComposeInspect(t *testing.T) {
 		t.Fatalf("expected 2 inspect outputs, got %d: %#v", len(allArr), allArr)
 	}
 	for _, o := range allArr {
-		if _, ok := o["config"]; !ok {
+		if _, ok := o["Config"]; !ok {
 			t.Fatalf("inspect output missing config field: %#v", o)
 		}
 	}
@@ -154,7 +154,7 @@ func TestComposeInspect(t *testing.T) {
 	if len(oneArr) != 1 {
 		t.Fatalf("expected 1 inspect output for alpha, got %d: %#v", len(oneArr), oneArr)
 	}
-	if name, _ := oneArr[0]["name"].(string); !strings.Contains(name, "alpha") {
+	if name, _ := oneArr[0]["Name"].(string); !strings.Contains(name, "alpha") {
 		t.Fatalf("expected alpha in inspect name; got %q", name)
 	}
 }

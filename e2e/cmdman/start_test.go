@@ -34,10 +34,10 @@ func TestStart_FromFailedState(t *testing.T) {
 	env.waitForState(ctx, "start-failed", "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, "start-failed")
-	if info["state"] != "exited" {
-		t.Errorf("expected state=exited after restart from failed, got %v", info["state"])
+	if info["State"] != "exited" {
+		t.Errorf("expected state=exited after restart from failed, got %v", info["State"])
 	}
-	exitCode, _ := info["exit_code"].(float64)
+	exitCode, _ := info["ExitCode"].(float64)
 	if exitCode != 0 {
 		t.Errorf("expected exit_code=0 after restart from failed, got %v", exitCode)
 	}

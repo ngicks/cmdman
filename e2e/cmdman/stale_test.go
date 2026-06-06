@@ -24,7 +24,7 @@ func TestStale_DetectedOnLs(t *testing.T) {
 
 	// Get the monitor PID from inspect.
 	info := env.inspectJSON(ctx, "stale-target")
-	stateDetail, _ := info["state_detail"].(map[string]any)
+	stateDetail, _ := info["StateJSON"].(map[string]any)
 	monitorPID, _ := stateDetail["monitor_pid"].(float64)
 	if monitorPID <= 0 {
 		t.Fatal("could not get monitor PID")
@@ -44,11 +44,11 @@ func TestStale_DetectedOnLs(t *testing.T) {
 	env.run(ctx, "ls", "-a")
 
 	info = env.inspectJSON(ctx, "stale-target")
-	if info["state"] != "failed" {
-		t.Errorf("expected state=failed after monitor crash, got %v", info["state"])
+	if info["State"] != "failed" {
+		t.Errorf("expected state=failed after monitor crash, got %v", info["State"])
 	}
 
-	stateDetail, _ = info["state_detail"].(map[string]any)
+	stateDetail, _ = info["StateJSON"].(map[string]any)
 	errorMsg, _ := stateDetail["error"].(string)
 	if errorMsg == "" {
 		t.Error("expected error message in state_detail after stale detection")
@@ -98,10 +98,10 @@ func TestStale_DetectedOnStop(t *testing.T) {
 	}
 
 	info := env.inspectJSON(ctx, "stale-stop")
-	if info["state"] != "failed" {
-		t.Fatalf("expected state=failed after stop repaired stale command, got %v", info["state"])
+	if info["State"] != "failed" {
+		t.Fatalf("expected state=failed after stop repaired stale command, got %v", info["State"])
 	}
-	stateDetail, _ := info["state_detail"].(map[string]any)
+	stateDetail, _ := info["StateJSON"].(map[string]any)
 	if errorMsg, _ := stateDetail["error"].(string); errorMsg == "" {
 		t.Fatal("expected error message in state_detail after stale stop")
 	}

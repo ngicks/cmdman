@@ -110,7 +110,7 @@ func TestLogDriver_K8sFileWritesLogToCommandDir(t *testing.T) {
 	env.waitForState(ctx, "k8s-log-default", "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, "k8s-log-default")
-	hexID, _ := info["id"].(string)
+	hexID, _ := info["ID"].(string)
 	if hexID == "" {
 		t.Fatalf("inspect returned empty id; raw=%v", info)
 	}
@@ -179,7 +179,7 @@ func TestRun_DefaultPipeModeSplitsStdoutAndStderrLogs(t *testing.T) {
 	}
 
 	info := env.inspectJSON(ctx, "pipe-split")
-	hexID, _ := info["id"].(string)
+	hexID, _ := info["ID"].(string)
 	if hexID == "" {
 		t.Fatalf("inspect returned empty id; raw=%v", info)
 	}
@@ -215,7 +215,7 @@ func TestLogDriver_NoneDoesNotCreateLogFile(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 
 	info := env.inspectJSON(ctx, "log-none")
-	hexID, _ := info["id"].(string)
+	hexID, _ := info["ID"].(string)
 	if hexID == "" {
 		t.Fatalf("inspect returned empty id; raw=%v", info)
 	}
@@ -225,7 +225,7 @@ func TestLogDriver_NoneDoesNotCreateLogFile(t *testing.T) {
 	}
 
 	// The configured driver should round-trip into inspect output.
-	cfg, _ := info["config"].(map[string]any)
+	cfg, _ := info["Config"].(map[string]any)
 	if cfg["log_driver"] != "none" {
 		t.Errorf("expected config.log_driver=none, got %v", cfg["log_driver"])
 	}
@@ -280,7 +280,7 @@ func TestLogOpt_PathOverridesDefaultLocation(t *testing.T) {
 
 	// The default location must not be created when path is overridden.
 	info := env.inspectJSON(ctx, "log-opt-path")
-	hexID, _ := info["id"].(string)
+	hexID, _ := info["ID"].(string)
 	defaultPath := filepath.Join(env.dataHome, "commands", hexID, "console.log")
 	if _, err := os.Stat(defaultPath); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf(
@@ -290,7 +290,7 @@ func TestLogOpt_PathOverridesDefaultLocation(t *testing.T) {
 		)
 	}
 
-	cfg, _ := info["config"].(map[string]any)
+	cfg, _ := info["Config"].(map[string]any)
 	logOpts, _ := cfg["log_opts"].(map[string]any)
 	if logOpts["path"] != customLog {
 		t.Errorf("expected config.log_opts.path=%q, got %v", customLog, logOpts["path"])
@@ -353,7 +353,7 @@ func TestLogOpt_MaxSizeTruncatesFile(t *testing.T) {
 	env.waitForState(ctx, "log-max-size", "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, "log-max-size")
-	hexID, _ := info["id"].(string)
+	hexID, _ := info["ID"].(string)
 	if hexID == "" {
 		t.Fatalf("inspect returned empty id; raw=%v", info)
 	}
@@ -376,7 +376,7 @@ func TestLogOpt_MaxSizeTruncatesFile(t *testing.T) {
 		t.Errorf("expected log file size <= 1024 bytes after truncation, got %d", size)
 	}
 
-	cfg, _ := info["config"].(map[string]any)
+	cfg, _ := info["Config"].(map[string]any)
 	logOpts, _ := cfg["log_opts"].(map[string]any)
 	if logOpts["max-size"] != "512" {
 		t.Errorf("expected config.log_opts.max-size=512, got %v", logOpts["max-size"])
@@ -414,7 +414,7 @@ func TestLogOpt_MaxFileRotatesArchives(t *testing.T) {
 	env.waitForState(ctx, "log-max-file", "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, "log-max-file")
-	hexID, _ := info["id"].(string)
+	hexID, _ := info["ID"].(string)
 	if hexID == "" {
 		t.Fatalf("inspect returned empty id; raw=%v", info)
 	}
@@ -439,7 +439,7 @@ func TestLogOpt_MaxFileRotatesArchives(t *testing.T) {
 		t.Errorf("expected no %s archive (max-file=3), got err=%v", logPath+".3", err)
 	}
 
-	cfg, _ := info["config"].(map[string]any)
+	cfg, _ := info["Config"].(map[string]any)
 	logOpts, _ := cfg["log_opts"].(map[string]any)
 	if logOpts["max-file"] != "3" {
 		t.Errorf("expected config.log_opts.max-file=3, got %v", logOpts["max-file"])
@@ -527,7 +527,7 @@ func TestLogs_SinceCrossesRotation(t *testing.T) {
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
 
 	info := env.inspectJSON(ctx, "logs-since-rotation")
-	hexID, _ := info["id"].(string)
+	hexID, _ := info["ID"].(string)
 	if hexID == "" {
 		t.Fatalf("inspect returned empty id; raw=%v", info)
 	}
@@ -577,7 +577,7 @@ func TestLogs_FollowSeesStoredThenLive(t *testing.T) {
 	env.waitForState(ctx, "follow-stored-live", "running", defaultTimeout)
 
 	info := env.inspectJSON(ctx, "follow-stored-live")
-	hexID, _ := info["id"].(string)
+	hexID, _ := info["ID"].(string)
 	if hexID == "" {
 		t.Fatalf("inspect returned empty id; raw=%v", info)
 	}

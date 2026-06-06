@@ -80,14 +80,26 @@ func TestExitCodeRangeCheck(t *testing.T) {
 		CommandDir:      "/tmp/test",
 	}
 	assert.NilError(t, st.InsertCommandConfig("test-1", "", cfg))
-	assert.NilError(t, st.InsertCommandState("test-1", model.EventTypeCreated, &model.CommandState{}))
+	assert.NilError(
+		t,
+		st.InsertCommandState("test-1", model.EventTypeCreated, &model.CommandState{}),
+	)
 
 	ec := 0
-	assert.NilError(t, st.UpdateCommandState("test-1", model.EventTypeExited, &ec, &model.CommandState{}))
+	assert.NilError(
+		t,
+		st.UpdateCommandState("test-1", model.EventTypeExited, &ec, &model.CommandState{}),
+	)
 	ec = 255
-	assert.NilError(t, st.UpdateCommandState("test-1", model.EventTypeExited, &ec, &model.CommandState{}))
+	assert.NilError(
+		t,
+		st.UpdateCommandState("test-1", model.EventTypeExited, &ec, &model.CommandState{}),
+	)
 	ec = -1
-	assert.NilError(t, st.UpdateCommandState("test-1", model.EventTypeExited, &ec, &model.CommandState{}))
+	assert.NilError(
+		t,
+		st.UpdateCommandState("test-1", model.EventTypeExited, &ec, &model.CommandState{}),
+	)
 
 	ec = 256
 	err := st.UpdateCommandState("test-1", model.EventTypeExited, &ec, &model.CommandState{})

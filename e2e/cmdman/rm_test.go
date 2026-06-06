@@ -68,8 +68,8 @@ func TestRm_RunningCommandFails(t *testing.T) {
 
 	// The command should still exist (not removed).
 	info := env.inspectJSON(ctx, "running-rm")
-	if info["state"] != "running" {
-		t.Errorf("expected command to still be running, got %v", info["state"])
+	if info["State"] != "running" {
+		t.Errorf("expected command to still be running, got %v", info["State"])
 	}
 }
 

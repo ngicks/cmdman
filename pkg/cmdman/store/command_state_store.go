@@ -8,7 +8,11 @@ import (
 )
 
 // InsertCommandState inserts a new CommandState row.
-func (s *Store) InsertCommandState(id string, state model.EventType, stateJSON *model.CommandState) error {
+func (s *Store) InsertCommandState(
+	id string,
+	state model.EventType,
+	stateJSON *model.CommandState,
+) error {
 	data, err := json.Marshal(stateJSON)
 	if err != nil {
 		return err

@@ -50,16 +50,16 @@ func TestInspect_DefaultStillJSON(t *testing.T) {
 	env.waitForState(ctx, "fmt-default", "exited", defaultTimeout)
 
 	stdout := env.run(ctx, "inspect", "fmt-default")
-	// Pretty-printed JSON should contain a newline and the indented "id" key.
-	if !strings.Contains(stdout, "\n  \"id\":") {
+	// Pretty-printed JSON should contain a newline and the indented "ID" key.
+	if !strings.Contains(stdout, "\n  \"ID\":") {
 		t.Errorf("expected indented JSON output, got: %s", stdout)
 	}
 	var info map[string]any
 	if err := json.Unmarshal([]byte(stdout), &info); err != nil {
 		t.Fatalf("default output is not valid JSON: %v\nraw: %s", err, stdout)
 	}
-	if info["name"] != "fmt-default" {
-		t.Errorf("expected name=fmt-default, got %v", info["name"])
+	if info["Name"] != "fmt-default" {
+		t.Errorf("expected name=fmt-default, got %v", info["Name"])
 	}
 }
 
@@ -75,23 +75,23 @@ func TestInspect_BasicFields(t *testing.T) {
 	info := env.inspectJSON(ctx, "inspect-me")
 
 	// Check required top-level fields.
-	if info["id"] == nil || info["id"] == "" {
-		t.Error("inspect output missing 'id'")
+	if info["ID"] == nil || info["ID"] == "" {
+		t.Error("inspect output missing 'ID'")
 	}
-	if info["name"] != "inspect-me" {
-		t.Errorf("expected name=inspect-me, got %v", info["name"])
+	if info["Name"] != "inspect-me" {
+		t.Errorf("expected name=inspect-me, got %v", info["Name"])
 	}
-	if info["state"] != "exited" {
-		t.Errorf("expected state=exited, got %v", info["state"])
+	if info["State"] != "exited" {
+		t.Errorf("expected state=exited, got %v", info["State"])
 	}
-	if info["config"] == nil {
-		t.Error("inspect output missing 'config'")
+	if info["Config"] == nil {
+		t.Error("inspect output missing 'Config'")
 	}
-	if info["state_detail"] == nil {
-		t.Error("inspect output missing 'state_detail'")
+	if info["StateJSON"] == nil {
+		t.Error("inspect output missing 'StateJSON'")
 	}
-	if info["config_path"] == nil || info["config_path"] == "" {
-		t.Error("inspect output missing 'config_path'")
+	if info["ConfigPath"] == nil || info["ConfigPath"] == "" {
+		t.Error("inspect output missing 'ConfigPath'")
 	}
 }
 
@@ -105,7 +105,7 @@ func TestInspect_ConfigContainsArgv(t *testing.T) {
 	env.waitForState(ctx, id, "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, id)
-	cfg, _ := info["config"].(map[string]any)
+	cfg, _ := info["Config"].(map[string]any)
 	argv, _ := cfg["argv"].([]any)
 
 	if len(argv) < 3 {
@@ -132,7 +132,7 @@ func TestInspect_StateDetailHasTimestamps(t *testing.T) {
 	env.waitForState(ctx, id, "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, id)
-	stateDetail, _ := info["state_detail"].(map[string]any)
+	stateDetail, _ := info["StateJSON"].(map[string]any)
 
 	startedAt, _ := stateDetail["started_at"].(string)
 	if startedAt == "" {
@@ -155,18 +155,18 @@ func TestInspect_ExitHistory(t *testing.T) {
 	env.waitForState(ctx, id, "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, id)
-	history, _ := info["exit_history"].([]any)
+	history, _ := info["ExitHistory"].([]any)
 
 	if len(history) == 0 {
 		t.Fatal("expected at least one exit_history entry")
 	}
 
 	firstExit, _ := history[0].(map[string]any)
-	exitCode, _ := firstExit["exit_code"].(float64)
+	exitCode, _ := firstExit["ExitCode"].(float64)
 	if exitCode != 7 {
 		t.Errorf("expected exit_code=7 in exit_history, got %v", exitCode)
 	}
-	ts, _ := firstExit["timestamp"].(string)
+	ts, _ := firstExit["Timestamp"].(string)
 	if ts == "" {
 		t.Error("expected timestamp in exit_history entry")
 	}
@@ -187,11 +187,11 @@ func TestInspect_ByNameAndByID(t *testing.T) {
 	byID := env.inspectJSON(ctx, id)
 
 	// Both should return the same id.
-	if byName["id"] != byID["id"] {
+	if byName["ID"] != byID["ID"] {
 		t.Errorf(
 			"inspect by name and by ID returned different IDs: %v vs %v",
-			byName["id"],
-			byID["id"],
+			byName["ID"],
+			byID["ID"],
 		)
 	}
 }
@@ -208,14 +208,14 @@ func TestInspect_LiveStatusForRunningCommand(t *testing.T) {
 	info := env.inspectJSON(ctx, "live-status")
 
 	// A running command should have live_status populated.
-	liveStatus, _ := info["live_status"].(map[string]any)
+	liveStatus, _ := info["LiveStatus"].(map[string]any)
 	if liveStatus == nil {
 		t.Fatal("expected live_status for running command")
 	}
-	if liveStatus["state"] != "running" {
-		t.Errorf("expected live_status.state=running, got %v", liveStatus["state"])
+	if liveStatus["State"] != "running" {
+		t.Errorf("expected live_status.state=running, got %v", liveStatus["State"])
 	}
-	pid, _ := liveStatus["pid"].(float64)
+	pid, _ := liveStatus["PID"].(float64)
 	if pid <= 0 {
 		t.Errorf("expected live_status.pid > 0, got %v", pid)
 	}
@@ -235,7 +235,7 @@ func TestInspect_LabelsInConfig(t *testing.T) {
 	env.waitForState(ctx, id, "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, id)
-	cfg, _ := info["config"].(map[string]any)
+	cfg, _ := info["Config"].(map[string]any)
 	labels, _ := cfg["labels"].(map[string]any)
 
 	if labels["app"] != "web" {

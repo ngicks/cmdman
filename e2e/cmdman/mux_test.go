@@ -210,7 +210,7 @@ func TestMux_BuildsPanesBoundToCommands(t *testing.T) {
 		env.run(ctx, "run", "-n", name, "--", "/bin/sh", "-c", "sleep 300")
 		t.Cleanup(func() { env.cleanupCommand(ctx, name) })
 		env.waitForState(ctx, name, "running", defaultTimeout)
-		ids[name] = env.inspectJSON(ctx, name)["id"].(string)
+		ids[name] = env.inspectJSON(ctx, name)["ID"].(string)
 	}
 
 	specPath := writeSpecFile(t, standaloneMuxYAML(socket))
@@ -457,10 +457,10 @@ func TestMux_KillingSessionLeavesCommandRunning(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	info := env.inspectJSON(ctx, "solo")
-	if info["state"] != "running" {
+	if info["State"] != "running" {
 		t.Fatalf(
 			"killing the mux session changed command state to %v; mux must be view-only",
-			info["state"],
+			info["State"],
 		)
 	}
 	if pidAfter := env.livePID(ctx, "solo"); pidAfter != pidBefore {
@@ -476,13 +476,13 @@ func TestMux_KillingSessionLeavesCommandRunning(t *testing.T) {
 func (e *testEnv) livePID(ctx context.Context, idOrName string) float64 {
 	e.t.Helper()
 	info := e.inspectJSON(ctx, idOrName)
-	live, _ := info["live_status"].(map[string]any)
+	live, _ := info["LiveStatus"].(map[string]any)
 	if live == nil {
 		e.t.Fatalf("no live_status for %q; command not running?\n%v", idOrName, info)
 	}
-	pid, _ := live["pid"].(float64)
+	pid, _ := live["PID"].(float64)
 	if pid <= 0 {
-		e.t.Fatalf("bad live pid for %q: %v", idOrName, live["pid"])
+		e.t.Fatalf("bad live pid for %q: %v", idOrName, live["PID"])
 	}
 	return pid
 }
@@ -743,8 +743,8 @@ func TestMux_DetachRestoresWindowAndKeepsCommands(t *testing.T) {
 
 	// The disposable-viewer guarantee: commands keep running, untouched.
 	for _, name := range names {
-		if info := env.inspectJSON(ctx, name); info["state"] != "running" {
-			t.Errorf("after detach %s state = %v, want running", name, info["state"])
+		if info := env.inspectJSON(ctx, name); info["State"] != "running" {
+			t.Errorf("after detach %s state = %v, want running", name, info["State"])
 		}
 		if got := env.livePID(ctx, name); got != pids[name] {
 			t.Errorf("after detach %s pid changed %v -> %v (restarted, not left alone)",
@@ -816,8 +816,8 @@ func TestComposeMux_DetachRestoresWindow(t *testing.T) {
 		"-l", "cmdman.compose.project="+project,
 	) {
 		id := e["ID"].(string)
-		if info := env.inspectJSON(ctx, id); info["state"] != "running" {
-			t.Errorf("after detach %s state = %v, want running", id, info["state"])
+		if info := env.inspectJSON(ctx, id); info["State"] != "running" {
+			t.Errorf("after detach %s state = %v, want running", id, info["State"])
 		}
 	}
 }

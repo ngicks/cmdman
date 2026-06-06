@@ -10,23 +10,31 @@ import (
 )
 
 // InspectOutput is the merged command definition, state, and history.
+//
+// This is a CLI-output type: it is rendered as JSON by default and through
+// `--format` Go templates, where users reference fields by their Go names
+// (.ExitCode, .StateJSON). It therefore carries no json field-name tags, so the
+// `{{json .}}` helper and `{{.Field}}` access agree on the same names. The
+// nested Config/StateJSON/ExitHistory keep their own tags as documented on
+// those types.
 type InspectOutput struct {
-	ID          string               `json:"id"`
-	Name        string               `json:"name,omitzero"`
-	Config      *model.CommandConfig `json:"config"`
-	State       model.EventType      `json:"state"`
-	ExitCode    *int                 `json:"exit_code,omitzero"`
-	StateJSON   *model.CommandState  `json:"state_detail"`
-	ExitHistory []store.ExitRecord   `json:"exit_history,omitzero"`
-	ConfigPath  string               `json:"config_path,omitzero"`
-	LiveStatus  *LiveStatusInfo      `json:"live_status,omitzero"`
+	ID          string
+	Name        string `json:",omitzero"`
+	Config      *model.CommandConfig
+	State       model.EventType
+	ExitCode    *int `json:",omitzero"`
+	StateJSON   *model.CommandState
+	ExitHistory []store.ExitRecord `json:",omitzero"`
+	ConfigPath  string             `json:",omitzero"`
+	LiveStatus  *LiveStatusInfo    `json:",omitzero"`
 }
 
 // LiveStatusInfo is the live status from the monitor gRPC Status RPC.
+// CLI-output type; see InspectOutput for why it carries no json name tags.
 type LiveStatusInfo struct {
-	State    string `json:"state"`
-	ExitCode int32  `json:"exit_code"`
-	PID      int32  `json:"pid"`
+	State    string
+	ExitCode int32
+	PID      int32
 }
 
 func (s *Service) Inspect(ctx context.Context, idOrName string) (*InspectOutput, error) {

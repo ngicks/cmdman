@@ -22,8 +22,8 @@ func TestStop_RunningCommand(t *testing.T) {
 	env.waitForState(ctx, "sleeper", "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, "sleeper")
-	if info["state"] != "exited" {
-		t.Errorf("expected state=exited after stop, got %v", info["state"])
+	if info["State"] != "exited" {
+		t.Errorf("expected state=exited after stop, got %v", info["State"])
 	}
 }
 
@@ -92,8 +92,8 @@ func TestStop_AlreadyExited(t *testing.T) {
 
 	// State should still be exited.
 	info := env.inspectJSON(ctx, id)
-	if info["state"] != "exited" {
-		t.Errorf("expected state=exited, got %v", info["state"])
+	if info["State"] != "exited" {
+		t.Errorf("expected state=exited, got %v", info["State"])
 	}
 }
 

@@ -155,7 +155,7 @@ func (e *testEnv) waitForState(ctx context.Context, idOrName, state string, time
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
-		if result["state"] == state {
+		if result["State"] == state {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)

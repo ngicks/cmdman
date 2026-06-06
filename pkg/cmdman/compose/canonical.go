@@ -20,10 +20,10 @@ import (
 // sorted by normalization — so the output is stable across runs and across host
 // environments.
 type CanonicalSpec struct {
-	Name     string                      `yaml:"name"`
-	WorkDir  string                      `yaml:"work_dir"`
-	Commands map[string]CanonicalCommand `yaml:"commands"`
-	Mux      *mux.Spec                   `yaml:"mux,omitempty"`
+	Name     string                      `yaml:"name" json:"name"`
+	WorkDir  string                      `yaml:"work_dir" json:"work_dir"`
+	Commands map[string]CanonicalCommand `yaml:"commands" json:"commands"`
+	Mux      *mux.Spec                   `yaml:"mux,omitempty" json:"mux,omitzero"`
 }
 
 // CanonicalCommand is one resolved command in a [CanonicalSpec]. Fields left at
@@ -31,23 +31,23 @@ type CanonicalSpec struct {
 // explicitly (cmdman applies runtime defaults later), so an omitted field means
 // "not set in the compose file", not "set to the default".
 type CanonicalCommand struct {
-	Dir             string                    `yaml:"dir"`
-	Args            []string                  `yaml:"args"`
-	Env             []string                  `yaml:"env,omitempty"`
-	Labels          map[string]string         `yaml:"labels,omitempty"`
-	RestartPolicy   string                    `yaml:"restart_policy,omitempty"`
-	StopSignal      string                    `yaml:"stop_signal,omitempty"`
-	Tty             bool                      `yaml:"tty,omitempty"`
-	ScrollbackBytes int                       `yaml:"scrollback_bytes,omitempty"`
-	LogDriver       string                    `yaml:"log_driver,omitempty"`
-	LogOpts         map[string]string         `yaml:"log_opts,omitempty"`
-	After           map[string]CanonicalAfter `yaml:"after,omitempty"`
+	Dir             string                    `yaml:"dir" json:"dir"`
+	Args            []string                  `yaml:"args" json:"args"`
+	Env             []string                  `yaml:"env,omitempty" json:"env,omitzero"`
+	Labels          map[string]string         `yaml:"labels,omitempty" json:"labels,omitzero"`
+	RestartPolicy   string                    `yaml:"restart_policy,omitempty" json:"restart_policy,omitzero"` //nolint:lll // dual yaml+json snake_case tags exceed the line limit
+	StopSignal      string                    `yaml:"stop_signal,omitempty" json:"stop_signal,omitzero"`       //nolint:lll // dual yaml+json snake_case tags exceed the line limit
+	Tty             bool                      `yaml:"tty,omitempty" json:"tty,omitzero"`
+	ScrollbackBytes int                       `yaml:"scrollback_bytes,omitempty" json:"scrollback_bytes,omitzero"` //nolint:lll // dual yaml+json snake_case tags exceed the line limit
+	LogDriver       string                    `yaml:"log_driver,omitempty" json:"log_driver,omitzero"`
+	LogOpts         map[string]string         `yaml:"log_opts,omitempty" json:"log_opts,omitzero"`
+	After           map[string]CanonicalAfter `yaml:"after,omitempty" json:"after,omitzero"`
 }
 
 // CanonicalAfter is the resolved dependency condition for one predecessor.
 // Condition is always populated (normalization defaults it to "completed").
 type CanonicalAfter struct {
-	Condition string `yaml:"condition"`
+	Condition string `yaml:"condition" json:"condition"`
 }
 
 // Canonicalize projects a normalized [ComposeSpec] onto its [CanonicalSpec]

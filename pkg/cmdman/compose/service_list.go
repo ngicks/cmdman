@@ -11,24 +11,29 @@ import (
 
 // ProjectSummary describes one compose project discovered from stored command
 // labels.
+//
+// CLI-output type: rendered as JSON (`--format json`) and through `--format` Go
+// templates, where fields are referenced by Go name (.WorkDir, .ComposeFile).
+// It carries no json field-name tags so `{{json .}}` and `{{.Field}}` agree.
 type ProjectSummary struct {
-	Project     string `json:"project"`
-	WorkDir     string `json:"workdir"`
-	ComposeFile string `json:"compose_file,omitzero"`
-	Commands    int    `json:"commands"`
-	Running     int    `json:"running"`
-	Exited      int    `json:"exited"`
-	Failed      int    `json:"failed"`
+	Project     string
+	WorkDir     string
+	ComposeFile string `json:",omitzero"`
+	Commands    int
+	Running     int
+	Exited      int
+	Failed      int
 }
 
 // CommandStatus describes one stored command in a compose project.
+// CLI-output type; see ProjectSummary for why it carries no json name tags.
 type CommandStatus struct {
-	Command  string          `json:"command"`
-	ID       string          `json:"id"`
-	Name     string          `json:"name"`
-	State    model.EventType `json:"state"`
-	ExitCode *int            `json:"exit_code,omitzero"`
-	Argv     []string        `json:"argv,omitzero"`
+	Command  string
+	ID       string
+	Name     string
+	State    model.EventType
+	ExitCode *int     `json:",omitzero"`
+	Argv     []string `json:",omitzero"`
 }
 
 // ListProjects returns every compose project known to the cmdman store.

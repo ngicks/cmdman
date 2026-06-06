@@ -35,10 +35,10 @@ func TestLifecycle_RunStopRm(t *testing.T) {
 
 	// Step 4: Inspect while running.
 	info := env.inspectJSON(ctx, "lifecycle-cmd")
-	if info["state"] != "running" {
-		t.Errorf("expected state=running in inspect, got %v", info["state"])
+	if info["State"] != "running" {
+		t.Errorf("expected state=running in inspect, got %v", info["State"])
 	}
-	liveStatus, _ := info["live_status"].(map[string]any)
+	liveStatus, _ := info["LiveStatus"].(map[string]any)
 	if liveStatus == nil {
 		t.Error("expected live_status for running command")
 	}
@@ -51,8 +51,8 @@ func TestLifecycle_RunStopRm(t *testing.T) {
 
 	// Step 7: Verify exited state in inspect.
 	info = env.inspectJSON(ctx, "lifecycle-cmd")
-	if info["state"] != "exited" {
-		t.Errorf("expected state=exited after stop, got %v", info["state"])
+	if info["State"] != "exited" {
+		t.Errorf("expected state=exited after stop, got %v", info["State"])
 	}
 
 	// Step 8: Remove.
@@ -109,7 +109,7 @@ func TestLifecycle_RunRestartStop(t *testing.T) {
 
 	// Verify it has restarted multiple times.
 	info := env.inspectJSON(ctx, "restart-lifecycle")
-	history, _ := info["exit_history"].([]any)
+	history, _ := info["ExitHistory"].([]any)
 	if len(history) < 2 {
 		t.Errorf("expected at least 2 exit_history entries, got %d", len(history))
 	}
@@ -119,8 +119,8 @@ func TestLifecycle_RunRestartStop(t *testing.T) {
 	env.waitForState(ctx, "restart-lifecycle", "exited", defaultTimeout)
 
 	info = env.inspectJSON(ctx, "restart-lifecycle")
-	if info["state"] != "exited" {
-		t.Errorf("expected state=exited after stop, got %v", info["state"])
+	if info["State"] != "exited" {
+		t.Errorf("expected state=exited after stop, got %v", info["State"])
 	}
 }
 

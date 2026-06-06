@@ -19,12 +19,12 @@ func TestRestart_NoPolicy(t *testing.T) {
 	info := env.inspectJSON(ctx, id)
 
 	// Should have exactly one exit history entry.
-	history, _ := info["exit_history"].([]any)
+	history, _ := info["ExitHistory"].([]any)
 	if len(history) != 1 {
 		t.Errorf("expected 1 exit_history entry with restart=no, got %d", len(history))
 	}
 
-	exitCode, _ := info["exit_code"].(float64)
+	exitCode, _ := info["ExitCode"].(float64)
 	if exitCode != 1 {
 		t.Errorf("expected exit_code=1, got %v", exitCode)
 	}
@@ -57,19 +57,19 @@ exit 0
 	env.waitForState(ctx, id, "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, id)
-	exitCode, _ := info["exit_code"].(float64)
+	exitCode, _ := info["ExitCode"].(float64)
 	if exitCode != 0 {
 		t.Errorf("expected final exit_code=0 with on-failure restart, got %v", exitCode)
 	}
 
 	// Should have 3 exit history entries.
-	history, _ := info["exit_history"].([]any)
+	history, _ := info["ExitHistory"].([]any)
 	if len(history) != 3 {
 		t.Errorf("expected 3 exit_history entries, got %d", len(history))
 	}
 
 	// Verify restart count in state_detail.
-	stateDetail, _ := info["state_detail"].(map[string]any)
+	stateDetail, _ := info["StateJSON"].(map[string]any)
 	restartCount, _ := stateDetail["restart_count"].(float64)
 	if restartCount != 2 {
 		t.Errorf("expected restart_count=2, got %v", restartCount)
@@ -87,7 +87,7 @@ func TestRestart_OnFailure_SuccessDoesNotRestart(t *testing.T) {
 	env.waitForState(ctx, id, "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, id)
-	history, _ := info["exit_history"].([]any)
+	history, _ := info["ExitHistory"].([]any)
 	if len(history) != 1 {
 		t.Errorf("expected 1 exit_history entry (no restart on success), got %d", len(history))
 	}
@@ -110,7 +110,7 @@ func TestRestart_Always(t *testing.T) {
 	info := env.inspectJSON(ctx, "always-restart")
 
 	// Should have multiple exit history entries.
-	history, _ := info["exit_history"].([]any)
+	history, _ := info["ExitHistory"].([]any)
 	if len(history) < 2 {
 		t.Errorf(
 			"expected at least 2 exit_history entries with restart=always, got %d",
@@ -139,8 +139,8 @@ func TestRestart_AlwaysStoppedBySignal(t *testing.T) {
 	env.waitForState(ctx, "always-sleep", "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, "always-sleep")
-	if info["state"] != "exited" {
-		t.Errorf("expected state=exited after stop, got %v", info["state"])
+	if info["State"] != "exited" {
+		t.Errorf("expected state=exited after stop, got %v", info["State"])
 	}
 }
 

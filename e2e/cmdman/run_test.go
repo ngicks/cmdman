@@ -35,10 +35,10 @@ func TestRun_BasicCommand(t *testing.T) {
 
 	// Verify the command exited with code 0.
 	info := env.inspectJSON(ctx, id)
-	if info["state"] != "exited" {
-		t.Errorf("expected state=exited, got %v", info["state"])
+	if info["State"] != "exited" {
+		t.Errorf("expected state=exited, got %v", info["State"])
 	}
-	exitCode, _ := info["exit_code"].(float64)
+	exitCode, _ := info["ExitCode"].(float64)
 	if exitCode != 0 {
 		t.Errorf("expected exit_code=0, got %v", exitCode)
 	}
@@ -61,8 +61,8 @@ func TestRun_WithName(t *testing.T) {
 
 	// Inspect by name.
 	info := env.inspectJSON(ctx, "my-echo")
-	if info["name"] != "my-echo" {
-		t.Errorf("expected name=my-echo, got %v", info["name"])
+	if info["Name"] != "my-echo" {
+		t.Errorf("expected name=my-echo, got %v", info["Name"])
 	}
 }
 
@@ -75,7 +75,7 @@ func TestRun_NonZeroExitCode(t *testing.T) {
 	env.waitForState(ctx, id, "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, id)
-	exitCode, _ := info["exit_code"].(float64)
+	exitCode, _ := info["ExitCode"].(float64)
 	if exitCode != 42 {
 		t.Errorf("expected exit_code=42, got %v", exitCode)
 	}
@@ -90,7 +90,7 @@ func TestRun_WithWorkingDirectory(t *testing.T) {
 	env.waitForState(ctx, id, "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, id)
-	cfg, _ := info["config"].(map[string]any)
+	cfg, _ := info["Config"].(map[string]any)
 	if cfg["dir"] != "/tmp" {
 		t.Errorf("expected dir=/tmp, got %v", cfg["dir"])
 	}
@@ -109,7 +109,7 @@ func TestRun_WithEnvVars(t *testing.T) {
 	env.waitForState(ctx, id, "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, id)
-	cfg, _ := info["config"].(map[string]any)
+	cfg, _ := info["Config"].(map[string]any)
 	envList, _ := cfg["env"].([]any)
 
 	found := map[string]bool{}
@@ -151,12 +151,12 @@ test -f "$CMDMAN_CMD_DATA_DIR/config.json"
 	env.waitForState(ctx, id, "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, id)
-	exitCode, _ := info["exit_code"].(float64)
+	exitCode, _ := info["ExitCode"].(float64)
 	if exitCode != 0 {
 		t.Fatalf("expected injected cmdman context environment, exit_code=%v", exitCode)
 	}
 
-	cfg, _ := info["config"].(map[string]any)
+	cfg, _ := info["Config"].(map[string]any)
 	envList, _ := cfg["env"].([]any)
 	want := map[string]string{
 		cmdman.ENV_CMDMAN_DATA_DIR:     env.dataHome,
@@ -240,7 +240,7 @@ func TestRun_ScrollbackBytesFlag(t *testing.T) {
 	env.waitForState(ctx, id, "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, id)
-	cfg, _ := info["config"].(map[string]any)
+	cfg, _ := info["Config"].(map[string]any)
 	scrollback, _ := cfg["scrollback_bytes"].(float64)
 	if scrollback != 2048 {
 		t.Errorf("expected scrollback_bytes=2048, got %v", scrollback)
