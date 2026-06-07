@@ -10,9 +10,16 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
-// SpawnMonitor starts the monitor as a detached process via re-exec.
-// It launches the current executable with the __monitor subcommand.
-func SpawnMonitor(cfg CmdmanConfig, id string) (*os.Process, error) {
+// This file holds the platform-independent parts of monitor spawning. The
+// OS-specific detach strategy lives in mon_spawn_<os>.go (currently only the
+// POSIX double-fork in mon_spawn_posix.go): SpawnMonitor and DaemonizeMonitor
+// are defined there so a Windows implementation can be added as a sibling file
+// with no change to this one.
+
+// newMonitorCmd builds an exec.Cmd that re-runs the current binary's hidden
+// __monitor command for id. extraEnv is appended to the inherited environment;
+// pass nil to inherit it unchanged.
+func newMonitorCmd(cfg CmdmanConfig, id string, extraEnv []string) (*exec.Cmd, error) {
 	commandCfg, err := cfg.WithDefaults()
 	if err != nil {
 		return nil, err
@@ -28,22 +35,10 @@ func SpawnMonitor(cfg CmdmanConfig, id string) (*os.Process, error) {
 		"__monitor",
 		"--id", id,
 	)
-
-	clean, err := detachProcess(cmd)
-	if err != nil {
-		return nil, err
+	if extraEnv != nil {
+		cmd.Env = append(os.Environ(), extraEnv...)
 	}
-	defer clean()
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start monitor: %w", err)
-	}
-
-	// Release the child so it runs independently.
-	proc := cmd.Process
-	cmd.Process.Release()
-
-	return proc, nil
+	return cmd, nil
 }
 
 // WaitForState polls the store until the command reaches the desired state

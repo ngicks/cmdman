@@ -33,5 +33,5 @@ func runMonitor(cmd *cobra.Command, _ []string, rootCfg *cmdman.CmdmanConfig, id
 		return err
 	}
 	logger := contextkey.ValueSlogLoggerDefault(cmd.Context())
-	return cmdman.RunMonitor(cmd.Context(), id, cfg, logger)
+	return cmdman.DaemonizeMonitor(cmd.Context(), id, cfg, logger)
 }
