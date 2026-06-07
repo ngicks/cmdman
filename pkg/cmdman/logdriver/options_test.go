@@ -89,10 +89,20 @@ func TestParseLogMaxSize_Errors(t *testing.T) {
 }
 
 func TestValidateLogOpt_MaxSize(t *testing.T) {
-	assert.NilError(t, logdriver.ValidateOpt(string(logdriver.DriverK8sFile), logdriver.LogOptMaxSize, "10mb"))
-	assert.NilError(t, logdriver.ValidateOpt(string(logdriver.DriverK8sFile), logdriver.LogOptMaxSize, "0"))
+	assert.NilError(
+		t,
+		logdriver.ValidateOpt(string(logdriver.DriverK8sFile), logdriver.LogOptMaxSize, "10mb"),
+	)
+	assert.NilError(
+		t,
+		logdriver.ValidateOpt(string(logdriver.DriverK8sFile), logdriver.LogOptMaxSize, "0"),
+	)
 
-	err := logdriver.ValidateOpt(string(logdriver.DriverK8sFile), logdriver.LogOptMaxSize, "not-a-size")
+	err := logdriver.ValidateOpt(
+		string(logdriver.DriverK8sFile),
+		logdriver.LogOptMaxSize,
+		"not-a-size",
+	)
 	assert.Assert(t, err != nil)
 	assert.Assert(t, strings.Contains(err.Error(), "max-size"))
 
@@ -136,10 +146,20 @@ func TestParseLogMaxFile_Errors(t *testing.T) {
 }
 
 func TestValidateLogOpt_MaxFile(t *testing.T) {
-	assert.NilError(t, logdriver.ValidateOpt(string(logdriver.DriverK8sFile), logdriver.LogOptMaxFile, "3"))
-	assert.NilError(t, logdriver.ValidateOpt(string(logdriver.DriverK8sFile), logdriver.LogOptMaxFile, "0"))
+	assert.NilError(
+		t,
+		logdriver.ValidateOpt(string(logdriver.DriverK8sFile), logdriver.LogOptMaxFile, "3"),
+	)
+	assert.NilError(
+		t,
+		logdriver.ValidateOpt(string(logdriver.DriverK8sFile), logdriver.LogOptMaxFile, "0"),
+	)
 
-	err := logdriver.ValidateOpt(string(logdriver.DriverK8sFile), logdriver.LogOptMaxFile, "not-a-number")
+	err := logdriver.ValidateOpt(
+		string(logdriver.DriverK8sFile),
+		logdriver.LogOptMaxFile,
+		"not-a-number",
+	)
 	assert.Assert(t, err != nil)
 	assert.Assert(t, strings.Contains(err.Error(), "max-file"))
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,34 @@ func writeFixture(t *testing.T, path, body string) {
 	t.Helper()
 	assert.NilError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	assert.NilError(t, os.WriteFile(path, []byte(body), 0o644))
+}
+
+// syncBuffer is a bytes.Buffer guarded by a mutex. The follow tests have a
+// background reader goroutine append here while the test goroutine polls and
+// then inspects the contents; without the lock those concurrent accesses are a
+// data race (the -race detector fails them, and the read can observe torn state
+// even without it).
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) contains(sub string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return bytes.Contains(b.buf.Bytes(), []byte(sub))
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func mustTime(t *testing.T, value string) time.Time {
@@ -153,7 +182,7 @@ func TestNewReader_K8sFile_FollowReadsAppendedContent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var buf bytes.Buffer
+	var buf syncBuffer
 	done := make(chan error, 1)
 	go func() {
 		r, err := logdriver.NewReader(
@@ -193,7 +222,7 @@ func TestNewReader_K8sFile_FollowReadsAppendedContent(t *testing.T) {
 	// Wait for the appended content to surface, then cancel.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if bytes.Contains(buf.Bytes(), []byte("second")) {
+		if buf.contains("second") {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -351,7 +380,7 @@ func TestNewReader_K8sFile_TailFollowReadsAppendedContent(t *testing.T) {
 	assert.NilError(t, err)
 	defer r.Close()
 
-	var buf bytes.Buffer
+	var buf syncBuffer
 	done := make(chan error, 1)
 	go func() {
 		for rec := range r.Records() {
@@ -377,7 +406,7 @@ func TestNewReader_K8sFile_TailFollowReadsAppendedContent(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if bytes.Contains(buf.Bytes(), []byte("three")) {
+		if buf.contains("three") {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)

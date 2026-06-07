@@ -289,25 +289,31 @@ func promptWait(
 // sub-pipes. Each sub-pipe is given to one consumer (an [Attach] iteration
 // or a prompt). When a sub-pipe is closed, the mux moves on to the next.
 //
-// The pump goroutine runs for the lifetime of the mux. [Stop] is best-effort
-// — closing the source is the only way to unblock a stdin Read, and the
-// caller (typically [AttachSticky]) keeps source ownership.
+// The pump goroutine starts on the first [stdinMux.subPipe] call, not at
+// construction. Starting it eagerly would let it read — and, finding no active
+// consumer yet, drop — source bytes that arrive in the window before the first
+// consumer registers, losing the user's first keystroke (and hanging callers
+// like [PromptStickyWait] that deliver exactly one). Once started it runs until
+// [stdinMux.Stop] or source EOF. Stop is best-effort — closing the source is
+// the only way to unblock a stdin Read, and the caller (typically
+// [AttachSticky]) keeps source ownership.
 type stdinMux struct {
-	source io.Reader
-	mu     sync.Mutex
-	cur    io.WriteCloser
-	stop   chan struct{}
-	done   chan struct{}
+	source      io.Reader
+	mu          sync.Mutex
+	cur         io.WriteCloser
+	pumpStarted bool
+	stop        chan struct{}
+	done        chan struct{}
 }
 
 func newStdinMux(source io.Reader) *stdinMux {
-	m := &stdinMux{
+	// The pump is started lazily by the first subPipe call (see the type doc),
+	// so it never reads — and drops — a source byte before a consumer exists.
+	return &stdinMux{
 		source: source,
 		stop:   make(chan struct{}),
 		done:   make(chan struct{}),
 	}
-	go m.pump()
-	return m
 }
 
 func (m *stdinMux) pump() {
@@ -357,9 +363,16 @@ func (m *stdinMux) subPipe() io.ReadCloser {
 	m.mu.Lock()
 	prev := m.cur
 	m.cur = pw
+	startPump := !m.pumpStarted
+	m.pumpStarted = true
 	m.mu.Unlock()
 	if prev != nil {
 		_ = prev.Close()
+	}
+	// Start the pump only now that cur is set, so the first source byte reaches
+	// this consumer instead of being dropped by a not-yet-registered mux.
+	if startPump {
+		go m.pump()
 	}
 	return pr
 }

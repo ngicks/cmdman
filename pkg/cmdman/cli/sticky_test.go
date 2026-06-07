@@ -17,6 +17,20 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/cli"
 )
 
+// stickyTestTimeout is a deadlock guard for the asynchronous sticky-wait tests,
+// not a performance budget. In the success case PromptStickyWait/AttachSticky
+// react to a keypress or ctx cancellation within milliseconds; this deadline
+// only exists to fail a genuine hang instead of blocking the whole package.
+//
+// It is generous on purpose. These tests used to flake at the old 2s/3s values
+// because of a real startup race in stdinMux: it pumped and dropped the first
+// keystroke before a consumer was registered, so the read hung forever. That is
+// fixed in sticky.go (the pump now starts only once a consumer exists), making
+// the success path deterministic and fast. The wide margin keeps this guard
+// from firing on scheduler latency under a full parallel `go test ./...` run
+// while still catching a future hang regression before the package test timeout.
+const stickyTestTimeout = 30 * time.Second
+
 // nonTTYStdio returns an (stdin, stdout) pair of *os.File handles that
 // behave like real files but are NOT TTYs, so setupRawTerminal is a no-op.
 // Callers MUST close both at end of test.
@@ -193,7 +207,7 @@ func TestAttachStickyReattachKeepsStdout(t *testing.T) {
 
 	select {
 	case <-reached:
-	case <-time.After(3 * time.Second):
+	case <-time.After(stickyTestTimeout):
 		cancel()
 		t.Fatal("AttachSticky did not reach the third attach iteration")
 	}
@@ -201,7 +215,7 @@ func TestAttachStickyReattachKeepsStdout(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(stickyTestTimeout):
 		t.Fatal("AttachSticky did not return after ctx cancel")
 	}
 
@@ -258,7 +272,7 @@ func TestAttachStickyRecoverableAttachErrorDropsToPrompt(t *testing.T) {
 		assert.Assert(t, !errors.Is(err, errBoom),
 			"raw attach error must not propagate; got %v", err)
 		assert.ErrorIs(t, err, context.Canceled)
-	case <-time.After(3 * time.Second):
+	case <-time.After(stickyTestTimeout):
 		t.Fatal("AttachSticky did not return after ctx cancel")
 	}
 }
@@ -297,7 +311,7 @@ func TestPromptStickyWaitR(t *testing.T) {
 		assert.Equal(t, res, cli.PromptRestart)
 	case err := <-errCh:
 		t.Fatalf("unexpected error: %v", err)
-	case <-time.After(2 * time.Second):
+	case <-time.After(stickyTestTimeout):
 		t.Fatal("PromptStickyWait did not return")
 	}
 }
@@ -337,7 +351,7 @@ func TestPromptStickyWaitDetachKeys(t *testing.T) {
 		assert.Equal(t, res, cli.PromptDetach)
 	case err := <-errCh:
 		t.Fatalf("unexpected error: %v", err)
-	case <-time.After(2 * time.Second):
+	case <-time.After(stickyTestTimeout):
 		t.Fatal("PromptStickyWait did not return")
 	}
 }
@@ -381,7 +395,7 @@ func TestPromptStickyWaitContextCancel(t *testing.T) {
 		t.Fatal("expected ctx error, got result")
 	case err := <-errCh:
 		assert.Assert(t, errors.Is(err, context.Canceled))
-	case <-time.After(2 * time.Second):
+	case <-time.After(stickyTestTimeout):
 		t.Fatal("PromptStickyWait did not return on ctx cancel")
 	}
 }
