@@ -91,7 +91,7 @@ func newTestEnv(t *testing.T) *testEnv {
 }
 
 func (e *testEnv) exec(ctx context.Context, args ...string) (string, string, error) {
-	return e.execWithExtraEnv(ctx, nil, args...)
+	return e.execFull(ctx, "", nil, args...)
 }
 
 // execWithExtraEnv is like exec but appends additional environment variables.
@@ -100,10 +100,32 @@ func (e *testEnv) execWithExtraEnv(
 	extraEnv []string,
 	args ...string,
 ) (string, string, error) {
+	return e.execFull(ctx, "", extraEnv, args...)
+}
+
+// execInDir is like exec but runs the binary with its working directory set to
+// dir, so compose file auto-discovery (cmd-compose.yaml in CWD) is exercised.
+func (e *testEnv) execInDir(
+	ctx context.Context,
+	dir string,
+	args ...string,
+) (string, string, error) {
+	return e.execFull(ctx, dir, nil, args...)
+}
+
+// execFull runs the binary with an optional working directory (dir, "" inherits
+// the parent CWD) and extra environment variables appended.
+func (e *testEnv) execFull(
+	ctx context.Context,
+	dir string,
+	extraEnv []string,
+	args ...string,
+) (string, string, error) {
 	e.t.Helper()
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, cmdmanBin, args...)
+	cmd.Dir = dir
 	cmd.Env = append(
 		os.Environ(),
 		cmdman.ENV_CMDMAN_DATA_DIR+"="+e.dataHome,

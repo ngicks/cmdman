@@ -35,7 +35,7 @@ func runComposePs(
 	commandNames []string,
 	format string,
 ) error {
-	selection, err := compose.LoadOrProject(cf.normalizeOpts())
+	selection, err := compose.LoadOrWorkdir(cf.normalizeOpts())
 	if err != nil {
 		return err
 	}

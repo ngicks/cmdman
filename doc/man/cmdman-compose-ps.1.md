@@ -26,6 +26,15 @@ Uses the compose selection flags documented in
 [`cmdman compose`](./cmdman-compose.1.md): `-f, --file`,
 `-p, --project-name`, and `--workdir`.
 
+Unlike the lifecycle subcommands, `ps` does not auto-discover a
+`cmd-compose.yaml` in the working directory to narrow the listing: with neither
+`-f` nor `-p` it lists **every** command in the working directory, across all
+co-located projects (for example a `cmd-compose.yaml` project plus named
+projects whose `work_dir` points here). This keeps a status listing from
+silently hiding co-located projects. Pass `-f FILE` or `-p NAME` to scope the
+listing to a single project, or use [`cmdman compose ls`](./cmdman-compose-ls.1.md)
+for a project summary across the whole data directory.
+
 ## Options
 
 - `--format FORMAT`: built-in table, `json`, or a Go template.

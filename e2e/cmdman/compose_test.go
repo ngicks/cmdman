@@ -184,6 +184,78 @@ func TestComposeLsAndPs(t *testing.T) {
 	}
 }
 
+// TestComposePsListsAllProjectsInWorkdir verifies that `compose ps` without -f
+// or -p lists commands from every project sharing the working directory, even
+// when a cmd-compose.yaml is present in the CWD. The cmd-compose.yaml project
+// must not silently narrow the read-only listing to itself and hide co-located
+// projects (e.g. named projects under the compose config dir whose work_dir
+// points here). Explicit -f / -p still narrow the listing.
+func TestComposePsListsAllProjectsInWorkdir(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	projA, projB := "tc-ps-a", "tc-ps-b"
+
+	// projA lives in wd as the default cmd-compose.yaml (command "alpha").
+	writeComposeFile(t, wd, fmt.Sprintf(`name: %s
+commands:
+  alpha:
+    args: [sleep, "300"]
+`, projA))
+
+	// projB is a named project under the compose config dir whose work_dir
+	// points at wd, so it shares wd with projA (command "beta").
+	composeDir := filepath.Join(filepath.Dir(env.confPath), "compose")
+	must(t, os.MkdirAll(composeDir, 0o755))
+	must(t, os.WriteFile(filepath.Join(composeDir, projB+".yaml"), fmt.Appendf(nil, `name: %s
+work_dir: %s
+commands:
+  beta:
+    args: [sleep, "300"]
+`, projB, wd), 0o644))
+
+	t.Cleanup(func() {
+		cleanupProject(ctx, env, wd, projA)
+		cleanupProject(ctx, env, wd, projB)
+	})
+
+	// Bring both projects up from wd: projA via auto-discovery, projB via -f.
+	if _, stderr, err := env.execInDir(ctx, wd, "compose", "up"); err != nil {
+		t.Fatalf("compose up (projA) failed: %v\nstderr:\n%s", err, stderr)
+	}
+	if _, stderr, err := env.execInDir(ctx, wd, "compose", "-f", projB, "up"); err != nil {
+		t.Fatalf("compose up (projB) failed: %v\nstderr:\n%s", err, stderr)
+	}
+
+	// ps with no selection, run from wd (cmd-compose.yaml discoverable): must
+	// list BOTH projects' commands. Before the fix this listed only "alpha".
+	psOut, psErr, err := env.execInDir(ctx, wd, "compose", "ps")
+	if err != nil {
+		t.Fatalf("compose ps failed: %v\nstdout:\n%s\nstderr:\n%s", err, psOut, psErr)
+	}
+	if !strings.Contains(psOut, "alpha") || !strings.Contains(psOut, "beta") {
+		t.Fatalf("expected ps to list both alpha and beta; got:\n%s", psOut)
+	}
+
+	// Explicit -f still narrows to the named project (only beta, not alpha).
+	psOut, psErr, err = env.execInDir(ctx, wd, "compose", "-f", projB, "ps")
+	if err != nil {
+		t.Fatalf("compose -f %s ps failed: %v\nstdout:\n%s\nstderr:\n%s", projB, err, psOut, psErr)
+	}
+	if !strings.Contains(psOut, "beta") || strings.Contains(psOut, "alpha") {
+		t.Fatalf("expected -f ps to list only beta; got:\n%s", psOut)
+	}
+
+	// Explicit -p still narrows to the named project (only alpha, not beta).
+	psOut, psErr, err = env.execInDir(ctx, wd, "compose", "-p", projA, "ps")
+	if err != nil {
+		t.Fatalf("compose -p %s ps failed: %v\nstdout:\n%s\nstderr:\n%s", projA, err, psOut, psErr)
+	}
+	if !strings.Contains(psOut, "alpha") || strings.Contains(psOut, "beta") {
+		t.Fatalf("expected -p ps to list only alpha; got:\n%s", psOut)
+	}
+}
+
 func TestComposeUpIdempotent(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnv(t)

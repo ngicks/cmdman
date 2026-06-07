@@ -140,15 +140,7 @@ func LoadOrProject(opts NormalizeOpts) (ProjectSelection, error) {
 
 	filePath, raw, discoverErr := DiscoverFile(cwd, opts)
 	if discoverErr == nil {
-		spec, err := Normalize(context.Background(), filePath, raw, opts)
-		if err != nil {
-			return ProjectSelection{}, err
-		}
-		return ProjectSelection{
-			Spec:    &spec,
-			WorkDir: spec.WorkDir,
-			Project: spec.Project,
-		}, nil
+		return specSelection(filePath, raw, opts)
 	}
 	if opts.File != "" {
 		return ProjectSelection{}, discoverErr
@@ -157,6 +149,62 @@ func LoadOrProject(opts NormalizeOpts) (ProjectSelection, error) {
 	// No compose file: query by working directory. --project-name narrows the
 	// selection; when empty it matches every command in this workdir (cwd), which
 	// is how down/stop/... work from the project directory without -f.
+	return workdirSelection(cwd, opts), nil
+}
+
+// LoadOrWorkdir resolves the project selection for read-only listing operations
+// (ps) that report stored reality for a working directory.
+//
+// Unlike [LoadOrProject] it does NOT auto-discover a default compose file: an
+// auto-discovered cmd-compose.yaml must not silently narrow a status listing to
+// a single project when several projects share the workdir (a co-located
+// cmd-compose.yaml project plus named projects whose work_dir points here).
+//
+// Resolution order:
+//  1. An explicit --file is loaded and normalized; the selection is scoped to
+//     its (workdir, project). A --file that fails to load is an error.
+//  2. Otherwise the selection is scoped to the working directory (--workdir or
+//     the process CWD). --project-name narrows it; when absent the selection
+//     matches every command in that workdir, listing every co-located project.
+func LoadOrWorkdir(opts NormalizeOpts) (ProjectSelection, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ProjectSelection{}, fmt.Errorf("get working directory: %w", err)
+	}
+
+	if opts.File != "" {
+		filePath, raw, err := DiscoverFile(cwd, opts)
+		if err != nil {
+			return ProjectSelection{}, err
+		}
+		return specSelection(filePath, raw, opts)
+	}
+
+	return workdirSelection(cwd, opts), nil
+}
+
+// specSelection normalizes a decoded compose file into a selection scoped to the
+// spec's (workdir, project).
+func specSelection(
+	filePath string,
+	raw RawComposeSpec,
+	opts NormalizeOpts,
+) (ProjectSelection, error) {
+	spec, err := Normalize(context.Background(), filePath, raw, opts)
+	if err != nil {
+		return ProjectSelection{}, err
+	}
+	return ProjectSelection{
+		Spec:    &spec,
+		WorkDir: spec.WorkDir,
+		Project: spec.Project,
+	}, nil
+}
+
+// workdirSelection builds a fileless selection scoped to a working directory:
+// WorkDir is --workdir (resolved against CWD) or CWD; Project is --project-name,
+// where "" matches every command in the workdir.
+func workdirSelection(cwd string, opts NormalizeOpts) ProjectSelection {
 	workDir := opts.WorkDir
 	if workDir == "" {
 		workDir = cwd
@@ -170,7 +218,7 @@ func LoadOrProject(opts NormalizeOpts) (ProjectSelection, error) {
 		Spec:    nil,
 		WorkDir: workDir,
 		Project: opts.ProjectName,
-	}, nil
+	}
 }
 
 // SelectMuxProject auto-selects the compose project for `compose mux` when the
