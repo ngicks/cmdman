@@ -344,6 +344,7 @@ func TestComposeAttachDetach(t *testing.T) {
 		t.Fatalf("start compose attach pty: %v", err)
 	}
 	defer ptmx.Close()
+	answerTerminalProbes(ptmx, nil)
 
 	time.Sleep(300 * time.Millisecond)
 	if _, err := ptmx.Write([]byte{0x10, 0x11}); err != nil {

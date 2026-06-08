@@ -60,7 +60,7 @@ func (s *Service) Down(
 	}
 
 	spec := selection.Spec
-	if spec == nil {
+	if spec == nil && !spansMultipleProjects(allEntries) {
 		stored, ok, err := reconstructProjectFromMeta(selection, allEntries)
 		if err != nil {
 			return nil, err
@@ -120,6 +120,37 @@ func (s *Service) Down(
 	removes := removeAllConcurrent(ctx, s, removeTargets, selection.Project)
 
 	return &DownResult{Stops: stops, Removes: removes}, nil
+}
+
+// spansMultipleProjects reports whether entries carry more than one distinct
+// compose project label.
+//
+// A cwd-scoped selection (no -f and no --project-name) legitimately matches
+// every project sharing the workdir, so the entries can belong to several
+// projects. There is no single dependency graph across projects, so Down must
+// not treat that as the ambiguous-graph error; instead it skips graph
+// reconstruction and tears every selected command down via the brute-force
+// stop+remove path (spec stays nil). Per-project reverse-dependency stop
+// ordering is not preserved across that whole-workdir teardown, which matches
+// the fileless behavior before graph reconstruction was introduced.
+func spansMultipleProjects(entries []cmdmanEntry) bool {
+	first := ""
+	seen := false
+	for _, e := range entries {
+		if e.ConfigJSON == nil {
+			continue
+		}
+		project := e.ConfigJSON.Labels[LabelProject]
+		if !seen {
+			first = project
+			seen = true
+			continue
+		}
+		if project != first {
+			return true
+		}
+	}
+	return false
 }
 
 // runningEntries returns the entries with a live monitor (running/starting),
