@@ -3,7 +3,7 @@ package tui
 import (
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
@@ -93,8 +93,9 @@ func (m Model) onHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // onFilterKey edits the active tab's filter text. Single-key lifecycle/quit
 // bindings are inert while the filter input has focus.
 func (m Model) onFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEsc:
+	key := msg.Key()
+	switch key.Code {
+	case tea.KeyEscape:
 		m.setFiltering(false)
 		return m, nil
 	case tea.KeyEnter:
@@ -110,12 +111,12 @@ func (m Model) onFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return string(r[:len(r)-1])
 		})
 		return m, nil
-	case tea.KeySpace:
-		m.appendFilter(" ")
-		return m, nil
-	case tea.KeyRunes:
-		m.appendFilter(string(msg.Runes))
-		return m, nil
+	}
+	// v2 carries printable input (letters, digits, space, …) in Key.Text;
+	// special keys leave it empty, so this also covers what KeySpace/KeyRunes
+	// handled in v1.
+	if key.Text != "" {
+		m.appendFilter(key.Text)
 	}
 	return m, nil
 }

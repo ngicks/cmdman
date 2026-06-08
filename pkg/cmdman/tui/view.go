@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 
@@ -89,8 +90,16 @@ func statusStyle(state model.EventType, pending string) lipgloss.Style {
 	}
 }
 
-// View implements tea.Model.
-func (m Model) View() string {
+// View implements tea.Model. In v2 the view carries its own terminal modes
+// (alternate screen, etc.), so AltScreen is requested here per-frame rather
+// than as a program option.
+func (m Model) View() tea.View {
+	v := tea.NewView(m.viewContent())
+	v.AltScreen = m.altScreen
+	return v
+}
+
+func (m Model) viewContent() string {
 	if m.quitting {
 		return ""
 	}

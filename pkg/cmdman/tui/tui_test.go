@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
@@ -151,12 +151,12 @@ func selectCmd(m *Model, idx int) {
 	}
 }
 
-func kr(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+func kr(s string) tea.KeyMsg { return tea.KeyPressMsg{Code: []rune(s)[0], Text: s} }
 
 var (
-	kTab   = tea.KeyMsg{Type: tea.KeyTab}
-	kEnter = tea.KeyMsg{Type: tea.KeyEnter}
-	kEsc   = tea.KeyMsg{Type: tea.KeyEsc}
+	kTab   = tea.KeyPressMsg{Code: tea.KeyTab}
+	kEnter = tea.KeyPressMsg{Code: tea.KeyEnter}
+	kEsc   = tea.KeyPressMsg{Code: tea.KeyEscape}
 )
 
 // seed builds a model with two projects; local-dev is the cwd-tied project.
@@ -538,7 +538,7 @@ func TestRemoveRequiresExplicitConfirmation(t *testing.T) {
 	// Reopen, move to the action button, confirm.
 	m.commands.selected = 2
 	m, _ = upd(m, kr("x"))
-	m, _ = upd(m, tea.KeyMsg{Type: tea.KeyLeft}) // toggle to <yes>
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyLeft}) // toggle to <yes>
 	m, cmd = upd(m, kEnter)
 	if cmd == nil {
 		t.Fatalf("confirming <yes> should dispatch a remove command")

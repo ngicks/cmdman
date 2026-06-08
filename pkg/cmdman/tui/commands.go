@@ -3,7 +3,7 @@ package tui
 import (
 	"context"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // commandsLoadedMsg carries the result of a ListCommands load.

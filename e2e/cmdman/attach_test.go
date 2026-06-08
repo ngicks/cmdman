@@ -35,7 +35,6 @@ func TestAttach_DetachKeysExitWithoutStoppingCommand(t *testing.T) {
 		t.Fatalf("start attach pty: %v", err)
 	}
 	defer ptmx.Close()
-	answerTerminalProbes(ptmx, nil)
 
 	time.Sleep(300 * time.Millisecond)
 	if _, err := ptmx.Write([]byte{0x10, 0x11}); err != nil {
@@ -69,7 +68,6 @@ func TestAttach_ExitsWhenCommandStopsFromCtrlC(t *testing.T) {
 		t.Fatalf("start attach pty: %v", err)
 	}
 	defer ptmx.Close()
-	answerTerminalProbes(ptmx, nil)
 
 	time.Sleep(300 * time.Millisecond)
 	if _, err := ptmx.Write([]byte{0x03}); err != nil {
@@ -110,8 +108,12 @@ func TestAttach_DetachRestoresShellTtyMode(t *testing.T) {
 	}
 	defer ptmx.Close()
 
-	var output lockedBuffer
-	doneRead := answerTerminalProbes(ptmx, &output)
+	var output bytes.Buffer
+	doneRead := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&output, ptmx)
+		close(doneRead)
+	}()
 
 	time.Sleep(300 * time.Millisecond)
 	if _, err := ptmx.Write([]byte{0x10, 0x11}); err != nil {
@@ -172,8 +174,12 @@ func TestAttach_CtrlCRestoresShellTtyMode(t *testing.T) {
 	}
 	defer ptmx.Close()
 
-	var output lockedBuffer
-	doneRead := answerTerminalProbes(ptmx, &output)
+	var output bytes.Buffer
+	doneRead := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&output, ptmx)
+		close(doneRead)
+	}()
 
 	time.Sleep(300 * time.Millisecond)
 	if _, err := ptmx.Write([]byte{0x03}); err != nil {
@@ -200,65 +206,6 @@ func TestAttach_CtrlCRestoresShellTtyMode(t *testing.T) {
 			text,
 		)
 	}
-}
-
-// lockedBuffer is a goroutine-safe bytes.Buffer for collecting PTY output from
-// the reader goroutine [answerTerminalProbes] starts.
-type lockedBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *lockedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *lockedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
-// answerTerminalProbes drains ptmx in a goroutine, mirroring everything read
-// into sink (nil discards) and replying to the OSC 11 (background color) and
-// DSR (cursor position) capability probes the way a real terminal does.
-//
-// These probes are emitted from bubbletea's package init() — which the cmdman
-// binary links transitively via its TUI command — and run before main(),
-// blocking on stdin until the terminal answers. Without a reply attach never
-// reaches raw-mode and signal setup, so the detach keys / ctrl-c the tests send
-// are mishandled (swallowed in cooked mode, or ISIG kills attach outright). A
-// real interactive terminal answers instantly; the test PTY must do the same.
-//
-// The returned channel closes once the reader goroutine exits (ptmx closed),
-// letting callers that inspect sink wait for the final flush.
-func answerTerminalProbes(ptmx *os.File, sink io.Writer) <-chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		b := make([]byte, 4096)
-		for {
-			n, rerr := ptmx.Read(b)
-			if n > 0 {
-				chunk := b[:n]
-				if sink != nil {
-					_, _ = sink.Write(chunk)
-				}
-				if bytes.Contains(chunk, []byte("\x1b]11;?")) {
-					_, _ = ptmx.Write([]byte("\x1b]11;rgb:0000/0000/0000\x1b\\"))
-				}
-				if bytes.Contains(chunk, []byte("\x1b[6n")) {
-					_, _ = ptmx.Write([]byte("\x1b[1;1R"))
-				}
-			}
-			if rerr != nil {
-				return
-			}
-		}
-	}()
-	return done
 }
 
 func waitAttachExit(t *testing.T, cmd *exec.Cmd, timeout time.Duration) {

@@ -3,7 +3,7 @@ package tui
 import (
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // muxDoneMsg reports the result of a mux cycle invocation.

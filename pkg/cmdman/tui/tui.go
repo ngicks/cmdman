@@ -14,7 +14,7 @@ package tui
 import (
 	"context"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
@@ -143,12 +143,9 @@ type Options struct {
 func Run(ctx context.Context, opts Options) error {
 	m := New(opts)
 	m.ctx = ctx
-	var teaOpts []tea.ProgramOption
-	teaOpts = append(teaOpts, tea.WithContext(ctx))
-	if opts.AltScreen {
-		teaOpts = append(teaOpts, tea.WithAltScreen())
-	}
-	p := tea.NewProgram(m, teaOpts...)
+	// v2: the alternate screen is requested per-frame via View().AltScreen
+	// (see Model.View), not as a program option.
+	p := tea.NewProgram(m, tea.WithContext(ctx))
 	_, err := p.Run()
 	return err
 }
@@ -159,6 +156,7 @@ func New(opts Options) Model {
 		backend:   opts.Backend,
 		version:   opts.Version,
 		popupMode: opts.PopupMode,
+		altScreen: opts.AltScreen,
 		active:    tabCommands,
 		commands: commandsTab{
 			fold:  map[string]bool{},

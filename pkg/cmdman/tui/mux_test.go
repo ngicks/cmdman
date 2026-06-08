@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // composeSeed builds a model on the Compose tab with two projects: one with a
@@ -104,7 +104,7 @@ func TestCycleMuxDirectModeWarnsFirst(t *testing.T) {
 	}
 
 	// Confirm: move to <continue> and press enter.
-	m, _ = upd(m, tea.KeyMsg{Type: tea.KeyLeft})
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyLeft})
 	m, cmd = upd(m, kEnter)
 	if cmd == nil {
 		t.Fatalf("confirming the warning should invoke the mux cycle")

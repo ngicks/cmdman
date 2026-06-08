@@ -5,7 +5,7 @@ import (
 	"io"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 )
@@ -255,5 +255,5 @@ func (m Model) onAttachDone(msg attachDoneMsg) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("detached from %s", msg.name)
 	}
 	// Redraw cleanly, re-query terminal size, and refresh after the handoff.
-	return m, tea.Batch(tea.ClearScreen, tea.WindowSize(), m.loadCommandsCmd())
+	return m, tea.Batch(tea.ClearScreen, tea.RequestWindowSize, m.loadCommandsCmd())
 }

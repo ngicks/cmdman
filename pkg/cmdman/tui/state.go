@@ -60,6 +60,7 @@ type Model struct {
 	reloadGen int         // debounce generation for event-triggered re-list
 
 	popupMode bool // running inside a multiplexer popup
+	altScreen bool // render in the alternate screen buffer (set per-View in v2)
 
 	spinner  int  // animation frame for in-progress status markers
 	spinning bool // whether the spinner ticker is currently running
