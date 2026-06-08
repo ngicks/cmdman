@@ -7,7 +7,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.3
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/compose-spec/compose-go/v2 v2.11.0
-	github.com/creack/pty/v2 v2.0.1
+	github.com/creack/pty v1.1.24
 	github.com/dustin/go-humanize v1.0.1
 	github.com/mattn/go-runewidth v0.0.23
 	github.com/muesli/cancelreader v0.2.2

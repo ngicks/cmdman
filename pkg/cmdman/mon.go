@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/creack/pty/v2"
+	"github.com/creack/pty"
 	"google.golang.org/grpc"
 
 	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"

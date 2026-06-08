@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/creack/pty/v2"
+	"github.com/creack/pty"
 	"github.com/ngicks/cmdman/pkg/cmdman"
 )
 

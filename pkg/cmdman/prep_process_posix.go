@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/creack/pty/v2"
+	"github.com/creack/pty"
 )
 
 // startTty starts cmd attached to a fresh PTY and returns the master fd.
