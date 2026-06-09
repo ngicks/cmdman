@@ -4,6 +4,7 @@ description: APM project for cmdman
 author: ngicks
 dependencies:
   apm:
+  - ngicks/agents-package/hooks/go-vet-ngcheckers
   - ngicks/agents-package/hooks/golangci-lint-fmt-after-edit
   - ngicks/agents-package/hooks/golangci-lint-run-after-edit
   - ngicks/agents-package/instructions/base-env.instructions.md
