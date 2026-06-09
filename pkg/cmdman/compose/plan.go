@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
@@ -22,12 +25,19 @@ const (
 	ActionUnchanged ActionKind = "unchanged"
 )
 
-// CommandAction describes the required action for a single compose command.
+// CommandAction describes the required action for a single compose command
+// replica (one scale instance).
 type CommandAction struct {
 	// Kind is the action type.
 	Kind ActionKind
-	// Desired is the normalized command from the compose spec.
+	// Desired is the normalized command (service definition) from the compose
+	// spec; every replica of the command shares it.
 	Desired Command
+	// ScaleIndex is the 1-based replica index this action targets.
+	ScaleIndex int
+	// InstanceName is the concrete cmdman command name for this replica
+	// (Desired.GeneratedName with the scale-index suffix).
+	InstanceName string
 	// Existing is the current store entry, nil for ActionCreate.
 	Existing *store.CommandEntry
 	// DesiredHash is the computed hash of the desired command config.
@@ -38,11 +48,16 @@ type CommandAction struct {
 // project-labeled commands.
 type Plan struct {
 	// Actions lists create/recreate/unchanged actions in topological order
-	// (commands with no dependencies come first).
+	// (commands with no dependencies come first), one per desired replica.
 	Actions []CommandAction
-	// Orphans lists existing commands that belong to the project but are absent
-	// from the desired spec.
+	// Orphans lists existing commands that belong to the project but whose
+	// compose command name is absent from the desired spec.
 	Orphans []store.CommandEntry
+	// ExcessReplicas lists existing instances of a still-desired command whose
+	// scale index exceeds the desired replica count — the surplus left by a
+	// scale-down. Unlike orphans, these are always reconciled away (stopped and
+	// removed) because reducing scale is an explicit instruction.
+	ExcessReplicas []store.CommandEntry
 }
 
 // ComputePlan computes the reconciliation plan for the given desired spec against the
@@ -69,8 +84,11 @@ func ComputePlan(spec ComposeSpec, existing []store.CommandEntry) (Plan, error) 
 		desiredByName[c.Name] = c
 	}
 
-	// Index existing commands by compose command name label.
-	existingByCommand := make(map[string]store.CommandEntry)
+	// Index existing commands by (compose command name, scale index). A desired
+	// command whose existing instances exceed its replica count leaves the
+	// surplus in existingByInstance after the desired loop consumes the in-range
+	// ones; that surplus is the scale-down excess.
+	existingByInstance := make(map[instanceKey]store.CommandEntry)
 	var orphans []store.CommandEntry
 
 	for _, e := range existing {
@@ -91,7 +109,7 @@ func ComputePlan(spec ComposeSpec, existing []store.CommandEntry) (Plan, error) 
 		}
 
 		if _, wanted := desiredByName[cmdName]; wanted {
-			existingByCommand[cmdName] = e
+			existingByInstance[instanceKey{cmdName, scaleIndexOf(e)}] = e
 		} else {
 			orphans = append(orphans, e)
 		}
@@ -115,60 +133,95 @@ func ComputePlan(spec ComposeSpec, existing []store.CommandEntry) (Plan, error) 
 		for _, name := range layer {
 			desired := cmdByName[name]
 
+			// All replicas share the same runtime config, hence the same hash.
 			desiredHash, err := Hash(desired)
 			if err != nil {
 				return Plan{}, fmt.Errorf("hash command %q: %w", name, err)
 			}
 
-			ex, exists := existingByCommand[name]
-			if !exists {
-				actions = append(actions, CommandAction{
-					Kind:        ActionCreate,
-					Desired:     desired,
-					Existing:    nil,
-					DesiredHash: desiredHash,
-				})
-				continue
-			}
+			scale := max(desired.Scale, 1)
+			for idx := 1; idx <= scale; idx++ {
+				key := instanceKey{name, idx}
+				action := CommandAction{
+					Desired:      desired,
+					ScaleIndex:   idx,
+					InstanceName: InstanceName(desired.GeneratedName, idx),
+					DesiredHash:  desiredHash,
+				}
 
-			storedHash := ""
-			if ex.ConfigJSON != nil {
-				storedHash = ex.ConfigJSON.Labels[LabelConfigHash]
-			}
+				ex, exists := existingByInstance[key]
+				if !exists {
+					action.Kind = ActionCreate
+					actions = append(actions, action)
+					continue
+				}
+				// Consume the matched instance so it is not later flagged excess.
+				delete(existingByInstance, key)
 
-			if storedHash == desiredHash {
-				actions = append(actions, CommandAction{
-					Kind:        ActionUnchanged,
-					Desired:     desired,
-					Existing:    &ex,
-					DesiredHash: desiredHash,
-				})
-			} else {
-				actions = append(actions, CommandAction{
-					Kind:        ActionRecreate,
-					Desired:     desired,
-					Existing:    &ex,
-					DesiredHash: desiredHash,
-				})
+				storedHash := ""
+				if ex.ConfigJSON != nil {
+					storedHash = ex.ConfigJSON.Labels[LabelConfigHash]
+				}
+				action.Existing = &ex
+				if storedHash == desiredHash {
+					action.Kind = ActionUnchanged
+				} else {
+					action.Kind = ActionRecreate
+				}
+				actions = append(actions, action)
 			}
 		}
 	}
 
+	// Whatever desired-command instances remain unconsumed are surplus replicas
+	// from a scale-down. Order them deterministically for stable reporting.
+	var excess []store.CommandEntry
+	for _, e := range existingByInstance {
+		excess = append(excess, e)
+	}
+	slices.SortFunc(excess, func(a, b store.CommandEntry) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+
 	return Plan{
-		Actions: actions,
-		Orphans: orphans,
+		Actions:        actions,
+		Orphans:        orphans,
+		ExcessReplicas: excess,
 	}, nil
 }
 
-// BuildLabels returns the complete label map for a compose command, merging
-// user labels with the reserved compose labels.
-// configHash should be the output of Hash(cmd).
+// instanceKey identifies one replica of a compose command by its command name
+// and 1-based scale index.
+type instanceKey struct {
+	command    string
+	scaleIndex int
+}
+
+// scaleIndexOf reads the 1-based scale index recorded on an existing entry. A
+// missing or unparseable label yields 0, which never matches a desired index
+// (>= 1), so such an entry is treated as surplus/orphan rather than a live
+// replica.
+func scaleIndexOf(e store.CommandEntry) int {
+	if e.ConfigJSON == nil {
+		return 0
+	}
+	n, err := strconv.Atoi(e.ConfigJSON.Labels[LabelScaleIndex])
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// BuildLabels returns the complete label map for one replica of a compose
+// command, merging user labels with the reserved compose labels. scaleIndex is
+// the replica's 1-based index. configHash should be the output of Hash(cmd).
 func BuildLabels(
 	spec ComposeSpec,
 	cmd Command,
 	configHash string,
+	scaleIndex int,
 ) map[string]string {
-	labels := make(map[string]string, len(cmd.Labels)+7)
+	labels := make(map[string]string, len(cmd.Labels)+9)
 	maps.Copy(labels, cmd.Labels)
 	labels[LabelProject] = spec.Project
 	labels[LabelCommand] = cmd.Name
@@ -176,6 +229,8 @@ func BuildLabels(
 	labels[LabelVersion] = LabelVersionValue
 	labels[LabelWorkdir] = spec.WorkDir
 	labels[LabelFile] = spec.ComposeFile
+	labels[LabelScaleIndex] = strconv.Itoa(scaleIndex)
+	labels[LabelScale] = strconv.Itoa(max(cmd.Scale, 1))
 	if len(cmd.After) > 0 {
 		after, err := json.Marshal(cmd.After)
 		if err != nil {

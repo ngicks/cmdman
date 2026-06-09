@@ -93,15 +93,22 @@ func runMux(
 		return fmt.Errorf("locate cmdman binary: %w", err)
 	}
 
-	resolver := func(ctx context.Context, leafName string) (string, error) {
-		out, err := svc.Inspect(ctx, leafName)
+	// Standalone mux leaves name concrete cmdman commands, so there is no replica
+	// cycling (nil counter). A leaf may still pin an explicit scale index, which
+	// resolves the suffixed command name "<leaf>-<scaleIndex>".
+	resolver := func(ctx context.Context, leafName string, scaleIndex int) (string, error) {
+		target := leafName
+		if scaleIndex > 0 {
+			target = fmt.Sprintf("%s-%d", leafName, scaleIndex)
+		}
+		out, err := svc.Inspect(ctx, target)
 		if err != nil {
 			return "", err
 		}
 		return out.ID, nil
 	}
 
-	built, err := mux.Build(cmd.Context(), spec, resolver, mux.PaneArgvOpts{
+	built, err := mux.Build(cmd.Context(), spec, resolver, nil, mux.PaneArgvOpts{
 		Executable: exe,
 		DataDir:    cfg.DataDir,
 		RuntimeDir: cfg.RuntimeDir,

@@ -3,62 +3,89 @@ package compose
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
 )
 
-// OpenAttachSession resolves a single compose command name to its backing
+// OpenAttachSession resolves one replica of a compose command to its backing
 // cmdman command ID and opens an attach session against it.
 //
 // Unlike the project-wide compose operations, attach targets exactly one
-// service: a PTY can only be bound to one terminal. commandName must be a known
-// compose command with exactly one backing cmdman command.
+// replica: a PTY can only be bound to one terminal. scaleIndex selects the
+// replica (1-based); 0 means "the sole replica" and errors when the command is
+// scaled to more than one.
 func (s *Service) OpenAttachSession(
 	ctx context.Context,
 	selection ProjectSelection,
 	commandName string,
+	scaleIndex int,
 ) (*cmdman.Session, error) {
-	id, err := s.ResolveCommandID(ctx, selection, commandName)
+	id, err := s.ResolveCommandID(ctx, selection, commandName, scaleIndex)
 	if err != nil {
 		return nil, err
 	}
 	return s.svc.OpenAttachSession(ctx, id)
 }
 
-// ResolveCommandID resolves a single compose command name to the cmdman command
-// ID backing it within the selected project. Exported so other operations that
-// take a single service name (e.g. `compose mux` leaf resolution) can share the
-// lookup logic.
+// ResolveCommandID resolves one replica of a compose command to the cmdman
+// command ID backing it within the selected project. scaleIndex selects the
+// replica (1-based); 0 means "the sole replica" and errors when the command has
+// more than one, prompting the caller to disambiguate. Exported so other
+// single-service operations (e.g. `compose attach`) can share the lookup.
 func (s *Service) ResolveCommandID(
 	ctx context.Context,
 	selection ProjectSelection,
 	commandName string,
+	scaleIndex int,
 ) (string, error) {
+	replicas, err := s.ResolveReplicas(ctx, selection, commandName)
+	if err != nil {
+		return "", err
+	}
+	if scaleIndex <= 0 {
+		if len(replicas) != 1 {
+			return "", fmt.Errorf(
+				"compose command %q has %d replicas; select one with a scale index (1..%d)",
+				commandName, len(replicas), len(replicas))
+		}
+		return replicas[0].ID, nil
+	}
+	if scaleIndex > len(replicas) {
+		return "", fmt.Errorf(
+			"compose command %q has no replica %d (scale is %d)",
+			commandName, scaleIndex, len(replicas))
+	}
+	return replicas[scaleIndex-1].ID, nil
+}
+
+// ResolveReplicas returns the existing replicas of commandName within the
+// selected project, ordered by 1-based scale index (index 1 first). It errors
+// when the command is unknown or has no created replicas.
+func (s *Service) ResolveReplicas(
+	ctx context.Context,
+	selection ProjectSelection,
+	commandName string,
+) ([]cmdmanEntry, error) {
 	entries, err := s.svc.List(ctx, cmdman.ListRequest{
 		AllStates: true,
 		Labels:    projectLabels(selection.WorkDir, selection.Project),
 	})
 	if err != nil {
-		return "", fmt.Errorf("list project commands: %w", err)
+		return nil, fmt.Errorf("list project commands: %w", err)
 	}
 
 	if err := validateCommandNames([]string{commandName}, selection.Spec, entries); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	matched := filterByCommandNames(entries, []string{commandName})
-	switch len(matched) {
-	case 0:
-		return "", fmt.Errorf(
+	if len(matched) == 0 {
+		return nil, fmt.Errorf(
 			"compose command %q not found in project (has it been created?)", commandName)
-	case 1:
-		return matched[0].ID, nil
-	default:
-		ids := make([]string, len(matched))
-		for i, e := range matched {
-			ids[i] = e.ID
-		}
-		return "", fmt.Errorf(
-			"compose command %q maps to multiple commands %v; remove duplicates", commandName, ids)
 	}
+	slices.SortFunc(matched, func(a, b cmdmanEntry) int {
+		return scaleIndexOf(a) - scaleIndexOf(b)
+	})
+	return matched, nil
 }

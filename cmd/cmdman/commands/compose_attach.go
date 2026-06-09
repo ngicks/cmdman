@@ -15,7 +15,10 @@ import (
 )
 
 func composeAttachCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
-	var flags attachFlags
+	var (
+		flags     attachFlags
+		flagScale int
+	)
 
 	cmd := &cobra.Command{
 		Use:               "attach [flags] SERVICE",
@@ -23,7 +26,7 @@ func composeAttachCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *c
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeAttach(cmd, rootCfg, cf, args[0], flags)
+			return runComposeAttach(cmd, rootCfg, cf, args[0], flags, flagScale)
 		},
 	}
 
@@ -35,6 +38,12 @@ func composeAttachCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *c
 		&flags.AutoExit, "auto-exit", false,
 		"Exit immediately when the command exits or is not running (opt out of sticky default)",
 	)
+	f.IntVar(
+		&flagScale,
+		"scale",
+		0,
+		"Scale index (1-based) of the replica to attach to; required when the service has >1 replica",
+	)
 
 	parent.AddCommand(cmd)
 }
@@ -45,6 +54,7 @@ func runComposeAttach(
 	cf *composeFlags,
 	serviceName string,
 	flags attachFlags,
+	scaleIndex int,
 ) error {
 	selection, err := compose.LoadOrProject(cf.normalizeOpts())
 	if err != nil {
@@ -74,7 +84,7 @@ func runComposeAttach(
 	}
 
 	if flags.AutoExit {
-		session, err := composeSvc.OpenAttachSession(attachCtx, selection, serviceName)
+		session, err := composeSvc.OpenAttachSession(attachCtx, selection, serviceName, scaleIndex)
 		if err != nil {
 			return err
 		}
@@ -87,7 +97,7 @@ func runComposeAttach(
 		return err
 	}
 
-	id, err := composeSvc.ResolveCommandID(attachCtx, selection, serviceName)
+	id, err := composeSvc.ResolveCommandID(attachCtx, selection, serviceName, scaleIndex)
 	if err != nil {
 		return err
 	}

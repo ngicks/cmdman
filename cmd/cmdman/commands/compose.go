@@ -57,6 +57,7 @@ func composeCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	composePsCmd(cmd, rootCfg, &flags)
 	composeInspectCmd(cmd, rootCfg, &flags)
 	composeUpCmd(cmd, rootCfg, &flags)
+	composeScaleCmd(cmd, rootCfg, &flags)
 	composeStartCmd(cmd, rootCfg, &flags)
 	composeStopCmd(cmd, rootCfg, &flags)
 	composeRestartCmd(cmd, rootCfg, &flags)

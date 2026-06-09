@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -23,12 +24,33 @@ func escapeName(s string) string {
 	return strings.ReplaceAll(s, "-", "--")
 }
 
-// GenerateName returns the deterministic cmdman command name for a compose command.
-// Format: <workdir-hash>-<escaped-project>-<escaped-command>
+// GenerateName returns the deterministic cmdman command base name for a compose
+// command. Format: <workdir-hash>-<escaped-project>-<escaped-command>
 // Every '-' in project or command is replaced by '--'; the workdir-hash is hex
-// (never contains '-'), so the generated form is uniquely decomposable.
+// (never contains '-'), so the generated form is uniquely decomposable. The
+// concrete per-replica command name is the base with a scale-index suffix; see
+// [InstanceName].
 func GenerateName(wdHash, project, command string) string {
 	return wdHash + "-" + escapeName(project) + "-" + escapeName(command)
+}
+
+// InstanceName returns the concrete cmdman command name for replica scaleIndex
+// (1-based) of the command whose base name is base: "<base>-<scaleIndex>". The
+// index is plain decimal (never contains '-'), so the suffix is always
+// recoverable as the run of digits after the final '-'.
+func InstanceName(base string, scaleIndex int) string {
+	return base + "-" + strconv.Itoa(scaleIndex)
+}
+
+// stripScaleIndexSuffix is the inverse of [InstanceName]: it removes the
+// "-<scaleIndex>" suffix from instanceName to recover the base generated name.
+// When the suffix is absent (scaleIndex <= 0 or no match), instanceName is
+// returned unchanged.
+func stripScaleIndexSuffix(instanceName string, scaleIndex int) string {
+	if scaleIndex <= 0 {
+		return instanceName
+	}
+	return strings.TrimSuffix(instanceName, "-"+strconv.Itoa(scaleIndex))
 }
 
 // hashCanonical is the canonical struct used as hash input.

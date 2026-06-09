@@ -2,6 +2,7 @@ package mux_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -81,10 +82,10 @@ func TestBuildResolvesArgvAndPropagatesFields(t *testing.T) {
 	spec, err := mux.Decode(strings.NewReader(sampleSpec))
 	assert.NilError(t, err)
 
-	resolver := func(_ context.Context, name string) (string, error) {
+	resolver := func(_ context.Context, name string, _ int) (string, error) {
 		return "id-" + name, nil
 	}
-	built, err := mux.Build(context.Background(), spec, resolver, mux.PaneArgvOpts{
+	built, err := mux.Build(context.Background(), spec, resolver, nil, mux.PaneArgvOpts{
 		Executable: "/usr/bin/cmdman",
 		DataDir:    "/var/lib/cmdman",
 		RuntimeDir: "/run/cmdman",
@@ -139,7 +140,8 @@ mux:
 	_, err = mux.Build(
 		context.Background(),
 		spec,
-		func(_ context.Context, name string) (string, error) { return "id-" + name, nil },
+		func(_ context.Context, name string, _ int) (string, error) { return "id-" + name, nil },
+		nil,
 		mux.PaneArgvOpts{Executable: "/usr/bin/cmdman"},
 	)
 	assert.ErrorContains(t, err, `duplicate command "api"`)
@@ -161,9 +163,10 @@ mux:
 	_, err = mux.Build(
 		context.Background(),
 		spec,
-		func(_ context.Context, name string) (string, error) {
+		func(_ context.Context, name string, _ int) (string, error) {
 			return "", &resolveErr{name: name}
 		},
+		nil,
 		mux.PaneArgvOpts{Executable: "/usr/bin/cmdman"},
 	)
 	assert.ErrorContains(t, err, wantErr)
@@ -172,3 +175,81 @@ mux:
 type resolveErr struct{ name string }
 
 func (e *resolveErr) Error() string { return "not found: " + e.name }
+
+// TestBuildExpandsUnpinnedScaledLeafIntoCycle verifies that a leaf referencing a
+// scaled command with no pinned scale index expands the layout into one muxctl
+// layout per replica, so layout cycling rotates the replica shown.
+func TestBuildExpandsUnpinnedScaledLeafIntoCycle(t *testing.T) {
+	t.Parallel()
+
+	const oneLeaf = `
+mux:
+  layouts:
+    - name: dash
+      root: { command: web }
+`
+	spec, err := mux.Decode(strings.NewReader(oneLeaf))
+	assert.NilError(t, err)
+
+	resolver := func(_ context.Context, name string, idx int) (string, error) {
+		return fmt.Sprintf("id-%s-%d", name, idx), nil
+	}
+	replicas := func(_ context.Context, name string) (int, error) {
+		if name == "web" {
+			return 3, nil
+		}
+		return 1, nil
+	}
+
+	built, err := mux.Build(
+		context.Background(), spec, resolver, replicas,
+		mux.PaneArgvOpts{Executable: "/cmdman"},
+	)
+	assert.NilError(t, err)
+
+	// One layout per replica: "dash", "dash#2", "dash#3".
+	assert.Equal(t, len(built.Layouts), 3)
+	assert.Equal(t, built.Layouts[0].Name, "dash")
+	assert.Equal(t, built.Layouts[1].Name, "dash#2")
+	assert.Equal(t, built.Layouts[2].Name, "dash#3")
+
+	// Each cycle position resolves the corresponding replica id and names the
+	// pane with its scale-index suffix.
+	for i, want := range []string{"id-web-1", "id-web-2", "id-web-3"} {
+		leaf := built.Layouts[i].Root.Leaf
+		assert.Equal(t, leaf.Name, fmt.Sprintf("web-%d", i+1))
+		assert.DeepEqual(t, leaf.Cmd, []string{"/cmdman", "attach", want})
+	}
+}
+
+// TestBuildPinnedScaleIndexDoesNotCycle verifies that a leaf pinning an explicit
+// scale index resolves exactly that replica and does not expand the layout.
+func TestBuildPinnedScaleIndexDoesNotCycle(t *testing.T) {
+	t.Parallel()
+
+	const pinned = `
+mux:
+  layouts:
+    - name: dash
+      root: { command: web, scale: 2 }
+`
+	spec, err := mux.Decode(strings.NewReader(pinned))
+	assert.NilError(t, err)
+
+	resolver := func(_ context.Context, name string, idx int) (string, error) {
+		return fmt.Sprintf("id-%s-%d", name, idx), nil
+	}
+	replicas := func(_ context.Context, _ string) (int, error) { return 3, nil }
+
+	built, err := mux.Build(
+		context.Background(), spec, resolver, replicas,
+		mux.PaneArgvOpts{Executable: "/cmdman"},
+	)
+	assert.NilError(t, err)
+
+	// A pinned leaf does not cycle: a single layout, resolving replica 2.
+	assert.Equal(t, len(built.Layouts), 1)
+	leaf := built.Layouts[0].Root.Leaf
+	assert.Equal(t, leaf.Name, "web-2")
+	assert.DeepEqual(t, leaf.Cmd, []string{"/cmdman", "attach", "id-web-2"})
+}

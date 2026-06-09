@@ -3,6 +3,7 @@ package compose
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
@@ -73,32 +74,42 @@ func (s *Service) reportBlocked(g *reconcileGraph) {
 	}
 }
 
-// upStartAction starts (or confirms running) a single command and, when a
-// dependent needs its completion, waits for it to stop so completion edges can
-// progress from the current run's terminal state.
+// upStartAction starts (or confirms running) every replica of a command and,
+// when a dependent needs its completion, waits for all replicas to stop so
+// completion edges can progress from the current run's terminal state.
 func (s *Service) upStartAction(
 	ctx context.Context,
 	g *reconcileGraph,
 	v *graphVertex,
 ) actionResult {
 	cmd := v.Command
-	state := v.Snapshot.State
 
-	// Idempotency: starting/running are already active. created/exited/failed
-	// (and any unexpected/absent state) get a Start, matching low-level cmdman
-	// start and project-only compose start.
-	active := state == model.EventTypeRunning || state == model.EventTypeStarting
-	if !active {
-		s.report(cmd.Name, PhaseStarting, nil, nil)
-		if err := s.svc.Start(ctx, cmd.GeneratedName); err != nil {
+	// Index the snapshot by replica name so each desired replica can be checked
+	// for activeness before being (idempotently) started.
+	active := make(map[string]bool, len(v.Snapshot.Instances))
+	for _, in := range v.Snapshot.Instances {
+		active[in.GenName] = in.State == model.EventTypeRunning ||
+			in.State == model.EventTypeStarting
+	}
+
+	instances := cmd.InstanceNames()
+	s.report(cmd.Name, PhaseStarting, nil, nil)
+	for _, genName := range instances {
+		// Idempotency: starting/running replicas are already active. Everything
+		// else (created/exited/failed/absent) gets a Start, matching low-level
+		// cmdman start and project-only compose start.
+		if active[genName] {
+			continue
+		}
+		if err := s.svc.Start(ctx, genName); err != nil {
 			contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: start failed",
 				"command", cmd.Name,
-				"generated_name", cmd.GeneratedName,
+				"generated_name", genName,
 				"error", err,
 			)
-			werr := fmt.Errorf("start command %q (%s): %w", cmd.Name, cmd.GeneratedName, err)
+			werr := fmt.Errorf("start command %q (%s): %w", cmd.Name, genName, err)
 			s.report(cmd.Name, PhaseError, werr, nil)
-			return actionResult{State: state, Err: werr}
+			return actionResult{State: v.Snapshot.State, Err: werr}
 		}
 	}
 
@@ -109,13 +120,13 @@ func (s *Service) upStartAction(
 		return actionResult{State: model.EventTypeRunning, ExitCode: v.Snapshot.ExitCode}
 	}
 
-	// A completion edge depends on us: observe the terminal state of this run.
-	// cmdman.Service.Start returns nil even if the command exits before running
-	// is observed, so completion must come from Wait(stopped), never inferred
-	// from Start alone.
+	// A completion edge depends on us: observe the terminal state of every
+	// replica this run. cmdman.Service.Start returns nil even if a command exits
+	// before running is observed, so completion must come from Wait(stopped),
+	// never inferred from Start alone.
 	s.report(cmd.Name, PhaseWaiting, nil, nil)
 	results, werr := s.svc.Wait(ctx, cmdman.WaitRequest{
-		Targets:   []string{cmd.GeneratedName},
+		Targets:   instances,
 		Condition: cmdman.WaitConditionStopped,
 	})
 	if werr != nil {
@@ -123,23 +134,36 @@ func (s *Service) upStartAction(
 		return actionResult{State: model.EventTypeRunning, Err: werr}
 	}
 
-	var exit *int
-	if len(results) > 0 {
-		exit = results[0].ExitCode
-		if results[0].Err != nil {
-			s.report(cmd.Name, PhaseFailed, results[0].Err, exit)
-			return actionResult{State: model.EventTypeFailed, ExitCode: exit, Err: results[0].Err}
+	// Reduce per-replica wait results to a single terminal state. A replica with
+	// a recorded exit code exited (possibly non-zero); one without is a
+	// monitor/subprocess failure. completed is satisfied by either; the
+	// successful condition additionally checks the exit code (see aggregate).
+	insts := make([]instanceSnapshot, 0, len(results))
+	var firstErr error
+	for _, r := range results {
+		st := model.EventTypeExited
+		if r.Err != nil {
+			st = model.EventTypeFailed
+			if firstErr == nil {
+				firstErr = r.Err
+			}
+		} else if r.ExitCode == nil {
+			st = model.EventTypeFailed
 		}
+		insts = append(insts, instanceSnapshot{State: st, ExitCode: r.ExitCode})
 	}
-	// A recorded exit code means a real exit (possibly non-zero); its absence
-	// means a monitor/subprocess failure. completed is satisfied by either;
-	// completed_successfully additionally checks the exit code.
-	if exit != nil {
+	state, exit := aggregateInstances(insts)
+	switch {
+	case firstErr != nil:
+		s.report(cmd.Name, PhaseFailed, firstErr, exit)
+		return actionResult{State: model.EventTypeFailed, ExitCode: exit, Err: firstErr}
+	case state == model.EventTypeExited:
 		s.report(cmd.Name, PhaseExited, nil, exit)
 		return actionResult{State: model.EventTypeExited, ExitCode: exit}
+	default:
+		s.report(cmd.Name, PhaseFailed, nil, exit)
+		return actionResult{State: model.EventTypeFailed, ExitCode: exit}
 	}
-	s.report(cmd.Name, PhaseFailed, nil, nil)
-	return actionResult{State: model.EventTypeFailed}
 }
 
 // reconcileStop converges the targeted commands to a stopped state by walking
@@ -192,23 +216,27 @@ func (s *Service) stopAction(
 	cmd := v.Command
 	snap := v.Snapshot
 
-	active := snap.State == model.EventTypeRunning || snap.State == model.EventTypeStarting
-	if !active || snap.ID == "" {
-		// Nothing to stop: already terminal. Report skipped, keep the observed
-		// state for diagnostics.
+	live := snap.activeInstances()
+	if len(live) == 0 {
+		// Nothing to stop: every replica is already terminal. Report skipped, keep
+		// the observed aggregate state for diagnostics.
 		s.report(cmd.Name, PhaseSkipped, nil, snap.ExitCode)
 		return actionResult{State: snap.State, ExitCode: snap.ExitCode}
 	}
 
+	ids := make([]string, len(live))
+	for i, in := range live {
+		ids[i] = in.ID
+	}
 	s.report(cmd.Name, PhaseStopping, nil, nil)
-	if _, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{snap.ID}}); err != nil {
+	if _, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: ids}); err != nil {
 		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: stop failed",
 			"project", project,
 			"command", cmd.Name,
-			"id", snap.ID,
+			"ids", ids,
 			"error", err,
 		)
-		werr := fmt.Errorf("stop command %q (%s): %w", cmd.Name, snap.ID, err)
+		werr := fmt.Errorf("stop command %q (%v): %w", cmd.Name, ids, err)
 		s.report(cmd.Name, PhaseError, werr, nil)
 		return actionResult{State: snap.State, Err: werr}
 	}
@@ -231,7 +259,8 @@ func (s *Service) snapshotCommands(
 	if err != nil {
 		return nil, fmt.Errorf("list existing commands before start: %w", err)
 	}
-	out := make(map[string]commandSnapshot, len(existing))
+	// Group replicas under their compose command name, then aggregate.
+	byName := make(map[string][]instanceSnapshot, len(existing))
 	for _, e := range existing {
 		if e.ConfigJSON == nil {
 			continue
@@ -240,12 +269,21 @@ func (s *Service) snapshotCommands(
 		if name == "" {
 			continue
 		}
-		out[name] = commandSnapshot{
-			ID:       e.ID,
-			GenName:  e.Name,
-			State:    e.State,
-			ExitCode: e.ExitCode,
-		}
+		byName[name] = append(byName[name], instanceSnapshot{
+			ID:         e.ID,
+			GenName:    e.Name,
+			ScaleIndex: scaleIndexOf(e),
+			State:      e.State,
+			ExitCode:   e.ExitCode,
+		})
+	}
+	out := make(map[string]commandSnapshot, len(byName))
+	for name, insts := range byName {
+		slices.SortFunc(insts, func(a, b instanceSnapshot) int {
+			return a.ScaleIndex - b.ScaleIndex
+		})
+		state, exit := aggregateInstances(insts)
+		out[name] = commandSnapshot{Instances: insts, State: state, ExitCode: exit}
 	}
 	return out, nil
 }

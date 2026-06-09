@@ -38,6 +38,14 @@ const ENV_CMDMAN_COMPOSE_FILE = "CMDMAN_COMPOSE_FILE"
 // directory path containing the compose file being loaded.
 const ENV_CMDMAN_COMPOSE_DIR = "CMDMAN_COMPOSE_DIR"
 
+// ENV_CMDMAN_COMPOSE_SCALE_INDEX is injected into each replica's environment
+// with its own 1-based scale index, so a command can tell which replica it is.
+const ENV_CMDMAN_COMPOSE_SCALE_INDEX = "CMDMAN_COMPOSE_SCALE_INDEX"
+
+// ENV_CMDMAN_COMPOSE_SCALE is injected into each replica's environment with the
+// command's total replica count.
+const ENV_CMDMAN_COMPOSE_SCALE = "CMDMAN_COMPOSE_SCALE"
+
 // NormalizeOpts holds caller-supplied overrides for Normalize.
 type NormalizeOpts struct {
 	// File is an explicit compose file path. When empty, discovery is used.
@@ -429,6 +437,15 @@ func Normalize(
 			return ComposeSpec{}, fmt.Errorf("command %q: after: %w", name, err)
 		}
 
+		scale := 1
+		if cmd.Scale != nil {
+			scale = *cmd.Scale
+			if scale < 1 {
+				return ComposeSpec{}, fmt.Errorf(
+					"command %q: scale must be >= 1, got %d", name, scale)
+			}
+		}
+
 		envSlice := mapToEnvSlice(commandEnv)
 		genName := GenerateName(wdHash, project, name)
 
@@ -457,6 +474,7 @@ func Normalize(
 			LogDriver:       logdriver.LogDriver(cmd.LogDriver),
 			LogOpts:         resolvedLogOpts,
 			After:           afterList,
+			Scale:           scale,
 			GeneratedName:   genName,
 		}
 		if err := validateRuntimeFields(nc); err != nil {

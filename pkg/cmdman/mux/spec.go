@@ -43,10 +43,16 @@ type PaneSpec struct {
 	Panes  []PaneSpec    `yaml:"panes,omitempty"`
 
 	// Leaf fields
-	Command string            `yaml:"command,omitempty"`
-	Mode    Mode              `yaml:"mode,omitempty"`
-	CmdOpt  map[string]string `yaml:"cmd_opt,omitempty"`
-	Focus   bool              `yaml:"focus,omitempty"`
+	Command string `yaml:"command,omitempty"`
+	// Scale pins which replica of a scaled command this leaf targets (1-based).
+	// Zero (the default, absent) leaves the leaf unpinned: `cmdman mux` then
+	// cycles it across the command's replicas on successive invocations. It is a
+	// compose concept; for standalone `cmdman mux` a positive Scale resolves the
+	// suffixed command name "<command>-<Scale>".
+	Scale  int               `yaml:"scale,omitempty"`
+	Mode   Mode              `yaml:"mode,omitempty"`
+	CmdOpt map[string]string `yaml:"cmd_opt,omitempty"`
+	Focus  bool              `yaml:"focus,omitempty"`
 }
 
 // Direction is the split direction. Same grammar as [muxctl.Direction]:

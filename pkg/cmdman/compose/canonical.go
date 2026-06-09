@@ -42,6 +42,7 @@ type CanonicalCommand struct {
 	LogDriver       string                    `yaml:"log_driver,omitempty" json:"log_driver,omitzero"`
 	LogOpts         map[string]string         `yaml:"log_opts,omitempty" json:"log_opts,omitzero"`
 	After           map[string]CanonicalAfter `yaml:"after,omitempty" json:"after,omitzero"`
+	Scale           int                       `yaml:"scale,omitempty" json:"scale,omitzero"`
 }
 
 // CanonicalAfter is the resolved dependency condition for one predecessor.
@@ -85,7 +86,18 @@ func canonicalCommand(c Command) CanonicalCommand {
 		LogDriver:       string(c.LogDriver),
 		LogOpts:         c.LogOpts,
 		After:           after,
+		Scale:           canonicalScale(c.Scale),
 	}
+}
+
+// canonicalScale renders the scale only when it deviates from the default of 1,
+// so an unscaled command omits the field (consistent with the other
+// omit-when-default canonical fields).
+func canonicalScale(scale int) int {
+	if scale <= 1 {
+		return 0
+	}
+	return scale
 }
 
 // canonicalRestartPolicy recomposes the restart_policy string that normalization

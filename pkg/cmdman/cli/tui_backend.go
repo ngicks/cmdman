@@ -355,10 +355,11 @@ func (b *serviceBackend) CycleMux(ctx context.Context, projectName, composeFile 
 	if err != nil {
 		return fmt.Errorf("mux: locate cmdman binary: %w", err)
 	}
-	resolver := func(ctx context.Context, leafName string) (string, error) {
-		return b.compose.ResolveCommandID(ctx, selection, leafName)
+	resolver, replicas, err := b.compose.MuxLeafResolver(ctx, selection)
+	if err != nil {
+		return err
 	}
-	built, err := mux.Build(ctx, spec, resolver, mux.PaneArgvOpts{
+	built, err := mux.Build(ctx, spec, resolver, replicas, mux.PaneArgvOpts{
 		Executable: exe,
 		DataDir:    cfg.DataDir,
 		RuntimeDir: cfg.RuntimeDir,

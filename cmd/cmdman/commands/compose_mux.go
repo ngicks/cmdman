@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -122,11 +121,12 @@ func runComposeMux(
 	}
 
 	composeSvc := compose.NewService(svc)
-	resolver := func(ctx context.Context, leafName string) (string, error) {
-		return composeSvc.ResolveCommandID(ctx, selection, leafName)
+	resolver, replicas, err := composeSvc.MuxLeafResolver(cmd.Context(), selection)
+	if err != nil {
+		return err
 	}
 
-	built, err := mux.Build(cmd.Context(), spec, resolver, mux.PaneArgvOpts{
+	built, err := mux.Build(cmd.Context(), spec, resolver, replicas, mux.PaneArgvOpts{
 		Executable: exe,
 		DataDir:    cfg.DataDir,
 		RuntimeDir: cfg.RuntimeDir,

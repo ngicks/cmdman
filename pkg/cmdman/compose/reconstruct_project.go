@@ -13,8 +13,10 @@ func reconstructProjectFromMeta(
 		project string
 		seen    bool
 	)
-	commands := make([]Command, 0, len(entries))
-	names := make(map[string]struct{}, len(entries))
+	// Group replicas under their compose command name. Multiple entries sharing a
+	// name are the scale replicas of one command, not a conflict.
+	byName := make(map[string]*Command)
+	var order []string
 	for _, entry := range entries {
 		if entry.ConfigJSON == nil {
 			continue
@@ -31,26 +33,34 @@ func reconstructProjectFromMeta(
 		} else if entryProject != project {
 			return ComposeSpec{}, false, nil
 		}
-		if _, dup := names[name]; dup {
-			return ComposeSpec{}, false, nil
+		if existing, ok := byName[name]; ok {
+			existing.Scale++
+			continue
 		}
-		names[name] = struct{}{}
 		after, err := decodeAfterLabel(labels[LabelAfter])
 		if err != nil {
 			return ComposeSpec{}, false, fmt.Errorf("command %q: %w", name, err)
 		}
-		generatedName := entry.Name
+		// Recover the base generated name by stripping this replica's scale-index
+		// suffix, so Command.InstanceNames regenerates every replica's name.
+		generatedName := stripScaleIndexSuffix(entry.Name, scaleIndexOf(entry))
 		if generatedName == "" {
 			generatedName = entry.ID
 		}
-		commands = append(commands, Command{
+		byName[name] = &Command{
 			Name:          name,
 			GeneratedName: generatedName,
 			After:         after,
-		})
+			Scale:         1,
+		}
+		order = append(order, name)
 	}
-	if len(commands) == 0 {
+	if len(order) == 0 {
 		return ComposeSpec{}, false, nil
+	}
+	commands := make([]Command, 0, len(order))
+	for _, name := range order {
+		commands = append(commands, *byName[name])
 	}
 	slices.SortFunc(commands, func(a, b Command) int {
 		return cmpCommandName(a.Name, b.Name)

@@ -186,10 +186,10 @@ func (e *reconcileTestEnv) svc(states map[string]model.EventType) *Service {
 			for name, st := range states {
 				entries = append(entries, store.CommandEntry{
 					ID:    "id-" + name,
-					Name:  "gen-" + name,
+					Name:  "gen-" + name + "-1",
 					State: st,
 					ConfigJSON: &model.CommandConfig{
-						Labels: map[string]string{LabelCommand: name},
+						Labels: map[string]string{LabelCommand: name, LabelScaleIndex: "1"},
 					},
 				})
 			}
@@ -314,9 +314,10 @@ func (e *reconcileTestEnv) order() []string {
 	return slices.Clone(e.startOrder)
 }
 
-// cmd builds a normalized Command with a GeneratedName and after deps.
+// cmd builds a normalized Command with a GeneratedName and after deps. Scale 1
+// means the sole replica's name is "gen-<name>-1".
 func reconcileCmd(name string, after ...AfterSpec) Command {
-	return Command{Name: name, GeneratedName: "gen-" + name, After: after}
+	return Command{Name: name, GeneratedName: "gen-" + name, Scale: 1, After: after}
 }
 
 func reconcileSpec(cmds ...Command) ComposeSpec {
@@ -332,10 +333,11 @@ func storedGraphEntry(
 		reconcileSpec(reconcileCmd(name, after...)),
 		reconcileCmd(name, after...),
 		"sha256:test",
+		1,
 	)
 	return store.CommandEntry{
 		ID:    "id-" + name,
-		Name:  "gen-" + name,
+		Name:  "gen-" + name + "-1",
 		State: state,
 		ConfigJSON: &model.CommandConfig{
 			Labels: labels,
@@ -360,6 +362,7 @@ func TestBuildLabelsStoresAfterMetadata(t *testing.T) {
 		),
 		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionRunning}),
 		"sha256:test",
+		1,
 	)
 	raw := labels[LabelAfter]
 	if raw == "" {
@@ -396,7 +399,7 @@ func TestStartWithoutSpecUsesStoredAfterDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if got, want := env.order(), []string{"gen-api", "gen-worker"}; !slices.Equal(got, want) {
+	if got, want := env.order(), []string{"gen-api-1", "gen-worker-1"}; !slices.Equal(got, want) {
 		t.Fatalf("start order = %v, want %v", got, want)
 	}
 	if len(result.Starts) != 2 {
@@ -435,7 +438,7 @@ func TestReconcileRunningConditionStartsDependentWithoutWaitingForExit(t *testin
 	env := newReconcileTestEnv()
 	apiStarted := make(chan struct{})
 	releaseAPI := make(chan struct{})
-	env.startHook["gen-api"] = func(context.Context) error {
+	env.startHook["gen-api-1"] = func(context.Context) error {
 		close(apiStarted)
 		<-releaseAPI // api stays "starting" until the test releases it
 		return nil
@@ -453,7 +456,7 @@ func TestReconcileRunningConditionStartsDependentWithoutWaitingForExit(t *testin
 	// api blocks in Start; worker must not start until api's Start returns.
 	go func() {
 		<-apiStarted
-		if env.started("gen-worker") {
+		if env.started("gen-worker-1") {
 			t.Errorf("worker started before api finished starting")
 		}
 		close(releaseAPI)
@@ -463,7 +466,7 @@ func TestReconcileRunningConditionStartsDependentWithoutWaitingForExit(t *testin
 	if err != nil {
 		t.Fatalf("reconcileStart: %v", err)
 	}
-	if !env.started("gen-worker") {
+	if !env.started("gen-worker-1") {
 		t.Fatal("worker should have started after api started")
 	}
 	for _, name := range []string{"api", "worker"} {
@@ -479,7 +482,7 @@ func TestReconcileCompletedConditionWaitsForTerminal(t *testing.T) {
 	env := newReconcileTestEnv()
 	releaseWait := make(chan struct{})
 	waitEntered := make(chan struct{})
-	env.waitHook["gen-api"] = func(context.Context) error {
+	env.waitHook["gen-api-1"] = func(context.Context) error {
 		close(waitEntered)
 		<-releaseWait
 		return nil
@@ -496,7 +499,7 @@ func TestReconcileCompletedConditionWaitsForTerminal(t *testing.T) {
 
 	go func() {
 		<-waitEntered
-		if env.started("gen-worker") {
+		if env.started("gen-worker-1") {
 			t.Errorf("worker started before api completed")
 		}
 		close(releaseWait)
@@ -506,7 +509,7 @@ func TestReconcileCompletedConditionWaitsForTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reconcileStart: %v", err)
 	}
-	if !env.started("gen-worker") {
+	if !env.started("gen-worker-1") {
 		t.Fatal("worker should have started after api completed")
 	}
 	if o, _ := outcomeByCommand(outcomes, "worker"); o.Err != nil {
@@ -520,7 +523,7 @@ func TestReconcileCompletedConditionWaitsForTerminal(t *testing.T) {
 func TestReconcileCompletedSuccessfullyBlocksOnNonZeroExit(t *testing.T) {
 	env := newReconcileTestEnv()
 	two := 2
-	env.waitResult["gen-api"] = cmdman.WaitResult{ID: "gen-api", ExitCode: &two}
+	env.waitResult["gen-api-1"] = cmdman.WaitResult{ID: "gen-api-1", ExitCode: &two}
 
 	spec := reconcileSpec(
 		reconcileCmd("api"),
@@ -535,7 +538,7 @@ func TestReconcileCompletedSuccessfullyBlocksOnNonZeroExit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reconcileStart: %v", err)
 	}
-	if env.started("gen-worker") {
+	if env.started("gen-worker-1") {
 		t.Fatal("worker must not start when api exits non-zero")
 	}
 	if o, _ := outcomeByCommand(outcomes, "api"); o.Err != nil {
@@ -553,7 +556,7 @@ func TestReconcileStaleTerminalStateDoesNotSatisfyCompleted(t *testing.T) {
 	env := newReconcileTestEnv()
 	releaseWait := make(chan struct{})
 	waitEntered := make(chan struct{})
-	env.waitHook["gen-api"] = func(context.Context) error {
+	env.waitHook["gen-api-1"] = func(context.Context) error {
 		close(waitEntered)
 		<-releaseWait
 		return nil
@@ -572,7 +575,7 @@ func TestReconcileStaleTerminalStateDoesNotSatisfyCompleted(t *testing.T) {
 
 	go func() {
 		<-waitEntered
-		if env.started("gen-worker") {
+		if env.started("gen-worker-1") {
 			t.Errorf("worker started from api's stale terminal state")
 		}
 		close(releaseWait)
@@ -582,10 +585,10 @@ func TestReconcileStaleTerminalStateDoesNotSatisfyCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reconcileStart: %v", err)
 	}
-	if !env.started("gen-api") {
+	if !env.started("gen-api-1") {
 		t.Fatal("api should be restarted from its exited state")
 	}
-	if !env.started("gen-worker") {
+	if !env.started("gen-worker-1") {
 		t.Fatal("worker should start after api's new completion")
 	}
 	if o, _ := outcomeByCommand(outcomes, "worker"); o.Err != nil {
@@ -607,7 +610,7 @@ func TestReconcileRestartsExitedAndFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reconcileStart: %v", err)
 	}
-	if !env.started("gen-alpha") || !env.started("gen-beta") {
+	if !env.started("gen-alpha-1") || !env.started("gen-beta-1") {
 		t.Fatalf("both exited/failed commands should be started; order=%v", env.order())
 	}
 	for _, name := range []string{"alpha", "beta"} {
@@ -631,7 +634,7 @@ func TestReconcileSkipsActiveCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reconcileStart: %v", err)
 	}
-	if env.started("gen-alpha") || env.started("gen-beta") {
+	if env.started("gen-alpha-1") || env.started("gen-beta-1") {
 		t.Fatalf("active commands must not be re-started; order=%v", env.order())
 	}
 	for _, name := range []string{"alpha", "beta"} {
@@ -661,8 +664,8 @@ func TestReconcileIndependentCommandsStartConcurrently(t *testing.T) {
 		}
 		return nil
 	}
-	env.startHook["gen-alpha"] = barrier
-	env.startHook["gen-beta"] = barrier
+	env.startHook["gen-alpha-1"] = barrier
+	env.startHook["gen-beta-1"] = barrier
 
 	spec := reconcileSpec(reconcileCmd("alpha"), reconcileCmd("beta"))
 	states := map[string]model.EventType{
@@ -685,7 +688,7 @@ func TestReconcileIndependentCommandsStartConcurrently(t *testing.T) {
 // branch does not prevent an independent branch from starting.
 func TestReconcileFailedBranchDoesNotBlockSibling(t *testing.T) {
 	env := newReconcileTestEnv()
-	env.startHook["gen-api"] = func(context.Context) error {
+	env.startHook["gen-api-1"] = func(context.Context) error {
 		return errors.New("boom")
 	}
 
@@ -710,10 +713,10 @@ func TestReconcileFailedBranchDoesNotBlockSibling(t *testing.T) {
 		!strings.Contains(log, "api") {
 		t.Fatalf("expected a start-failure warning mentioning api; got:\n%s", log)
 	}
-	if !env.started("gen-solo") {
+	if !env.started("gen-solo-1") {
 		t.Fatal("independent command should start despite api failure")
 	}
-	if env.started("gen-worker") {
+	if env.started("gen-worker-1") {
 		t.Fatal("worker depends on a failed api and must not start")
 	}
 	if o, _ := outcomeByCommand(outcomes, "api"); o.Err == nil {

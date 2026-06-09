@@ -101,8 +101,8 @@ func (s *Service) restartWithSpec(
 		return nil, fmt.Errorf("topo layers: %w", err)
 	}
 
-	idByCommand := buildIDByCommand(entries)
-	genNameByCommand := buildGenNameByCommand(selection.Spec.Commands)
+	idsByCommand := buildIDsByCommand(entries)
+	genNamesByCommand := buildGenNamesByCommand(entries)
 
 	// Identify orphan entries (in project labels but not in YAML).
 	yamlNames := make(map[string]struct{}, len(selection.Spec.Commands))
@@ -139,7 +139,7 @@ func (s *Service) restartWithSpec(
 			ctx,
 			s,
 			layer,
-			idByCommand,
+			idsByCommand,
 			outByCommand,
 			selection.Project,
 			true,
@@ -152,7 +152,7 @@ func (s *Service) restartWithSpec(
 			ctx,
 			s,
 			layer,
-			genNameByCommand,
+			genNamesByCommand,
 			outByCommand,
 			selection.Project,
 		)
@@ -171,13 +171,14 @@ func (s *Service) restartWithSpec(
 	return &RestartResult{Restarts: restarts}, nil
 }
 
-// stopLayerRestartConcurrent stops a layer for the restart operation, recording results into
-// outByCommand.
+// stopLayerRestartConcurrent stops a layer for the restart operation, recording
+// results into outByCommand. Every replica of each command is stopped; the
+// command's outcome records the first stop error across its replicas.
 func stopLayerRestartConcurrent(
 	ctx context.Context,
 	s *Service,
 	layer []string,
-	idByCommand map[string]string,
+	idsByCommand map[string][]string,
 	outByCommand map[string]*RestartOutcome,
 	project string,
 	_ bool, // reserved for future use
@@ -186,38 +187,37 @@ func stopLayerRestartConcurrent(
 	eg, _ := errgroup.WithContext(ctx)
 
 	for _, name := range layer {
-		id, ok := idByCommand[name]
-		if !ok {
-			continue
+		for _, id := range idsByCommand[name] {
+			eg.Go(func() error {
+				_, stopErr := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{id}})
+				if stopErr != nil {
+					contextkey.ValueSlogLoggerDefault(ctx).Warn("compose restart: stop failed",
+						"project", project,
+						"command", name,
+						"id", id,
+						"error", stopErr,
+					)
+				}
+				mu.Lock()
+				if o, ok := outByCommand[name]; ok && stopErr != nil && o.StopErr == nil {
+					o.StopErr = stopErr
+				}
+				mu.Unlock()
+				return nil
+			})
 		}
-		eg.Go(func() error {
-			_, stopErr := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{id}})
-			if stopErr != nil {
-				contextkey.ValueSlogLoggerDefault(ctx).Warn("compose restart: stop failed",
-					"project", project,
-					"command", name,
-					"id", id,
-					"error", stopErr,
-				)
-			}
-			mu.Lock()
-			if o, ok := outByCommand[name]; ok {
-				o.StopErr = stopErr
-			}
-			mu.Unlock()
-			return nil
-		})
 	}
 	_ = eg.Wait()
 }
 
-// startLayerRestartConcurrent starts a layer for the restart operation, recording results into
-// outByCommand.
+// startLayerRestartConcurrent starts a layer for the restart operation,
+// recording results into outByCommand. Every replica of each command is
+// started; the command's outcome records the first start error.
 func startLayerRestartConcurrent(
 	ctx context.Context,
 	s *Service,
 	layer []string,
-	genNameByCommand map[string]string,
+	genNamesByCommand map[string][]string,
 	outByCommand map[string]*RestartOutcome,
 	project string,
 ) {
@@ -225,37 +225,43 @@ func startLayerRestartConcurrent(
 	eg, _ := errgroup.WithContext(ctx)
 
 	for _, name := range layer {
-		genName, ok := genNameByCommand[name]
-		if !ok {
-			continue
+		for _, genName := range genNamesByCommand[name] {
+			eg.Go(func() error {
+				// Idempotency: if already running/starting, skip.
+				startErr := s.svc.Start(ctx, genName)
+				if startErr != nil {
+					contextkey.ValueSlogLoggerDefault(ctx).Warn("compose restart: start failed",
+						"project", project,
+						"command", name,
+						"generated_name", genName,
+						"error", startErr,
+					)
+				}
+				mu.Lock()
+				if o, ok := outByCommand[name]; ok && startErr != nil && o.StartErr == nil {
+					o.StartErr = startErr
+				}
+				mu.Unlock()
+				return nil
+			})
 		}
-		eg.Go(func() error {
-			// Idempotency: if already running/starting, skip.
-			startErr := s.svc.Start(ctx, genName)
-			if startErr != nil {
-				contextkey.ValueSlogLoggerDefault(ctx).Warn("compose restart: start failed",
-					"project", project,
-					"command", name,
-					"generated_name", genName,
-					"error", startErr,
-				)
-			}
-			mu.Lock()
-			if o, ok := outByCommand[name]; ok {
-				o.StartErr = startErr
-			}
-			mu.Unlock()
-			return nil
-		})
 	}
 	_ = eg.Wait()
 }
 
-// buildGenNameByCommand returns a map from compose command name to its GeneratedName.
-func buildGenNameByCommand(commands []Command) map[string]string {
-	m := make(map[string]string, len(commands))
-	for _, nc := range commands {
-		m[nc.Name] = nc.GeneratedName
+// buildGenNamesByCommand groups the existing entries' cmdman names by their
+// compose command name, so every replica of a command is restarted.
+func buildGenNamesByCommand(entries []cmdmanEntry) map[string][]string {
+	m := make(map[string][]string, len(entries))
+	for _, e := range entries {
+		if e.ConfigJSON == nil {
+			continue
+		}
+		name := e.ConfigJSON.Labels[LabelCommand]
+		if name == "" {
+			continue
+		}
+		m[name] = append(m[name], e.Name)
 	}
 	return m
 }

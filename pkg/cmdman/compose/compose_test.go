@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -691,6 +692,7 @@ commands:
 			compose.LabelCommand:    "app",
 			compose.LabelFile:       yamlPath,
 			compose.LabelVersion:    "1",
+			compose.LabelScaleIndex: "1",
 			compose.LabelConfigHash: h,
 		})
 
@@ -728,6 +730,7 @@ commands:
 			compose.LabelCommand:    "app",
 			compose.LabelFile:       yamlPath,
 			compose.LabelVersion:    "1",
+			compose.LabelScaleIndex: "1",
 			compose.LabelConfigHash: "sha256:" + strings.Repeat("0", 64), // stale hash
 		})
 
@@ -735,6 +738,83 @@ commands:
 	assert.NilError(t, err)
 	assert.Equal(t, len(plan.Actions), 1)
 	assert.Equal(t, plan.Actions[0].Kind, compose.ActionRecreate)
+}
+
+func TestReconciliationPlan_ScaleExpandsInstances(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := `
+name: myproject
+commands:
+  app:
+    args: [echo, hello]
+    scale: 3
+`
+	yamlPath := filepath.Join(dir, "cmd-compose.yaml")
+	assert.NilError(t, os.WriteFile(yamlPath, []byte(yamlContent), 0644))
+
+	raw, err := compose.DecodeFile(yamlPath)
+	assert.NilError(t, err)
+	spec, err := compose.Normalize(
+		context.Background(), yamlPath, raw, compose.NormalizeOpts{WorkDir: dir})
+	assert.NilError(t, err)
+	assert.Equal(t, spec.Commands[0].Scale, 3)
+
+	// No existing commands: three create actions, one per replica, each with a
+	// distinct scale index and instance name.
+	plan, err := compose.ComputePlan(spec, nil)
+	assert.NilError(t, err)
+	assert.Equal(t, len(plan.Actions), 3)
+	base := spec.Commands[0].GeneratedName
+	for i, action := range plan.Actions {
+		assert.Equal(t, action.Kind, compose.ActionCreate)
+		assert.Equal(t, action.ScaleIndex, i+1)
+		assert.Equal(t, action.InstanceName, compose.InstanceName(base, i+1))
+	}
+}
+
+func TestReconciliationPlan_ScaleDownYieldsExcess(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := `
+name: myproject
+commands:
+  app:
+    args: [echo, hello]
+    scale: 1
+`
+	yamlPath := filepath.Join(dir, "cmd-compose.yaml")
+	assert.NilError(t, os.WriteFile(yamlPath, []byte(yamlContent), 0644))
+
+	raw, err := compose.DecodeFile(yamlPath)
+	assert.NilError(t, err)
+	spec, err := compose.Normalize(
+		context.Background(), yamlPath, raw, compose.NormalizeOpts{WorkDir: dir})
+	assert.NilError(t, err)
+
+	h, err := compose.Hash(spec.Commands[0])
+	assert.NilError(t, err)
+	base := spec.Commands[0].GeneratedName
+
+	mkEntry := func(idx int) store.CommandEntry {
+		return buildExistingEntry(
+			"id-"+compose.InstanceName(base, idx), compose.InstanceName(base, idx),
+			map[string]string{
+				compose.LabelWorkdir:    dir,
+				compose.LabelProject:    "myproject",
+				compose.LabelCommand:    "app",
+				compose.LabelFile:       yamlPath,
+				compose.LabelVersion:    "1",
+				compose.LabelScaleIndex: strconv.Itoa(idx),
+				compose.LabelConfigHash: h,
+			})
+	}
+	// Two replicas exist but the desired scale is 1: replica 1 is unchanged,
+	// replica 2 is surplus.
+	plan, err := compose.ComputePlan(spec, []store.CommandEntry{mkEntry(1), mkEntry(2)})
+	assert.NilError(t, err)
+	assert.Equal(t, len(plan.Actions), 1)
+	assert.Equal(t, plan.Actions[0].Kind, compose.ActionUnchanged)
+	assert.Equal(t, len(plan.ExcessReplicas), 1)
+	assert.Equal(t, plan.ExcessReplicas[0].Name, compose.InstanceName(base, 2))
 }
 
 // ---- file discovery ---------------------------------------------------------

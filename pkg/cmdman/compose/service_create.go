@@ -3,9 +3,11 @@ package compose
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
+	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"github.com/ngicks/go-common/contextkey"
 )
 
@@ -83,6 +85,10 @@ func (s *Service) Create(
 		actions = append(actions, orphanOutcomes...)
 	}
 
+	// Surplus replicas from a scale-down are always reconciled away (scoped to the
+	// targeted commands), regardless of --remove-orphan.
+	actions = append(actions, s.handleExcessReplicas(ctx, spec, plan.ExcessReplicas, targets)...)
+
 	for _, action := range plan.Actions {
 		if _, ok := targets[action.Desired.Name]; !ok {
 			continue
@@ -97,37 +103,41 @@ func (s *Service) Create(
 	return &CreateResult{Actions: actions}, nil
 }
 
-// executeAction carries out a single plan action and returns its outcome.
+// executeAction carries out a single plan action (one replica) and returns its
+// outcome. disp is the user-facing name for the replica (the bare command name
+// for an unscaled command, "<command>-<index>" otherwise).
 func (s *Service) executeAction(
 	ctx context.Context,
 	spec ComposeSpec,
 	action CommandAction,
 ) (ActionOutcome, error) {
 	nc := action.Desired
+	disp := instanceDisplayName(nc, action.ScaleIndex)
+	instName := action.InstanceName
 
 	switch action.Kind {
 	case ActionUnchanged:
-		s.report(nc.Name, PhaseUnchanged, nil, nil)
-		return ActionOutcome{Command: nc.Name, Action: "unchanged"}, nil
+		s.report(disp, PhaseUnchanged, nil, nil)
+		return ActionOutcome{Command: disp, Action: "unchanged"}, nil
 
 	case ActionCreate:
-		s.report(nc.Name, PhaseCreating, nil, nil)
-		req := buildCreateRequest(spec, nc, action.DesiredHash)
+		s.report(disp, PhaseCreating, nil, nil)
+		req := buildCreateRequest(spec, nc, action.DesiredHash, instName, action.ScaleIndex)
 		_, err := s.svc.Create(ctx, req)
 		if err != nil {
-			werr := fmt.Errorf("create command %q (%s): %w", nc.Name, nc.GeneratedName, err)
-			s.report(nc.Name, PhaseError, werr, nil)
-			return ActionOutcome{Command: nc.Name, Action: "create", Err: werr}, nil
+			werr := fmt.Errorf("create command %q (%s): %w", disp, instName, err)
+			s.report(disp, PhaseError, werr, nil)
+			return ActionOutcome{Command: disp, Action: "create", Err: werr}, nil
 		}
-		s.report(nc.Name, PhaseCreated, nil, nil)
-		return ActionOutcome{Command: nc.Name, Action: "create"}, nil
+		s.report(disp, PhaseCreated, nil, nil)
+		return ActionOutcome{Command: disp, Action: "create"}, nil
 
 	case ActionRecreate:
 		existing := action.Existing
 		if existing == nil {
-			werr := fmt.Errorf("recreate command %q: missing existing entry", nc.Name)
-			s.report(nc.Name, PhaseSkipped, werr, nil)
-			return ActionOutcome{Command: nc.Name, Action: "skipped", Err: werr}, nil
+			werr := fmt.Errorf("recreate command %q: missing existing entry", disp)
+			s.report(disp, PhaseSkipped, werr, nil)
+			return ActionOutcome{Command: disp, Action: "skipped", Err: werr}, nil
 		}
 
 		// A running/starting command is stopped before it can be removed and
@@ -139,55 +149,132 @@ func (s *Service) executeAction(
 			contextkey.ValueSlogLoggerDefault(ctx).Info(
 				"compose: stopping changed command before recreate",
 				"project", spec.Project,
-				"command", nc.Name,
+				"command", disp,
 				"id", existing.ID,
 				"state", existing.State,
 			)
-			s.report(nc.Name, PhaseStopping, nil, nil)
+			s.report(disp, PhaseStopping, nil, nil)
 			if err := s.stopForRecreate(ctx, existing.ID); err != nil {
 				werr := fmt.Errorf(
 					"stop command %q (%s) for recreate: %w",
-					nc.Name,
+					disp,
 					existing.ID,
 					err,
 				)
-				s.report(nc.Name, PhaseError, werr, nil)
-				return ActionOutcome{Command: nc.Name, Action: "recreate", Err: werr}, nil
+				s.report(disp, PhaseError, werr, nil)
+				return ActionOutcome{Command: disp, Action: "recreate", Err: werr}, nil
 			}
-			s.report(nc.Name, PhaseStopped, nil, nil)
+			s.report(disp, PhaseStopped, nil, nil)
 		}
 
-		s.report(nc.Name, PhaseRecreating, nil, nil)
+		s.report(disp, PhaseRecreating, nil, nil)
 		// Remove then recreate.
 		results, err := s.svc.Remove(ctx, cmdman.RemoveRequest{
 			Targets: []string{existing.ID},
 		})
 		if err != nil {
-			werr := fmt.Errorf("remove command %q for recreate: %w", nc.Name, err)
-			s.report(nc.Name, PhaseError, werr, nil)
-			return ActionOutcome{Command: nc.Name, Action: "recreate", Err: werr}, nil
+			werr := fmt.Errorf("remove command %q for recreate: %w", disp, err)
+			s.report(disp, PhaseError, werr, nil)
+			return ActionOutcome{Command: disp, Action: "recreate", Err: werr}, nil
 		}
 		for _, r := range results {
 			if r.Err != nil {
-				werr := fmt.Errorf("remove command %q for recreate: %w", nc.Name, r.Err)
-				s.report(nc.Name, PhaseError, werr, nil)
-				return ActionOutcome{Command: nc.Name, Action: "recreate", Err: werr}, nil
+				werr := fmt.Errorf("remove command %q for recreate: %w", disp, r.Err)
+				s.report(disp, PhaseError, werr, nil)
+				return ActionOutcome{Command: disp, Action: "recreate", Err: werr}, nil
 			}
 		}
 
-		req := buildCreateRequest(spec, nc, action.DesiredHash)
+		req := buildCreateRequest(spec, nc, action.DesiredHash, instName, action.ScaleIndex)
 		_, err = s.svc.Create(ctx, req)
 		if err != nil {
-			werr := fmt.Errorf("create command %q after remove: %w", nc.Name, err)
-			s.report(nc.Name, PhaseError, werr, nil)
-			return ActionOutcome{Command: nc.Name, Action: "recreate", Err: werr}, nil
+			werr := fmt.Errorf("create command %q after remove: %w", disp, err)
+			s.report(disp, PhaseError, werr, nil)
+			return ActionOutcome{Command: disp, Action: "recreate", Err: werr}, nil
 		}
-		s.report(nc.Name, PhaseRecreated, nil, nil)
-		return ActionOutcome{Command: nc.Name, Action: "recreate"}, nil
+		s.report(disp, PhaseRecreated, nil, nil)
+		return ActionOutcome{Command: disp, Action: "recreate"}, nil
 
 	default:
 		return ActionOutcome{}, fmt.Errorf("unknown action kind %q", action.Kind)
 	}
+}
+
+// instanceDisplayName is the user-facing label for one replica: the bare
+// command name for an unscaled command (so single-replica output is unchanged),
+// and "<command>-<index>" once a command runs more than one replica.
+func instanceDisplayName(cmd Command, scaleIndex int) string {
+	if cmd.Scale <= 1 {
+		return cmd.Name
+	}
+	return fmt.Sprintf("%s-%d", cmd.Name, scaleIndex)
+}
+
+// handleExcessReplicas stops (when live) and removes surplus replicas left by a
+// scale-down. Only replicas whose command is in the target set are touched, so a
+// subset operation never tears down a replica it was not asked about. Each
+// removal is reported as its own removing → removed/error step.
+func (s *Service) handleExcessReplicas(
+	ctx context.Context,
+	spec ComposeSpec,
+	excess []store.CommandEntry,
+	targets map[string]struct{},
+) []ActionOutcome {
+	var outcomes []ActionOutcome
+	for _, e := range excess {
+		if e.ConfigJSON == nil {
+			continue
+		}
+		cmdName := e.ConfigJSON.Labels[LabelCommand]
+		if _, ok := targets[cmdName]; !ok {
+			continue
+		}
+		disp := fmt.Sprintf("%s-%d", cmdName, scaleIndexOf(e))
+		s.report(disp, PhaseRemoving, nil, nil)
+
+		// Stop a live replica before removal so its monitor is not yanked.
+		if e.State == model.EventTypeRunning || e.State == model.EventTypeStarting {
+			if err := s.stopForRecreate(ctx, e.ID); err != nil {
+				werr := fmt.Errorf("stop excess replica %q (%s): %w", disp, e.ID, err)
+				s.report(disp, PhaseError, werr, nil)
+				outcomes = append(outcomes, ActionOutcome{
+					Command: disp, Action: "remove-excess", Err: werr,
+				})
+				continue
+			}
+		}
+
+		results, err := s.svc.Remove(ctx, cmdman.RemoveRequest{
+			Targets: []string{e.ID},
+			Force:   true,
+		})
+		if err == nil {
+			for _, r := range results {
+				if r.Err != nil {
+					err = r.Err
+					break
+				}
+			}
+		}
+		if err != nil {
+			werr := fmt.Errorf("remove excess replica %q (%s): %w", disp, e.ID, err)
+			contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: remove excess replica failed",
+				"project", spec.Project,
+				"workdir", spec.WorkDir,
+				"command", cmdName,
+				"id", e.ID,
+				"error", err,
+			)
+			s.report(disp, PhaseError, werr, nil)
+			outcomes = append(outcomes, ActionOutcome{
+				Command: disp, Action: "remove-excess", Err: werr,
+			})
+			continue
+		}
+		s.report(disp, PhaseRemoved, nil, nil)
+		outcomes = append(outcomes, ActionOutcome{Command: disp, Action: "remove-excess"})
+	}
+	return outcomes
 }
 
 // stopForRecreate stops a running command and waits for it to terminate so its
@@ -208,18 +295,33 @@ func (s *Service) stopForRecreate(ctx context.Context, id string) error {
 	return nil
 }
 
-// buildCreateRequest constructs a cmdman.CreateRequest from a Command
-// and its computed config hash. Reserved compose labels are merged with user labels.
+// buildCreateRequest constructs a cmdman.CreateRequest for one replica of a
+// Command. instanceName is the replica's concrete cmdman command name and
+// scaleIndex its 1-based index; configHash is the command's computed hash.
+// Reserved compose labels are merged with user labels.
 func buildCreateRequest(
 	spec ComposeSpec,
 	nc Command,
 	configHash string,
+	instanceName string,
+	scaleIndex int,
 ) cmdman.CreateRequest {
+	// Inject the replica's identity as environment variables via AppendEnv (not
+	// nc.Env) for two reasons: it keeps them out of the config hash (the index is
+	// a property of the replica, not the command config, so identical replicas
+	// must not look like drift), and it preserves cmdman's OS-env inheritance for
+	// commands that declare no env of their own (a non-empty Env would suppress
+	// the DefaultEnvironment fallback, dropping PATH).
+	appendEnv := []string{
+		ENV_CMDMAN_COMPOSE_SCALE_INDEX + "=" + strconv.Itoa(scaleIndex),
+		ENV_CMDMAN_COMPOSE_SCALE + "=" + strconv.Itoa(max(nc.Scale, 1)),
+	}
 	return cmdman.CreateRequest{
-		Name:            nc.GeneratedName,
+		Name:            instanceName,
 		Dir:             nc.Dir,
 		Argv:            nc.Args,
 		Env:             nc.Env,
+		AppendEnv:       appendEnv,
 		RestartPolicy:   nc.RestartPolicy,
 		MaxRetries:      nc.MaxRetries,
 		StopSignal:      nc.StopSignal,
@@ -228,6 +330,6 @@ func buildCreateRequest(
 		LogDriver:       nc.LogDriver,
 		LogOpts:         nc.LogOpts,
 		AutoRemove:      false, // compose owns lifecycle
-		Labels:          BuildLabels(spec, nc, configHash),
+		Labels:          BuildLabels(spec, nc, configHash, scaleIndex),
 	}
 }

@@ -22,6 +22,13 @@ const (
 	LabelWorkdir    = "cmdman.compose.workdir"
 	LabelFile       = "cmdman.compose.file"
 	LabelAfter      = "cmdman.compose.after"
+	// LabelScaleIndex is the 1-based replica index of a scaled command's
+	// instance (e.g. "2" for the api-2 replica). Every compose-created command
+	// carries it; an unscaled command's sole instance has index "1".
+	LabelScaleIndex = "cmdman.compose.scale-index"
+	// LabelScale is the desired replica count of the command this instance
+	// belongs to, recorded so stored state can be read back without the file.
+	LabelScale = "cmdman.compose.scale"
 
 	LabelVersionValue = "1"
 )
@@ -79,6 +86,9 @@ type RawCommand struct {
 	LogDriver       string               `yaml:"log_driver" json:"log_driver"`
 	LogOpts         map[string]string    `yaml:"log_opts" json:"log_opts"`
 	After           map[string]AfterSpec `yaml:"after" json:"after"`
+	// Scale is the desired replica count. A pointer so absence (nil → default 1)
+	// is distinguishable from an explicit value; Normalize rejects values < 1.
+	Scale *int `yaml:"scale" json:"scale"`
 	// Unknown captures unrecognized per-command keys so Normalize can warn about them.
 	Unknown map[string]any `yaml:",inline" json:"-"`
 }
@@ -157,7 +167,22 @@ type Command struct {
 	LogOpts map[string]string
 	// After is the expanded dependency list.
 	After []AfterSpec
-	// GeneratedName is the deterministic cmdman command name:
-	// <workdir-hash>-<escaped-project>-<escaped-command>
+	// Scale is the desired replica count (>= 1). Each replica is a distinct
+	// cmdman command named <GeneratedName>-<index> for index in 1..Scale.
+	Scale int
+	// GeneratedName is the deterministic cmdman command base name:
+	// <workdir-hash>-<escaped-project>-<escaped-command>. The concrete per-replica
+	// command name appends the 1-based scale index (see InstanceName).
 	GeneratedName string
+}
+
+// InstanceNames returns the per-replica cmdman command names for this command,
+// ordered by scale index (index 1 first). It always returns at least one name.
+func (c Command) InstanceNames() []string {
+	n := max(c.Scale, 1)
+	out := make([]string, n)
+	for i := range out {
+		out[i] = InstanceName(c.GeneratedName, i+1)
+	}
+	return out
 }

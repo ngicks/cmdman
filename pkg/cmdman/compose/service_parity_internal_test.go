@@ -193,7 +193,8 @@ func TestResolveCommandID(t *testing.T) {
 		},
 	}}
 
-	id, err := svc.ResolveCommandID(context.Background(), ProjectSelection{WorkDir: "/wd"}, "alpha")
+	id, err := svc.ResolveCommandID(
+		context.Background(), ProjectSelection{WorkDir: "/wd"}, "alpha", 0)
 	if err != nil {
 		t.Fatalf("resolveCommandID(alpha) failed: %v", err)
 	}
@@ -202,7 +203,7 @@ func TestResolveCommandID(t *testing.T) {
 	}
 
 	if _, err := svc.ResolveCommandID(
-		context.Background(), ProjectSelection{WorkDir: "/wd"}, "ghost"); err == nil {
+		context.Background(), ProjectSelection{WorkDir: "/wd"}, "ghost", 0); err == nil {
 		t.Fatal("expected error for an unknown command name")
 	}
 }

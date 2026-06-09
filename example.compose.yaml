@@ -30,3 +30,29 @@ commands:
         condition: completed
       yay2:
         condition: completed
+
+  # web: scaled to 3 replicas. Each replica is a distinct cmdman command named
+  # "<base>-1".."<base>-3"; cmdman injects CMDMAN_COMPOSE_SCALE_INDEX (this
+  # replica's 1-based index) and CMDMAN_COMPOSE_SCALE (the total) into each one.
+  # Note the $$ — it escapes interpolation so the variable reaches the shell at
+  # run time instead of being substituted (to blank) while loading the file.
+  # Change the count live with `cmdman compose scale web=5`.
+  web:
+    scale: 3
+    args:
+      - sh
+      - -c
+      - echo "replica $${CMDMAN_COMPOSE_SCALE_INDEX} of $${CMDMAN_COMPOSE_SCALE}"
+
+# mux: a leaf may pin a replica with scale: <n>; an unpinned leaf cycles through
+# the command's replicas on successive `cmdman compose mux` invocations.
+mux:
+  layouts:
+    - name: web
+      root:
+        dir: h
+        splits: [1, 1]
+        panes:
+          - command: web
+            scale: 1   # always shows replica web-1
+          - command: web   # unpinned: cycles web-1 → web-2 → web-3

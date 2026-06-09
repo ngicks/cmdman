@@ -103,6 +103,82 @@ func cleanupProject(ctx context.Context, e *testEnv, workdir, project string) {
 	}
 }
 
+// TestComposeScale exercises the scale field, the per-replica "-<n>" command
+// names, the injected scale-index environment, and `compose scale` up/down.
+func TestComposeScale(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-scale"
+	// Each replica prints its injected scale index, then idles so it stays
+	// running long enough to be observed.
+	yaml := fmt.Sprintf(`name: %s
+commands:
+  web:
+    args: [sh, -c, "echo replica $$CMDMAN_COMPOSE_SCALE_INDEX of $$CMDMAN_COMPOSE_SCALE; sleep 30"]
+    scale: 3
+`, project)
+	writeComposeFile(t, wd, yaml)
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	composePath := filepath.Join(wd, "cmd-compose.yaml")
+	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up"); err != nil {
+		t.Fatalf("compose up failed: %v", err)
+	}
+
+	// Three replicas exist, named "<base>-1".."<base>-3" with distinct
+	// scale-index labels.
+	wantIdx := map[string]bool{"1": false, "2": false, "3": false}
+	entries := env.lsJSON(ctx,
+		"-l", "cmdman.compose.workdir="+wd,
+		"-l", "cmdman.compose.command=web",
+	)
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 web replicas, got %d", len(entries))
+	}
+	for _, e := range entries {
+		labels, _ := e["ConfigJSON"].(map[string]any)["labels"].(map[string]any)
+		idx, _ := labels["cmdman.compose.scale-index"].(string)
+		if _, ok := wantIdx[idx]; !ok {
+			t.Fatalf("unexpected scale-index %q", idx)
+		}
+		wantIdx[idx] = true
+		name, _ := e["Name"].(string)
+		if !strings.HasSuffix(name, "-web-"+idx) {
+			t.Fatalf("replica name %q should end with -web-%s", name, idx)
+		}
+		env.waitForState(ctx, e["ID"].(string), "running", 10*time.Second)
+	}
+	for idx, seen := range wantIdx {
+		if !seen {
+			t.Fatalf("scale-index %s replica missing", idx)
+		}
+	}
+
+	// Each replica saw its own injected scale index in the environment.
+	logs, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "logs")
+	if err != nil {
+		t.Fatalf("compose logs failed: %v", err)
+	}
+	for _, want := range []string{"replica 1 of 3", "replica 2 of 3", "replica 3 of 3"} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("logs missing %q; got:\n%s", want, logs)
+		}
+	}
+
+	// Scale down to 1: the surplus replicas are removed, one remains.
+	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath,
+		"scale", "web=1"); err != nil {
+		t.Fatalf("compose scale web=1 failed: %v", err)
+	}
+	waitUntil(t, 10*time.Second, func() bool {
+		return len(env.lsJSON(ctx,
+			"-l", "cmdman.compose.workdir="+wd,
+			"-l", "cmdman.compose.command=web",
+		)) == 1
+	}, "scale-down leaves exactly one replica")
+}
+
 func TestComposeCreate(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnv(t)

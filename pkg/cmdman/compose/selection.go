@@ -57,17 +57,17 @@ func commandNameOf(e cmdmanEntry) string {
 	return e.ConfigJSON.Labels[LabelCommand]
 }
 
-// buildIDByCommand returns a map from compose command name (LabelCommand) to
-// the cmdman entry ID for the supplied entries.
-func buildIDByCommand(entries []cmdmanEntry) map[string]string {
-	m := make(map[string]string, len(entries))
+// buildIDsByCommand groups the cmdman entry IDs by compose command name
+// (LabelCommand), so a command with multiple replicas maps to all of its IDs.
+func buildIDsByCommand(entries []cmdmanEntry) map[string][]string {
+	m := make(map[string][]string, len(entries))
 	for _, e := range entries {
 		if e.ConfigJSON == nil {
 			continue
 		}
 		name := e.ConfigJSON.Labels[LabelCommand]
 		if name != "" {
-			m[name] = e.ID
+			m[name] = append(m[name], e.ID)
 		}
 	}
 	return m

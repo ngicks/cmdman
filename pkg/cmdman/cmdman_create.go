@@ -14,9 +14,14 @@ import (
 
 // CreateRequest defines a command creation request.
 type CreateRequest struct {
-	Name            string
-	Dir             string
-	Env             []string
+	Name string
+	Dir  string
+	Env  []string
+	// AppendEnv holds environment entries appended after the base environment is
+	// resolved — i.e. after the empty-Env fallback to DefaultEnvironment. Use it
+	// for context the command should always see (e.g. compose scale index)
+	// without suppressing OS-env inheritance the way a non-empty Env does.
+	AppendEnv       []string
 	Labels          map[string]string
 	RestartPolicy   model.RestartPolicy
 	MaxRetries      int
@@ -101,6 +106,9 @@ func (s *Service) buildCommandConfig(req CreateRequest) *model.CommandConfig {
 	if len(env) == 0 {
 		env = append(env, s.cfg.DefaultEnvironment...)
 	}
+	// AppendEnv is layered on after the fallback so callers can inject context
+	// vars without an explicit Env defeating DefaultEnvironment inheritance.
+	env = append(env, req.AppendEnv...)
 
 	scrollbackBytes := req.ScrollbackBytes
 	if scrollbackBytes == 0 {

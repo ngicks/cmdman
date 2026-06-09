@@ -12,21 +12,87 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
-// commandSnapshot is the service-level equivalent of one `compose ps` row: the
-// current stored state, exit code, and identity of a project-labeled command as
-// observed before reconciliation begins. Reconcile decisions and user-visible
-// status agree on this snapshot.
+// commandSnapshot is the service-level view of a project-labeled command as
+// observed before reconciliation begins: the per-replica instances plus the
+// state/exit code aggregated across them. Reconcile decisions and user-visible
+// status agree on this snapshot. A scaled command has one Instances entry per
+// replica; an unscaled command has exactly one.
 type commandSnapshot struct {
+	// Instances are the existing replicas, ordered by scale index.
+	Instances []instanceSnapshot
+	// State is the aggregate state across Instances (see aggregateInstances).
+	State model.EventType
+	// ExitCode is the aggregate exit code: 0 when every replica exited 0, the
+	// first non-zero exit code when any replica exited non-zero, nil when no
+	// replica has exited.
+	ExitCode *int
+}
+
+// instanceSnapshot is the stored state of one replica.
+type instanceSnapshot struct {
 	// ID is the cmdman command ID.
 	ID string
-	// GenName is the deterministic cmdman command name (Command.GeneratedName as
-	// stored). It is retained for diagnostics; the Start target is taken from the
-	// spec's GeneratedName to preserve existing behavior.
+	// GenName is the cmdman command name (the per-replica InstanceName).
 	GenName string
+	// ScaleIndex is the replica's 1-based scale index.
+	ScaleIndex int
 	// State is the persisted state at snapshot time.
 	State model.EventType
 	// ExitCode is the last recorded exit code (nil when never exited).
 	ExitCode *int
+}
+
+// activeInstances returns the replicas with a live monitor (running/starting) —
+// the only ones a stop can act on.
+func (s commandSnapshot) activeInstances() []instanceSnapshot {
+	var out []instanceSnapshot
+	for _, in := range s.Instances {
+		if in.State == model.EventTypeRunning || in.State == model.EventTypeStarting {
+			out = append(out, in)
+		}
+	}
+	return out
+}
+
+// aggregateInstances reduces per-replica states into a single (state, exit code)
+// pair for dependency-condition evaluation:
+//   - any replica failed         → failed
+//   - every replica exited       → exited (exit code aggregated, see commandSnapshot)
+//   - every replica is active     → running
+//   - otherwise (mixed/partial)   → starting (terminal-pending)
+func aggregateInstances(insts []instanceSnapshot) (model.EventType, *int) {
+	if len(insts) == 0 {
+		return "", nil
+	}
+	anyFailed := false
+	allExited := true
+	allActive := true
+	var exit *int
+	for _, in := range insts {
+		switch in.State {
+		case model.EventTypeFailed:
+			anyFailed, allExited, allActive = true, false, false
+		case model.EventTypeExited:
+			allActive = false
+			if in.ExitCode != nil && (exit == nil || (*exit == 0 && *in.ExitCode != 0)) {
+				exit = in.ExitCode
+			}
+		case model.EventTypeRunning, model.EventTypeStarting:
+			allExited = false
+		default:
+			allExited, allActive = false, false
+		}
+	}
+	switch {
+	case anyFailed:
+		return model.EventTypeFailed, exit
+	case allExited:
+		return model.EventTypeExited, exit
+	case allActive:
+		return model.EventTypeRunning, nil
+	default:
+		return model.EventTypeStarting, nil
+	}
 }
 
 // resolveTargetCommands resolves the supplied command-name subset to the set of
