@@ -375,7 +375,11 @@ func (b *serviceBackend) CycleMux(ctx context.Context, projectName, composeFile 
 	// TUI runs inside tmux so mux prints nothing anyway.
 	return mux.Run(ctx, built, mux.RunOptions{
 		WindowName: windowName,
-		Stdout:     io.Discard,
+		// Pass the compose project identity so TUI-built dashboards are stamped
+		// identically to CLI-built ones: `mux down` can find them regardless of
+		// whether they were opened from the TUI or the command line.
+		Identity: selection.ProjectIdentity(),
+		Stdout:   io.Discard,
 	})
 }
 

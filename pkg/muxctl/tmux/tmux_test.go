@@ -144,19 +144,36 @@ func TestNew_DoesNotReuseMultiPaneCurrentWindow(t *testing.T) {
 	}
 }
 
-// TestNew_ReusesMarkedCurrentWindow verifies that a window we built before
-// (its panes carry the marker) is reused in place even when it is multi-pane
-// and its name does not match — so re-running cycles the layout in place.
-func TestNew_ReusesMarkedCurrentWindow(t *testing.T) {
+// TestNew_ReusesOwnedCurrentWindow verifies that a window we built before —
+// one that carries the @cmdman_window ownership stamp — is reused in place even
+// when it is multi-pane and its name does not match, so a re-run cycles the
+// layout in place. Ownership is now determined by the window-level option rather
+// than requiring every pane to carry a numeric marker; the test therefore builds
+// the session with a non-empty OwnedIdentity.
+func TestNew_ReusesOwnedCurrentWindow(t *testing.T) {
 	requireTmux(t)
-	sess, socket := newSession(t, "cmdman-owned")
+	socket := uniqueSocket(t)
+	t.Cleanup(func() { killServer(t, socket) })
+
+	// Build the initial session with an ownership stamp so currentWindowToReuse
+	// recognises it via @cmdman_window regardless of pane count or name.
+	sess, err := tmuxctl.New(context.Background(), tmuxctl.Config{
+		Socket:           socket,
+		SessionName:      "cmdman-test",
+		WindowName:       "cmdman-owned",
+		OwnedIdentity:    "my-project",
+		ViewerDetachKeys: []string{"C-p", "C-q"},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	root := loadLayout(t, "horizontal-two.yaml", "")
 	if _, err := sess.ApplyLayout(context.Background(), root, 0); err != nil {
 		t.Fatalf("ApplyLayout: %v", err)
 	}
 	ownedID := sess.WindowID()
-	// Make the marked window the session's current window.
+	// Make the owned window the session's current window.
 	run(t, socket, "select-window", "-t", ownedID)
 
 	sess2, err := tmuxctl.New(context.Background(), tmuxctl.Config{
@@ -169,7 +186,7 @@ func TestNew_ReusesMarkedCurrentWindow(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	if sess2.WindowID() != ownedID {
-		t.Errorf("expected to reuse marked current window %s, got %s", ownedID, sess2.WindowID())
+		t.Errorf("expected to reuse owned current window %s, got %s", ownedID, sess2.WindowID())
 	}
 }
 

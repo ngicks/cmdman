@@ -34,6 +34,27 @@ func GenerateName(wdHash, project, command string) string {
 	return wdHash + "-" + escapeName(project) + "-" + escapeName(command)
 }
 
+// GenerateProjectIdentity returns the opaque ownership identity string for a
+// compose project's mux dashboard. Format: <workdir-hash>-<escaped-project>
+//
+// This is the prefix of [GenerateName] without the command segment. It is
+// stable across commands and replicas within the same project: every dashboard
+// window built for this (workdir, project) pair carries this identity,
+// regardless of which layout or scale replica is active.
+//
+// The identity is passed as [mux.RunOptions.Identity] when building or cycling
+// a compose mux dashboard, and as [mux.DownOptions.Identity] when tearing it
+// down. Standalone mux uses a different default (the window name); only compose
+// passes this value explicitly.
+//
+// wdHash must be the value returned by workdirHash for the project's canonical
+// working directory; project is the resolved project name. Both match the
+// inputs to [GenerateName], so the identity is always a strict prefix of any
+// generated command name for this project.
+func GenerateProjectIdentity(wdHash, project string) string {
+	return wdHash + "-" + escapeName(project)
+}
+
 // InstanceName returns the concrete cmdman command name for replica scaleIndex
 // (1-based) of the command whose base name is base: "<base>-<scaleIndex>". The
 // index is plain decimal (never contains '-'), so the suffix is always

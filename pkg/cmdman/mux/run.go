@@ -26,6 +26,20 @@ type RunOptions struct {
 	// defaults to SessionName. Plan/mux-00: standalone mux uses "cmdman";
 	// compose mux passes "cmdman-<project>".
 	WindowName string
+	// Identity is the opaque ownership string stamped on the window as the
+	// @cmdman_window tmux user option, enabling server-wide discovery and
+	// reliable teardown via [Down]. Callers set this to a stable,
+	// context-independent value:
+	//
+	//   - compose mux:    <wdhash>-<escaped-project>  (see compose.GenerateProjectIdentity)
+	//   - standalone mux: empty here — defaults to the resolved window name
+	//     (session-local, so [Down] with the same spec finds it within the
+	//     same session; see the known-limitation note in PLAN.md).
+	//
+	// The identity is separate from the window name: a takeover window keeps
+	// its original name but is stamped with the identity, so find-by-identity
+	// works even after the window is renamed.
+	Identity string
 	// Layout selects a specific layout to apply instead of cycling. It accepts
 	// a layout name or a 0-based index (e.g. "2"). A name is matched first, so
 	// a layout literally named "2" wins over index 2. Empty (the default)
@@ -96,6 +110,12 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 	if windowName == "" {
 		windowName = sessionName
 	}
+	// Default the identity to the resolved window name when the caller did not
+	// supply one. This is the standalone-mux default: the identity is
+	// session-local (it equals the window name), so [Down] with the same spec
+	// finds it within the same session. Compose callers always pass an explicit
+	// Identity (compose.GenerateProjectIdentity), which is context-independent.
+	identity := deriveIdentity(opts.Identity, opts.WindowName, sessionName)
 
 	// With no explicit --session, take over the caller's current window when it
 	// is safe to repurpose (single-pane or already ours) instead of spawning a
@@ -119,6 +139,7 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 		Socket:             spec.DriverOpt["socket"],
 		SessionName:        sessionName,
 		WindowName:         windowName,
+		OwnedIdentity:      identity,
 		ReuseCurrentWindow: reuseCurrent,
 		ViewerDetachKeys:   viewerDetachKeys,
 	})
@@ -166,6 +187,21 @@ func resolveSessionName(
 		}
 	}
 	return "cmdman"
+}
+
+// deriveIdentity returns the ownership identity [Run] stamps on the window and
+// [Down]/[List] search for: the explicit identity when non-empty, else the
+// window name, else the session name. Run and Down must share this derivation
+// so a default-named `mux down` finds exactly what `mux up` stamped.
+func deriveIdentity(identity, windowName, sessionName string) string {
+	switch {
+	case identity != "":
+		return identity
+	case windowName != "":
+		return windowName
+	default:
+		return sessionName
+	}
 }
 
 // currentTmuxSession queries the name of the currently-active tmux session by

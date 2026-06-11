@@ -11,10 +11,13 @@ import (
 // returns the current window's id and ok=true when that window is safe to
 // reuse; ok=false means the caller should fall back to find-or-create by name.
 //
-// A window is reused when it already carries our per-pane marker (we built it
-// on a previous run, so cycling stays in place), when it is already named like
+// A window is reused when it already carries the @cmdman_window ownership
+// option (we built it on a previous run, so cycling stays in place regardless
+// of how many panes the user has since added), when it is already named like
 // the owned window, or when it has a single pane (an "empty" window safe to
-// repurpose). This mirrors the resolution the muxctltester performs.
+// repurpose). The old all-panes-marked check is intentionally NOT used here:
+// it breaks as soon as the user manually splits a pane into the dashboard
+// window, which is a common workflow.
 func currentWindowToReuse(
 	ctx context.Context,
 	e *executor,
@@ -22,23 +25,31 @@ func currentWindowToReuse(
 ) (string, bool) {
 	out, err := e.run(
 		ctx, "display-message", "-p",
-		"#{window_id}\t#{window_name}\t#{window_panes}",
+		"#{window_id}\t#{window_name}\t#{window_panes}\t#{"+ownerOption+"}",
 	)
 	if err != nil {
 		return "", false
 	}
-	parts := strings.SplitN(out, "\t", 3)
-	if len(parts) != 3 {
+	// executor.run trims trailing whitespace from tmux's output; when
+	// @cmdman_window is unset the trailing tab is stripped, yielding 3 fields
+	// instead of 4. Accept either length: a missing 4th field means an empty
+	// (unset) identity.
+	parts := strings.SplitN(out, "\t", 4)
+	if len(parts) < 3 {
 		return "", false
 	}
 	id, name := parts[0], parts[1]
+	identity := ""
+	if len(parts) == 4 {
+		identity = parts[3]
+	}
 	panes, err := strconv.Atoi(parts[2])
 	if err != nil {
 		return "", false
 	}
-	// A window we built before carries the marker on every pane; recognize it
-	// regardless of its name or pane count so a re-run cycles in place.
-	if windowIsMarked(ctx, e, id) {
+	// A window we stamped before carries a non-empty @cmdman_window; recognise
+	// it regardless of its name or pane count so a re-run cycles in place.
+	if identity != "" {
 		return id, true
 	}
 	if shouldReuseUnmarkedWindow(name, ownedWindowName, panes) {
@@ -47,44 +58,33 @@ func currentWindowToReuse(
 	return "", false
 }
 
-// shouldReuseUnmarkedWindow decides whether an unmarked current window should
+// shouldReuseUnmarkedWindow decides whether an unowned current window should
 // be taken over: when it is already named like ours or has at most a single
 // pane (so repurposing it does not clobber unrelated work).
 func shouldReuseUnmarkedWindow(curName, ownedName string, panes int) bool {
 	return curName == ownedName || panes <= 1
 }
 
-// currentWindowIfMarked returns the caller's current window id when that window
-// carries the muxctl marker on every pane (i.e. it is a dashboard a previous
-// ApplyLayout built). Unlike currentWindowToReuse it never accepts an unmarked
-// window: teardown callers (e.g. [Session.Detach] via [OpenExisting]) must act
-// only on a provably muxctl-owned window, not repurpose an arbitrary one.
-func currentWindowIfMarked(ctx context.Context, e *executor) (string, bool) {
-	out, err := e.run(ctx, "display-message", "-p", "#{window_id}")
+// currentWindowIfOwned returns the caller's current window id when that window
+// carries the @cmdman_window ownership option — i.e. it was stamped by a
+// previous [New] call. Unlike [currentWindowToReuse] it never accepts an
+// unowned window: teardown callers (e.g. [Session.Detach] via [OpenExisting])
+// must act only on a provably muxctl-owned window, never repurpose an arbitrary
+// window the user happens to be sitting in.
+//
+// This replaces the older currentWindowIfMarked (every-pane-marked check),
+// which broke whenever the user manually added a pane to the dashboard window.
+func currentWindowIfOwned(ctx context.Context, e *executor) (string, bool) {
+	out, err := e.run(
+		ctx, "display-message", "-p",
+		"#{window_id}\t#{"+ownerOption+"}",
+	)
 	if err != nil {
 		return "", false
 	}
-	id := strings.TrimSpace(out)
-	if id == "" {
+	id, identity, ok := strings.Cut(strings.TrimSpace(out), "\t")
+	if !ok || id == "" || identity == "" {
 		return "", false
 	}
-	if windowIsMarked(ctx, e, id) {
-		return id, true
-	}
-	return "", false
-}
-
-// windowIsMarked reports whether every pane of windowID carries a numeric
-// @cmdman_marker option — i.e. the window was built by a previous ApplyLayout.
-func windowIsMarked(ctx context.Context, e *executor, windowID string) bool {
-	out, err := e.run(ctx, "list-panes", "-t", windowID, "-F", "#{"+markerOption+"}")
-	if err != nil || out == "" {
-		return false
-	}
-	for line := range strings.SplitSeq(out, "\n") {
-		if _, err := strconv.Atoi(line); err != nil {
-			return false
-		}
-	}
-	return true
+	return id, true
 }

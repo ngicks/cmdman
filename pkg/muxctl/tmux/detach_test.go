@@ -73,10 +73,12 @@ func TestOpenExisting_FindsNamedWindow(t *testing.T) {
 	}
 }
 
-// TestOpenExisting_FindsMarkedCurrentWindow verifies the reuse-current case: a
+// TestOpenExisting_FindsOwnedCurrentWindow verifies the reuse-current case: a
 // dashboard built into a window whose NAME differs from the owned name is found
-// via the marked-current path (find-by-name "cmdman" would not match "work").
-func TestOpenExisting_FindsMarkedCurrentWindow(t *testing.T) {
+// via the owned-current path (find-by-name "cmdman" would not match "work").
+// Ownership is now determined by the @cmdman_window option, so the session is
+// built with a non-empty OwnedIdentity to ensure the stamp is present.
+func TestOpenExisting_FindsOwnedCurrentWindow(t *testing.T) {
 	requireTmux(t)
 	socket := uniqueSocket(t)
 	t.Cleanup(func() { killServer(t, socket) })
@@ -85,6 +87,7 @@ func TestOpenExisting_FindsMarkedCurrentWindow(t *testing.T) {
 		Socket:           socket,
 		SessionName:      "main",
 		WindowName:       "work",
+		OwnedIdentity:    "find-owned-test",
 		ViewerDetachKeys: []string{"C-p", "C-q"},
 	})
 	if err != nil {
@@ -95,7 +98,7 @@ func TestOpenExisting_FindsMarkedCurrentWindow(t *testing.T) {
 	); err != nil {
 		t.Fatalf("ApplyLayout: %v", err)
 	}
-	// Make the marked dashboard the session's current window.
+	// Make the owned dashboard the session's current window.
 	run(t, socket, "select-window", "-t", sess.WindowID())
 
 	got, ok, err := tmuxctl.OpenExisting(context.Background(), tmuxctl.Config{
@@ -108,7 +111,7 @@ func TestOpenExisting_FindsMarkedCurrentWindow(t *testing.T) {
 		t.Fatalf("OpenExisting: %v", err)
 	}
 	if !ok {
-		t.Fatal("expected to find the marked current window")
+		t.Fatal("expected to find the owned current window")
 	}
 	if got.WindowID() != sess.WindowID() {
 		t.Errorf("WindowID = %q, want %q", got.WindowID(), sess.WindowID())

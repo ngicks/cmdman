@@ -56,9 +56,9 @@ Each layout has:
 - `name`: required unique layout name.
 - `root`: pane tree root.
 
-`cmdman mux` and `cmdman compose mux` apply one layout to one cmdman-owned
-window. Re-running the command cycles layouts unless a layout name or index is
-selected.
+`cmdman mux [up]` and `cmdman compose mux [up]` apply one layout to one
+cmdman-owned window. Re-running the command cycles layouts unless a layout name
+or index is selected.
 
 ## Pane Tree
 

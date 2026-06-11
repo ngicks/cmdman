@@ -172,6 +172,71 @@ func (e *testEnv) muxExecInDir(
 	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
 }
 
+// muxExecWithTmpdir is like muxExec but also sets TMUX_TMPDIR to tmuxTmpdir in
+// the child's environment. This redirects the default tmux socket path so tests
+// that need to use the default socket (e.g. `mux ls`, which has no --socket
+// flag) can still run in isolation: every test uses its own TMUX_TMPDIR.
+func (e *testEnv) muxExecWithTmpdir(
+	ctx context.Context,
+	tmuxTmpdir string,
+	args ...string,
+) (string, string, error) {
+	e.t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, cmdmanBin, args...)
+	base := slices.DeleteFunc(os.Environ(), func(s string) bool {
+		return strings.HasPrefix(s, "TMUX=") ||
+			strings.HasPrefix(s, "ZELLIJ=") ||
+			strings.HasPrefix(s, "TMUX_TMPDIR=")
+	})
+	base = append(base,
+		"TMUX_TMPDIR="+tmuxTmpdir,
+		cmdman.ENV_CMDMAN_DATA_DIR+"="+e.dataHome,
+		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+e.runtimeDir,
+		cmdman.ENV_CMDMAN_CONF+"="+e.confPath,
+	)
+	cmd.Env = base
+	cmd.WaitDelay = 3 * time.Second
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
+}
+
+// tmuxRunWithTmpdir is like tmuxRun but sets TMUX_TMPDIR so the command finds
+// the same default-socket server as muxExecWithTmpdir.
+func tmuxRunWithTmpdir(t *testing.T, tmuxTmpdir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("tmux", args...)
+	cmd.Env = append(
+		slices.DeleteFunc(os.Environ(), func(s string) bool {
+			return strings.HasPrefix(s, "TMUX_TMPDIR=")
+		}),
+		"TMUX_TMPDIR="+tmuxTmpdir,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("tmux %s: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// killDefaultTmuxServer kills the tmux default-socket server rooted at
+// tmuxTmpdir, ignoring errors (server may already be gone).
+func killDefaultTmuxServer(t *testing.T, tmuxTmpdir string) {
+	t.Helper()
+	cmd := exec.Command("tmux", "kill-server")
+	cmd.Env = append(
+		slices.DeleteFunc(os.Environ(), func(s string) bool {
+			return strings.HasPrefix(s, "TMUX_TMPDIR=")
+		}),
+		"TMUX_TMPDIR="+tmuxTmpdir,
+	)
+	_ = cmd.Run()
+}
+
 // standaloneMuxYAML is a single-layout spec with three side-by-side panes
 // bound to commands api/worker/cache, on the given dedicated tmux socket.
 func standaloneMuxYAML(socket string) string {
@@ -656,6 +721,319 @@ func TestComposeMux_NoFileNoneAssociatedErrors(t *testing.T) {
 	}
 }
 
+// TestComposeMux_DownFindsWindowServerWide is the core capability test for the
+// new server-wide discovery: build a compose dashboard in session A, then run
+// `compose mux down` from OUTSIDE tmux (no $TMUX — muxExec strips it). The
+// window must be found by its identity stamp and restored even though the
+// caller has no $TMUX context pointing at the right session.
+func TestComposeMux_DownFindsWindowServerWide(t *testing.T) {
+	t.Parallel()
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	wd := composeWorkdir(t)
+	project := "muxservwide"
+	socket := muxSocket(t)
+	t.Cleanup(func() { killTmuxServer(t, socket) })
+	composePath := writeComposeFile(t, wd, composeMuxYAML(project, socket))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	// Bring the services up.
+	if _, stderr, err := env.exec(
+		ctx, "compose", "--workdir", wd, "-f", composePath, "up",
+	); err != nil {
+		t.Fatalf("compose up failed: %v\nstderr:\n%s", err, stderr)
+	}
+	for _, e := range env.lsJSON(ctx,
+		"-l", "cmdman.compose.workdir="+wd,
+		"-l", "cmdman.compose.project="+project,
+	) {
+		env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
+	}
+
+	// Build the dashboard (from outside tmux — muxExec strips $TMUX).
+	if _, stderr, err := env.muxExec(
+		ctx, "compose", "--workdir", wd, "-f", composePath, "mux",
+	); err != nil {
+		t.Fatalf("compose mux failed: %v\nstderr:\n%s", err, stderr)
+	}
+	window := "cmdman-" + project
+	wid := tmuxWindowID(t, socket, window)
+	if got := len(tmuxPaneField(t, socket, wid, "#{pane_title}")); got != 2 {
+		t.Fatalf("want 2 panes before down, got %d", got)
+	}
+
+	// Run compose mux down from OUTSIDE tmux (muxExec strips $TMUX). The window
+	// must be found by its identity stamp without any $TMUX context.
+	downStdout, downStderr, downErr := env.muxExec(
+		ctx, "compose", "--workdir", wd, "-f", composePath, "mux", "down",
+	)
+	if downErr != nil {
+		t.Fatalf(
+			"compose mux down failed: %v\nstdout:\n%s\nstderr:\n%s",
+			downErr, downStdout, downStderr,
+		)
+	}
+	// Assert the "Restored window ..." output line (exact format from mux/down.go).
+	if !strings.Contains(downStdout, "Restored window") {
+		t.Fatalf("expected 'Restored window ...' on stdout; got:\n%s", downStdout)
+	}
+	if !strings.Contains(downStdout, window) {
+		t.Fatalf("expected window name %q in down output; got:\n%s", window, downStdout)
+	}
+
+	// The window still exists (restored, not killed) but has collapsed to one pane.
+	if got := tmuxWindowID(t, socket, window); got != wid {
+		t.Fatalf("window id changed across down: %s vs %s", wid, got)
+	}
+	if got := len(tmuxPaneField(t, socket, wid, "#{pane_id}")); got != 1 {
+		t.Fatalf("want 1 pane after down, got %d", got)
+	}
+	// The ownership option is cleared.
+	if got := tmuxWindowOption(t, socket, wid, "@cmdman_window"); got != "" {
+		t.Errorf("@cmdman_window still set after down: %q", got)
+	}
+}
+
+// muxLsYAML is a one-pane spec that uses the default tmux socket (no
+// driver_opt.socket). Used by ls tests, which drive `mux ls` without a spec
+// file: both `mux up` and `mux ls` must therefore talk to the same server. The
+// calling test redirects the default socket via TMUX_TMPDIR.
+func muxLsYAML() string {
+	return `mux:
+  driver: tmux
+  layouts:
+    - name: only
+      root:
+        command: solo
+`
+}
+
+// composeMuxLsYAML is like composeMuxYAML but omits driver_opt.socket, so
+// `compose mux up` and `compose mux ls` both hit the default tmux socket
+// (redirected per-test via TMUX_TMPDIR). Tests that exercise the driver_opt
+// passthrough on a custom socket use composeMuxCustomSocketYAML instead.
+func composeMuxLsYAML(project string) string {
+	return fmt.Sprintf(`name: %s
+commands:
+  alpha:
+    args: [sleep, "300"]
+  beta:
+    args: [sleep, "300"]
+mux:
+  driver: tmux
+  layouts:
+    - name: services
+      root:
+        dir: h
+        splits: [1, 1]
+        panes: [alpha, beta]
+`, project)
+}
+
+// TestMuxLs_ListsDashboard builds a standalone dashboard via the default tmux
+// socket (isolated per-test via TMUX_TMPDIR) and verifies that `cmdman mux ls`
+// reports it with the correct SESSION and IDENTITY values. The table format is
+// asserted via --format for stable, whitespace-independent matching.
+//
+// Note: `mux ls` has no spec-file argument and therefore no way to receive a
+// custom socket; both `mux up` and `mux ls` must target the same socket. We
+// achieve isolation by redirecting TMUX_TMPDIR to a private temp directory so
+// the default socket (`$TMUX_TMPDIR/tmux-<uid>/default`) is unique per test.
+func TestMuxLs_ListsDashboard(t *testing.T) {
+	t.Parallel()
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	// Unique TMUX_TMPDIR gives this test its own default tmux socket.
+	tmuxTmpdir := t.TempDir()
+	t.Cleanup(func() { killDefaultTmuxServer(t, tmuxTmpdir) })
+
+	env.run(ctx, "run", "-n", "solo", "--", "/bin/sh", "-c", "sleep 300")
+	t.Cleanup(func() { env.cleanupCommand(ctx, "solo") })
+	env.waitForState(ctx, "solo", "running", defaultTimeout)
+
+	specPath := writeSpecFile(t, muxLsYAML())
+
+	// Build the dashboard on the default socket (redirected to tmuxTmpdir).
+	// Outside tmux: session = "cmdman", window = "cmdman", identity = "cmdman".
+	if _, stderr, err := env.muxExecWithTmpdir(ctx, tmuxTmpdir, "mux", specPath); err != nil {
+		t.Fatalf("cmdman mux failed: %v\nstderr:\n%s", err, stderr)
+	}
+
+	// Verify the window exists on the default server.
+	tmuxRunWithTmpdir(t, tmuxTmpdir,
+		"list-windows", "-a", "-F", "#{window_name}\t#{window_id}",
+	)
+
+	// List using a stable --format template so the assertion is whitespace-independent.
+	stdout, stderr, err := env.muxExecWithTmpdir(
+		ctx, tmuxTmpdir,
+		"mux", "ls", "--format", "{{.SessionName}}\t{{.Identity}}",
+	)
+	if err != nil {
+		t.Fatalf("cmdman mux ls failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	// Outside tmux the session defaults to "cmdman" and the standalone identity
+	// equals the window name which defaults to the session name: "cmdman".
+	const wantSession = "cmdman"
+	const wantIdentity = "cmdman"
+	found := false
+	for line := range strings.SplitSeq(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) == 2 && parts[0] == wantSession && parts[1] == wantIdentity {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf(
+			"mux ls: expected a row with session=%q identity=%q; got:\n%s",
+			wantSession, wantIdentity, stdout,
+		)
+	}
+}
+
+// TestComposeMuxLs_ListsDashboard builds a compose dashboard via the default
+// tmux socket (isolated per-test via TMUX_TMPDIR) and verifies that
+// `compose mux ls` reports it with the correct SESSION and IDENTITY values.
+// This test covers the default-socket path; TestComposeMuxLs_HonorsDriverOpt
+// covers the custom-socket path that was fixed in the 2026-06-12 decision.
+func TestComposeMuxLs_ListsDashboard(t *testing.T) {
+	t.Parallel()
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	// Unique TMUX_TMPDIR gives this test its own default tmux socket.
+	tmuxTmpdir := t.TempDir()
+	t.Cleanup(func() { killDefaultTmuxServer(t, tmuxTmpdir) })
+
+	wd := composeWorkdir(t)
+	project := "muxls"
+	composePath := writeComposeFile(t, wd, composeMuxLsYAML(project))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	// Bring the services up (explicit flags).
+	if _, stderr, err := env.exec(
+		ctx, "compose", "--workdir", wd, "-f", composePath, "up",
+	); err != nil {
+		t.Fatalf("compose up failed: %v\nstderr:\n%s", err, stderr)
+	}
+	for _, e := range env.lsJSON(ctx,
+		"-l", "cmdman.compose.workdir="+wd,
+		"-l", "cmdman.compose.project="+project,
+	) {
+		env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
+	}
+
+	// Build the dashboard on the default socket (redirected to tmuxTmpdir).
+	if _, stderr, err := env.muxExecWithTmpdir(
+		ctx, tmuxTmpdir,
+		"compose", "--workdir", wd, "-f", composePath, "mux",
+	); err != nil {
+		t.Fatalf("compose mux failed: %v\nstderr:\n%s", err, stderr)
+	}
+
+	// List using a stable --format template.
+	stdout, stderr, err := env.muxExecWithTmpdir(
+		ctx, tmuxTmpdir,
+		"compose", "--workdir", wd, "-f", composePath,
+		"mux", "ls", "--format", "{{.SessionName}}\t{{.Identity}}",
+	)
+	if err != nil {
+		t.Fatalf("compose mux ls failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	// Outside tmux the session defaults to "cmdman". The compose identity is
+	// <wdhash>-<project>; we verify the suffix rather than predicting the hash.
+	// escapeName("muxls") = "muxls" (no dashes to escape).
+	const wantSession = "cmdman"
+	identitySuffix := "-" + project
+	found := false
+	for line := range strings.SplitSeq(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) == 2 &&
+			parts[0] == wantSession &&
+			strings.HasSuffix(parts[1], identitySuffix) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf(
+			"compose mux ls: expected a row with session=%q and identity suffix %q; got:\n%s",
+			wantSession, identitySuffix, stdout,
+		)
+	}
+}
+
+// TestMux_RootAliasEqualsUp verifies that `cmdman mux <path>` (root alias) is
+// equivalent to `cmdman mux up <path>`: both build the same dashboard on the
+// same socket. Each sub-test uses its own socket for isolation.
+func TestMux_RootAliasEqualsUp(t *testing.T) {
+	t.Parallel()
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	env.run(ctx, "run", "-n", "solo", "--", "/bin/sh", "-c", "sleep 300")
+	t.Cleanup(func() { env.cleanupCommand(ctx, "solo") })
+	env.waitForState(ctx, "solo", "running", defaultTimeout)
+
+	for _, tc := range []struct {
+		name string
+		args func(specPath string) []string
+	}{
+		{
+			name: "root-alias",
+			args: func(specPath string) []string {
+				return []string{"mux", specPath}
+			},
+		},
+		{
+			name: "explicit-up",
+			args: func(specPath string) []string {
+				return []string{"mux", "up", specPath}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			socket := muxSocket(t)
+			t.Cleanup(func() { killTmuxServer(t, socket) })
+
+			specPath := writeSpecFile(t, singleMuxYAML(socket))
+
+			stdout, stderr, err := env.muxExec(ctx, tc.args(specPath)...)
+			if err != nil {
+				t.Fatalf("cmdman %s failed: %v\nstdout:\n%s\nstderr:\n%s",
+					tc.name, err, stdout, stderr)
+			}
+			// Both forms must print the attach hint when outside tmux.
+			if !strings.Contains(stdout, "tmux attach -t cmdman") {
+				t.Fatalf("expected attach hint; got:\n%s", stdout)
+			}
+			// Both must create the dashboard window.
+			wid := tmuxWindowID(t, socket, "cmdman")
+			if got := len(tmuxPaneField(t, socket, wid, "#{pane_title}")); got != 1 {
+				t.Fatalf("want 1 pane, got %d", got)
+			}
+		})
+	}
+}
+
 // writeSpecFile writes a standalone mux layout spec to a temp file and returns
 // its path.
 func writeSpecFile(t *testing.T, content string) string {
@@ -717,9 +1095,15 @@ func TestMux_DetachRestoresWindowAndKeepsCommands(t *testing.T) {
 		t.Fatalf("pane-border-status before detach = %q, want top", got)
 	}
 
-	// Detach: restore the window.
-	if stdout, stderr, err := env.muxExec(ctx, "mux", "--detach", specPath); err != nil {
-		t.Fatalf("cmdman mux --detach failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	// Detach: restore the window (new CLI: mux down <path>).
+	{
+		stdout, stderr, err := env.muxExec(ctx, "mux", "down", specPath)
+		if err != nil {
+			t.Fatalf("cmdman mux down failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+		}
+		if !strings.Contains(stdout, "Restored window") {
+			t.Fatalf("expected 'Restored window ...' on stdout; got:\n%s", stdout)
+		}
 	}
 
 	// The owned window survives (restored, not killed) ...
@@ -750,6 +1134,157 @@ func TestMux_DetachRestoresWindowAndKeepsCommands(t *testing.T) {
 			t.Errorf("after detach %s pid changed %v -> %v (restarted, not left alone)",
 				name, pids[name], got)
 		}
+	}
+}
+
+// composeMuxCustomSocketYAML is like composeMuxYAML but includes a custom
+// driver_opt.socket, used by tests that verify driver_opt passthrough.
+func composeMuxCustomSocketYAML(project, socket string) string {
+	return composeMuxYAML(project, socket)
+}
+
+// TestMuxLs_HonorsDriverOpt verifies that `cmdman mux ls <specPath>` passes
+// the spec's driver_opt (including a custom socket) to mux.List, so dashboards
+// on a non-default tmux server are visible. This covers the fix recorded in the
+// 2026-06-12 decision log: `mux ls` gained an optional [path] argument with the
+// same semantics as `mux down [path]` (read only for driver/driver_opt).
+func TestMuxLs_HonorsDriverOpt(t *testing.T) {
+	t.Parallel()
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	socket := muxSocket(t)
+	t.Cleanup(func() { killTmuxServer(t, socket) })
+
+	env.run(ctx, "run", "-n", "solo", "--", "/bin/sh", "-c", "sleep 300")
+	t.Cleanup(func() { env.cleanupCommand(ctx, "solo") })
+	env.waitForState(ctx, "solo", "running", defaultTimeout)
+
+	// The spec declares driver_opt.socket so both `mux up` and `mux ls <path>`
+	// target the same isolated server.
+	specPath := writeSpecFile(t, singleMuxYAML(socket))
+
+	// Build the dashboard on the custom socket.
+	if _, stderr, err := env.muxExec(ctx, "mux", specPath); err != nil {
+		t.Fatalf("cmdman mux failed: %v\nstderr:\n%s", err, stderr)
+	}
+	// Confirm the window exists.
+	wid := tmuxWindowID(t, socket, "cmdman")
+	if got := len(tmuxPaneField(t, socket, wid, "#{pane_title}")); got != 1 {
+		t.Fatalf("want 1 pane after up, got %d", got)
+	}
+
+	// `mux ls <specPath>` must find the window on the custom socket by reading
+	// driver_opt from the spec, not by querying the default server.
+	stdout, stderr, err := env.muxExec(
+		ctx, "mux", "ls", "--format", "{{.SessionName}}\t{{.Identity}}", specPath,
+	)
+	if err != nil {
+		t.Fatalf("cmdman mux ls failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+
+	const wantSession = "cmdman"
+	const wantIdentity = "cmdman"
+	found := false
+	for line := range strings.SplitSeq(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) == 2 && parts[0] == wantSession && parts[1] == wantIdentity {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf(
+			"mux ls with spec path: expected row with session=%q identity=%q; got:\n%s",
+			wantSession, wantIdentity, stdout,
+		)
+	}
+}
+
+// TestComposeMuxLs_HonorsDriverOpt verifies that `compose mux ls` passes the
+// spec's driver_opt (including a custom socket) to mux.List, so dashboards on a
+// non-default tmux server are visible. This covers the fix recorded in the
+// 2026-06-12 decision log: `runComposeMuxLs` now passes spec.Driver and
+// spec.DriverOpt to mux.List, the same way `runComposeMuxDown` does.
+func TestComposeMuxLs_HonorsDriverOpt(t *testing.T) {
+	t.Parallel()
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	wd := composeWorkdir(t)
+	project := "muxlssock"
+	socket := muxSocket(t)
+	t.Cleanup(func() { killTmuxServer(t, socket) })
+	composePath := writeComposeFile(t, wd, composeMuxCustomSocketYAML(project, socket))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	// Bring the services up.
+	if _, stderr, err := env.exec(
+		ctx, "compose", "--workdir", wd, "-f", composePath, "up",
+	); err != nil {
+		t.Fatalf("compose up failed: %v\nstderr:\n%s", err, stderr)
+	}
+	for _, e := range env.lsJSON(ctx,
+		"-l", "cmdman.compose.workdir="+wd,
+		"-l", "cmdman.compose.project="+project,
+	) {
+		env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
+	}
+
+	// Build the dashboard on the custom socket.
+	if _, stderr, err := env.muxExec(
+		ctx, "compose", "--workdir", wd, "-f", composePath, "mux",
+	); err != nil {
+		t.Fatalf("compose mux failed: %v\nstderr:\n%s", err, stderr)
+	}
+	window := "cmdman-" + project
+	wid := tmuxWindowID(t, socket, window)
+	if got := len(tmuxPaneField(t, socket, wid, "#{pane_title}")); got != 2 {
+		t.Fatalf("want 2 panes after up, got %d", got)
+	}
+
+	// `compose mux ls` must find the window on the custom socket by reading
+	// driver_opt from the compose spec. Before the fix this would silently query
+	// the default server and return no rows.
+	stdout, stderr, err := env.muxExec(
+		ctx, "compose", "--workdir", wd, "-f", composePath,
+		"mux", "ls", "--format", "{{.SessionName}}\t{{.Identity}}",
+	)
+	if err != nil {
+		t.Fatalf(
+			"compose mux ls failed: %v\nstdout:\n%s\nstderr:\n%s",
+			err, stdout, stderr,
+		)
+	}
+
+	const wantSession = "cmdman"
+	identitySuffix := "-" + project
+	found := false
+	for line := range strings.SplitSeq(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) == 2 &&
+			parts[0] == wantSession &&
+			strings.HasSuffix(parts[1], identitySuffix) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf(
+			"compose mux ls with custom socket: expected row with session=%q "+
+				"and identity suffix %q; got:\n%s",
+			wantSession, identitySuffix, stdout,
+		)
 	}
 }
 
@@ -792,10 +1327,16 @@ func TestComposeMux_DetachRestoresWindow(t *testing.T) {
 		t.Fatalf("want 2 panes before detach, got %d", got)
 	}
 
-	if stdout, stderr, err := env.muxExec(
-		ctx, "compose", "--workdir", wd, "-f", composePath, "mux", "--detach",
-	); err != nil {
-		t.Fatalf("compose mux --detach failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	// Detach: restore the window (new CLI: compose mux down).
+	if downStdout, downStderr, downErr := env.muxExec(
+		ctx, "compose", "--workdir", wd, "-f", composePath, "mux", "down",
+	); downErr != nil {
+		t.Fatalf(
+			"compose mux down failed: %v\nstdout:\n%s\nstderr:\n%s",
+			downErr, downStdout, downStderr,
+		)
+	} else if !strings.Contains(downStdout, "Restored window") {
+		t.Fatalf("expected 'Restored window ...' on stdout; got:\n%s", downStdout)
 	}
 
 	if got := tmuxWindowID(t, socket, window); got != wid {

@@ -28,6 +28,20 @@ type ProjectSelection struct {
 	Project string
 }
 
+// ProjectIdentity returns the opaque mux ownership identity for this project:
+// [GenerateProjectIdentity](workdirHash(WorkDir), Project). It is the value to
+// pass as [mux.RunOptions.Identity] and [mux.DownOptions.Identity] for compose
+// mux dashboards.
+//
+// Returns "" when Project is empty (no project name = no stable identity;
+// callers should not build or tear down a dashboard for an unnamed project).
+func (s ProjectSelection) ProjectIdentity() string {
+	if s.Project == "" {
+		return ""
+	}
+	return GenerateProjectIdentity(workdirHash(s.WorkDir), s.Project)
+}
+
 // filterByCommandNames returns only the entries whose LabelCommand matches one
 // of the provided names.
 func filterByCommandNames(entries []cmdmanEntry, names []string) []cmdmanEntry {

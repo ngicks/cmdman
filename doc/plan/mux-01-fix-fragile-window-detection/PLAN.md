@@ -264,6 +264,19 @@ Workstreams, in dependency order:
 5. **e2e** — `e2e/cmdman/mux_test.go` updates + new capability tests.
    Depends on 3.
 
+## Decision log
+
+- **2026-06-12 — `ls` must honor spec driver options (user-approved: "fix both").**
+  Found during ws5 e2e: `runComposeMuxLs` dropped `spec.Driver`/`spec.DriverOpt`,
+  so `compose mux ls` could not see dashboards on a non-default tmux socket
+  (`compose mux down` passed them correctly). Standalone `mux ls` had the same
+  blindness structurally: it accepted no spec path, while `mux down [path]`
+  reads one purely for driver/driver_opt extraction. Decision: fix both —
+  `compose mux ls` passes the spec's driver options to `mux.List`, and
+  standalone `mux ls` gains an optional `[path]` argument with the exact
+  `mux down [path]` semantics (read only for driver/driver_opt; stdin default
+  skips the read). Docs and e2e updated to match.
+
 ## Out of scope (candidate follow-up)
 
 The *up/cycle* path from `run-shell` / command prompt still misresolves the

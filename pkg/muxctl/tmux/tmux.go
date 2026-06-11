@@ -9,6 +9,15 @@ import (
 	"github.com/ngicks/cmdman/pkg/muxctl"
 )
 
+// ownerOption is the window-level tmux user option that records the
+// cmdman-assigned identity for this window. It is set by [New] after the
+// window is resolved and cleared by [Session.Detach] when the window is
+// restored. A non-empty value is the authoritative ownership signal: ownership
+// recognition checks this option rather than requiring every pane to carry
+// @cmdman_marker, so the check survives manual pane splits and pane churn
+// across layout re-applies.
+const ownerOption = "@cmdman_window"
+
 // Config configures a tmux-backed [muxctl.Session].
 type Config struct {
 	// Path overrides the tmux binary path. Defaults to "tmux".
@@ -41,13 +50,23 @@ type Config struct {
 	// consulted.
 	WindowID string
 
+	// OwnedIdentity, when non-empty, is stamped onto the resolved window as
+	// the window-level tmux user option @cmdman_window. It is the durable
+	// ownership signal that survives pane churn, manual pane splits, and window
+	// renames. Callers supply an opaque string (e.g. a workdir-hash+project
+	// prefix for compose, or the window name for standalone mux); the driver
+	// stores and returns it verbatim, never interpreting it. Empty disables
+	// stamping — useful for one-off callers that do not need enumeration.
+	OwnedIdentity string
+
 	// ReuseCurrentWindow, when true and WindowID is empty, applies the layout
 	// to the caller's current tmux window instead of a window found-or-created
 	// by name — but only when that current window is safe to take over (it is
-	// already muxctl-marked, already named WindowName, or has a single pane).
-	// When the current window cannot be resolved or is not safe to reuse, New
-	// falls back to find-or-create by name. Callers set this when running
-	// inside a tmux client and they have not pinned an explicit session.
+	// already muxctl-owned via @cmdman_window, already named WindowName, or
+	// has a single pane). When the current window cannot be resolved or is not
+	// safe to reuse, New falls back to find-or-create by name. Callers set
+	// this when running inside a tmux client and they have not pinned an
+	// explicit session.
 	ReuseCurrentWindow bool
 
 	// ViewerDetachKeys is the tmux send-keys key sequence (e.g.
@@ -119,6 +138,21 @@ func New(ctx context.Context, cfg Config) (*Session, error) {
 	); err != nil {
 		return nil, fmt.Errorf("tmux: enable pane-border-status: %w", err)
 	}
+
+	// Stamp the ownership identity onto the window so it can be enumerated
+	// and recognised later without relying on every pane carrying a marker
+	// (which breaks when the user manually splits a pane). Skip when the
+	// caller did not supply an identity — callers that do not need
+	// enumeration (one-off builds, tests) simply leave this unset.
+	if cfg.OwnedIdentity != "" {
+		if _, err := e.run(
+			ctx,
+			"set-option", "-w", "-t", wid, ownerOption, cfg.OwnedIdentity,
+		); err != nil {
+			return nil, fmt.Errorf("tmux: stamp %s: %w", ownerOption, err)
+		}
+	}
+
 	return &Session{cfg: cfg, exec: e, windowID: wid}, nil
 }
 
@@ -133,10 +167,11 @@ func New(ctx context.Context, cfg Config) (*Session, error) {
 //
 //   - cfg.WindowID != "" targets that window directly.
 //   - otherwise, when cfg.ReuseCurrentWindow is set and the caller's current
-//     window carries the muxctl marker on every pane, that window is used.
-//     Unlike New, an unmarked current window is NOT taken over: detach must act
-//     only on a provably muxctl-owned window, never repurpose an arbitrary
-//     single-pane window the user happens to be sitting in.
+//     window carries the @cmdman_window option (i.e. it was stamped by a
+//     previous [New] call), that window is used. Unlike [New], an unowned
+//     current window is NOT taken over: detach must act only on a provably
+//     muxctl-owned window, never repurpose an arbitrary window the user happens
+//     to be sitting in.
 //   - otherwise the window named cfg.WindowName in cfg.SessionName is looked up
 //     (find-only). A missing session or window yields ok=false rather than an
 //     error: from a teardown caller's view, "no session/window" simply means
@@ -150,7 +185,7 @@ func OpenExisting(ctx context.Context, cfg Config) (*Session, bool, error) {
 		wid = cfg.WindowID
 	default:
 		if cfg.ReuseCurrentWindow {
-			if cur, ok := currentWindowIfMarked(ctx, e); ok {
+			if cur, ok := currentWindowIfOwned(ctx, e); ok {
 				wid = cur
 			}
 		}

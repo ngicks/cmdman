@@ -54,6 +54,12 @@ func (s *Session) Detach(ctx context.Context) error {
 	); err != nil {
 		return fmt.Errorf("tmux: unset pane-border-status: %w", err)
 	}
+
+	// Clear the ownership stamp so the window is no longer enumerable as a
+	// cmdman-owned window. Best-effort: the option may be absent on a session
+	// that was built before identity stamping was introduced.
+	_, _ = s.exec.run(ctx, "set-option", "-w", "-u", "-t", s.windowID, ownerOption)
+
 	return nil
 }
 
