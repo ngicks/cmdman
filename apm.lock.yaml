@@ -1,26 +1,34 @@
 lockfile_version: '1'
-generated_at: '2026-05-30T12:06:14.164825+00:00'
-apm_version: 0.16.0
+generated_at: '2026-06-10T04:28:43.420315+00:00'
+apm_version: 0.18.0
 dependencies:
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: 6bfa1e67336c4a77837643b544f75b08c6fba209
+  resolved_commit: ae219593143b86fb67a97f69ba0e3aafa9340c19
+  virtual_path: hooks/go-vet-ngcheckers
+  is_virtual: true
+  package_type: hook_package
+  content_hash: sha256:55d6da41fbbabb28f30bf4e4831443fe6b37cb970babb0ae86fca508dc488557
+- repo_url: ngicks/agents-package
+  host: github.com
+  resolved_commit: ae219593143b86fb67a97f69ba0e3aafa9340c19
   virtual_path: hooks/golangci-lint-fmt-after-edit
   is_virtual: true
   package_type: hook_package
-  content_hash: sha256:d03b2bb095b8734caca93810f8f8e5d35660fbda80401507cc81f6496958894f
+  content_hash: sha256:4f3e3ff72524079a224c23b05008f5a419c6bb7221e4fb8d7a5e9db2cea5f87c
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: 6bfa1e67336c4a77837643b544f75b08c6fba209
+  resolved_commit: ae219593143b86fb67a97f69ba0e3aafa9340c19
   virtual_path: hooks/golangci-lint-run-after-edit
   is_virtual: true
   package_type: hook_package
-  content_hash: sha256:afce7bea0dbe7003a3e761f1518cf7374999447b63883b87701631920f439fe4
+  content_hash: sha256:65c244da3bcd072713d0d3f85027cedebb3b0eba43c574e14f9a6da65a1ab253
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: 6bfa1e67336c4a77837643b544f75b08c6fba209
+  resolved_commit: ae219593143b86fb67a97f69ba0e3aafa9340c19
   virtual_path: instructions/base-env.instructions.md
   is_virtual: true
+  package_type: apm_package
   deployed_files:
   - .claude/rules/base-env.md
   deployed_file_hashes:
@@ -28,9 +36,10 @@ dependencies:
   content_hash: sha256:e8e2f850d9cb676f3e9dc7756563576bc3dca4aed77f162987d88b6a7a0d18c5
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: 6bfa1e67336c4a77837643b544f75b08c6fba209
+  resolved_commit: ae219593143b86fb67a97f69ba0e3aafa9340c19
   virtual_path: instructions/go/go-basics.instructions.md
   is_virtual: true
+  package_type: apm_package
   deployed_files:
   - .claude/rules/go-basics.md
   deployed_file_hashes:
@@ -38,9 +47,10 @@ dependencies:
   content_hash: sha256:66bae51c80e9bb324b7de4d9a7d451de94ce8eb3ec49620140a30efc2b1111c7
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: 6bfa1e67336c4a77837643b544f75b08c6fba209
+  resolved_commit: ae219593143b86fb67a97f69ba0e3aafa9340c19
   virtual_path: instructions/go/go-design-preference.instructions.md
   is_virtual: true
+  package_type: apm_package
   deployed_files:
   - .claude/rules/go-design-preference.md
   deployed_file_hashes:
@@ -48,7 +58,7 @@ dependencies:
   content_hash: sha256:08392ce26cee0ed77f6865678fe518f2e224c3706351936d7e59eed4b5e4d43b
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: 6bfa1e67336c4a77837643b544f75b08c6fba209
+  resolved_commit: ae219593143b86fb67a97f69ba0e3aafa9340c19
   virtual_path: skills/go-check-outdated-patterns
   is_virtual: true
   package_type: claude_skill
@@ -58,17 +68,17 @@ dependencies:
   content_hash: sha256:a94ed31b24c332612dea8e116c226c95e189c0ff29fb2551fd67e094af673994
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: 6bfa1e67336c4a77837643b544f75b08c6fba209
+  resolved_commit: ae219593143b86fb67a97f69ba0e3aafa9340c19
   virtual_path: skills/go-edit-cobra
   is_virtual: true
   package_type: claude_skill
   deployed_files:
   - .agents/skills/go-edit-cobra
   - .claude/skills/go-edit-cobra
-  content_hash: sha256:8595845e676291807ff68b77a252770fdb3d40695db82270bc31720c7dd99bf0
+  content_hash: sha256:a5909b2d0be495f0366cd5193a6c66593ebd2746ab1fcfe5832fa5d5e14c3bdf
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: 6bfa1e67336c4a77837643b544f75b08c6fba209
+  resolved_commit: ae219593143b86fb67a97f69ba0e3aafa9340c19
   virtual_path: skills/go-review-checklist
   is_virtual: true
   package_type: claude_skill
@@ -78,7 +88,9 @@ dependencies:
   content_hash: sha256:d1f2432180ac2de13a6a23d83bb879f5c1c552218f7cf55aea9af4c6ffe51f92
 local_deployed_files:
 - .agents/skills/go-cmdman-review-checklist
-- .claude/rules/base.md
+- .claude/rules/base.local.md
+- .claude/rules/project-overview.local.md
 - .claude/skills/go-cmdman-review-checklist
 local_deployed_file_hashes:
-  .claude/rules/base.md: sha256:8ee4db368cc493bc823e8808e5059e441f3ee8c3af0096f0ad0e99be15bec357
+  .claude/rules/base.local.md: sha256:8ee4db368cc493bc823e8808e5059e441f3ee8c3af0096f0ad0e99be15bec357
+  .claude/rules/project-overview.local.md: sha256:52d45a0975025dbd23b30e8e1c55e35a09396b816498496096a1ace6e3c67941
