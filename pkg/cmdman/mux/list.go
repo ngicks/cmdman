@@ -30,6 +30,11 @@ type OwnedWindow struct {
 	// [muxctl.Session.StatWindow]), or -1 when no layout has been applied or
 	// the panes carry inconsistent markers.
 	Marker int
+	// ScalePositions holds the per-command cycle-scale positions decoded from the
+	// window's @cmdman_scale option (command name → 1-based replica position).
+	// Absent commands default to position 1 at consumption time.
+	// Nil when the option is unset or empty.
+	ScalePositions map[string]int
 }
 
 // ListOptions configures [List].
@@ -90,11 +95,12 @@ func List(ctx context.Context, opts ListOptions) ([]OwnedWindow, error) {
 	out := make([]OwnedWindow, len(rows))
 	for i, r := range rows {
 		out[i] = OwnedWindow{
-			SessionName: r.SessionName,
-			WindowID:    r.WindowID,
-			WindowName:  r.WindowName,
-			Identity:    r.Identity,
-			Marker:      r.Marker,
+			SessionName:    r.SessionName,
+			WindowID:       r.WindowID,
+			WindowName:     r.WindowName,
+			Identity:       r.Identity,
+			Marker:         r.Marker,
+			ScalePositions: r.ScalePositions,
 		}
 	}
 	return out, nil

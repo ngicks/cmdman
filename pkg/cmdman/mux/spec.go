@@ -45,10 +45,13 @@ type PaneSpec struct {
 	// Leaf fields
 	Command string `yaml:"command,omitempty"`
 	// Scale pins which replica of a scaled command this leaf targets (1-based).
-	// Zero (the default, absent) leaves the leaf unpinned: `cmdman mux` then
-	// cycles it across the command's replicas on successive invocations. It is a
-	// compose concept; for standalone `cmdman mux` a positive Scale resolves the
-	// suffixed command name "<command>-<Scale>".
+	// Zero (the default, absent) marks the leaf as a cycle-scale target: its
+	// displayed replica is controlled by `cmdman compose mux cycle-scale` and
+	// persists in the dashboard window's @cmdman_scale option across layout
+	// switches. A positive Scale pins the leaf permanently to that replica and
+	// is never advanced by cycle-scale. It is a compose concept; for standalone
+	// `cmdman mux` a positive Scale resolves the suffixed command name
+	// "<command>-<Scale>".
 	Scale  int               `yaml:"scale,omitempty"`
 	Mode   Mode              `yaml:"mode,omitempty"`
 	CmdOpt map[string]string `yaml:"cmd_opt,omitempty"`

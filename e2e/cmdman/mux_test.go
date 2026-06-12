@@ -617,15 +617,17 @@ func TestComposeMux_BuildsPanesForServices(t *testing.T) {
 		t.Fatalf("expected attach hint on stdout; got:\n%s", stdout)
 	}
 
-	// compose mux names the owned window cmdman-<project>.
+	// compose mux names the owned window cmdman-<project>. Unpinned compose
+	// leaves are cycle-scale targets and resolve at replica position 1, so
+	// panes are titled <command>-1.
 	wid := tmuxWindowID(t, socket, "cmdman-"+project)
 	if got, want := windowPaneBases(
 		t,
 		socket,
 		wid,
 	), []string{
-		"alpha",
-		"beta",
+		"alpha-1",
+		"beta-1",
 	}; !slices.Equal(
 		got,
 		want,
@@ -694,7 +696,7 @@ func TestComposeMux_NoFileAutoSelectsCwdFile(t *testing.T) {
 	}
 	wid := tmuxWindowID(t, socket, "cmdman-"+project)
 	if got, want := windowPaneBases(t, socket, wid), []string{
-		"alpha", "beta",
+		"alpha-1", "beta-1",
 	}; !slices.Equal(got, want) {
 		t.Fatalf("pane base names = %v, want %v", got, want)
 	}

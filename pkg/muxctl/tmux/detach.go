@@ -35,6 +35,7 @@ func (s *Session) Detach(ctx context.Context) error {
 	// Clear the layout marker on the surviving anchor (best-effort: the option
 	// may already be absent on a window that never had a layout applied).
 	_, _ = s.exec.run(ctx, "set-option", "-p", "-u", "-t", anchorID, markerOption)
+	_, _ = s.exec.run(ctx, "set-option", "-p", "-u", "-t", anchorID, leafOption)
 
 	// Respawn the anchor with a fresh shell. An explicit argv is required:
 	// respawn-pane with no command re-runs the pane's previous command — here
@@ -59,6 +60,11 @@ func (s *Session) Detach(ctx context.Context) error {
 	// cmdman-owned window. Best-effort: the option may be absent on a session
 	// that was built before identity stamping was introduced.
 	_, _ = s.exec.run(ctx, "set-option", "-w", "-u", "-t", s.windowID, ownerOption)
+
+	// Clear the scale positions so a fresh dashboard starts every command at
+	// replica 1. Best-effort: the option may be absent on a window that never
+	// had cycle-scale invoked.
+	_, _ = s.exec.run(ctx, "set-option", "-w", "-u", "-t", s.windowID, scaleOption)
 
 	return nil
 }

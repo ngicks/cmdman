@@ -27,8 +27,13 @@ session named `cmdman` and prints an attach command. The v1 driver is tmux;
 server.
 
 Layouts are trees of horizontal (`h`) or vertical (`v`) containers with
-weighted `splits` and leaf panes. Standalone mux cycles layouts on successive
-applications. Duplicate commands within one layout are rejected.
+weighted `splits` and leaf panes. Standalone `mux up` cycles layouts on
+successive applications; each spec layout maps to exactly one applied layout.
+Duplicate commands within one layout are rejected.
+
+Standalone `cmdman mux` has no replica counter, so unpinned leaves (`scale:`
+absent) resolve the command name without a replica suffix. A pinned leaf
+(`scale: N`) resolves the suffixed command `<command>-N`.
 
 The mux file format is documented in [cmdman-mux(5)](./cmdman-mux.5.md).
 
@@ -43,8 +48,8 @@ explicit form `cmdman mux up <path>` in that case.
 Open or cycle the dashboard. Reads the full spec, resolves each leaf against
 the cmdman store, and applies the layout to the owned window. The spec is
 read from `PATH` when given, otherwise from stdin (use `-` explicitly for
-stdin). Each invocation advances the cycle position; pass a layout name or
-zero-based index as part of the spec to pin a specific layout.
+stdin). Each invocation advances the layout cycle position; pass a layout name
+or zero-based index to select a specific layout directly.
 
 `up` targets the current tmux session when run inside tmux. Running it from
 `run-shell` or the tmux command prompt may not resolve the correct session;
@@ -98,9 +103,14 @@ The spec path is optional: when given it is read only to extract `driver` and
 `driver_opt` (for example a custom socket). With no path or the stdin default
 `-`, listing uses the default driver with no custom options.
 
-Columns: `SESSION`, `WINDOW`, `ID`, `IDENTITY`, `LAYOUT`. The `LAYOUT` column
-shows the last applied layout index; `-1` (no layout applied yet) is displayed
-as `-`.
+Columns: `SESSION`, `WINDOW`, `ID`, `IDENTITY`, `LAYOUT`, `SCALE`.
+
+- The `LAYOUT` column shows the last applied layout index; `-1` (no layout
+  applied yet) is displayed as `-`.
+- The `SCALE` column shows the replica positions stored on the window as
+  `cmd=pos` pairs (sorted by command name), or `-` when none are stored.
+  Standalone `mux ls` has no replica counter, so no `/count` suffix is shown.
+  Use `compose mux ls` to see `cmd=pos/count` values for compose projects.
 
 ## Options
 
@@ -121,9 +131,11 @@ as `-`.
 - `--format FORMAT`: output format. `table` (default) or a Go
   `text/template` string applied per row. Template fields: `.SessionName`,
   `.WindowName`, `.WindowID`, `.Identity`, `.Marker` (int; `-1` means no
-  layout applied). Extra template function: `muxMarker` (renders `-1` as
-  `"-"`). Standard template functions: `cell`, `command`, `deref`,
-  `exitCode`, `fit`, `join`, `json`, `pad`, `shortID`, `trunc`, `width`.
+  layout applied), `.Scale` (string; precomputed SCALE column value, stored
+  `cmd=pos` pairs or `"-"`). Extra template function: `muxMarker`
+  (renders `-1` as `"-"`). Standard template functions: `cell`, `command`,
+  `deref`, `exitCode`, `fit`, `join`, `json`, `pad`, `shortID`, `trunc`,
+  `width`.
 
 ## Example
 

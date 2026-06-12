@@ -101,6 +101,13 @@ type Leaf struct {
 	// layout. At most one focus per layout; the first leaf in document order
 	// is used otherwise.
 	Focus bool `yaml:"focus,omitempty"`
+
+	// CycleKey is the command name this leaf tracks for replica cycling
+	// ("cycle-scale target"). When non-empty, the tmux driver stamps the
+	// per-pane user option @cmdman_leaf with this value so cycle-scale can
+	// locate the pane by command name. Empty means the leaf is not a
+	// cycle-scale target (pinned or non-cycling).
+	CycleKey string `yaml:"cycle_key,omitempty"`
 }
 
 // PaneSpec is a layout-tree node: a [Container] XOR a [Leaf]. Embedding both

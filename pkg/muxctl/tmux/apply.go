@@ -1,7 +1,6 @@
 package tmux
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"strconv"
@@ -143,34 +142,19 @@ func (st *applyState) materialize(anchorID string, node muxctl.PaneSpec, w, h in
 // own native pane metadata.
 const markerOption = "@cmdman_marker"
 
+// leafOption is the per-pane tmux user option that records the cycle-scale
+// command key for this pane, set by realizeLeafAt when the leaf is a cycle
+// target (Leaf.CycleKey non-empty) and cleared otherwise.
+//
+// NOTE: per-pane user options ("@name", set/read with the -p flag) are a
+// tmux-specific feature. A future zellij or wezterm driver has no equivalent
+// and would need a different mechanism — e.g. a sidecar file or that
+// driver's own native pane metadata (same caveat as markerOption above).
+const leafOption = "@cmdman_leaf"
+
 func (st *applyState) realizeLeafAt(paneID string, leaf muxctl.PaneSpec) error {
-	// Set the pane title and marker option BEFORE respawning. respawn-pane -k
-	// SIGHUPs the existing in-pane process tree; when the caller (e.g. the
-	// muxctltester) is running inside that pane, it can die before any
-	// follow-up tmux command lands. Setting them first lets them persist
-	// regardless — tmux per-pane state survives respawn-pane.
-	title := cmp.Or(leaf.CmdOpt["title"], leaf.Name)
-	if _, err := st.s.exec.run(
-		st.ctx, "select-pane", "-t", paneID, "-T", title,
-	); err != nil {
-		return fmt.Errorf("tmux: set pane title for %s: %w", paneID, err)
-	}
-	if st.marker >= 0 {
-		if _, err := st.s.exec.run(
-			st.ctx, "set-option", "-p", "-t", paneID,
-			markerOption, strconv.Itoa(st.marker),
-		); err != nil {
-			return fmt.Errorf("tmux: set marker option for %s: %w", paneID, err)
-		}
-	} else {
-		// Clear any stale marker so a marker-less apply leaves the pane in a
-		// clean state (best-effort: the option may not exist yet).
-		_, _ = st.s.exec.run(
-			st.ctx, "set-option", "-p", "-u", "-t", paneID, markerOption,
-		)
-	}
-	if err := st.s.respawnPane(st.ctx, paneID, leaf.Cmd); err != nil {
-		return fmt.Errorf("tmux: respawn pane %s with %v: %w", paneID, leaf.Cmd, err)
+	if err := st.s.stampLeaf(st.ctx, paneID, leaf, false, st.marker); err != nil {
+		return err
 	}
 	st.panes[leaf.Name] = &Pane{id: paneID, name: leaf.Name}
 	return nil

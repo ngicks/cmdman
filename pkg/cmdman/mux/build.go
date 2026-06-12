@@ -23,9 +23,9 @@ import (
 type Resolver func(ctx context.Context, leafName string, scaleIndex int) (id string, err error)
 
 // ReplicaCounter reports how many scale replicas a leaf's command has (>= 1).
-// [Build] uses it only to size the replica cycle for leaves that pin no scale
-// index. A nil ReplicaCounter disables cycling: every unpinned leaf resolves
-// once at scale index 0 (the standalone `cmdman mux` behavior).
+// [Build] uses it only to resolve the current cycle position for leaves that
+// pin no scale index. A nil ReplicaCounter disables cycling: every unpinned
+// leaf resolves once at scale index 0 (the standalone `cmdman mux` behavior).
 type ReplicaCounter func(ctx context.Context, leafName string) (count int, err error)
 
 // PaneArgvOpts holds the per-pane argv parameters carried into every leaf's
@@ -40,43 +40,54 @@ type PaneArgvOpts struct {
 	RuntimeDir string
 }
 
+// BuildOptions collects all parameters for [Build].
+type BuildOptions struct {
+	Spec     Spec
+	Resolver Resolver
+	Replicas ReplicaCounter
+	Opts     PaneArgvOpts
+	// ScalePositions holds 1-based per-command positions for cycling leaves.
+	// A missing key defaults to position 1. If the stored position exceeds the
+	// live replica count n, it wraps as ((pos-1) % n) + 1.
+	ScalePositions map[string]int
+}
+
 // Build resolves each leaf's command via resolver and emits a [muxctl.MuxSpec]
 // with concrete argv.
 //
-// A layout containing leaves that pin no scale index but reference scaled
-// commands is expanded into one muxctl layout per replica-cycle position: the
-// first keeps the layout's name, the rest are suffixed "#<n>". Because muxctl
-// cycles layouts on successive `mux` invocations, this makes those invocations
-// rotate through the replicas — while an unscaled spec expands one-to-one and
-// behaves exactly as before. replicas may be nil to disable that expansion.
+// Each spec layout maps to exactly one muxctl layout (no expansion). Unpinned
+// cycling leaves (Scale == 0 with a non-nil ReplicaCounter whose count > 1)
+// resolve the replica selected by ScalePositions[command] (defaulting to 1,
+// wrapping if out of range), and get CycleKey set to the command name.
 //
 // Duplicate resolved commands within a single realized layout are rejected (one
 // pane per command replica).
-func Build(
-	ctx context.Context,
-	spec Spec,
-	resolver Resolver,
-	replicas ReplicaCounter,
-	opts PaneArgvOpts,
-) (muxctl.MuxSpec, error) {
-	if opts.Executable == "" {
+func Build(ctx context.Context, opts BuildOptions) (muxctl.MuxSpec, error) {
+	if opts.Opts.Executable == "" {
 		return muxctl.MuxSpec{}, errors.New("mux: PaneArgvOpts.Executable is required")
 	}
-	if resolver == nil {
+	if opts.Resolver == nil {
 		return muxctl.MuxSpec{}, errors.New("mux: Resolver is required")
 	}
 
 	out := muxctl.MuxSpec{
-		Driver:    spec.Driver,
-		DriverOpt: spec.DriverOpt,
-		Layouts:   make([]muxctl.Layout, 0, len(spec.Layouts)),
+		Driver:    opts.Spec.Driver,
+		DriverOpt: opts.Spec.DriverOpt,
+		Layouts:   make([]muxctl.Layout, 0, len(opts.Spec.Layouts)),
 	}
-	for i, l := range spec.Layouts {
-		expanded, err := buildLayout(ctx, l, resolver, replicas, opts)
+	for i, l := range opts.Spec.Layouts {
+		layout, err := buildLayout(
+			ctx,
+			l,
+			opts.Resolver,
+			opts.Replicas,
+			opts.Opts,
+			opts.ScalePositions,
+		)
 		if err != nil {
 			return muxctl.MuxSpec{}, fmt.Errorf("layouts[%d] (%q): %w", i, l.Name, err)
 		}
-		out.Layouts = append(out.Layouts, expanded...)
+		out.Layouts = append(out.Layouts, layout)
 	}
 	if err := out.Validate(); err != nil {
 		return muxctl.MuxSpec{}, err
@@ -84,81 +95,22 @@ func Build(
 	return out, nil
 }
 
-// buildLayout expands one cmdman-layer layout into one or more muxctl layouts,
-// one per replica-cycle position (see [Build]). counts caches the replica count
-// of every cycling leaf so the cycle length is the largest among them.
+// buildLayout converts one cmdman-layer layout into exactly one muxctl layout.
+// scalePositions maps command names to 1-based positions for cycling leaves.
 func buildLayout(
 	ctx context.Context,
 	l Layout,
 	resolver Resolver,
 	replicas ReplicaCounter,
 	opts PaneArgvOpts,
-) ([]muxctl.Layout, error) {
-	counts, err := cyclingReplicaCounts(ctx, l.Root, replicas)
+	scalePositions map[string]int,
+) (muxctl.Layout, error) {
+	seen := make(map[string]struct{})
+	root, err := buildPane(ctx, l.Root, resolver, opts, seen, replicas, scalePositions)
 	if err != nil {
-		return nil, err
+		return muxctl.Layout{}, err
 	}
-	cycleLen := 1
-	for _, n := range counts {
-		cycleLen = max(cycleLen, n)
-	}
-
-	layouts := make([]muxctl.Layout, 0, cycleLen)
-	for scalePos := range cycleLen {
-		seen := make(map[string]struct{})
-		root, err := buildPane(ctx, l.Root, resolver, opts, seen, scalePos, counts)
-		if err != nil {
-			return nil, err
-		}
-		name := l.Name
-		if scalePos > 0 {
-			name = fmt.Sprintf("%s#%d", l.Name, scalePos+1)
-		}
-		layouts = append(layouts, muxctl.Layout{Name: name, Root: root})
-	}
-	return layouts, nil
-}
-
-// cyclingReplicaCounts returns the replica count of every leaf in the tree that
-// pins no scale index, keyed by command name. With a nil ReplicaCounter (no
-// cycling) it returns an empty map, so the layout expands to a single position.
-func cyclingReplicaCounts(
-	ctx context.Context,
-	p PaneSpec,
-	replicas ReplicaCounter,
-) (map[string]int, error) {
-	counts := make(map[string]int)
-	if replicas == nil {
-		return counts, nil
-	}
-	var walk func(PaneSpec) error
-	walk = func(p PaneSpec) error {
-		switch {
-		case p.IsLeaf():
-			if p.Scale > 0 {
-				return nil // explicitly pinned: does not cycle
-			}
-			if _, done := counts[p.Command]; done {
-				return nil
-			}
-			n, err := replicas(ctx, p.Command)
-			if err != nil {
-				return fmt.Errorf("count replicas of %q: %w", p.Command, err)
-			}
-			counts[p.Command] = max(n, 1)
-		case p.IsContainer():
-			for _, child := range p.Panes {
-				if err := walk(child); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	if err := walk(p); err != nil {
-		return nil, err
-	}
-	return counts, nil
+	return muxctl.Layout{Name: l.Name, Root: root}, nil
 }
 
 func buildPane(
@@ -167,21 +119,43 @@ func buildPane(
 	resolver Resolver,
 	opts PaneArgvOpts,
 	seen map[string]struct{},
-	scalePos int,
-	counts map[string]int,
+	replicas ReplicaCounter,
+	scalePositions map[string]int,
 ) (muxctl.PaneSpec, error) {
 	switch {
 	case p.IsLeaf():
-		// Resolve the concrete replica: an explicit Scale pins it; otherwise the
-		// cycle position selects one (mod the command's replica count), or 0 when
-		// the command is not scaled / cycling is disabled.
-		idx := p.Scale
-		scaled := p.Scale > 0
-		if idx <= 0 {
-			if n, cycling := counts[p.Command]; cycling {
-				idx = (scalePos % n) + 1
-				scaled = n > 1
+		var (
+			idx      int
+			cycleKey string
+			name     string
+		)
+
+		if p.Scale > 0 {
+			// Pinned leaf: resolve the explicit replica.
+			idx = p.Scale
+			name = fmt.Sprintf("%s-%d", p.Command, idx)
+		} else if replicas != nil {
+			// Unpinned with a ReplicaCounter: this is a cycle-scale target.
+			// CycleKey is always set so @cmdman_leaf is stamped and the pane is
+			// locatable by cycle-scale even when n == 1.
+			n, err := replicas(ctx, p.Command)
+			if err != nil {
+				return muxctl.PaneSpec{}, fmt.Errorf("count replicas of %q: %w", p.Command, err)
 			}
+			n = max(n, 1)
+			storedPos := 1
+			if scalePositions != nil {
+				if sp, ok := scalePositions[p.Command]; ok {
+					storedPos = sp
+				}
+			}
+			idx = ((storedPos - 1) % n) + 1
+			cycleKey = p.Command
+			name = fmt.Sprintf("%s-%d", p.Command, idx)
+		} else {
+			// Standalone mux (nil ReplicaCounter): resolve at index 0, no suffix.
+			idx = 0
+			name = p.Command
 		}
 
 		id, err := resolver(ctx, p.Command, idx)
@@ -194,22 +168,20 @@ func buildPane(
 		}
 		seen[id] = struct{}{}
 
-		name := p.Command
-		if scaled {
-			name = fmt.Sprintf("%s-%d", p.Command, idx)
-		}
 		return muxctl.PaneSpec{
 			Leaf: muxctl.Leaf{
-				Name:   name,
-				Cmd:    paneArgv(opts, p.Mode, id),
-				CmdOpt: p.CmdOpt,
-				Focus:  p.Focus,
+				Name:     name,
+				Cmd:      paneArgv(opts, p.Mode, id),
+				CmdOpt:   p.CmdOpt,
+				Focus:    p.Focus,
+				CycleKey: cycleKey,
 			},
 		}, nil
+
 	case p.IsContainer():
 		children := make([]muxctl.PaneSpec, len(p.Panes))
 		for i, child := range p.Panes {
-			built, err := buildPane(ctx, child, resolver, opts, seen, scalePos, counts)
+			built, err := buildPane(ctx, child, resolver, opts, seen, replicas, scalePositions)
 			if err != nil {
 				return muxctl.PaneSpec{}, fmt.Errorf("panes[%d]: %w", i, err)
 			}
@@ -222,6 +194,7 @@ func buildPane(
 				Panes:  children,
 			},
 		}, nil
+
 	default:
 		return muxctl.PaneSpec{}, errors.New(
 			"mux: pane must be a leaf (command:) or a container (dir+splits+panes)",

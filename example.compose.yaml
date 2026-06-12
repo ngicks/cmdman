@@ -44,8 +44,10 @@ commands:
       - -c
       - echo "replica $${CMDMAN_COMPOSE_SCALE_INDEX} of $${CMDMAN_COMPOSE_SCALE}"
 
-# mux: a leaf may pin a replica with scale: <n>; an unpinned leaf cycles through
-# the command's replicas on successive `cmdman compose mux` invocations.
+# mux: a leaf may pin a replica with scale: <n>; an unpinned leaf is a
+# cycle-scale target whose position is advanced by `cmdman compose mux
+# cycle-scale web`. Replica positions persist across layout switches and are
+# reset by `cmdman compose mux down`.
 mux:
   layouts:
     - name: web
@@ -54,5 +56,5 @@ mux:
         splits: [1, 1]
         panes:
           - command: web
-            scale: 1   # always shows replica web-1
-          - command: web   # unpinned: cycles web-1 → web-2 → web-3
+            scale: 1   # pinned: always shows replica web-1
+          - command: web   # cycle-scale target: defaults to web-1, advance with cycle-scale

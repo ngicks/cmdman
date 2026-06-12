@@ -350,6 +350,15 @@ func (b *serviceBackend) CycleMux(ctx context.Context, projectName, composeFile 
 	}
 	spec := *selection.Spec.Mux
 
+	scalePositions, err := mux.ReadScaleState(ctx, mux.ScaleStateOptions{
+		Driver:    spec.Driver,
+		DriverOpt: spec.DriverOpt,
+		Identity:  selection.ProjectIdentity(),
+	})
+	if err != nil {
+		return fmt.Errorf("mux: read scale state: %w", err)
+	}
+
 	cfg := b.svc.Config()
 	exe, err := os.Executable()
 	if err != nil {
@@ -359,10 +368,16 @@ func (b *serviceBackend) CycleMux(ctx context.Context, projectName, composeFile 
 	if err != nil {
 		return err
 	}
-	built, err := mux.Build(ctx, spec, resolver, replicas, mux.PaneArgvOpts{
-		Executable: exe,
-		DataDir:    cfg.DataDir,
-		RuntimeDir: cfg.RuntimeDir,
+	built, err := mux.Build(ctx, mux.BuildOptions{
+		Spec:     spec,
+		Resolver: resolver,
+		Replicas: replicas,
+		Opts: mux.PaneArgvOpts{
+			Executable: exe,
+			DataDir:    cfg.DataDir,
+			RuntimeDir: cfg.RuntimeDir,
+		},
+		ScalePositions: scalePositions,
 	})
 	if err != nil {
 		return err

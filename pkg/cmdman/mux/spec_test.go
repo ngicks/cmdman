@@ -85,10 +85,14 @@ func TestBuildResolvesArgvAndPropagatesFields(t *testing.T) {
 	resolver := func(_ context.Context, name string, _ int) (string, error) {
 		return "id-" + name, nil
 	}
-	built, err := mux.Build(context.Background(), spec, resolver, nil, mux.PaneArgvOpts{
-		Executable: "/usr/bin/cmdman",
-		DataDir:    "/var/lib/cmdman",
-		RuntimeDir: "/run/cmdman",
+	built, err := mux.Build(context.Background(), mux.BuildOptions{
+		Spec:     spec,
+		Resolver: resolver,
+		Opts: mux.PaneArgvOpts{
+			Executable: "/usr/bin/cmdman",
+			DataDir:    "/var/lib/cmdman",
+			RuntimeDir: "/run/cmdman",
+		},
 	})
 	assert.NilError(t, err)
 
@@ -139,10 +143,13 @@ mux:
 
 	_, err = mux.Build(
 		context.Background(),
-		spec,
-		func(_ context.Context, name string, _ int) (string, error) { return "id-" + name, nil },
-		nil,
-		mux.PaneArgvOpts{Executable: "/usr/bin/cmdman"},
+		mux.BuildOptions{
+			Spec: spec,
+			Resolver: func(_ context.Context, name string, _ int) (string, error) {
+				return "id-" + name, nil
+			},
+			Opts: mux.PaneArgvOpts{Executable: "/usr/bin/cmdman"},
+		},
 	)
 	assert.ErrorContains(t, err, `duplicate command "api"`)
 }
@@ -162,12 +169,13 @@ mux:
 	wantErr := "not found: ghost"
 	_, err = mux.Build(
 		context.Background(),
-		spec,
-		func(_ context.Context, name string, _ int) (string, error) {
-			return "", &resolveErr{name: name}
+		mux.BuildOptions{
+			Spec: spec,
+			Resolver: func(_ context.Context, name string, _ int) (string, error) {
+				return "", &resolveErr{name: name}
+			},
+			Opts: mux.PaneArgvOpts{Executable: "/usr/bin/cmdman"},
 		},
-		nil,
-		mux.PaneArgvOpts{Executable: "/usr/bin/cmdman"},
 	)
 	assert.ErrorContains(t, err, wantErr)
 }
@@ -176,10 +184,10 @@ type resolveErr struct{ name string }
 
 func (e *resolveErr) Error() string { return "not found: " + e.name }
 
-// TestBuildExpandsUnpinnedScaledLeafIntoCycle verifies that a leaf referencing a
-// scaled command with no pinned scale index expands the layout into one muxctl
-// layout per replica, so layout cycling rotates the replica shown.
-func TestBuildExpandsUnpinnedScaledLeafIntoCycle(t *testing.T) {
+// TestBuildUnpinnedCyclingLeafResolvesScalePosition verifies that with
+// scalePositions={"web":2} and 3 replicas, one layout is emitted, the leaf
+// resolves to replica 2, the pane is named "web-2", and CycleKey is "web".
+func TestBuildUnpinnedCyclingLeafResolvesScalePosition(t *testing.T) {
 	t.Parallel()
 
 	const oneLeaf = `
@@ -202,28 +210,32 @@ mux:
 	}
 
 	built, err := mux.Build(
-		context.Background(), spec, resolver, replicas,
-		mux.PaneArgvOpts{Executable: "/cmdman"},
+		context.Background(),
+		mux.BuildOptions{
+			Spec:     spec,
+			Resolver: resolver,
+			Replicas: replicas,
+			Opts:     mux.PaneArgvOpts{Executable: "/cmdman"},
+			ScalePositions: map[string]int{
+				"web": 2,
+			},
+		},
 	)
 	assert.NilError(t, err)
 
-	// One layout per replica: "dash", "dash#2", "dash#3".
-	assert.Equal(t, len(built.Layouts), 3)
+	// Exactly one layout — no expansion.
+	assert.Equal(t, len(built.Layouts), 1)
 	assert.Equal(t, built.Layouts[0].Name, "dash")
-	assert.Equal(t, built.Layouts[1].Name, "dash#2")
-	assert.Equal(t, built.Layouts[2].Name, "dash#3")
 
-	// Each cycle position resolves the corresponding replica id and names the
-	// pane with its scale-index suffix.
-	for i, want := range []string{"id-web-1", "id-web-2", "id-web-3"} {
-		leaf := built.Layouts[i].Root.Leaf
-		assert.Equal(t, leaf.Name, fmt.Sprintf("web-%d", i+1))
-		assert.DeepEqual(t, leaf.Cmd, []string{"/cmdman", "attach", want})
-	}
+	leaf := built.Layouts[0].Root.Leaf
+	assert.Equal(t, leaf.Name, "web-2")
+	assert.DeepEqual(t, leaf.Cmd, []string{"/cmdman", "attach", "id-web-2"})
+	assert.Equal(t, leaf.CycleKey, "web")
 }
 
 // TestBuildPinnedScaleIndexDoesNotCycle verifies that a leaf pinning an explicit
-// scale index resolves exactly that replica and does not expand the layout.
+// scale index resolves exactly that replica in a single layout, and CycleKey is
+// empty.
 func TestBuildPinnedScaleIndexDoesNotCycle(t *testing.T) {
 	t.Parallel()
 
@@ -242,8 +254,13 @@ mux:
 	replicas := func(_ context.Context, _ string) (int, error) { return 3, nil }
 
 	built, err := mux.Build(
-		context.Background(), spec, resolver, replicas,
-		mux.PaneArgvOpts{Executable: "/cmdman"},
+		context.Background(),
+		mux.BuildOptions{
+			Spec:     spec,
+			Resolver: resolver,
+			Replicas: replicas,
+			Opts:     mux.PaneArgvOpts{Executable: "/cmdman"},
+		},
 	)
 	assert.NilError(t, err)
 
@@ -252,4 +269,5 @@ mux:
 	leaf := built.Layouts[0].Root.Leaf
 	assert.Equal(t, leaf.Name, "web-2")
 	assert.DeepEqual(t, leaf.Cmd, []string{"/cmdman", "attach", "id-web-2"})
+	assert.Equal(t, leaf.CycleKey, "")
 }

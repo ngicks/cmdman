@@ -141,7 +141,10 @@ A layout file path is optional: when given it is read only to extract the
 driver and driver_opt (for example a custom socket). With no path or the stdin
 default "-", listing uses the default driver with no custom options.
 
-Columns: SESSION, WINDOW, ID, IDENTITY, LAYOUT (-1 displayed as "-").`,
+Columns: SESSION, WINDOW, ID, IDENTITY, LAYOUT (-1 displayed as "-"), SCALE.
+The SCALE column shows the replica positions stored on the window ("cmd=pos",
+"-" when none are stored). Standalone mux ls has no replica counter; use
+"compose mux ls" to see live counts ("cmd=pos/count").`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := flagSession
 			if !cmd.Flags().Changed("session") && parentSession != nil {
@@ -208,10 +211,15 @@ func runMuxUp(
 		return out.ID, nil
 	}
 
-	built, err := mux.Build(cmd.Context(), spec, resolver, nil, mux.PaneArgvOpts{
-		Executable: exe,
-		DataDir:    cfg.DataDir,
-		RuntimeDir: cfg.RuntimeDir,
+	built, err := mux.Build(cmd.Context(), mux.BuildOptions{
+		Spec:     spec,
+		Resolver: resolver,
+		Replicas: nil,
+		Opts: mux.PaneArgvOpts{
+			Executable: exe,
+			DataDir:    cfg.DataDir,
+			RuntimeDir: cfg.RuntimeDir,
+		},
 	})
 	if err != nil {
 		return err
@@ -286,7 +294,10 @@ func runMuxLs(cmd *cobra.Command, args []string, session, format string) error {
 	if err != nil {
 		return err
 	}
-	return cli.RenderMuxWindows(cmd.OutOrStdout(), windows, format)
+	// Standalone mux ls has no spec and no replica counter; cycle targets and
+	// counts are unavailable. Pass nil for both so the SCALE column renders
+	// stored positions only (or "-" when nothing is stored).
+	return cli.RenderMuxWindows(cmd.OutOrStdout(), windows, nil, nil, format)
 }
 
 // openSpecSource opens the spec source. An empty or "-" path reads from stdin

@@ -16,6 +16,7 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
+	"github.com/ngicks/cmdman/pkg/cmdman/mux"
 	"github.com/ngicks/cmdman/pkg/hrstr"
 	"github.com/ngicks/go-common/contextkey"
 	"go.yaml.in/yaml/v4"
@@ -487,6 +488,16 @@ func Normalize(
 		return ComposeSpec{}, err
 	}
 
+	if raw.Mux != nil {
+		commandsByName := make(map[string]Command, len(normalized))
+		for _, c := range normalized {
+			commandsByName[c.Name] = c
+		}
+		if err := validateMux(raw.Mux, commandsByName); err != nil {
+			return ComposeSpec{}, err
+		}
+	}
+
 	return ComposeSpec{
 		ComposeFile: composeFilePath,
 		Project:     project,
@@ -701,6 +712,56 @@ func validateName(kind, name string) error {
 				name,
 				r,
 			)
+		}
+	}
+	return nil
+}
+
+// validateMux checks every leaf in every layout of spec against commandsByName:
+//   - the leaf's command must name a key in commandsByName;
+//   - a pinned scale (Scale > 0) must not exceed the command's normalized Scale.
+//
+// Absent scale on a leaf (Scale == 0, the cycle-target case) is never an error.
+func validateMux(spec *mux.Spec, commandsByName map[string]Command) error {
+	for _, layout := range spec.Layouts {
+		if err := validateMuxPane(layout.Name, layout.Root, commandsByName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateMuxPane recursively validates a PaneSpec tree.
+// layoutName is used in error messages.
+func validateMuxPane(
+	layoutName string,
+	pane mux.PaneSpec,
+	commandsByName map[string]Command,
+) error {
+	if pane.IsLeaf() {
+		cmd, ok := commandsByName[pane.Command]
+		if !ok {
+			return fmt.Errorf(
+				"mux: layout %q: leaf %q: unknown command",
+				layoutName,
+				pane.Command,
+			)
+		}
+		if pane.Scale > 0 && pane.Scale > cmd.Scale {
+			return fmt.Errorf(
+				"mux: layout %q: leaf %q: scale %d exceeds commands.%s.scale %d",
+				layoutName,
+				pane.Command,
+				pane.Scale,
+				pane.Command,
+				cmd.Scale,
+			)
+		}
+		return nil
+	}
+	for _, child := range pane.Panes {
+		if err := validateMuxPane(layoutName, child, commandsByName); err != nil {
+			return err
 		}
 	}
 	return nil

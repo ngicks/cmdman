@@ -24,6 +24,11 @@ type OwnedWindow struct {
 	// panes carry inconsistent markers. Reading the marker requires an extra
 	// list-panes call per window; it is -1 when the server returns no panes.
 	Marker int
+	// ScalePositions holds the per-command cycle-scale positions decoded from
+	// the window's @cmdman_scale option (command name → 1-based replica
+	// position). Absent commands default to position 1 at consumption time.
+	// Nil when the option is unset or empty.
+	ScalePositions map[string]int
 }
 
 // ListOwnedWindowsOptions controls which windows [ListOwnedWindows] returns.
@@ -66,17 +71,16 @@ func ListOwnedWindows(
 	// Build the list-windows invocation. -a scans all sessions; -t <session>
 	// restricts to one. The format delivers all per-window fields we need in
 	// one round-trip; we read the marker per-window below.
+	// The format string fetches five tab-separated fields per window.
+	// #{@cmdman_scale} expands as a window option directly in list-windows -F,
+	// so no extra tmux call is needed to read the scale positions.
+	const fmtStr = "#{window_id}\t#{session_name}\t#{window_name}\t#{" +
+		ownerOption + "}\t#{" + scaleOption + "}"
 	var args []string
 	if opts.Session != "" {
-		args = []string{
-			"list-windows", "-t", opts.Session,
-			"-F", "#{window_id}\t#{session_name}\t#{window_name}\t#{" + ownerOption + "}",
-		}
+		args = []string{"list-windows", "-t", opts.Session, "-F", fmtStr}
 	} else {
-		args = []string{
-			"list-windows", "-a",
-			"-F", "#{window_id}\t#{session_name}\t#{window_name}\t#{" + ownerOption + "}",
-		}
+		args = []string{"list-windows", "-a", "-F", fmtStr}
 	}
 
 	out, err := e.run(ctx, args...)
@@ -107,11 +111,17 @@ func ListOwnedWindows(
 
 	var rows []OwnedWindow
 	for line := range strings.SplitSeq(out, "\n") {
-		parts := strings.SplitN(line, "\t", 4)
-		if len(parts) != 4 {
+		// tmux strips trailing empty fields from -F output: a window without
+		// @cmdman_scale set yields 4 fields instead of 5. Accept both.
+		parts := strings.SplitN(line, "\t", 5)
+		if len(parts) < 4 {
 			continue
 		}
 		wid, session, wname, identity := parts[0], parts[1], parts[2], parts[3]
+		scaleRaw := ""
+		if len(parts) == 5 {
+			scaleRaw = parts[4]
+		}
 		if identity == "" {
 			// Window has no ownership stamp — not ours.
 			continue
@@ -132,11 +142,12 @@ func ListOwnedWindows(
 		}
 
 		rows = append(rows, OwnedWindow{
-			SessionName: session,
-			WindowID:    wid,
-			WindowName:  wname,
-			Identity:    identity,
-			Marker:      marker,
+			SessionName:    session,
+			WindowID:       wid,
+			WindowName:     wname,
+			Identity:       identity,
+			Marker:         marker,
+			ScalePositions: decodeScalePositions(scaleRaw),
 		})
 	}
 	return rows, nil

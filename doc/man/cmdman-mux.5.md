@@ -58,7 +58,8 @@ Each layout has:
 
 `cmdman mux [up]` and `cmdman compose mux [up]` apply one layout to one
 cmdman-owned window. Re-running the command cycles layouts unless a layout name
-or index is selected.
+or index is selected. Each spec layout maps to exactly one applied layout; there
+is no per-replica layout expansion.
 
 ## Pane Tree
 
@@ -74,6 +75,7 @@ A leaf has:
 
 - `command`: cmdman command ID/name, or compose service name under
   `cmdman compose mux`.
+- `scale`: replica pin or cycle-scale behaviour (see below).
 - `mode`: `attach` or `logs`. Empty means `attach`.
 - `cmd_opt`: per-pane driver options.
 - `focus`: request initial focus for this pane.
@@ -88,6 +90,32 @@ panes:
 ```
 
 The shorthand is equivalent to `{command: api}`.
+
+## Replica Pinning and Cycle-Scale (`scale:`)
+
+`scale:` is a compose-context field that controls which replica of a scaled
+command a leaf displays.
+
+- **Absent or zero** (`scale: 0`, the default): the leaf is a *cycle-scale
+  target*. Its displayed replica is controlled by
+  `cmdman compose mux cycle-scale` and persists in the dashboard window's
+  `@cmdman_scale` option across layout switches. It defaults to replica 1 when
+  no position has been stored yet.
+- **Positive integer** (`scale: N`): the leaf is *pinned* to replica N. It
+  always resolves to `<command>-N` and is never advanced by `cycle-scale`.
+
+Layout cycling (`mux up`) and replica cycling (`cycle-scale`) are independent
+operations. Applying a new layout does not reset stored replica positions;
+`mux down` does reset them.
+
+In a compose file, `scale: N` in a `mux:` leaf must not exceed the `scale:` of
+the same command in `commands:` (see [cmdman-compose(5)](./cmdman-compose.5.md)
+for the static validation rule). This constraint is compose-specific; standalone
+`cmdman mux` ignores it.
+
+For standalone `cmdman mux`, a positive `scale:` resolves the suffixed command
+name `<command>-<N>` (e.g. `scale: 2` on leaf `api` resolves `api-2`). An
+absent `scale:` resolves the command name without a suffix.
 
 ## Split Sizes
 
@@ -118,6 +146,13 @@ The mux spec enforces:
 For user-facing cmdman specs, the leaf name is the `command` value. Standalone
 `cmdman mux` resolves it as a cmdman ID or name. `cmdman compose mux` resolves
 it as a service in the selected compose project.
+
+In the compose context, additional static validation is applied at file load
+time:
+
+- every leaf `command` must name a declared command in `commands:`;
+- a pinned `scale: N` must not exceed the command's own `scale:` in
+  `commands:`.
 
 ## Pane Modes
 

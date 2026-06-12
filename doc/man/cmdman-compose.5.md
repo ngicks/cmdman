@@ -54,7 +54,7 @@ Unknown YAML fields are ignored with a warning.
   directory. `--workdir` overrides it.
 - `commands`: map from command name to command definition.
 - `mux`: optional dashboard layout used by `cmdman compose mux`; see
-  [cmdman-mux(5)](./cmdman-mux.5.md).
+  [cmdman-mux(5)](./cmdman-mux.5.md) and [Mux Section](#mux-section) below.
 
 Project and command names must be 1 to 63 characters, must not start with `.`
 or `-`, must not contain whitespace or path separators, and may contain only
@@ -206,6 +206,35 @@ labels:
 Orphans are retained unless `--remove-orphan` is used or `compose down` removes
 the selected project.
 
+## Mux Section
+
+The optional `mux:` top-level field embeds a mux spec body (see
+[cmdman-mux(5)](./cmdman-mux.5.md)). Leaves name compose services from the
+same file's `commands:` map.
+
+At file load time, `cmdman compose` applies the following static validation
+rules to `mux:` leaves:
+
+- **Unknown command**: every leaf `command` must name a key in `commands:`.
+  A leaf referencing an unknown service is an error:
+  ```
+  mux: layout "<name>": leaf "<command>": unknown command
+  ```
+- **Pinned scale exceeds command scale**: a leaf with `scale: N` must satisfy
+  `N <= commands.<command>.scale`. For example, pinning `scale: 3` on a command
+  declared with `scale: 2` is rejected:
+  ```
+  mux: layout "<name>": leaf "<command>": scale 3 exceeds commands.<command>.scale 2
+  ```
+  A command without a `scale:` field in `commands:` normalizes to `scale: 1`.
+- **Absent scale (cycle-scale target)**: a leaf with no `scale:` (or `scale: 0`)
+  is a cycle-scale target and is never rejected by static validation. Live
+  divergence (e.g. `cmdman compose scale web=5`) is handled at resolution time.
+
+These rules are spec-vs-spec only. Live replica count changes after file load
+are handled by the existing resolver, which errors on a missing live replica.
+
 ## See Also
 
-[cmdman-compose(1)](./cmdman-compose.1.md), [cmdman-mux(5)](./cmdman-mux.5.md)
+[cmdman-compose(1)](./cmdman-compose.1.md), [cmdman-mux(5)](./cmdman-mux.5.md),
+[cmdman-compose-mux(1)](./cmdman-compose-mux.1.md)
