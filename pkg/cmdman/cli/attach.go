@@ -76,14 +76,32 @@ type AttachSession interface {
 // streams.
 //
 // StdinPipe and StdoutPipe carry the byte streams. Typically they are
-// cancellable io.Pipe wrappers (see cmd/internal/stdiopipe) around
+// cancellable io.Pipe wrappers (see internal/stdiopipe) around
 // Stdin/Stdout so the attach loop can unblock pending Read/Write calls
 // by closing them.
 type AttachOptions struct {
-	NoStdin      bool
-	SigProxy     bool
-	DetachKeys   string
-	ResetSignals []os.Signal
+	NoStdin    bool
+	SigProxy   bool
+	DetachKeys string
+
+	// PauseSignals and ResumeSignals bracket Attach's signal forwarding so the
+	// process-global SIGINT/SIGTERM handler installed by the binary does not
+	// also fire while attached.
+	//
+	// When SigProxy is set and both hooks are non-nil, Attach calls
+	// PauseSignals(install) — where install registers Attach's own forwarding
+	// handler — before forwarding begins, and ResumeSignals(remove) — where
+	// remove unregisters it — once forwarding stops. The command layer wires
+	// these to cmdsignals.Pause / cmdsignals.Resume bound to the root context,
+	// so SIGINT/SIGTERM reach the remote command during an attach and normal
+	// CLI cancellation is restored on detach. Pause's install / Resume's remove
+	// run atomically with the suspend / restore, leaving no window where the
+	// signals are unhandled.
+	//
+	// Both nil (the TUI and test callers) means Attach installs its forwarding
+	// handler directly and never touches the global handler.
+	PauseSignals  func(install func()) bool
+	ResumeSignals func(remove func()) bool
 
 	Stdin      *os.File
 	Stdout     *os.File
@@ -130,12 +148,6 @@ func Attach(ctx context.Context, session AttachSession, opts AttachOptions) erro
 	restoreTerminal := setupRawTerminal(opts.NoStdin, opts.Stdin, opts.Stdout)
 	defer restoreTerminal()
 
-	if len(opts.ResetSignals) > 0 {
-		// We cannot use signal.Reset() with no arguments because gRPC's
-		// runtime relies on SIGPIPE staying trapped.
-		signal.Reset(opts.ResetSignals...)
-	}
-
 	sendResize(session, opts.Stdout)
 
 	var wg sync.WaitGroup
@@ -143,8 +155,23 @@ func Attach(ctx context.Context, session AttachSession, opts AttachOptions) erro
 
 	if opts.SigProxy {
 		sigCh := make(chan os.Signal, 4)
-		signal.Notify(sigCh, forwardedSignals...)
-		defer signal.Stop(sigCh)
+		install := func() { signal.Notify(sigCh, forwardedSignals...) }
+		remove := func() { signal.Stop(sigCh) }
+
+		// Suspend the binary's process-global SIGINT/SIGTERM handler for the
+		// duration of the attach so those signals are forwarded to the remote
+		// command instead of cancelling the CLI, then restore it on return.
+		// PauseSignals installs our forwarding handler atomically with the
+		// suspension (and ResumeSignals removes it on the way out). When the
+		// hooks are unset (TUI / tests) we forward directly and never touch the
+		// global handler. Pausing — rather than signal.Reset — leaves SIGPIPE
+		// and every other unrelated signal trapped as gRPC's runtime requires.
+		if opts.PauseSignals != nil && opts.ResumeSignals != nil && opts.PauseSignals(install) {
+			defer opts.ResumeSignals(remove)
+		} else {
+			install()
+			defer remove()
+		}
 
 		wg.Go(func() {
 			handleAttachSignals(attachCtx, sigCh, session, opts.Stdout, forceExitCh)

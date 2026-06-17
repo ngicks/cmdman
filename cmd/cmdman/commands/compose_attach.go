@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmd/internal/cmdsignals"
-	"github.com/ngicks/cmdman/cmd/internal/stdiopipe"
+	"github.com/ngicks/cmdman/internal/cmdsignals"
+	"github.com/ngicks/cmdman/internal/stdiopipe"
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/cli"
 	"github.com/ngicks/cmdman/pkg/cmdman/compose"
@@ -73,14 +73,21 @@ func runComposeAttach(
 	defer cancelAttach()
 
 	opts := cli.AttachOptions{
-		NoStdin:      flags.NoStdin,
-		SigProxy:     flags.SigProxy,
-		DetachKeys:   flags.DetachKeys,
-		ResetSignals: cmdsignals.ExitSignals[:],
-		Stdin:        os.Stdin,
-		Stdout:       os.Stdout,
-		StdinPipe:    stdiopipe.Stdin(attachCtx),
-		StdoutPipe:   stdiopipe.Stdout(attachCtx),
+		NoStdin:    flags.NoStdin,
+		SigProxy:   flags.SigProxy,
+		DetachKeys: flags.DetachKeys,
+		// Pause the root SIGINT/SIGTERM handler while attached so those signals
+		// forward to the remote command, then restore it on detach.
+		PauseSignals: func(install func()) bool {
+			return cmdsignals.Pause(cmd.Context(), install)
+		},
+		ResumeSignals: func(remove func()) bool {
+			return cmdsignals.Resume(cmd.Context(), remove)
+		},
+		Stdin:      os.Stdin,
+		Stdout:     os.Stdout,
+		StdinPipe:  stdiopipe.Stdin(attachCtx),
+		StdoutPipe: stdiopipe.Stdout(attachCtx),
 	}
 
 	if flags.AutoExit {

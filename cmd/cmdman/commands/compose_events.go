@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmd/internal/stdiopipe"
+	"github.com/ngicks/cmdman/internal/stdiopipe"
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/cli"
 	"github.com/ngicks/cmdman/pkg/cmdman/compose"
