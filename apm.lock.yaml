@@ -1,10 +1,10 @@
 lockfile_version: '1'
-generated_at: '2026-06-26T12:19:24.052740+00:00'
+generated_at: '2026-06-26T18:11:02.321169+00:00'
 apm_version: 0.21.0
 dependencies:
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: c7694be5a51a05e56a92d2bd79d88a3ac61c96a2
+  resolved_commit: 25aff3c490fad4532b0ba2e8d46a227c8704f07a
   virtual_path: apm-package/cc-workers
   is_virtual: true
   package_type: marketplace_plugin
@@ -41,51 +41,51 @@ dependencies:
   - .codex/agents/ng-test-runner.toml
   deployed_file_hashes:
     .agents/skills/ng-command-invoker/SKILL.md: sha256:f4048af82a2d5836b9ac77dbcdfd010ced96708476972c122fb55d18f6e16942
-    .agents/skills/ng-explorer/SKILL.md: sha256:5936b80b050be95ca34a61fe8cdb3c03cbc4232fc0271e52473c29a6967828c5
+    .agents/skills/ng-explorer/SKILL.md: sha256:c9c1de9dbee6bfc8a3111bdffd456357c642434ef32a2276e085098eefdbf93e
     .agents/skills/ng-implementer/SKILL.md: sha256:74b75a94afee2306386307ce6e5eb8fa73f92c2a9c26e62f275621d848f4a643
-    .agents/skills/ng-orchestrator/SKILL.md: sha256:2c607dabef23926138102edb669a97022f853b21d3f109592cb696ff76a9ad7c
-    .agents/skills/ng-reviewer/SKILL.md: sha256:9273ef3d108815f1da89f18febb6e0dedbc4abf52553f5e4bbe385f3dcd028a6
-    .claude/agents/ng-command-invoker.md: sha256:b019b129f0e0597319294a11e7d87f610ecbcbf1191840496ba8c932da7e84ae
-    .claude/agents/ng-explorer.md: sha256:a349f1e09d0a42caffcc66fb3e679fc00978293d5601d8d5a604014a8d39b41e
-    .claude/agents/ng-implementer.md: sha256:4e1005e22466e926e7517eb5f7353ee812ee753bb0cfa3530720b7883f8e90e7
-    .claude/agents/ng-reviewer.md: sha256:a9601b422811a989450f5d19a5d2f1a3ed9c4cacd2e8d2b4f6696c4817c7c912
-    .claude/agents/ng-test-runner.md: sha256:d4571c358f7baba185560f5d2249361052995c7a3b0cdfabab8b446a635605a6
+    .agents/skills/ng-orchestrator/SKILL.md: sha256:6b57df58228bad0a6574ca7f1d4668c27bbe12254f0ef6c7a7dccea586a70dbd
+    .agents/skills/ng-reviewer/SKILL.md: sha256:226e5af4a8017b7075314e5b92622f33c194e5fe60838dc3f5d2d6c71301297c
+    .claude/agents/ng-command-invoker.md: sha256:2ebc19b040196a2bdcc1e7185897acf83e4392c3ec02747b72de32030d8185d8
+    .claude/agents/ng-explorer.md: sha256:29095f6a95997443a7e0958045272966ee81b3b5c76252a66e2ac8178599f42c
+    .claude/agents/ng-implementer.md: sha256:90118cdc367dca1c84adbffd5f03f2b796b2694a06f4e366a22b7042edeac189
+    .claude/agents/ng-reviewer.md: sha256:273a02dddf8643c0102d9c16de537517d532563bf4749d2d29599a5ca4009abf
+    .claude/agents/ng-test-runner.md: sha256:2b6b1188560b9749dd3910fd4fe3479398ceac59ee5d993f71a2a070167e250c
     .claude/skills/ng-command-invoker/SKILL.md: sha256:f4048af82a2d5836b9ac77dbcdfd010ced96708476972c122fb55d18f6e16942
-    .claude/skills/ng-explorer/SKILL.md: sha256:5936b80b050be95ca34a61fe8cdb3c03cbc4232fc0271e52473c29a6967828c5
+    .claude/skills/ng-explorer/SKILL.md: sha256:c9c1de9dbee6bfc8a3111bdffd456357c642434ef32a2276e085098eefdbf93e
     .claude/skills/ng-implementer/SKILL.md: sha256:74b75a94afee2306386307ce6e5eb8fa73f92c2a9c26e62f275621d848f4a643
-    .claude/skills/ng-orchestrator/SKILL.md: sha256:2c607dabef23926138102edb669a97022f853b21d3f109592cb696ff76a9ad7c
-    .claude/skills/ng-reviewer/SKILL.md: sha256:9273ef3d108815f1da89f18febb6e0dedbc4abf52553f5e4bbe385f3dcd028a6
+    .claude/skills/ng-orchestrator/SKILL.md: sha256:6b57df58228bad0a6574ca7f1d4668c27bbe12254f0ef6c7a7dccea586a70dbd
+    .claude/skills/ng-reviewer/SKILL.md: sha256:226e5af4a8017b7075314e5b92622f33c194e5fe60838dc3f5d2d6c71301297c
     .codex/agents/ng-command-invoker.toml: sha256:71e65ace87b27b4fea573f0ffe84ce99652a33b0cab540b4f65e959b4489ac6b
-    .codex/agents/ng-explorer.toml: sha256:8362d9b4d2d8625bfbe6c30f0d7715691408ac0e772745a9a934fd0548bd80d6
+    .codex/agents/ng-explorer.toml: sha256:9937070e48601b6356021b525856f4e7b95f3fc93b6e239fca5c06091b98279c
     .codex/agents/ng-implementer.toml: sha256:b4e25d1e0bc34c2682409ef73e5c636f332e08c66c29a00422e30da10d349950
     .codex/agents/ng-reviewer.toml: sha256:9d14ee18cc710b34acaa1c44cdbc9c5dbb7ee9897ec0ebf4a82313a16eec325d
     .codex/agents/ng-test-runner.toml: sha256:e121ea80d32dfd1c23fb4b17bbeb70a6a1b458d4a840db915a9e6300527ba3c2
-  content_hash: sha256:20b39caf2ae711959285972f1bd7707c642cbd543b7a130a6d318f2aaaff875f
+  content_hash: sha256:ea019b4884924f0c8b9f7095ffe533210155198526d89de5ed0ad43f094a5e76
   declared_license: MIT
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: c7694be5a51a05e56a92d2bd79d88a3ac61c96a2
+  resolved_commit: 25aff3c490fad4532b0ba2e8d46a227c8704f07a
   virtual_path: hooks/go-vet-ngcheckers
   is_virtual: true
   package_type: hook_package
   content_hash: sha256:55d6da41fbbabb28f30bf4e4831443fe6b37cb970babb0ae86fca508dc488557
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: c7694be5a51a05e56a92d2bd79d88a3ac61c96a2
+  resolved_commit: 25aff3c490fad4532b0ba2e8d46a227c8704f07a
   virtual_path: hooks/golangci-lint-fmt-after-edit
   is_virtual: true
   package_type: hook_package
   content_hash: sha256:4f3e3ff72524079a224c23b05008f5a419c6bb7221e4fb8d7a5e9db2cea5f87c
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: c7694be5a51a05e56a92d2bd79d88a3ac61c96a2
+  resolved_commit: 25aff3c490fad4532b0ba2e8d46a227c8704f07a
   virtual_path: hooks/golangci-lint-run-after-edit
   is_virtual: true
   package_type: hook_package
   content_hash: sha256:65c244da3bcd072713d0d3f85027cedebb3b0eba43c574e14f9a6da65a1ab253
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: c7694be5a51a05e56a92d2bd79d88a3ac61c96a2
+  resolved_commit: 25aff3c490fad4532b0ba2e8d46a227c8704f07a
   virtual_path: instructions/base-env.instructions.md
   is_virtual: true
   deployed_files:
@@ -95,7 +95,7 @@ dependencies:
   content_hash: sha256:e8e2f850d9cb676f3e9dc7756563576bc3dca4aed77f162987d88b6a7a0d18c5
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: c7694be5a51a05e56a92d2bd79d88a3ac61c96a2
+  resolved_commit: 25aff3c490fad4532b0ba2e8d46a227c8704f07a
   virtual_path: instructions/go/go-basics.instructions.md
   is_virtual: true
   deployed_files:
@@ -105,7 +105,7 @@ dependencies:
   content_hash: sha256:66bae51c80e9bb324b7de4d9a7d451de94ce8eb3ec49620140a30efc2b1111c7
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: c7694be5a51a05e56a92d2bd79d88a3ac61c96a2
+  resolved_commit: 25aff3c490fad4532b0ba2e8d46a227c8704f07a
   virtual_path: instructions/go/go-design-preference.instructions.md
   is_virtual: true
   deployed_files:
@@ -115,7 +115,7 @@ dependencies:
   content_hash: sha256:08392ce26cee0ed77f6865678fe518f2e224c3706351936d7e59eed4b5e4d43b
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: c7694be5a51a05e56a92d2bd79d88a3ac61c96a2
+  resolved_commit: 25aff3c490fad4532b0ba2e8d46a227c8704f07a
   virtual_path: skills/go-check-outdated-patterns
   is_virtual: true
   package_type: claude_skill
@@ -130,7 +130,7 @@ dependencies:
   content_hash: sha256:a94ed31b24c332612dea8e116c226c95e189c0ff29fb2551fd67e094af673994
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: c7694be5a51a05e56a92d2bd79d88a3ac61c96a2
+  resolved_commit: 25aff3c490fad4532b0ba2e8d46a227c8704f07a
   virtual_path: skills/go-edit-cobra
   is_virtual: true
   package_type: claude_skill
@@ -213,7 +213,7 @@ dependencies:
   content_hash: sha256:bcaeba8dc2804f4d4d66bbabcaea612668ef524fe1e625a86567464144026b67
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: c7694be5a51a05e56a92d2bd79d88a3ac61c96a2
+  resolved_commit: 25aff3c490fad4532b0ba2e8d46a227c8704f07a
   virtual_path: skills/go-review-checklist
   is_virtual: true
   package_type: claude_skill
@@ -228,7 +228,7 @@ dependencies:
   content_hash: sha256:d1f2432180ac2de13a6a23d83bb879f5c1c552218f7cf55aea9af4c6ffe51f92
 - repo_url: ngicks/agents-package
   host: github.com
-  resolved_commit: c7694be5a51a05e56a92d2bd79d88a3ac61c96a2
+  resolved_commit: 25aff3c490fad4532b0ba2e8d46a227c8704f07a
   virtual_path: skills/ngplan
   is_virtual: true
   package_type: claude_skill
