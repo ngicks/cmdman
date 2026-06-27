@@ -36,7 +36,7 @@ func attachCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	f := cmd.Flags()
 	f.BoolVar(&flags.NoStdin, "no-stdin", false, "Output-only mode")
 	f.BoolVar(&flags.SigProxy, "sig-proxy", true, "Forward signals to command")
-	f.StringVar(&flags.DetachKeys, "detach-keys", "ctrl-p,ctrl-q", "Key sequence to detach")
+	f.StringVar(&flags.DetachKeys, "detach-keys", cli.DefaultDetachKeys, "Key sequence to detach")
 	f.BoolVar(
 		&flags.AutoExit, "auto-exit", false,
 		"Exit immediately when the command exits or is not running (opt out of sticky default)",

@@ -381,6 +381,7 @@ func (b *serviceBackend) Attach(ctx context.Context, id string) (string, error) 
 		Stdout:     os.Stdout,
 		StdinPipe:  stdinPipe,
 		StdoutPipe: nopWriteCloser{os.Stdout},
+		DetachKeys: DefaultDetachKeys,
 	}
 	err = Attach(attachCtx, session, opts)
 	switch {

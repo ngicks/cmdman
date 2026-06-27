@@ -67,6 +67,11 @@ type AttachSession interface {
 	Close() error
 }
 
+// DefaultDetachKeys is the detach-key sequence used when a caller does not
+// override it: Ctrl-P, Ctrl-Q. Intercepted locally by Attach and never
+// forwarded to the remote command.
+const DefaultDetachKeys = "ctrl-p,ctrl-q"
+
 // AttachOptions configure a single attach run. All four I/O fields are
 // required; Attach does not fall back to os.Stdin / os.Stdout.
 //
