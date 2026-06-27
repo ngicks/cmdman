@@ -16,6 +16,7 @@ const (
 	popupRemove
 	popupForceRemove
 	popupMuxWarn
+	popupComposeUp
 )
 
 // popupState is the pending confirmation dialog. Confirmation popups use a
@@ -27,6 +28,7 @@ type popupState struct {
 	command  string
 	targetID string
 	path     string // compose file path (mux warn popup)
+	layout   string // layout name to apply (mux warn popup); empty cycles instead
 	// choice selects between the action button (0) and <cancel> (1).
 	choice int
 }
@@ -44,6 +46,8 @@ func (p popupState) actionLabel() string {
 		return "<force remove>"
 	case popupMuxWarn:
 		return "<continue>"
+	case popupComposeUp:
+		return "<up>"
 	default:
 		return "<yes>"
 	}
@@ -59,6 +63,8 @@ func (p popupState) title() string {
 		return "Force remove running command?"
 	case popupMuxWarn:
 		return "Rearrange the current tmux window?"
+	case popupComposeUp:
+		return "Compose up project?"
 	default:
 		return ""
 	}
@@ -94,6 +100,19 @@ func openMuxWarnPopup(project, path string) popupState {
 	return popupState{kind: popupMuxWarn, project: project, path: path, choice: 1}
 }
 
+// openLayoutWarnPopup opens the non-popup mux warning for applying a specific
+// layout (Layout tab), defaulting to <cancel>. The layout name is carried so the
+// confirm path applies that layout instead of cycling.
+func openLayoutWarnPopup(project, path, layout string) popupState {
+	return popupState{kind: popupMuxWarn, project: project, path: path, layout: layout, choice: 1}
+}
+
+// openComposeUpPopup opens the compose-up confirmation, defaulting to <up>
+// (running the project is the explicit intent of pressing `a`).
+func openComposeUpPopup(project, path string) popupState {
+	return popupState{kind: popupComposeUp, project: project, path: path, choice: 0}
+}
+
 // toggleChoice moves the popup selection between the action button and <cancel>.
 func (p *popupState) toggleChoice() {
 	if p.choice == 0 {
@@ -109,11 +128,18 @@ func (m Model) renderPopup() string {
 	var b strings.Builder
 	b.WriteString(p.title())
 	b.WriteString("\n\n")
-	if p.kind == popupMuxWarn {
+	switch p.kind {
+	case popupMuxWarn:
 		fmt.Fprintf(&b, "project: %s\n", p.project)
-		b.WriteString("\nShowing a mux layout will rearrange the current tmux window,\n")
+		if p.layout != "" {
+			fmt.Fprintf(&b, "layout: %s\n", p.layout)
+		}
+		b.WriteString("\nApplying a mux layout will rearrange the current tmux window,\n")
 		b.WriteString("including this TUI. Continue?\n")
-	} else {
+	case popupComposeUp:
+		fmt.Fprintf(&b, "project: %s\n", p.project)
+		b.WriteString("\nCreate and start this project's commands (compose up)?\n")
+	default:
 		fmt.Fprintf(&b, "project: %s\n", p.project)
 		fmt.Fprintf(&b, "command: %s\n", p.command)
 		if p.kind == popupForceRemove {
@@ -140,10 +166,13 @@ func (m Model) renderPopup() string {
 func (m Model) renderHelp() string {
 	var b strings.Builder
 	b.WriteString("Help — ")
-	if m.active == tabCommands {
+	switch m.active {
+	case TabCommands:
 		b.WriteString("Commands tab\n\n")
-	} else {
+	case TabCompose:
 		b.WriteString("Compose tab\n\n")
+	default:
+		b.WriteString("Layout tab\n\n")
 	}
 	b.WriteString("Navigation\n")
 	b.WriteString("  tab/shift-tab  switch tab\n")
@@ -153,16 +182,22 @@ func (m Model) renderHelp() string {
 	b.WriteString("\nFilter\n")
 	b.WriteString("  /              focus filter input\n")
 	b.WriteString("  esc            leave filter / cancel popup\n")
-	if m.active == tabCommands {
+	switch m.active {
+	case TabCommands:
 		b.WriteString("\nCommand lifecycle\n")
 		b.WriteString("  s  start    S  stop    r  restart\n")
 		b.WriteString("  a  attach   x  remove\n")
-	} else {
-		b.WriteString("\nCompose mux\n")
-		b.WriteString("  enter  open project in Commands tab\n")
+	case TabCompose:
+		b.WriteString("\nCompose\n")
+		b.WriteString("  enter  view definition (read-only; j/k scroll, esc close)\n")
+		b.WriteString("  e      edit compose file in $VISUAL/$EDITOR/vim\n")
+		b.WriteString("  a      compose up (create + start, with confirmation)\n")
 		b.WriteString("  c      cycle mux layout\n")
-		b.WriteString("  l      specific layout (cycle-only for now)\n")
 		b.WriteString("  r      refresh project list\n")
+	default:
+		b.WriteString("\nLayout\n")
+		b.WriteString("  enter  apply the selected layout (● marks the current one)\n")
+		b.WriteString("  r      refresh layouts\n")
 	}
 	b.WriteString("\nPopups\n")
 	b.WriteString("  ←/→ or tab   move between buttons\n")

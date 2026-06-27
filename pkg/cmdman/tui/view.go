@@ -133,17 +133,119 @@ func (m Model) viewContent() string {
 	if m.helpOpen {
 		return overlay(m.renderHelp(), width, height)
 	}
+	if m.defViewer.open {
+		return overlay(m.renderDefViewer(), width, height)
+	}
+	if m.composeUp.active {
+		return overlay(m.renderComposeUp(), width, height)
+	}
 	if m.popup.open() {
 		return overlay(m.renderPopup(), width, height)
 	}
 	return out
 }
 
+// renderComposeUp renders the live compose-up progress overlay: one per-service
+// mark line in first-seen order, mirroring the compose TTY reporter's glyphs.
+func (m Model) renderComposeUp() string {
+	w, h := m.composeUpSize()
+	title := "Compose up"
+	if m.composeUp.project != "" {
+		title = "Compose up — " + m.composeUp.project
+	}
+	var lines []string
+	if len(m.composeUp.order) == 0 {
+		lines = []string{styleActive.Render("Starting…")}
+	} else {
+		for _, name := range m.composeUp.order {
+			mk := m.composeUp.marks[name]
+			glyph := composeUpGlyph(mk, m.spinner)
+			styled := composeUpStyle(mk).Render(glyph)
+			lines = append(lines, fmt.Sprintf("%s %-20s %s", styled, truncate(name, 20), mk.phase))
+		}
+	}
+	content := clampLines(lines, max(h-2, 1), 0)
+	return box(title, content, w, h)
+}
+
+// composeUpSize returns the outer overlay box dimensions, growing to fit the
+// service list but clamped to the screen.
+func (m Model) composeUpSize() (w, h int) {
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	height := m.height
+	if height <= 0 {
+		height = 24
+	}
+	rows := max(len(m.composeUp.order), 1) + 2 // content + top/bottom border
+	return max(width-8, 30), min(max(rows, 5), max(height-4, 5))
+}
+
+// composeUpGlyph picks the single-cell mark for a service, matching statusGlyph:
+// spinner while in flight, ● running, ◌ created, ✘ failed, ✔ otherwise terminal.
+func composeUpGlyph(mk composeUpMark, frame int) string {
+	if !mk.terminal {
+		return spinnerFrames[frame%len(spinnerFrames)]
+	}
+	if mk.failed {
+		return "✘"
+	}
+	switch mk.phase {
+	case "running":
+		return "●"
+	case "created", "recreated", "unchanged":
+		return "◌"
+	default:
+		return "✔"
+	}
+}
+
+// composeUpStyle returns the color style paired with composeUpGlyph, mirroring
+// statusStyle / the compose TTY reporter colors.
+func composeUpStyle(mk composeUpMark) lipgloss.Style {
+	if !mk.terminal {
+		return styleMarkProgress
+	}
+	if mk.failed {
+		return styleMarkErr
+	}
+	switch mk.phase {
+	case "created", "recreated", "unchanged":
+		return styleMarkPending
+	default:
+		return styleMarkOK
+	}
+}
+
+// renderDefViewer renders the read-only definition viewer overlay: the project's
+// raw compose YAML, scrolled to defViewer.scroll.
+func (m Model) renderDefViewer() string {
+	w, h := m.defViewerSize()
+	title := "Definition"
+	if m.defViewer.project != "" {
+		title = "Definition — " + m.defViewer.project
+	}
+	title += "  (j/k scroll  esc close)"
+	var lines []string
+	switch {
+	case m.defViewer.loading:
+		lines = []string{styleActive.Render("Loading…")}
+	case m.defViewer.errMsg != "":
+		lines = []string{styleActive.Render("Unable to read definition:"), m.defViewer.errMsg}
+	default:
+		lines = m.defViewer.lines
+	}
+	content := scrollLines(lines, max(h-2, 1), m.defViewer.scroll)
+	return box(title, content, w, h)
+}
+
 func (m Model) renderTabBar() string {
-	names := []string{"Commands", "Compose"}
+	names := TabNames()
 	parts := make([]string, 0, len(names))
 	for i, n := range names {
-		if tab(i) == m.active {
+		if Tab(i) == m.active {
 			parts = append(parts, styleTabActive.Render(n))
 		} else {
 			parts = append(parts, styleTabIdle.Render(n))
@@ -156,10 +258,11 @@ func (m Model) renderTabBar() string {
 func (m Model) renderFilterBox(width int) string {
 	var filter string
 	var focused bool
-	if m.active == tabCommands {
+	switch m.active {
+	case TabCommands:
 		filter = m.commands.filter
 		focused = m.commands.filtering
-	} else {
+	case TabCompose:
 		filter = m.compose.filter
 		focused = m.compose.filtering
 	}
@@ -171,10 +274,61 @@ func (m Model) renderFilterBox(width int) string {
 }
 
 func (m Model) renderBody(width, height int) string {
-	if m.active == tabCommands {
+	switch m.active {
+	case TabCommands:
 		return m.renderCommandsBody(width, height)
+	case TabCompose:
+		return m.renderComposeBody(width, height)
+	default:
+		return m.renderLayoutBody(width, height)
 	}
-	return m.renderComposeBody(width, height)
+}
+
+// renderLayoutBody renders the Layout tab: the current project's mux layouts in
+// definition order. The running dashboard's current layout is marked with ●; the
+// selection is shown with the selection bar.
+func (m Model) renderLayoutBody(width, height int) string {
+	cw := max(width-2, 1)
+	ch := max(height-2, 1)
+	title := "Layouts"
+	if m.layout.project != "" {
+		title = "Layouts — " + m.layout.project
+	}
+	rows := m.layout.rows
+	if len(rows) == 0 {
+		msg := "No mux layouts for the current project."
+		if !m.layout.loaded {
+			msg = "Loading…"
+		}
+		content := clampLines([]string{styleActive.Render(msg)}, ch, 0)
+		return box(title, content, width, height)
+	}
+	lines := make([]string, 0, len(rows))
+	for i, r := range rows {
+		selected := i == m.layout.selected
+		prefix := "  "
+		if selected {
+			prefix = "> "
+		}
+		marker := " "
+		if i == m.layout.current {
+			marker = "●"
+		}
+		plain := fmt.Sprintf("%s%s %s", prefix, marker, r.name)
+		switch {
+		case selected:
+			lines = append(lines, styleSelected.Width(cw).Render(truncate(plain, cw)))
+		case i == m.layout.current:
+			lines = append(
+				lines,
+				fmt.Sprintf("%s%s %s", prefix, styleMarkOK.Render(marker), r.name),
+			)
+		default:
+			lines = append(lines, plain)
+		}
+	}
+	content := clampLines(lines, ch, m.layout.selected)
+	return box(title, content, width, height)
 }
 
 func (m Model) renderCommandsBody(width, height int) string {
@@ -250,6 +404,13 @@ func (m Model) renderCommandList(title string, width, height int) string {
 func (m Model) renderPreview(width, height int) string {
 	ch := max(height-2, 1)
 	p := m.commands.preview
+	// Terminal-view mode: render the live vt emulator frame. The emulator is
+	// sized to this pane's inner area (see previewInnerSize), so its rows map
+	// directly onto the box content.
+	if p.terminal && p.term != nil {
+		content := clampLines(m.renderPreviewTerm(), ch, 0)
+		return box("Preview", content, width, height)
+	}
 	var lines []string
 	switch p.status {
 	case previewNoStorage:
@@ -309,11 +470,15 @@ func (m Model) renderComposeBody(width, height int) string {
 
 func (m Model) renderFooter(width int) string {
 	var hints string
-	if m.active == tabCommands {
+	switch m.active {
+	case TabCommands:
 		hints = "tab next  j/k move  h/l fold  / filter  s start  S stop  r restart  " +
 			"a attach  x remove  ? help  q quit"
-	} else {
-		hints = "tab next  j/k move  / filter  enter open  c cycle mux  r refresh  ? help  q quit"
+	case TabCompose:
+		hints = "tab next  j/k move  / filter  enter def  e edit  a up  " +
+			"c cycle mux  r refresh  ? help  q quit"
+	default:
+		hints = "tab next  j/k move  enter apply  r refresh  ? help  q quit"
 	}
 	status := m.status
 	line1 := styleFooter.Render(truncate(hints, width))
@@ -397,6 +562,20 @@ func clampLines(lines []string, height, focus int) string {
 	}
 	end := min(start+height, len(lines))
 	view := lines[start:end]
+	for len(view) < height {
+		view = append(view, "")
+	}
+	return strings.Join(view, "\n")
+}
+
+// scrollLines renders lines into a viewport of the given height starting at the
+// top line index, clamping top to the content and padding the remainder so the
+// viewport always has exactly height lines.
+func scrollLines(lines []string, height, top int) string {
+	height = max(height, 1)
+	top = min(max(top, 0), max(len(lines)-height, 0))
+	end := min(top+height, len(lines))
+	view := lines[top:end]
 	for len(view) < height {
 		view = append(view, "")
 	}

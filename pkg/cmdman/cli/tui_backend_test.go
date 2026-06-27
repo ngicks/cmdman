@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,6 +26,7 @@ func TestCommandInfosIncludesStandalone(t *testing.T) {
 					compose.LabelCommand: "web",
 				},
 				LogDriver: logdriver.DriverK8sFile,
+				Tty:       true,
 			},
 		},
 		{
@@ -52,10 +54,16 @@ func TestCommandInfosIncludesStandalone(t *testing.T) {
 	if web.LogDriver != logdriver.DriverK8sFile {
 		t.Fatalf("log driver should propagate, got %q", web.LogDriver)
 	}
+	if !web.Tty {
+		t.Fatalf("tty should propagate from the command config")
+	}
 
 	tool := byID["c2"]
 	if tool.Project != "" {
 		t.Fatalf("standalone command should have empty project, got %q", tool.Project)
+	}
+	if tool.Tty {
+		t.Fatalf("a command without tty should project Tty=false, got true")
 	}
 	if tool.Name != "standalone-tool" {
 		t.Fatalf("standalone command name = %q, want standalone-tool", tool.Name)
@@ -113,6 +121,89 @@ func TestAppendCwdProjectAddsUnregisteredProject(t *testing.T) {
 	}
 	if got[0].Path == "" {
 		t.Fatal("path should be the discovered compose file")
+	}
+}
+
+func TestProjectDefinitionReadsRawFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "compose.yaml")
+	content := "name: tools\ncommands:\n  a:\n    args: [echo, a]\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := &serviceBackend{}
+	got, err := b.ProjectDefinition(context.Background(), "tools", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != content {
+		t.Fatalf("ProjectDefinition should return the raw file text, got %q", got)
+	}
+}
+
+func TestComposeFilePathReturnsExplicitPath(t *testing.T) {
+	b := &serviceBackend{}
+	got, err := b.ComposeFilePath(context.Background(), "tools", "/etc/compose/tools.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "/etc/compose/tools.yaml" {
+		t.Fatalf("an explicit composeFile should pass through, got %q", got)
+	}
+}
+
+const muxComposeYAML = `name: tools
+commands:
+  web:
+    args: [echo, web]
+  db:
+    args: [echo, db]
+mux:
+  driver: tmux
+  layouts:
+    - name: dev
+      root: web
+    - name: ops
+      root:
+        dir: h
+        panes: [web, db]
+`
+
+func TestListLayoutsProjectsNamesInOrder(t *testing.T) {
+	conf := t.TempDir()
+	t.Setenv("CMDMAN_CONF", filepath.Join(conf, "config.json"))
+	dir := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(dir, "cmd-compose.yaml"), []byte(muxComposeYAML), 0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	b := &serviceBackend{}
+	info, err := b.ListLayouts(context.Background(), "tools", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Project != "tools" {
+		t.Fatalf("project = %q, want tools", info.Project)
+	}
+	if info.Path == "" {
+		t.Fatal("path should be the discovered compose file")
+	}
+	want := []string{"dev", "ops"}
+	if len(info.Names) != len(want) {
+		t.Fatalf("layout names = %v, want %v", info.Names, want)
+	}
+	for i, n := range want {
+		if info.Names[i] != n {
+			t.Fatalf("layout names should be in definition order: got %v, want %v",
+				info.Names, want)
+		}
+	}
+	// No running dashboard for this synthetic project, so the marker is unknown.
+	if info.Current != -1 {
+		t.Fatalf("current marker = %d, want -1 (no running dashboard)", info.Current)
 	}
 }
 

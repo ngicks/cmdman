@@ -63,10 +63,12 @@ func commandInfos(entries []store.CommandEntry) []tui.CommandInfo {
 		var labels map[string]string
 		var driver logdriver.LogDriver
 		var dir string
+		var tty bool
 		if e.ConfigJSON != nil {
 			labels = e.ConfigJSON.Labels
 			driver = e.ConfigJSON.LogDriver
 			dir = e.ConfigJSON.Dir
+			tty = e.ConfigJSON.Tty
 		}
 		project := labels[compose.LabelProject]
 		workdir, hasWorkdir := labels[compose.LabelWorkdir]
@@ -87,6 +89,7 @@ func commandInfos(entries []store.CommandEntry) []tui.CommandInfo {
 			State:     e.State,
 			ExitCode:  e.ExitCode,
 			LogDriver: driver,
+			Tty:       tty,
 		})
 	}
 	return out
@@ -297,6 +300,62 @@ func (l *logStream) Close() error {
 	return l.rdr.Close()
 }
 
+// RawView opens a read-only attach session and streams its raw stdout (the
+// monitor replays scrollback then follows live). It only ever calls Recv, never
+// SendStdin/Resize, so the previewed command and any concurrent interactive
+// attach are unaffected. Close releases the session, unblocking the pump.
+func (b *serviceBackend) RawView(ctx context.Context, id string) (tui.RawStream, error) {
+	session, err := b.svc.OpenAttachSession(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	rs := &rawStream{
+		session: session,
+		ch:      make(chan tui.RawChunk, 64),
+		done:    make(chan struct{}),
+	}
+	go rs.pump()
+	return rs, nil
+}
+
+type rawStream struct {
+	session   *cmdman.Session
+	ch        chan tui.RawChunk
+	done      chan struct{}
+	closeOnce sync.Once
+}
+
+func (r *rawStream) pump() {
+	defer close(r.ch)
+	for {
+		data, err := r.session.Recv()
+		if err != nil {
+			// io.EOF (the command exited or the stream ended) is a clean close:
+			// the consumer observes the channel closing, keeping the last frame.
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			select {
+			case r.ch <- tui.RawChunk{Err: err}:
+			case <-r.done:
+			}
+			return
+		}
+		select {
+		case r.ch <- tui.RawChunk{Bytes: data}:
+		case <-r.done:
+			return
+		}
+	}
+}
+
+func (r *rawStream) Chunks() <-chan tui.RawChunk { return r.ch }
+
+func (r *rawStream) Close() error {
+	r.closeOnce.Do(func() { close(r.done) })
+	return r.session.Close()
+}
+
 // Attach opens an attach session and hands the terminal to cli.Attach directly
 // (not the sticky Cobra path), so detach returns control to the TUI.
 func (b *serviceBackend) Attach(ctx context.Context, id string) (string, error) {
@@ -334,20 +393,20 @@ func (b *serviceBackend) Attach(ctx context.Context, id string) (string, error) 
 // mux path (compose.LoadOrProject + mux.Build + mux.Run). mux owns its layout
 // state through a persisted tmux window marker; the TUI keeps none.
 func (b *serviceBackend) CycleMux(ctx context.Context, projectName, composeFile string) error {
-	opts := compose.NormalizeOpts{File: composeFile}
-	if composeFile == "" {
-		opts.File = projectName
-	}
-	selection, err := compose.LoadOrProject(opts)
+	selection, err := resolveMuxSelection(projectName, composeFile)
 	if err != nil {
 		return err
 	}
-	if selection.Spec == nil {
-		return fmt.Errorf("mux: no compose file found for project %q", projectName)
-	}
-	if selection.Spec.Mux == nil {
-		return fmt.Errorf("mux: project %q has no mux section", projectName)
-	}
+	return b.muxRun(ctx, selection, "")
+}
+
+// muxRun rebuilds the project's mux dashboard and applies a layout. An empty
+// layout cycles to the next layout; a non-empty one applies that named/indexed
+// layout (and starts a dashboard at it when none is running). Shared by CycleMux
+// and ApplyLayout.
+func (b *serviceBackend) muxRun(
+	ctx context.Context, selection compose.ProjectSelection, layout string,
+) error {
 	spec := *selection.Spec.Mux
 
 	scalePositions, err := mux.ReadScaleState(ctx, mux.ScaleStateOptions{
@@ -394,8 +453,231 @@ func (b *serviceBackend) CycleMux(ctx context.Context, projectName, composeFile 
 		// identically to CLI-built ones: `mux down` can find them regardless of
 		// whether they were opened from the TUI or the command line.
 		Identity: selection.ProjectIdentity(),
+		Layout:   layout,
 		Stdout:   io.Discard,
 	})
+}
+
+// resolveMuxSelection loads the compose project for a mux operation and verifies
+// it declares a mux: section. composeFile is used directly when set; otherwise it
+// is resolved on demand from the project name.
+func resolveMuxSelection(projectName, composeFile string) (compose.ProjectSelection, error) {
+	opts := compose.NormalizeOpts{File: composeFile}
+	if composeFile == "" {
+		opts.File = projectName
+	}
+	selection, err := compose.LoadOrProject(opts)
+	if err != nil {
+		return compose.ProjectSelection{}, err
+	}
+	if selection.Spec == nil {
+		return compose.ProjectSelection{}, fmt.Errorf(
+			"mux: no compose file found for project %q", projectName,
+		)
+	}
+	if selection.Spec.Mux == nil {
+		return compose.ProjectSelection{}, fmt.Errorf(
+			"mux: project %q has no mux section", projectName,
+		)
+	}
+	return selection, nil
+}
+
+// resolveLayoutSelection resolves the "current" mux project for the Layout tab
+// (D5): the cwd-active mux project, falling back to the Compose-tab selection
+// identified by projectName/composeFile. The resolved project must declare a
+// mux: section.
+func resolveLayoutSelection(projectName, composeFile string) (compose.ProjectSelection, error) {
+	// Prefer the cwd-active mux project. SelectMuxProject errors when no (or an
+	// ambiguous set of) mux compose is associated with the cwd; in that case fall
+	// back to the explicit Compose-tab selection.
+	if sel, err := compose.SelectMuxProject(compose.NormalizeOpts{}); err == nil {
+		return sel, nil
+	}
+	return resolveMuxSelection(projectName, composeFile)
+}
+
+// ListLayouts returns the current project's mux layouts in definition order plus
+// the running dashboard's current layout marker. The project is resolved per D5
+// (cwd-active mux project, falling back to the Compose-tab selection).
+func (b *serviceBackend) ListLayouts(
+	ctx context.Context, projectName, composeFile string,
+) (tui.LayoutsInfo, error) {
+	selection, err := resolveLayoutSelection(projectName, composeFile)
+	if err != nil {
+		return tui.LayoutsInfo{}, err
+	}
+	spec := *selection.Spec.Mux
+
+	names := make([]string, len(spec.Layouts))
+	for i, l := range spec.Layouts {
+		names[i] = l.Name
+	}
+	info := tui.LayoutsInfo{
+		Project: selection.Project,
+		Path:    selection.Spec.ComposeFile,
+		Names:   names,
+		Current: -1,
+	}
+
+	// Read the running dashboard's current layout marker, best-effort: a missing
+	// tmux server or no dashboard yields no rows (Current stays -1). A genuine
+	// listing failure is not fatal here — the layouts list itself is still valid,
+	// and -1 already encodes "current layout unknown".
+	windows, listErr := mux.List(ctx, mux.ListOptions{
+		Driver:    spec.Driver,
+		DriverOpt: spec.DriverOpt,
+		Identity:  selection.ProjectIdentity(),
+	})
+	if listErr == nil && len(windows) > 0 {
+		info.Current = windows[0].Marker
+	}
+	return info, nil
+}
+
+// ApplyLayout applies the named layout to the project's running dashboard,
+// starting one at that layout when none is running (D6). It reuses CycleMux's
+// build path with an explicit layout selector.
+func (b *serviceBackend) ApplyLayout(
+	ctx context.Context, projectName, composeFile, layoutName string,
+) error {
+	selection, err := resolveMuxSelection(projectName, composeFile)
+	if err != nil {
+		return err
+	}
+	return b.muxRun(ctx, selection, layoutName)
+}
+
+// ProjectDefinition returns the raw compose YAML file text for the project. It
+// returns the file exactly as written on disk (not the normalized spec), so the
+// definition viewer matches what the `e` editor opens.
+func (b *serviceBackend) ProjectDefinition(
+	_ context.Context, projectName, composeFile string,
+) (string, error) {
+	path, err := resolveComposePath(projectName, composeFile)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read compose file %s: %w", path, err)
+	}
+	return string(data), nil
+}
+
+// ComposeFilePath resolves the compose file path for the project so the TUI can
+// hand it to the editor.
+func (b *serviceBackend) ComposeFilePath(
+	_ context.Context, projectName, composeFile string,
+) (string, error) {
+	return resolveComposePath(projectName, composeFile)
+}
+
+// ComposeUp runs "compose up" for a project, forwarding compose progress events
+// to the TUI through a stream. The reporter is installed on a per-operation
+// compose.Service so events flow only for this run; Up runs in a goroutine and
+// the stream's channel closes when it returns, signaling the terminal phase.
+func (b *serviceBackend) ComposeUp(
+	ctx context.Context, projectName, composeFile string,
+) (tui.ComposeUpStream, error) {
+	opts := compose.NormalizeOpts{File: composeFile}
+	if composeFile == "" {
+		opts.File = projectName
+	}
+	spec, err := compose.LoadAndNormalize(opts)
+	if err != nil {
+		return nil, fmt.Errorf("compose up %q: %w", projectName, err)
+	}
+	stream := newComposeUpStream(ctx)
+	svc := compose.NewService(b.svc, compose.WithReporter(stream))
+	go func() {
+		_, upErr := svc.Up(ctx, spec, compose.UpOption{})
+		stream.finish(upErr)
+	}()
+	return stream, nil
+}
+
+// composeUpStream adapts a compose progress Reporter to the tui.ComposeUpStream
+// contract: Report (called concurrently by the reconcile walk) projects each
+// event onto a channel the TUI drains; finish records the operation-level error
+// and closes the channel. Up joins its goroutines before returning, so no Report
+// call races finish's close.
+type composeUpStream struct {
+	// ctxDone is the operation context's cancellation signal (ctx.Done()), kept
+	// so a blocked Report unblocks if the consumer abandons the stream while Up
+	// is still running. We keep the channel, not the context itself, per the
+	// "no context in a struct" convention.
+	ctxDone   <-chan struct{}
+	ch        chan tui.ComposeUpEvent
+	done      chan struct{}
+	closeOnce sync.Once
+
+	mu    sync.Mutex
+	upErr error
+}
+
+func newComposeUpStream(ctx context.Context) *composeUpStream {
+	return &composeUpStream{
+		ctxDone: ctx.Done(),
+		ch:      make(chan tui.ComposeUpEvent, 64),
+		done:    make(chan struct{}),
+	}
+}
+
+// Report implements compose.Reporter.
+func (s *composeUpStream) Report(ev compose.Event) {
+	out := tui.ComposeUpEvent{
+		Command:  ev.Command,
+		Phase:    string(ev.Phase),
+		Terminal: ev.Phase.Terminal(),
+		Failed:   ev.Phase.Failed(),
+		ExitCode: ev.ExitCode,
+		Err:      ev.Err,
+	}
+	select {
+	case s.ch <- out:
+	case <-s.done:
+	case <-s.ctxDone:
+	}
+}
+
+// finish records the operation-level error and closes the event channel.
+func (s *composeUpStream) finish(err error) {
+	s.mu.Lock()
+	s.upErr = err
+	s.mu.Unlock()
+	close(s.ch)
+}
+
+func (s *composeUpStream) Events() <-chan tui.ComposeUpEvent { return s.ch }
+
+func (s *composeUpStream) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.upErr
+}
+
+func (s *composeUpStream) Close() error {
+	s.closeOnce.Do(func() { close(s.done) })
+	return nil
+}
+
+// resolveComposePath returns the compose file path for a project. composeFile is
+// used directly when set; otherwise it is resolved on demand via
+// compose.LoadOrProject, so never-run named projects (which carry an empty path)
+// still resolve to their compose file under the default compose dir.
+func resolveComposePath(projectName, composeFile string) (string, error) {
+	if composeFile != "" {
+		return composeFile, nil
+	}
+	sel, err := compose.LoadOrProject(compose.NormalizeOpts{File: projectName})
+	if err != nil {
+		return "", err
+	}
+	if sel.Spec == nil {
+		return "", fmt.Errorf("no compose file found for project %q", projectName)
+	}
+	return sel.Spec.ComposeFile, nil
 }
 
 // newCancelStdin wraps os.Stdin in a cancelable reader so that Attach's

@@ -9,26 +9,34 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/tui"
 )
 
-// RunTUI runs the interactive TUI directly in the current terminal.
-func RunTUI(ctx context.Context, svc *cmdman.Service) error {
+// RunTUI runs the interactive TUI directly in the current terminal, opening
+// initialTab on startup.
+func RunTUI(ctx context.Context, svc *cmdman.Service, initialTab tui.Tab) error {
 	return tui.Run(ctx, tui.Options{
-		Backend:   newServiceBackend(svc),
-		Version:   cmdman.Version,
-		AltScreen: true,
-		PopupMode: false,
+		Backend:    newServiceBackend(svc),
+		Version:    cmdman.Version,
+		AltScreen:  true,
+		PopupMode:  false,
+		InitialTab: initialTab,
 	})
 }
 
 // RunTUIChild runs the TUI inside a multiplexer popup, reporting startup and
 // final status to the launcher over the IPC endpoint at ipcPath. It is the
 // implementation of the hidden `cmdman tui __child` subcommand.
-func RunTUIChild(ctx context.Context, svc *cmdman.Service, ipcPath string) error {
+func RunTUIChild(
+	ctx context.Context,
+	svc *cmdman.Service,
+	ipcPath string,
+	initialTab tui.Tab,
+) error {
 	var enc *json.Encoder
 	if ipcPath != "" {
 		if conn, err := net.Dial("unix", ipcPath); err == nil {
@@ -43,10 +51,11 @@ func RunTUIChild(ctx context.Context, svc *cmdman.Service, ipcPath string) error
 	}
 	send(ipcMessage{Kind: ipcStarted})
 	err := tui.Run(ctx, tui.Options{
-		Backend:   newServiceBackend(svc),
-		Version:   cmdman.Version,
-		AltScreen: true,
-		PopupMode: true,
+		Backend:    newServiceBackend(svc),
+		Version:    cmdman.Version,
+		AltScreen:  true,
+		PopupMode:  true,
+		InitialTab: initialTab,
 	})
 	if err != nil {
 		send(ipcMessage{Kind: ipcError, Error: err.Error()})
@@ -76,12 +85,61 @@ type PopupConfig struct {
 	// ConfPath is the $CMDMAN_CONF value forwarded to the popup. Empty is not
 	// forwarded.
 	ConfPath string
+	// Tab is the --tab token (tui.TabKeys() value) forwarded to the popup child
+	// so it opens the same startup tab. Empty is not forwarded.
+	Tab string
+	// Width, Height, X and Y are explicit-percentage geometry values ("80%")
+	// forwarded to `tmux display-popup` as -w/-h/-x/-y. Empty values are omitted,
+	// leaving tmux's default geometry.
+	Width  string
+	Height string
+	X      string
+	Y      string
+}
+
+// popupPercentRe matches the explicit-percentage values accepted by the popup
+// geometry flags (e.g. "80%"); bare numbers and tmux tokens like "C" are
+// rejected.
+var popupPercentRe = regexp.MustCompile(`^[0-9]{1,3}%$`)
+
+// PopupGeometry holds the explicit-percentage size/position values forwarded to
+// `tmux display-popup` (-w/-h/-x/-y). Empty fields keep tmux's default geometry.
+type PopupGeometry struct {
+	Width  string
+	Height string
+	X      string
+	Y      string
+}
+
+// Validate reports an error when any set field is not an explicit percentage
+// ("80%"). Empty fields are allowed: tmux defaults the corresponding dimension.
+func (g PopupGeometry) Validate() error {
+	for _, f := range []struct{ name, value string }{
+		{"--popup-width", g.Width},
+		{"--popup-height", g.Height},
+		{"--popup-x", g.X},
+		{"--popup-y", g.Y},
+	} {
+		if f.value != "" && !popupPercentRe.MatchString(f.value) {
+			return fmt.Errorf(
+				"invalid %s %q: want an explicit percentage like 80%%", f.name, f.value)
+		}
+	}
+	return nil
 }
 
 // LaunchTUIPopup gathers the launcher's process context (executable path,
 // working directory, config file) and starts the popup. It is the entry point
 // the cobra command calls; gathering process/env state here keeps ./cmd thin.
-func LaunchTUIPopup(ctx context.Context, driverValue, dataDir, runtimeDir string) error {
+func LaunchTUIPopup(
+	ctx context.Context,
+	driverValue, dataDir, runtimeDir string,
+	initialTab tui.Tab,
+	geom PopupGeometry,
+) error {
+	if err := geom.Validate(); err != nil {
+		return err
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("tui: locate executable: %w", err)
@@ -94,7 +152,22 @@ func LaunchTUIPopup(ctx context.Context, driverValue, dataDir, runtimeDir string
 		DataDir:    dataDir,
 		RuntimeDir: runtimeDir,
 		ConfPath:   os.Getenv("CMDMAN_CONF"),
+		Tab:        tabToken(initialTab),
+		Width:      geom.Width,
+		Height:     geom.Height,
+		X:          geom.X,
+		Y:          geom.Y,
 	})
+}
+
+// tabToken maps a tui.Tab back to its --tab token so the popup child can be
+// launched with the same startup tab. It returns "" for an out-of-range tab.
+func tabToken(t tui.Tab) string {
+	keys := tui.TabKeys()
+	if int(t) < 0 || int(t) >= len(keys) {
+		return ""
+	}
+	return keys[t]
 }
 
 // RunTUIPopup is the `cmdman tui --popup` launcher. It resolves the popup
@@ -170,6 +243,32 @@ func (cfg PopupConfig) childCommand(ipcPath string) []string {
 	if cfg.RuntimeDir != "" {
 		args = append(args, "--runtime-dir", cfg.RuntimeDir)
 	}
+	if cfg.Tab != "" {
+		args = append(args, "--tab", cfg.Tab)
+	}
+	return args
+}
+
+// tmuxPopupArgs builds the `tmux display-popup` argv: -E, an optional working
+// directory (-d), any set geometry values (-w/-h/-x/-y), and finally the shell
+// command to run inside the popup. Empty geometry values are omitted so tmux
+// keeps its default.
+func tmuxPopupArgs(cfg PopupConfig, cmdStr string) []string {
+	args := []string{"display-popup", "-E"}
+	if cfg.Cwd != "" {
+		args = append(args, "-d", cfg.Cwd)
+	}
+	for _, f := range []struct{ flag, value string }{
+		{"-w", cfg.Width},
+		{"-h", cfg.Height},
+		{"-x", cfg.X},
+		{"-y", cfg.Y},
+	} {
+		if f.value != "" {
+			args = append(args, f.flag, f.value)
+		}
+	}
+	args = append(args, cmdStr)
 	return args
 }
 
@@ -181,11 +280,7 @@ func runTmuxPopup(ctx context.Context, cfg PopupConfig, env []string) error {
 	defer cleanup()
 
 	cmdStr := shellJoin(cfg.childCommand(ipcPath))
-	args := []string{"display-popup", "-E"}
-	if cfg.Cwd != "" {
-		args = append(args, "-d", cfg.Cwd)
-	}
-	args = append(args, cmdStr)
+	args := tmuxPopupArgs(cfg, cmdStr)
 
 	cmd := exec.CommandContext(ctx, "tmux", args...)
 	cmd.Env = env

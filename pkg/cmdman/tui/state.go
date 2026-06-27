@@ -6,19 +6,10 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/charmbracelet/x/vt"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
-
-// tab identifies a top-level tab.
-type tab int
-
-const (
-	tabCommands tab = iota
-	tabCompose
-)
-
-const numTabs = 2
 
 // pane identifies the focused pane within the Commands tab.
 type pane int
@@ -45,19 +36,24 @@ type Model struct {
 
 	width, height int
 
-	active tab
+	active Tab
 
 	commands commandsTab
 	compose  composeTab
+	layout   layoutTab
 
-	popup    popupState
-	helpOpen bool
+	popup     popupState
+	helpOpen  bool
+	defViewer defViewerState
+	composeUp composeUpState
 
 	status string // transient status/error message in the footer
 	cwd    string // normalized working directory for active detection
 
 	events    EventStream // lifecycle change-signal subscription
 	reloadGen int         // debounce generation for event-triggered re-list
+
+	previewGen int // monotonic generation for terminal-preview drain/tick loops
 
 	popupMode bool // running inside a multiplexer popup
 	altScreen bool // render in the alternate screen buffer (set per-View in v2)
@@ -77,6 +73,7 @@ type commandRow struct {
 	state     model.EventType
 	exitCode  *int
 	logDriver logdriver.LogDriver
+	tty       bool   // command runs under a pseudo-terminal (preview predicate)
 	pending   string // pending action label; empty when no action is in flight
 }
 
@@ -121,13 +118,105 @@ type composeRow struct {
 	modified string
 }
 
+// layoutTab holds the Layout-tab state: the current project's mux layouts in
+// definition order, the selected row, and the running dashboard's current
+// marker. project/path are the resolved current project (cwd-active mux project,
+// falling back to the Compose-tab selection) used when applying a layout.
+type layoutTab struct {
+	rows     []layoutRow
+	selected int
+	project  string // resolved current project name
+	path     string // resolved compose file path (used to apply a layout)
+	current  int    // current dashboard marker index, or -1 when none/unknown
+	loaded   bool   // whether layouts have been loaded at least once
+}
+
+// layoutRow is a single mux layout in the Layout tab.
+type layoutRow struct {
+	name string
+}
+
+// moveSelection moves the layout selection by delta, clamped to the rows.
+func (t *layoutTab) moveSelection(delta int) {
+	if len(t.rows) == 0 {
+		return
+	}
+	t.selected += delta
+	if t.selected < 0 {
+		t.selected = 0
+	}
+	if t.selected >= len(t.rows) {
+		t.selected = len(t.rows) - 1
+	}
+}
+
 // previewState holds the right-pane preview content for the selected command.
+//
+// A command renders in one of two modes. The default is the sanitized log text
+// (lines, fed by stream). A running, TTY-backed command instead renders in
+// terminal-view mode (terminal), where raw attach bytes (raw) drive a persistent
+// vt emulator (term) sized to the preview pane.
 type previewState struct {
 	cmdID  string
 	lines  []string
 	status previewStatus
 	errMsg string
 	stream LogStream // live Tail+Follow reader for cmdID; nil when none
+
+	terminal     bool             // terminal-view mode (vt emulator) is active
+	streaming    bool             // raw drain is live; the repaint tick runs while true
+	gen          int              // generation of the active drain/tick loop (see Model.previewGen)
+	raw          RawStream        // live raw attach stream for cmdID; nil when none
+	term         *vt.SafeEmulator // vt emulator for terminal-view; nil when none
+	termW, termH int              // emulator size, tracked so resizes are idempotent
+}
+
+// defViewerState holds the read-only definition-viewer overlay (Compose tab
+// `enter`). It shows the project's raw compose YAML file, scrollable with
+// j/k/PgUp/PgDn; open reports whether the overlay is shown.
+type defViewerState struct {
+	open    bool
+	project string
+	lines   []string
+	scroll  int // index of the first visible line
+	loading bool
+	errMsg  string
+}
+
+// composeUpState holds the live compose-up progress overlay (Compose tab `a`).
+// While `compose up` runs it shows a per-service mark for each command; on the
+// operation's terminal phase the overlay collapses to a footer summary. active
+// reports whether the overlay is shown.
+type composeUpState struct {
+	active  bool
+	project string
+	order   []string                 // services in first-seen order
+	marks   map[string]composeUpMark // service name → latest mark
+	stream  ComposeUpStream          // event source; nil when none
+}
+
+// composeUpMark is the latest known phase for a single service in the overlay.
+type composeUpMark struct {
+	phase    string
+	terminal bool
+	failed   bool
+}
+
+// anyPending reports whether the overlay is showing work still in flight, so the
+// spinner keeps animating until the operation's terminal phase.
+func (s *composeUpState) anyPending() bool {
+	if !s.active {
+		return false
+	}
+	if len(s.order) == 0 {
+		return true // opened but no event yet; show motion while we wait
+	}
+	for _, name := range s.order {
+		if !s.marks[name].terminal {
+			return true
+		}
+	}
+	return false
 }
 
 type previewStatus int
@@ -370,6 +459,7 @@ func groupFromInfos(infos []CommandInfo) []projectGroup {
 			state:     ci.State,
 			exitCode:  ci.ExitCode,
 			logDriver: ci.LogDriver,
+			tty:       ci.Tty,
 		})
 	}
 	return groups

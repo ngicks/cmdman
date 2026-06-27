@@ -8,6 +8,7 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/compose"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
+	"github.com/ngicks/cmdman/pkg/cmdman/tui"
 )
 
 // runningStates are the states in which a command owns a live monitor / PTY and
@@ -200,6 +201,21 @@ var progressCompletions = cobra.FixedCompletions(
 	[]cobra.Completion{"auto", "tty", "json", "quiet"},
 	cobra.ShellCompDirectiveNoFileComp,
 )
+
+// tabCompletions offers the tabs accepted by the tui `--tab` flag, derived from
+// the tui package's canonical tab table so the two never drift.
+func tabCompletions(
+	*cobra.Command,
+	[]string,
+	string,
+) ([]cobra.Completion, cobra.ShellCompDirective) {
+	keys := tui.TabKeys()
+	out := make([]cobra.Completion, len(keys))
+	for i, k := range keys {
+		out[i] = cobra.Completion(k)
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
+}
 
 // restartPolicyCompletions offers the policies accepted by `--restart`.
 var restartPolicyCompletions = cobra.FixedCompletions(

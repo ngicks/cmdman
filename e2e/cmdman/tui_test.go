@@ -72,7 +72,7 @@ func TestTUISmoke_RendersAndQuits(t *testing.T) {
 		t.Fatalf("TUI never rendered %q; got:\n%q", what, snapshot())
 	}
 	waitFor("cmdman tui", 5*time.Second)
-	for _, want := range []string{"Commands", "Compose", "Filter"} {
+	for _, want := range []string{"Commands", "Compose", "Layout", "Filter"} {
 		if !strings.Contains(snapshot(), want) {
 			t.Errorf("TUI render missing %q; got:\n%q", want, snapshot())
 		}
@@ -115,4 +115,123 @@ func TestTUISmoke_RendersAndQuits(t *testing.T) {
 		t.Fatalf("TUI did not quit on 'q' within 4s; got:\n%q", snapshot())
 	}
 	t.Logf("TUI quit cleanly on 'q'")
+}
+
+// --tab validation happens in RunE (via tui.ParseTab) before the TUI launches,
+// so a bad value fails fast without a terminal — assert the non-zero exit and
+// the error text rather than driving an interactive session.
+func TestTUI_TabFlagRejectsBogus(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	_, stderr := env.runExpectFail(ctx, "tui", "--tab=bogus")
+	if !strings.Contains(stderr, "invalid tab") {
+		t.Errorf("expected an invalid-tab error, got stderr:\n%s", stderr)
+	}
+	// The error must list the valid tokens so users can correct it.
+	for _, tab := range []string{"commands", "compose", "layout"} {
+		if !strings.Contains(stderr, tab) {
+			t.Errorf("invalid-tab error missing valid value %q; stderr:\n%s", tab, stderr)
+		}
+	}
+}
+
+// A valid --tab opens the TUI on that tab. The Compose tab's body box is titled
+// "Compose projects" and is only rendered while the Compose tab is the active
+// body (the bare word "Compose" always shows in the tab bar), so it is a robust
+// signal that startup honored --tab=compose rather than the default Commands tab.
+func TestTUI_TabFlagStartsOnCompose(t *testing.T) {
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	tuiCmd := exec.CommandContext(ctx, cmdmanBin, "tui", "--tab=compose")
+	tuiCmd.Env = append(os.Environ(),
+		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
+		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
+		"TERM=xterm-256color")
+
+	ptmx, err := pty.StartWithSize(tuiCmd, &pty.Winsize{Rows: 30, Cols: 100})
+	if err != nil {
+		t.Fatalf("start tui pty: %v", err)
+	}
+	defer ptmx.Close()
+
+	var mu sync.Mutex
+	var out bytes.Buffer
+	go func() {
+		b := make([]byte, 8192)
+		for {
+			n, rerr := ptmx.Read(b)
+			if n > 0 {
+				mu.Lock()
+				out.Write(b[:n])
+				mu.Unlock()
+			}
+			if rerr != nil {
+				return
+			}
+		}
+	}()
+	snapshot := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return out.String()
+	}
+
+	waitFor := func(what string, deadline time.Duration) {
+		t.Helper()
+		end := time.Now().Add(deadline)
+		for time.Now().Before(end) {
+			if strings.Contains(snapshot(), what) {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Fatalf("TUI never rendered %q; got:\n%q", what, snapshot())
+	}
+	waitFor("cmdman tui", 5*time.Second)
+	// The Compose-tab body box title proves we started on the Compose tab.
+	waitFor("Compose projects", 5*time.Second)
+
+	// Quit cleanly with 'q'.
+	_, _ = ptmx.Write([]byte("q"))
+	done := make(chan error, 1)
+	go func() { done <- tuiCmd.Wait() }()
+	select {
+	case werr := <-done:
+		if werr != nil {
+			t.Fatalf("tui exited with error: %v\noutput:\n%q", werr, snapshot())
+		}
+	case <-time.After(4 * time.Second):
+		_ = tuiCmd.Process.Kill()
+		t.Fatalf("TUI did not quit on 'q' within 4s; got:\n%q", snapshot())
+	}
+}
+
+// The popup geometry flags only apply with --popup; using one without it is
+// rejected in RunE before any tmux invocation, so this needs no tmux/terminal.
+func TestTUI_PopupGeometryRequiresPopup(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	_, stderr := env.runExpectFail(ctx, "tui", "--popup-width=80%")
+	if !strings.Contains(stderr, "--popup-width") || !strings.Contains(stderr, "--popup") {
+		t.Errorf("expected a 'requires --popup' error, got stderr:\n%s", stderr)
+	}
+}
+
+// A bare numeric geometry value is rejected for not being an explicit
+// percentage. Validation (PopupGeometry.Validate) runs before tmux is invoked,
+// so the failure does not depend on tmux being installed.
+func TestTUI_PopupGeometryRejectsBareNumber(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	_, stderr := env.runExpectFail(ctx, "tui", "--popup", "--popup-width=80")
+	if !strings.Contains(stderr, "--popup-width") || !strings.Contains(stderr, "percentage") {
+		t.Errorf("expected a percentage-format error, got stderr:\n%s", stderr)
+	}
 }

@@ -2,8 +2,11 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -32,6 +35,29 @@ type fakeBackend struct {
 
 	muxCycled []string // project names passed to CycleMux
 	muxErr    error
+
+	layoutsInfo    LayoutsInfo // info returned by ListLayouts
+	layoutsErr     error       // error returned by ListLayouts
+	layoutsReq     []string    // project names passed to ListLayouts
+	appliedLayouts []string    // layout names passed to ApplyLayout
+	applyLayoutErr error       // error returned by ApplyLayout
+
+	definition     string   // text returned by ProjectDefinition
+	definitionErr  error    // error returned by ProjectDefinition
+	defRequested   []string // project names passed to ProjectDefinition
+	composePath    string   // path returned by ComposeFilePath
+	composePathErr error    // error returned by ComposeFilePath
+	pathRequested  []string // project names passed to ComposeFilePath
+
+	composeUpCalled []string         // project names passed to ComposeUp
+	composeUpEvents []ComposeUpEvent // events pre-loaded into the stream
+	composeUpErr    error            // error returned by ComposeUp (open failure)
+	composeUpStream *fakeComposeUpStream
+
+	rawIDs     []string         // ids passed to RawView
+	rawChunks  [][]byte         // chunks pre-loaded into each RawView stream
+	rawErr     error            // error returned by RawView (open failure)
+	rawStreams []*fakeRawStream // one per RawView call
 }
 
 func (f *fakeBackend) ListCommands(context.Context) ([]CommandInfo, error) { return f.cmds, nil }
@@ -79,6 +105,114 @@ func (f *fakeBackend) Attach(_ context.Context, id string) (string, error) {
 func (f *fakeBackend) CycleMux(_ context.Context, projectName, _ string) error {
 	f.muxCycled = append(f.muxCycled, projectName)
 	return f.muxErr
+}
+
+func (f *fakeBackend) ListLayouts(_ context.Context, projectName, _ string) (LayoutsInfo, error) {
+	f.layoutsReq = append(f.layoutsReq, projectName)
+	return f.layoutsInfo, f.layoutsErr
+}
+
+func (f *fakeBackend) ApplyLayout(_ context.Context, _, _, layoutName string) error {
+	f.appliedLayouts = append(f.appliedLayouts, layoutName)
+	return f.applyLayoutErr
+}
+
+func (f *fakeBackend) ProjectDefinition(_ context.Context, projectName, _ string) (string, error) {
+	f.defRequested = append(f.defRequested, projectName)
+	return f.definition, f.definitionErr
+}
+
+func (f *fakeBackend) ComposeFilePath(_ context.Context, projectName, _ string) (string, error) {
+	f.pathRequested = append(f.pathRequested, projectName)
+	return f.composePath, f.composePathErr
+}
+
+func (f *fakeBackend) ComposeUp(_ context.Context, projectName, _ string) (ComposeUpStream, error) {
+	f.composeUpCalled = append(f.composeUpCalled, projectName)
+	if f.composeUpErr != nil {
+		return nil, f.composeUpErr
+	}
+	s := &fakeComposeUpStream{ch: make(chan ComposeUpEvent, len(f.composeUpEvents))}
+	for _, ev := range f.composeUpEvents {
+		s.ch <- ev
+	}
+	f.composeUpStream = s
+	return s, nil
+}
+
+func (f *fakeBackend) RawView(_ context.Context, id string) (RawStream, error) {
+	f.rawIDs = append(f.rawIDs, id)
+	if f.rawErr != nil {
+		return nil, f.rawErr
+	}
+	s := newFakeRawStream(len(f.rawChunks) + 1)
+	for _, c := range f.rawChunks {
+		s.ch <- RawChunk{Bytes: c}
+	}
+	f.rawStreams = append(f.rawStreams, s)
+	return s, nil
+}
+
+// fakeRawStream is closed off the update loop (see closeRawAsync), so its closed
+// state is mutex-guarded and a closedCh lets a test wait for an async close
+// without racing the goroutine.
+type fakeRawStream struct {
+	ch        chan RawChunk
+	closedCh  chan struct{}
+	closeOnce sync.Once
+
+	mu     sync.Mutex
+	closed bool
+}
+
+func newFakeRawStream(buf int) *fakeRawStream {
+	return &fakeRawStream{ch: make(chan RawChunk, buf), closedCh: make(chan struct{})}
+}
+
+func (s *fakeRawStream) Chunks() <-chan RawChunk { return s.ch }
+func (s *fakeRawStream) Close() error {
+	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		s.closed = true
+		s.mu.Unlock()
+		close(s.ch)
+		close(s.closedCh)
+	})
+	return nil
+}
+
+// isClosed reports the close state without racing an async Close.
+func (s *fakeRawStream) isClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
+// waitClosed blocks briefly for an async Close, failing the test if it never
+// happens (closeRawAsync runs Close in a goroutine).
+func (s *fakeRawStream) waitClosed(t *testing.T) {
+	t.Helper()
+	select {
+	case <-s.closedCh:
+	case <-time.After(time.Second):
+		t.Fatalf("raw stream was not closed")
+	}
+}
+
+type fakeComposeUpStream struct {
+	ch     chan ComposeUpEvent
+	err    error
+	closed bool
+}
+
+func (s *fakeComposeUpStream) Events() <-chan ComposeUpEvent { return s.ch }
+func (s *fakeComposeUpStream) Err() error                    { return s.err }
+func (s *fakeComposeUpStream) Close() error {
+	if !s.closed {
+		s.closed = true
+		close(s.ch)
+	}
+	return nil
 }
 
 type fakeLogStream struct {
@@ -389,12 +523,16 @@ func TestTabSwitchPreservesTabLocalState(t *testing.T) {
 	m.commands.selected = 1
 
 	m, _ = upd(m, kTab)
-	if m.active != tabCompose {
+	if m.active != TabCompose {
 		t.Fatalf("tab should switch to Compose")
 	}
 	m, _ = upd(m, kTab)
-	if m.active != tabCommands {
-		t.Fatalf("tab should switch back to Commands")
+	if m.active != TabLayout {
+		t.Fatalf("tab should switch to Layout")
+	}
+	m, _ = upd(m, kTab)
+	if m.active != TabCommands {
+		t.Fatalf("tab should wrap back to Commands")
 	}
 	if m.commands.filter != "abc" || m.compose.filter != "xyz" {
 		t.Fatalf("tab-local filters not preserved: %q / %q", m.commands.filter, m.compose.filter)
@@ -629,7 +767,7 @@ func TestHelpOverlayOpensWithTabBindings(t *testing.T) {
 	}
 	// Switch to compose tab help.
 	m.helpOpen = false
-	m.active = tabCompose
+	m.active = TabCompose
 	m, _ = upd(m, kr("?"))
 	composeHelp := m.renderHelp()
 	if !strings.Contains(composeHelp, "cycle mux") {
@@ -639,6 +777,401 @@ func TestHelpOverlayOpensWithTabBindings(t *testing.T) {
 	m, _ = upd(m, kr("?"))
 	if m.helpOpen {
 		t.Fatalf("? should close help")
+	}
+}
+
+func TestComposeEnterOpensDefinitionViewer(t *testing.T) {
+	m := seed()
+	m.active = TabCompose
+	m.compose.rows = []composeRow{{name: "tools", path: "/etc/compose/tools.yaml"}}
+	fb := m.backend.(*fakeBackend)
+	fb.definition = "name: tools\ncommands:\n  a:\n    args: [echo, a]\n"
+
+	m, cmd := upd(m, kEnter)
+	if !m.defViewer.open {
+		t.Fatalf("enter on the Compose tab should open the definition viewer")
+	}
+	if m.defViewer.project != "tools" {
+		t.Fatalf("viewer should target the selected project, got %q", m.defViewer.project)
+	}
+
+	var loaded defLoadedMsg
+	found := false
+	for _, mm := range drain(cmd) {
+		if d, ok := mm.(defLoadedMsg); ok {
+			loaded, found = d, true
+		}
+	}
+	if !found {
+		t.Fatalf("enter should dispatch a definition-load command")
+	}
+	if len(fb.defRequested) != 1 || fb.defRequested[0] != "tools" {
+		t.Fatalf("ProjectDefinition should be requested for tools, got %v", fb.defRequested)
+	}
+	m, _ = upd(m, loaded)
+	if m.defViewer.loading {
+		t.Fatalf("viewer should stop loading once the definition arrives")
+	}
+	if len(m.defViewer.lines) == 0 {
+		t.Fatalf("viewer should hold the loaded definition lines")
+	}
+	out := m.renderDefViewer()
+	if !strings.Contains(out, "name: tools") {
+		t.Fatalf("rendered viewer should show the raw YAML, got:\n%s", out)
+	}
+
+	m, _ = upd(m, kEsc)
+	if m.defViewer.open {
+		t.Fatalf("esc should close the definition viewer")
+	}
+}
+
+func TestDefViewerScrollAndClose(t *testing.T) {
+	m := seed()
+	m.width, m.height = 80, 24
+	m.active = TabCompose
+	lines := make([]string, 40)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line-%d", i)
+	}
+	m.defViewer = defViewerState{open: true, project: "tools", lines: lines}
+
+	m, _ = upd(m, kr("j"))
+	if m.defViewer.scroll != 1 {
+		t.Fatalf("j should scroll down by one, got %d", m.defViewer.scroll)
+	}
+	m, _ = upd(m, kr("k"))
+	if m.defViewer.scroll != 0 {
+		t.Fatalf("k should scroll back to the top, got %d", m.defViewer.scroll)
+	}
+	page := m.defViewerPage()
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyPgDown})
+	if m.defViewer.scroll != page {
+		t.Fatalf("pgdown should scroll one page (%d), got %d", page, m.defViewer.scroll)
+	}
+	// Scrolling cannot run past the final screenful.
+	for range 10 {
+		m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyPgDown})
+	}
+	if want := len(lines) - page; m.defViewer.scroll != want {
+		t.Fatalf("scroll should clamp to %d, got %d", want, m.defViewer.scroll)
+	}
+
+	m, _ = upd(m, kr("q"))
+	if m.defViewer.open {
+		t.Fatalf("q should close the definition viewer")
+	}
+}
+
+func TestComposeEditResolvesPathAndHandsOff(t *testing.T) {
+	m := seed()
+	m.active = TabCompose
+	m.compose.rows = []composeRow{{name: "tools", path: "/etc/compose/tools.yaml"}}
+	fb := m.backend.(*fakeBackend)
+	fb.composePath = "/etc/compose/tools.yaml"
+
+	m, cmd := upd(m, kr("e"))
+	var pathMsg editPathMsg
+	found := false
+	for _, mm := range drain(cmd) {
+		if p, ok := mm.(editPathMsg); ok {
+			pathMsg, found = p, true
+		}
+	}
+	if !found {
+		t.Fatalf("e should dispatch a path-resolve command")
+	}
+	if len(fb.pathRequested) != 1 || fb.pathRequested[0] != "tools" {
+		t.Fatalf("e should resolve the compose path for tools, got %v", fb.pathRequested)
+	}
+	if pathMsg.path != "/etc/compose/tools.yaml" {
+		t.Fatalf("resolved edit path = %q, want the compose file", pathMsg.path)
+	}
+	// onEditPath builds the editor handoff; assert it produces a command without
+	// running a real editor.
+	_, execCmd := upd(m, pathMsg)
+	if execCmd == nil {
+		t.Fatalf("a resolved edit path should produce an editor handoff command")
+	}
+	// A finished editor handoff reloads projects.
+	_, doneCmd := upd(m, editDoneMsg{project: "tools"})
+	if doneCmd == nil {
+		t.Fatalf("editDoneMsg should trigger a refresh")
+	}
+}
+
+func TestComposeEditPathErrorSurfacesStatus(t *testing.T) {
+	m := seed()
+	m.active = TabCompose
+	m.compose.rows = []composeRow{{name: "tools"}}
+	m, execCmd := upd(m, editPathMsg{project: "tools", err: fmt.Errorf("boom")})
+	if execCmd != nil {
+		t.Fatalf("an unresolved edit path should not hand off to an editor")
+	}
+	if !strings.Contains(m.status, "boom") {
+		t.Fatalf("path-resolve error should surface in the status, got %q", m.status)
+	}
+}
+
+func TestComposeUpOpensConfirmation(t *testing.T) {
+	m := seed()
+	m.active = TabCompose
+	m.compose.rows = []composeRow{{name: "tools", path: "/etc/compose/tools.yaml"}}
+
+	m, cmd := upd(m, kr("a"))
+	if cmd != nil {
+		t.Fatalf("a should only open a popup, not dispatch a command")
+	}
+	if m.popup.kind != popupComposeUp {
+		t.Fatalf("a on the Compose tab should open the compose-up popup, got %v", m.popup.kind)
+	}
+	if !m.popup.confirmed() {
+		t.Fatalf("compose-up popup should default to the action button (<up>)")
+	}
+	if m.composeUp.active {
+		t.Fatalf("the overlay should not be active until the run is confirmed")
+	}
+}
+
+func TestComposeUpConfirmRunsAndOverlayCollapses(t *testing.T) {
+	m := seed()
+	m.width, m.height = 80, 24
+	m.active = TabCompose
+	m.compose.rows = []composeRow{{name: "tools", path: "/etc/compose/tools.yaml"}}
+	fb := m.backend.(*fakeBackend)
+	zero := 0
+	fb.composeUpEvents = []ComposeUpEvent{
+		{Command: "web", Phase: "creating"},
+		{Command: "web", Phase: "running", Terminal: true},
+		{Command: "db", Phase: "exited", Terminal: true, ExitCode: &zero},
+	}
+
+	// a → confirm popup; enter confirms (default is the action button).
+	m, _ = upd(m, kr("a"))
+	m, cmd := upd(m, kEnter)
+
+	var opened composeUpOpenedMsg
+	found := false
+	for _, mm := range drain(cmd) {
+		if o, ok := mm.(composeUpOpenedMsg); ok {
+			opened, found = o, true
+		}
+	}
+	if !found {
+		t.Fatalf("confirming compose up should dispatch a ComposeUp command")
+	}
+	if len(fb.composeUpCalled) != 1 || fb.composeUpCalled[0] != "tools" {
+		t.Fatalf("ComposeUp should target tools, got %v", fb.composeUpCalled)
+	}
+
+	// Opening the stream activates the live overlay.
+	m, _ = upd(m, opened)
+	if !m.composeUp.active {
+		t.Fatalf("a successful ComposeUp open should activate the progress overlay")
+	}
+
+	// Drive the live stream: each buffered event updates the per-service marks.
+	for range fb.composeUpEvents {
+		ev, ok := waitComposeUpCmd(m.composeUp.stream, "tools")().(composeUpEventMsg)
+		if !ok {
+			t.Fatalf("expected a composeUpEventMsg from the stream")
+		}
+		m, _ = upd(m, ev)
+	}
+	if len(m.composeUp.order) != 2 {
+		t.Fatalf("overlay should track 2 services (web, db), got %v", m.composeUp.order)
+	}
+	if mk := m.composeUp.marks["web"]; mk.phase != "running" || !mk.terminal {
+		t.Fatalf("web should be marked terminal/running, got %+v", mk)
+	}
+	out := m.renderComposeUp()
+	if !strings.Contains(out, "web") || !strings.Contains(out, "running") {
+		t.Fatalf("overlay should render the web/running mark, got:\n%s", out)
+	}
+
+	// The operation's terminal phase (channel close) collapses to a footer summary.
+	_ = m.composeUp.stream.Close()
+	done, ok := waitComposeUpCmd(m.composeUp.stream, "tools")().(composeUpDoneMsg)
+	if !ok {
+		t.Fatalf("a closed stream should yield a composeUpDoneMsg")
+	}
+	m, _ = upd(m, done)
+	if m.composeUp.active {
+		t.Fatalf("the overlay should collapse on the terminal phase")
+	}
+	if !strings.Contains(m.status, "compose up tools") {
+		t.Fatalf("the footer summary should mention the project, got %q", m.status)
+	}
+}
+
+func TestComposeUpOpenErrorSurfacesStatus(t *testing.T) {
+	m := seed()
+	m.active = TabCompose
+	m.compose.rows = []composeRow{{name: "tools"}}
+
+	m, _ = upd(m, composeUpOpenedMsg{project: "tools", err: fmt.Errorf("boom")})
+	if m.composeUp.active {
+		t.Fatalf("a failed open should not activate the overlay")
+	}
+	if !strings.Contains(m.status, "boom") {
+		t.Fatalf("compose-up open error should surface in the status, got %q", m.status)
+	}
+}
+
+func TestTabBarRendersThreeTabs(t *testing.T) {
+	m := seed()
+	bar := m.renderTabBar()
+	for _, name := range []string{"Commands", "Compose", "Layout"} {
+		if !strings.Contains(bar, name) {
+			t.Fatalf("tab bar should render the %q tab, got %q", name, bar)
+		}
+	}
+}
+
+func TestLayoutTabDefaultSelectionIsMarker(t *testing.T) {
+	m := New(Options{Backend: &fakeBackend{}, PopupMode: true})
+	m.active = TabLayout
+	info := LayoutsInfo{
+		Project: "tools", Path: "/c.yaml",
+		Names: []string{"dev", "ops", "full"}, Current: 1,
+	}
+	m, _ = upd(m, layoutsLoadedMsg{info: info})
+	if len(m.layout.rows) != 3 {
+		t.Fatalf("want 3 layout rows, got %d", len(m.layout.rows))
+	}
+	if m.layout.selected != 1 {
+		t.Fatalf("default selection should be the current marker (1), got %d", m.layout.selected)
+	}
+	if m.layout.current != 1 {
+		t.Fatalf("current marker should be recorded as 1, got %d", m.layout.current)
+	}
+	out := m.renderLayoutBody(40, 10)
+	for _, name := range []string{"dev", "ops", "full"} {
+		if !strings.Contains(out, name) {
+			t.Fatalf("layout body should list %q, got:\n%s", name, out)
+		}
+	}
+}
+
+func TestLayoutTabNoMarkerSelectsFirst(t *testing.T) {
+	m := New(Options{Backend: &fakeBackend{}, PopupMode: true})
+	m.active = TabLayout
+	// No running dashboard: Current == -1 should land the selection on the first.
+	m, _ = upd(m, layoutsLoadedMsg{info: LayoutsInfo{Names: []string{"a", "b"}, Current: -1}})
+	if m.layout.selected != 0 {
+		t.Fatalf("with no marker the selection should default to 0, got %d", m.layout.selected)
+	}
+}
+
+func TestLayoutTabNavigation(t *testing.T) {
+	m := New(Options{Backend: &fakeBackend{}, PopupMode: true})
+	m.active = TabLayout
+	m, _ = upd(m, layoutsLoadedMsg{info: LayoutsInfo{Names: []string{"a", "b", "c"}, Current: 0}})
+	m, _ = upd(m, kr("j"))
+	if m.layout.selected != 1 {
+		t.Fatalf("j should move the selection down, got %d", m.layout.selected)
+	}
+	m, _ = upd(m, kr("k"))
+	if m.layout.selected != 0 {
+		t.Fatalf("k should move the selection up, got %d", m.layout.selected)
+	}
+	// Clamp at the top.
+	m, _ = upd(m, kr("k"))
+	if m.layout.selected != 0 {
+		t.Fatalf("k at the top should clamp to 0, got %d", m.layout.selected)
+	}
+}
+
+func TestLayoutTabEnterAppliesInPopupMode(t *testing.T) {
+	m := New(Options{Backend: &fakeBackend{}, PopupMode: true})
+	m.active = TabLayout
+	m, _ = upd(m, layoutsLoadedMsg{info: LayoutsInfo{
+		Project: "tools", Path: "/c.yaml", Names: []string{"dev", "ops"}, Current: 0,
+	}})
+	m, _ = upd(m, kr("j")) // select "ops"
+
+	m, cmd := upd(m, kEnter)
+	if m.popup.open() {
+		t.Fatalf("popup mode should apply immediately, not open a warning popup")
+	}
+	done, ok := firstMsg[layoutDoneMsg](drain(cmd))
+	if !ok {
+		t.Fatalf("enter should dispatch an ApplyLayout command")
+	}
+	if done.layout != "ops" {
+		t.Fatalf("layoutDoneMsg should report the applied layout, got %q", done.layout)
+	}
+	fb := m.backend.(*fakeBackend)
+	if len(fb.appliedLayouts) != 1 || fb.appliedLayouts[0] != "ops" {
+		t.Fatalf("ApplyLayout should target the selected layout, got %v", fb.appliedLayouts)
+	}
+}
+
+func TestLayoutTabEnterWarnsInDirectMode(t *testing.T) {
+	m := New(Options{Backend: &fakeBackend{}}) // direct mode: PopupMode false
+	m.active = TabLayout
+	m, _ = upd(m, layoutsLoadedMsg{info: LayoutsInfo{
+		Project: "tools", Path: "/c.yaml", Names: []string{"dev", "ops"}, Current: 0,
+	}})
+
+	m, _ = upd(m, kEnter)
+	if m.popup.kind != popupMuxWarn {
+		t.Fatalf("direct mode should open the mux warning popup, got %v", m.popup.kind)
+	}
+	if m.popup.layout != "dev" {
+		t.Fatalf("the warning popup should carry the selected layout, got %q", m.popup.layout)
+	}
+	if m.popup.confirmed() {
+		t.Fatalf("the warning popup should default to <cancel>")
+	}
+	fb := m.backend.(*fakeBackend)
+	if len(fb.appliedLayouts) != 0 {
+		t.Fatalf("apply must wait for confirmation, got %v", fb.appliedLayouts)
+	}
+
+	// Toggle to the action button and confirm.
+	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyLeft})
+	m, cmd := upd(m, kEnter)
+	if _, ok := firstMsg[layoutDoneMsg](drain(cmd)); !ok {
+		t.Fatalf("confirming the warning should dispatch ApplyLayout")
+	}
+	if len(fb.appliedLayouts) != 1 || fb.appliedLayouts[0] != "dev" {
+		t.Fatalf("ApplyLayout should target the selected layout after confirm, got %v",
+			fb.appliedLayouts)
+	}
+}
+
+func TestLayoutTabEntryLoadsLayouts(t *testing.T) {
+	m := seed()
+	fb := m.backend.(*fakeBackend)
+	fb.layoutsInfo = LayoutsInfo{Project: "local-dev", Names: []string{"solo"}, Current: 0}
+	// Switch Commands -> Compose -> Layout; entering Layout dispatches a load.
+	m, _ = upd(m, kTab) // Compose
+	m, cmd := upd(m, kTab)
+	if m.active != TabLayout {
+		t.Fatalf("precondition: should be on the Layout tab")
+	}
+	if _, ok := firstMsg[layoutsLoadedMsg](drain(cmd)); !ok {
+		t.Fatalf("entering the Layout tab should dispatch a ListLayouts load")
+	}
+	if len(fb.layoutsReq) == 0 {
+		t.Fatalf("ListLayouts should have been requested on tab entry")
+	}
+}
+
+func TestResolveEditor(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+	if got := resolveEditor(); got != "vim" {
+		t.Fatalf("resolveEditor fallback should be vim, got %q", got)
+	}
+	t.Setenv("EDITOR", "nano")
+	if got := resolveEditor(); got != "nano" {
+		t.Fatalf("$EDITOR should win over the fallback, got %q", got)
+	}
+	t.Setenv("VISUAL", "emacs")
+	if got := resolveEditor(); got != "emacs" {
+		t.Fatalf("$VISUAL should win over $EDITOR, got %q", got)
 	}
 }
 
@@ -672,4 +1205,170 @@ func TestNoneLogDriverPreviewState(t *testing.T) {
 		t.Fatalf("none-driver preview should show the no-storage state, got:\n%s", out)
 	}
 	_ = logdriver.DriverNone
+}
+
+// firstMsg returns the first message of type T produced by a drained command.
+func firstMsg[T tea.Msg](msgs []tea.Msg) (T, bool) {
+	for _, m := range msgs {
+		if t, ok := m.(T); ok {
+			return t, true
+		}
+	}
+	var zero T
+	return zero, false
+}
+
+// termModel builds a single-group model (no project header) with the given rows
+// and a fakeBackend, sized to a usable preview pane.
+func termModel(rows ...commandRow) Model {
+	m := New(Options{Backend: &fakeBackend{}})
+	m.width, m.height = 80, 24
+	m.active = TabCommands
+	m.setGroups([]projectGroup{{name: "", workdir: "/w", commands: rows}})
+	return m
+}
+
+func TestPreviewTerminalViewRendersRawStream(t *testing.T) {
+	m := termModel(commandRow{
+		id: "1", name: "shell", workdir: "/w", state: model.EventTypeRunning, tty: true,
+	})
+	m.commands.selected = 0
+	fb := m.backend.(*fakeBackend)
+	fb.rawChunks = [][]byte{[]byte("hello-term")}
+
+	openCmd := (&m).reconcilePreview()
+	if openCmd == nil {
+		t.Fatalf("selecting a running tty command should open a raw stream")
+	}
+	if !m.commands.preview.terminal {
+		t.Fatalf("a running tty command should select terminal-view mode")
+	}
+	opened, ok := firstMsg[rawOpenedMsg](drain(openCmd))
+	if !ok {
+		t.Fatalf("reconcile should dispatch a RawView open")
+	}
+	if len(fb.rawIDs) != 1 || fb.rawIDs[0] != "1" {
+		t.Fatalf("RawView should target the running tty command, got %v", fb.rawIDs)
+	}
+	if len(fb.logStreams) != 0 {
+		t.Fatalf("terminal-view must not fall back to the log reader")
+	}
+
+	m, _ = upd(m, opened)
+	if m.commands.preview.term == nil {
+		t.Fatalf("opening the raw stream should create the emulator")
+	}
+	if !m.commands.preview.streaming {
+		t.Fatalf("opening the raw stream should mark the preview as streaming")
+	}
+
+	// The background drain writes chunk bytes straight into the shared emulator
+	// (they never travel through the message loop). Close the stream so the drain
+	// loop finishes after consuming the buffered chunk.
+	stream := fb.rawStreams[0]
+	_ = stream.Close()
+	closed, ok := drainRawCmd(
+		m.commands.preview.term, stream, "1", m.commands.preview.gen,
+	)().(rawClosedMsg)
+	if !ok {
+		t.Fatalf("the drain should report a rawClosedMsg when the stream ends")
+	}
+	if closed.cmdID != "1" || closed.err != nil {
+		t.Fatalf("rawClosedMsg should carry the cmdID and no error, got %+v", closed)
+	}
+
+	out := m.renderPreview(40, 12)
+	if !strings.Contains(out, "hello-term") {
+		t.Fatalf("emulator frame should render the raw bytes, got:\n%s", out)
+	}
+}
+
+func TestPreviewPredicateSelectsFallback(t *testing.T) {
+	cases := []struct {
+		name string
+		row  commandRow
+	}{
+		{"running non-tty", commandRow{
+			id: "1", name: "svc", workdir: "/w",
+			state: model.EventTypeRunning, logDriver: logdriver.DriverK8sFile,
+		}},
+		{"exited tty", commandRow{
+			id: "1", name: "job", workdir: "/w",
+			state: model.EventTypeExited, logDriver: logdriver.DriverK8sFile, tty: true,
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := termModel(c.row)
+			m.commands.selected = 0
+			fb := m.backend.(*fakeBackend)
+
+			cmd := (&m).reconcilePreview()
+			if m.commands.preview.terminal {
+				t.Fatalf("%s must not use terminal-view mode", c.name)
+			}
+			if _, ok := firstMsg[previewOpenedMsg](drain(cmd)); !ok {
+				t.Fatalf("%s should open the sanitized log reader", c.name)
+			}
+			if len(fb.rawIDs) != 0 {
+				t.Fatalf("%s must not open a raw stream, got %v", c.name, fb.rawIDs)
+			}
+		})
+	}
+}
+
+func TestPreviewTerminalStreamClosesOnSelectionChange(t *testing.T) {
+	m := termModel(
+		commandRow{id: "1", name: "a", workdir: "/w", state: model.EventTypeRunning, tty: true},
+		commandRow{id: "2", name: "b", workdir: "/w", state: model.EventTypeRunning, tty: true},
+	)
+	fb := m.backend.(*fakeBackend)
+	m.commands.selected = 0
+
+	opened, ok := firstMsg[rawOpenedMsg](drain((&m).reconcilePreview()))
+	if !ok {
+		t.Fatalf("the first selection should open a raw stream")
+	}
+	m, _ = upd(m, opened)
+	if m.commands.preview.raw == nil {
+		t.Fatalf("the first selection should hold a live raw stream")
+	}
+	if len(fb.rawStreams) != 1 {
+		t.Fatalf("expected one raw stream opened, got %d", len(fb.rawStreams))
+	}
+
+	// Moving the selection must close the previous raw stream. stopPreview closes
+	// it off the update loop, so wait briefly for the async close.
+	m.commands.selected = 1
+	_ = (&m).reconcilePreview()
+	fb.rawStreams[0].waitClosed(t)
+}
+
+func TestPreviewTerminalResizeIsLocalOnly(t *testing.T) {
+	m := termModel(commandRow{
+		id: "1", name: "shell", workdir: "/w", state: model.EventTypeRunning, tty: true,
+	})
+	m.commands.selected = 0
+
+	opened, ok := firstMsg[rawOpenedMsg](drain((&m).reconcilePreview()))
+	if !ok {
+		t.Fatalf("selecting a running tty command should open a raw stream")
+	}
+	m, _ = upd(m, opened)
+	w0, h0 := m.commands.preview.termW, m.commands.preview.termH
+	if w0 == 0 || h0 == 0 {
+		t.Fatalf("the emulator should be sized on open, got %dx%d", w0, h0)
+	}
+
+	// A window resize re-sizes only the local emulator (RawStream has no Resize,
+	// so the remote PTY is structurally untouchable — decision D9).
+	m, _ = upd(m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	wantW, wantH := m.previewInnerSize()
+	if m.commands.preview.termW != wantW || m.commands.preview.termH != wantH {
+		t.Fatalf("emulator size = %dx%d, want %dx%d",
+			m.commands.preview.termW, m.commands.preview.termH, wantW, wantH)
+	}
+	if wantW == w0 && wantH == h0 {
+		t.Fatalf("a window resize should change the emulator size")
+	}
 }

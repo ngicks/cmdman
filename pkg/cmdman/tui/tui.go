@@ -31,6 +31,10 @@ type CommandInfo struct {
 	State     model.EventType
 	ExitCode  *int
 	LogDriver logdriver.LogDriver
+	// Tty reports whether the command runs under a pseudo-terminal. The preview
+	// pane uses it (with State) to decide between the vt terminal-view and the
+	// sanitized log fallback.
+	Tty bool
 }
 
 // ProjectInfo is the Compose-tab row data for a discovered compose project.
@@ -45,6 +49,24 @@ type ProjectInfo struct {
 	Active   bool
 	HasMux   bool
 	Modified string
+}
+
+// LayoutsInfo is the Layout-tab data for the current project: its mux layout
+// names in definition order plus the running dashboard's current layout marker.
+// It is a backend-neutral projection so the model can be exercised without a
+// live mux/tmux server.
+type LayoutsInfo struct {
+	// Project is the resolved current project name (the cwd-active mux project,
+	// falling back to the Compose-tab selection).
+	Project string
+	// Path is the resolved compose file path, carried so an apply can target the
+	// same file the listing came from.
+	Path string
+	// Names are the layout names in definition order.
+	Names []string
+	// Current is the 0-based index of the layout the running dashboard currently
+	// displays, or -1 when no dashboard is running (or the marker is unknown).
+	Current int
 }
 
 // Backend abstracts the cmdman/compose services the TUI talks to. It exists so
@@ -82,6 +104,10 @@ type Backend interface {
 	// Logs opens a Tail+Follow reader for the preview pane. tail sizes the
 	// initial snapshot.
 	Logs(ctx context.Context, id string, tail int) (LogStream, error)
+	// RawView opens a read-only raw stdout stream (scrollback replay then live)
+	// for the terminal-view preview of a running, TTY-backed command. It never
+	// forwards stdin, so the previewed command is unaffected by the preview.
+	RawView(ctx context.Context, id string) (RawStream, error)
 	// Attach hands the terminal to an attach session for the command and
 	// returns an outcome ("detached" or "exited") plus any real error. It is
 	// invoked from a released-terminal context (tea.Exec).
@@ -92,6 +118,36 @@ type Backend interface {
 	// its persisted tmux window marker. projectName identifies the project and
 	// composeFile (may be empty) is its compose file path.
 	CycleMux(ctx context.Context, projectName, composeFile string) error
+
+	// ListLayouts returns the current project's mux layouts in definition order
+	// plus the running dashboard's current layout marker (see LayoutsInfo). The
+	// current project is the cwd-active mux project, falling back to the
+	// Compose-tab selection identified by projectName/composeFile (which may be
+	// empty when there is no selection).
+	ListLayouts(ctx context.Context, projectName, composeFile string) (LayoutsInfo, error)
+	// ApplyLayout applies the named layout to the project's running dashboard,
+	// starting one at that layout when none is running. It wraps the same compose
+	// mux path as CycleMux with an explicit layout selector. projectName/composeFile
+	// identify the project as resolved by ListLayouts.
+	ApplyLayout(ctx context.Context, projectName, composeFile, layoutName string) error
+
+	// ProjectDefinition returns the raw compose YAML file text for a project, as
+	// shown by the read-only definition viewer. projectName identifies the
+	// project and composeFile (may be empty) is its compose file path; an empty
+	// path is resolved on demand for never-run named projects.
+	ProjectDefinition(ctx context.Context, projectName, composeFile string) (string, error)
+	// ComposeFilePath resolves the compose file path for a project so the editor
+	// handoff can open it. composeFile (may be empty) is used directly when set;
+	// an empty path is resolved on demand for never-run named projects.
+	ComposeFilePath(ctx context.Context, projectName, composeFile string) (string, error)
+
+	// ComposeUp runs "compose up" for a project and streams per-service progress
+	// events for the live progress overlay. projectName identifies the project
+	// and composeFile (may be empty) is its compose file path; an empty path is
+	// resolved on demand. The returned stream delivers events until the operation
+	// finishes (its channel closes), at which point Err reports the
+	// operation-level error.
+	ComposeUp(ctx context.Context, projectName, composeFile string) (ComposeUpStream, error)
 }
 
 // EventSignal is one lifecycle change cue. A non-nil Err is a local event-tail
@@ -118,6 +174,52 @@ type LogStream interface {
 	Close() error
 }
 
+// RawChunk is one raw stdout chunk from an attach stream; a non-nil Err is a
+// read error to surface in the preview.
+type RawChunk struct {
+	Bytes []byte
+	Err   error
+}
+
+// RawStream delivers raw stdout chunks (scrollback replay then live) from a
+// read-only attach session until closed. The chunks are fed verbatim into the
+// terminal-view emulator; Close releases the underlying attach session.
+type RawStream interface {
+	Chunks() <-chan RawChunk
+	Close() error
+}
+
+// ComposeUpEvent is one progress event from a compose up run, projected for the
+// progress overlay so the model stays decoupled from the compose package. It
+// mirrors a compose lifecycle event (command, phase token, exit code, error)
+// plus the phase's terminal/failure classification, which the overlay uses to
+// pick the per-service glyph.
+type ComposeUpEvent struct {
+	// Command is the compose command (service) name.
+	Command string
+	// Phase is the lifecycle phase token the command transitioned into, e.g.
+	// "creating", "running", "exited", "failed".
+	Phase string
+	// Terminal reports whether Phase is a result rather than work in flight.
+	Terminal bool
+	// Failed reports whether Phase is a terminal failure.
+	Failed bool
+	// ExitCode is the observed exit code when known.
+	ExitCode *int
+	// Err carries the detail for a failure phase.
+	Err error
+}
+
+// ComposeUpStream delivers compose up progress events for the live overlay until
+// closed. The event channel closes when the operation reaches its terminal phase
+// (the Up call returned); Err reports the operation-level error and is readable
+// once the channel is observed closed.
+type ComposeUpStream interface {
+	Events() <-chan ComposeUpEvent
+	Err() error
+	Close() error
+}
+
 // Attach outcomes.
 const (
 	AttachDetached = "detached"
@@ -137,6 +239,9 @@ type Options struct {
 	// mode, mux layout actions rearrange the underlying window safely; in
 	// direct mode they would clobber the TUI, so they require a warning first.
 	PopupMode bool
+	// InitialTab selects the tab shown on startup. The zero value is
+	// TabCommands, so leaving it unset keeps the default.
+	InitialTab Tab
 }
 
 // Run starts the TUI program and blocks until it exits.
@@ -157,10 +262,12 @@ func New(opts Options) Model {
 		version:   opts.Version,
 		popupMode: opts.PopupMode,
 		altScreen: opts.AltScreen,
-		active:    tabCommands,
+		active:    opts.InitialTab,
 		commands: commandsTab{
 			fold:  map[string]bool{},
 			focus: paneList,
 		},
+		// -1 = no dashboard marker known until the first ListLayouts load.
+		layout: layoutTab{current: -1},
 	}
 }

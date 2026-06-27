@@ -67,7 +67,7 @@ func TestRefreshPreservesFoldFilterAndTab(t *testing.T) {
 	m := seed()
 	m.commands.setFolded(0, true) // fold local-dev
 	m.commands.filter = "web"
-	m.active = tabCommands
+	m.active = TabCommands
 
 	infos := []CommandInfo{
 		{
@@ -100,7 +100,7 @@ func TestRefreshPreservesFoldFilterAndTab(t *testing.T) {
 	if m.commands.filter != "web" {
 		t.Fatalf("filter should survive a refresh, got %q", m.commands.filter)
 	}
-	if m.active != tabCommands {
+	if m.active != TabCommands {
 		t.Fatalf("active tab should survive a refresh")
 	}
 }
@@ -139,6 +139,29 @@ func TestPreviewStartsAndCancelsPreviousReader(t *testing.T) {
 	}
 }
 
+func TestPreviewDuplicateOpenClosesPreviousStream(t *testing.T) {
+	m := seed()
+	m.commands.preview = previewState{cmdID: "1", status: previewLoading}
+
+	// First open for id "1" establishes a reader.
+	first := &fakeLogStream{ch: make(chan LogLine, 1)}
+	m, _ = m2tuple(m.onPreviewOpened(previewOpenedMsg{cmdID: "1", stream: first}))
+	if m.commands.preview.stream == nil {
+		t.Fatalf("the first open should establish a preview stream")
+	}
+
+	// A second open for the same id (selection bounce A→B→A) must close the
+	// first stream before overwriting it, releasing its pump goroutine.
+	second := &fakeLogStream{ch: make(chan LogLine, 1)}
+	m, _ = m2tuple(m.onPreviewOpened(previewOpenedMsg{cmdID: "1", stream: second}))
+	if !first.closed {
+		t.Fatalf("a duplicate open for the same id must close the previous stream")
+	}
+	if second.closed {
+		t.Fatalf("the surviving stream must stay open")
+	}
+}
+
 func TestPreviewLineAppendsAndStaleIgnored(t *testing.T) {
 	m := seed()
 	stream := &fakeLogStream{ch: make(chan LogLine, 4)}
@@ -169,6 +192,87 @@ func TestPreviewReadErrorRendersErrorState(t *testing.T) {
 		t.Fatalf("a read error should set the preview error state")
 	}
 	if !strings.Contains(m.commands.preview.errMsg, "permission denied") {
+		t.Fatalf("error message should be captured, got %q", m.commands.preview.errMsg)
+	}
+}
+
+func TestRawDuplicateOpenClosesPreviousStream(t *testing.T) {
+	m := seed()
+	m.width, m.height = 80, 24
+	m.commands.preview = previewState{cmdID: "1", status: previewLoading, terminal: true}
+
+	// First open for id "1" establishes a raw stream and emulator.
+	first := newFakeRawStream(1)
+	m, _ = m2tuple(m.onRawOpened(rawOpenedMsg{cmdID: "1", stream: first}))
+	if m.commands.preview.raw == nil {
+		t.Fatalf("the first open should establish a raw stream")
+	}
+
+	// A second open for the same id (selection bounce A→B→A) must close the
+	// first stream before overwriting it, releasing its drain goroutine. The
+	// close runs off the update loop, so wait briefly for it.
+	second := newFakeRawStream(1)
+	m, _ = m2tuple(m.onRawOpened(rawOpenedMsg{cmdID: "1", stream: second}))
+	first.waitClosed(t)
+	if second.isClosed() {
+		t.Fatalf("the surviving raw stream must stay open")
+	}
+}
+
+func TestRawTickStaleGenerationIgnored(t *testing.T) {
+	m := seed()
+	// An active terminal preview for cmd "1" at generation 5.
+	m.commands.preview = previewState{
+		cmdID: "1", status: previewOK, terminal: true, streaming: true, gen: 5,
+	}
+
+	// A tick that matches the active (cmdID, gen) keeps the repaint cadence alive.
+	if _, cmd := m2tuple(m.onRawTick(rawTickMsg{cmdID: "1", gen: 5})); cmd == nil {
+		t.Fatalf("a matching tick should reschedule the repaint")
+	}
+	// A tick from a superseded generation must not spawn a duplicate loop.
+	if _, cmd := m2tuple(m.onRawTick(rawTickMsg{cmdID: "1", gen: 4})); cmd != nil {
+		t.Fatalf("a stale-generation tick should stop, not reschedule")
+	}
+	// A tick for a previously selected command is ignored too.
+	if _, cmd := m2tuple(m.onRawTick(rawTickMsg{cmdID: "9", gen: 5})); cmd != nil {
+		t.Fatalf("a stale-cmdID tick should stop, not reschedule")
+	}
+}
+
+func TestRawClosedStaleGenerationIgnored(t *testing.T) {
+	m := seed()
+	m.commands.preview = previewState{
+		cmdID: "1", status: previewOK, terminal: true, streaming: true, gen: 5,
+	}
+
+	// A close for a superseded preview must not disturb the live one.
+	stale, _ := m2tuple(m.onRawClosed(rawClosedMsg{cmdID: "1", gen: 4}))
+	if !stale.commands.preview.streaming {
+		t.Fatalf("a stale-generation close must not stop the current stream")
+	}
+
+	// A matching close stops the repaint tick while keeping the last frame.
+	closed, _ := m2tuple(m.onRawClosed(rawClosedMsg{cmdID: "1", gen: 5}))
+	if closed.commands.preview.streaming {
+		t.Fatalf("a matching close should stop streaming")
+	}
+	if closed.commands.preview.status != previewOK {
+		t.Fatalf("a clean close should keep the last frame, got status %v",
+			closed.commands.preview.status)
+	}
+}
+
+func TestRawClosedErrorRendersErrorState(t *testing.T) {
+	m := seed()
+	m.commands.preview = previewState{
+		cmdID: "1", status: previewOK, terminal: true, streaming: true, gen: 5,
+	}
+	m, _ = m2tuple(m.onRawClosed(rawClosedMsg{cmdID: "1", gen: 5, err: errors.New("attach gone")}))
+	if m.commands.preview.status != previewError {
+		t.Fatalf("a drain error should set the preview error state")
+	}
+	if !strings.Contains(m.commands.preview.errMsg, "attach gone") {
 		t.Fatalf("error message should be captured, got %q", m.commands.preview.errMsg)
 	}
 }

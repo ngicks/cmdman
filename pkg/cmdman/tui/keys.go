@@ -25,6 +25,9 @@ func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.helpOpen {
 		return m.onHelpKey(msg)
 	}
+	if m.defViewer.open {
+		return m.onDefViewerKey(msg)
+	}
 	if m.activeFiltering() {
 		return m.onFilterKey(msg)
 	}
@@ -33,10 +36,14 @@ func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // activeFiltering reports whether the active tab's filter input has focus.
 func (m Model) activeFiltering() bool {
-	if m.active == tabCommands {
+	switch m.active {
+	case TabCommands:
 		return m.commands.filtering
+	case TabCompose:
+		return m.compose.filtering
+	default:
+		return false
 	}
-	return m.compose.filtering
 }
 
 func (m Model) onPopupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -72,8 +79,17 @@ func (m Model) confirmPopup() (tea.Model, tea.Cmd) {
 		m.setPending(p.targetID, "removing")
 		return m, m.removeCmd(p.targetID, p.command, force)
 	case popupMuxWarn:
+		// A carried layout name means "apply this layout" (Layout tab); an empty
+		// one means "cycle to the next layout" (Compose tab `c`).
+		if p.layout != "" {
+			m.status = fmt.Sprintf("applying layout %s…", p.layout)
+			return m, m.applyLayoutCmd(p.project, p.path, p.layout)
+		}
 		m.status = fmt.Sprintf("cycling mux for %s…", p.project)
 		return m, m.cycleMuxCmd(p.project, p.path)
+	case popupComposeUp:
+		m.status = fmt.Sprintf("compose up %s…", p.project)
+		return m, m.composeUpCmd(p.project, p.path)
 	}
 	return m, nil
 }
@@ -122,18 +138,20 @@ func (m Model) onFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) setFiltering(v bool) {
-	if m.active == tabCommands {
+	switch m.active {
+	case TabCommands:
 		m.commands.filtering = v
-	} else {
+	case TabCompose:
 		m.compose.filtering = v
 	}
 }
 
 func (m *Model) editFilter(fn func(string) string) {
-	if m.active == tabCommands {
+	switch m.active {
+	case TabCommands:
 		m.commands.filter = fn(m.commands.filter)
 		m.commands.clampSelection()
-	} else {
+	case TabCompose:
 		m.compose.filter = fn(m.compose.filter)
 		if m.compose.selected >= len(m.compose.visibleRows()) {
 			m.compose.selected = 0
@@ -155,22 +173,27 @@ func (m Model) onNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.helpOpen = true
 		return m, nil
 	case "tab":
-		m.active = tab((int(m.active) + 1) % numTabs)
+		m.active = Tab((int(m.active) + 1) % NumTabs())
 		m.status = ""
-		return m, nil
+		return m, m.maybeLoadLayoutsCmd()
 	case "shift+tab":
-		m.active = tab((int(m.active) + numTabs - 1) % numTabs)
+		m.active = Tab((int(m.active) + NumTabs() - 1) % NumTabs())
 		m.status = ""
-		return m, nil
+		return m, m.maybeLoadLayoutsCmd()
 	case "/":
 		m.setFiltering(true)
 		return m, nil
 	}
 
-	if m.active == tabCommands {
+	switch m.active {
+	case TabCommands:
 		return m.onCommandsKey(msg)
+	case TabCompose:
+		return m.onComposeKey(msg)
+	case TabLayout:
+		return m.onLayoutKey(msg)
 	}
-	return m.onComposeKey(msg)
+	return m, nil
 }
 
 func (m Model) onCommandsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -307,42 +330,16 @@ func (m Model) onComposeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.compose.moveSelection(-1)
 		return m, nil
 	case "enter":
-		return m.openSelectedProject()
+		return m.openSelectedDefinition()
+	case "e":
+		return m.editSelectedProject()
+	case "a":
+		return m.composeUpSelected()
 	case "r":
 		m.status = "refreshing projects…"
 		return m, m.loadProjectsCmd()
 	case "c":
 		return m.cycleMux()
-	case "l":
-		m.status = "Specific layout selection is not available yet; use c to cycle layouts."
-		return m, nil
 	}
-	return m, nil
-}
-
-// openSelectedProject switches to the Commands tab and selects the chosen
-// project, unfolding it.
-func (m Model) openSelectedProject() (tea.Model, tea.Cmd) {
-	row, ok := m.compose.selectedComposeRow()
-	if !ok {
-		return m, nil
-	}
-	m.active = tabCommands
-	for gi := range m.commands.groups {
-		if m.commands.groups[gi].name == row.name {
-			m.commands.setFolded(gi, false)
-			// Select the project's header row.
-			vis := m.commands.visibleRows()
-			for i, vr := range vis {
-				if vr.kind == visProject && vr.group == gi {
-					m.commands.selected = i
-					break
-				}
-			}
-			m.status = ""
-			return m, nil
-		}
-	}
-	m.status = fmt.Sprintf("project %q has no commands yet", row.name)
 	return m, nil
 }

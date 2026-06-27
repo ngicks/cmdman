@@ -23,9 +23,13 @@ func spinnerTickCmd() tea.Cmd {
 }
 
 // anyInProgress reports whether any command is mid-transition — a persisted
-// `starting` state or a pending TUI action — i.e. whether the spinner should
-// keep animating so a start cascade stays visible.
+// `starting` state or a pending TUI action — or the compose-up overlay is
+// showing work in flight, i.e. whether the spinner should keep animating so a
+// start cascade (or the overlay's per-service marks) stays visible.
 func (m *Model) anyInProgress() bool {
+	if m.composeUp.anyPending() {
+		return true
+	}
 	for gi := range m.commands.groups {
 		for _, c := range m.commands.groups[gi].commands {
 			if c.pending != "" || c.state == model.EventTypeStarting {

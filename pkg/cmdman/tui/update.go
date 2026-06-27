@@ -8,7 +8,12 @@ import (
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.loadCommandsCmd(), m.loadProjectsCmd(), m.subscribeEventsCmd())
+	return tea.Batch(
+		m.loadCommandsCmd(),
+		m.loadProjectsCmd(),
+		m.subscribeEventsCmd(),
+		m.maybeLoadLayoutsCmd(),
+	)
 }
 
 // Update implements tea.Model.
@@ -17,6 +22,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Resize only the local terminal-view emulator (D9: never the remote PTY).
+		(&m).resizePreviewTerm()
 		return m, nil
 	case commandsLoadedMsg:
 		nm, cmd := m.onCommandsLoaded(msg)
@@ -36,10 +43,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onPreviewOpened(msg)
 	case previewLineMsg:
 		return m.onPreviewLine(msg)
+	case rawOpenedMsg:
+		return m.onRawOpened(msg)
+	case rawTickMsg:
+		return m.onRawTick(msg)
+	case rawClosedMsg:
+		return m.onRawClosed(msg)
 	case attachDoneMsg:
 		return m.onAttachDone(msg)
 	case muxDoneMsg:
 		return m.onMuxDone(msg)
+	case layoutsLoadedMsg:
+		return m.onLayoutsLoaded(msg)
+	case layoutDoneMsg:
+		return m.onLayoutDone(msg)
+	case defLoadedMsg:
+		return m.onDefLoaded(msg)
+	case editPathMsg:
+		return m.onEditPath(msg)
+	case editDoneMsg:
+		return m.onEditDone(msg)
+	case composeUpOpenedMsg:
+		return m.onComposeUpOpened(msg)
+	case composeUpEventMsg:
+		return m.onComposeUpEvent(msg)
+	case composeUpDoneMsg:
+		return m.onComposeUpDone(msg)
 	case spinnerTickMsg:
 		return m.onSpinnerTick()
 	case statusMsg:

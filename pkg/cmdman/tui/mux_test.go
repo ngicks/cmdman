@@ -13,7 +13,7 @@ import (
 func composeSeed(popupMode bool) Model {
 	m := New(Options{Backend: &fakeBackend{cwd: "/work/local-dev"}, PopupMode: popupMode})
 	m.cwd = "/work/local-dev"
-	m.active = tabCompose
+	m.active = TabCompose
 	m.setComposeRows([]composeRow{
 		{
 			name:     "local-dev",
@@ -136,14 +136,5 @@ func TestMuxDoneReportsStatus(t *testing.T) {
 	m, _ = m2tuple(m.onMuxDone(muxDoneMsg{project: "local-dev", err: errors.New("not in tmux")}))
 	if !strings.Contains(m.status, "not in tmux") {
 		t.Fatalf("mux error should be surfaced, got %q", m.status)
-	}
-}
-
-func TestLayoutSelectorReportsCycleOnly(t *testing.T) {
-	m := composeSeed(false)
-	m.compose.selected = 0
-	m, _ = upd(m, kr("l"))
-	if !strings.Contains(m.status, "cycle") {
-		t.Fatalf("l should explain that only cycling is available, got %q", m.status)
 	}
 }
