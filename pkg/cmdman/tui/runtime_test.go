@@ -4,9 +4,11 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/charmbracelet/x/vt"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
@@ -388,5 +390,109 @@ func TestInitSubscribesToEvents(t *testing.T) {
 	}
 	if !foundSubscribe {
 		t.Fatalf("Init should subscribe to events")
+	}
+}
+
+func TestDrainRawDoesNotDeadlockOnQueryResponses(t *testing.T) {
+	// A full-screen program emits terminal queries (DA1 ESC[c, secondary DA
+	// ESC[>c, cursor report ESC[6n, mode query ESC[?2026$p). The vt emulator
+	// answers them into an unbuffered internal pipe; if drainRawCmd does not
+	// drain that pipe, the first reply blocks term.Write under the write lock and
+	// starves Render(), hanging the UI. This drives the real drainRawCmd with a
+	// query-laden stream while a concurrent Render runs, and requires it to finish
+	// quickly. Without the discard drain it deadlocks (times out).
+	term := vt.NewSafeEmulator(40, 10)
+	stream := newFakeRawStream(256)
+	query := []byte("x\x1b[c y\x1b[>c\x1b[6n\x1b[?2026$p z\r\n")
+	for range 200 {
+		stream.ch <- RawChunk{Bytes: query}
+	}
+	_ = stream.Close() // closes the chunk channel; the 200 buffered chunks still drain
+
+	stopRender := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stopRender:
+				return
+			default:
+				_ = term.Render()
+			}
+		}
+	}()
+
+	done := make(chan tea.Msg, 1)
+	go func() { done <- drainRawCmd(term, stream, "1", 1)() }()
+
+	select {
+	case <-done:
+		close(stopRender)
+	case <-time.After(5 * time.Second):
+		close(stopRender)
+		t.Fatal(
+			"drainRawCmd deadlocked draining query responses (emulator response pipe not drained)",
+		)
+	}
+}
+
+func TestDrainRawRecoversEmulatorPanic(t *testing.T) {
+	// The vt/ultraviolet emulator panics on some real control-sequence combos a
+	// full-screen TUI (codex) emits: a scroll region + XTWINOPS resize + line
+	// insert. drainRawCmd must recover and report a panicked close instead of
+	// crashing the whole TUI. This sequence is a verified-deterministic trigger.
+	term := vt.NewSafeEmulator(1, 1)
+	stream := newFakeRawStream(2)
+	stream.ch <- RawChunk{Bytes: []byte("\x1b[1;5r\x1b[8;24;80t\x1b[L")}
+	_ = stream.Close()
+
+	msg := drainRawCmd(term, stream, "1", 1)()
+	rc, ok := msg.(rawClosedMsg)
+	if !ok {
+		t.Fatalf("expected rawClosedMsg, got %T", msg)
+	}
+	if !rc.panicked {
+		t.Fatalf("a vt emulator panic must be reported as a panicked close, got %+v", rc)
+	}
+}
+
+func TestRawClosedPanicDisablesTerminalPreviewAndFallsBack(t *testing.T) {
+	m := seed()
+	m.commands.preview = previewState{
+		cmdID: "1", status: previewOK, terminal: true, streaming: true, gen: 7,
+	}
+	m2, _ := m2tuple(m.onRawClosed(rawClosedMsg{cmdID: "1", gen: 7, panicked: true}))
+	if !m2.termPreviewDisabled {
+		t.Fatalf("a panicked close must disable terminal-view for the session")
+	}
+	if m2.commands.preview.terminal {
+		t.Fatalf("a panicked close must leave terminal-view mode")
+	}
+
+	// With terminal-view disabled, reconcile must never choose terminal-view again
+	// for a running, TTY-backed command — it falls back to the log path.
+	m2.setGroups([]projectGroup{
+		{name: "p", workdir: "/w", commands: []commandRow{
+			{id: "tty1", name: "codex", project: "p", workdir: "/w",
+				state: model.EventTypeRunning, tty: true, logDriver: logdriver.DriverK8sFile},
+		}},
+	})
+	m2.commands.selected = 1 // the command row
+	m2.commands.preview = previewState{}
+	_ = (&m2).reconcilePreview()
+	if m2.commands.preview.terminal {
+		t.Fatalf("with terminal-view disabled, a tty command must use the log preview")
+	}
+}
+
+func TestRawOpenedStaleCmdIDClosesStream(t *testing.T) {
+	// A rawOpenedMsg for a superseded selection must close the stale stream off
+	// the update loop and not establish a preview.
+	m := seed()
+	m.commands.preview = previewState{cmdID: "current", status: previewLoading, terminal: true}
+	stale := newFakeRawStream(1)
+	m2, _ := m2tuple(m.onRawOpened(rawOpenedMsg{cmdID: "old", stream: stale}))
+	stale.waitClosed(t)
+	if m2.commands.preview.raw != nil {
+		t.Fatalf("a stale-cmdID raw open must not establish a stream")
 	}
 }

@@ -133,8 +133,10 @@ func (m *Model) reconcilePreview() tea.Cmd {
 	m.stopPreview()
 	// Terminal-view mode: a running, TTY-backed command has a faithful raw PTY
 	// stream, so render it through a vt emulator. Everything else (exited, or a
-	// non-TTY log-only command) falls back to the sanitized log text below.
-	if c.state == model.EventTypeRunning && c.tty {
+	// non-TTY log-only command) falls back to the sanitized log text below. A
+	// command whose vt preview previously panicked also falls back here, since the
+	// predicate includes && !m.termPreviewDisabled.
+	if c.state == model.EventTypeRunning && c.tty && !m.termPreviewDisabled {
 		m.commands.preview = previewState{cmdID: c.id, status: previewLoading, terminal: true}
 		return m.openRawCmd(c.id)
 	}
@@ -269,9 +271,10 @@ type rawTickMsg struct {
 // channel closed (command exited / detached) or yielded an error. It carries
 // (cmdID, gen) so a close for a superseded preview is ignored.
 type rawClosedMsg struct {
-	cmdID string
-	gen   int
-	err   error
+	cmdID    string
+	gen      int
+	err      error
+	panicked bool // the vt emulator panicked draining this stream; fall back to logs
 }
 
 func (m Model) openRawCmd(id string) tea.Cmd {
@@ -286,9 +289,39 @@ func (m Model) openRawCmd(id string) tea.Cmd {
 // drainRawCmd pumps the whole raw stream into the shared emulator off the update
 // loop: bytes never touch the bubbletea message loop. It writes each chunk
 // directly into term (a SafeEmulator, so a concurrent Render/Resize is safe) and
-// returns a single rawClosedMsg only when the stream channel closes or errors.
+// returns a single rawClosedMsg when the stream channel closes or errors, or a
+// rawClosedMsg{panicked: true} if the emulator panics while draining (so the
+// model disables terminal-view and falls back to logs).
 func drainRawCmd(term *vt.SafeEmulator, stream RawStream, id string, gen int) tea.Cmd {
-	return func() tea.Msg {
+	return func() (msg tea.Msg) {
+		// A full-screen program emits terminal queries (device attributes, cursor
+		// reports, mode queries); the vt emulator answers them by writing into its
+		// internal, UNBUFFERED response pipe. This preview never sends input back to
+		// the remote PTY (D9), so those replies must be drained and discarded — if
+		// they are not, the first reply blocks term.Write under the emulator's write
+		// lock and starves Render(), hanging the whole UI. Closing the response-pipe
+		// writer when draining ends unblocks (and ends) this reader.
+		go func() { _, _ = io.Copy(io.Discard, term) }()
+		// Unblock (and end) the discard goroutine by closing only the emulator's
+		// internal response-pipe writer. We deliberately do NOT call term.Close():
+		// that also writes the emulator's unsynchronized `closed` flag, which would
+		// data-race the discard goroutine's Read. Closing the pipe writer makes that
+		// Read return EOF without touching any shared emulator field.
+		defer func() {
+			if pw, ok := term.InputPipe().(*io.PipeWriter); ok {
+				_ = pw.Close()
+			}
+		}()
+		// The vt/ultraviolet emulator can panic on some real control sequences (a
+		// scroll region + XTWINOPS resize + line insert, as a full-screen TUI such
+		// as codex emits). A passive preview must never crash the TUI: recover and
+		// report a panicked close, so the model disables terminal-view and falls
+		// back to the sanitized log preview.
+		defer func() {
+			if r := recover(); r != nil {
+				msg = rawClosedMsg{cmdID: id, gen: gen, panicked: true}
+			}
+		}()
 		for chunk := range stream.Chunks() {
 			if chunk.Err != nil {
 				return rawClosedMsg{cmdID: id, gen: gen, err: chunk.Err}
@@ -353,14 +386,46 @@ func (m Model) onRawTick(msg rawTickMsg) (tea.Model, tea.Cmd) {
 	if msg.cmdID != p.cmdID || msg.gen != p.gen || !p.streaming {
 		return m, nil // a newer preview took over, or the stream closed; stop ticking
 	}
-	// The repaint is implicit: bubbletea renders after this Update and
+	// Probe the render under recover on the Update goroutine: a Render-only panic
+	// (one not preceded by a Write panic) cannot be handled in View (value
+	// receiver), so catch it here and fall back to the crash-proof log view, the
+	// same way the panicked drain does.
+	if p.term != nil && renderPanics(p.term) {
+		m.termPreviewDisabled = true
+		m.stopPreview()
+		m.commands.preview = previewState{}
+		return m, (&m).reconcilePreview()
+	}
+	// The repaint is otherwise implicit: bubbletea renders after this Update and
 	// renderPreview reads term.Render(). Keep the cadence for this preview.
 	return m, rawTickCmd(msg.cmdID, msg.gen)
+}
+
+// renderPanics reports whether rendering the emulator panics, recovering so a
+// vt/ultraviolet crash never propagates. Used to detect a Render-side panic on
+// the Update goroutine so terminal-view can be disabled.
+func renderPanics(term *vt.SafeEmulator) (panicked bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			panicked = true
+		}
+	}()
+	_ = term.Render()
+	return false
 }
 
 func (m Model) onRawClosed(msg rawClosedMsg) (tea.Model, tea.Cmd) {
 	if msg.cmdID != m.commands.preview.cmdID || msg.gen != m.commands.preview.gen {
 		return m, nil // stale stream for a superseded preview
+	}
+	if msg.panicked {
+		// The vt emulator crashed on this command's output. Disable terminal-view
+		// for the rest of the session and fall back to the crash-proof sanitized
+		// log preview, re-reconciling to open the log reader for the selection.
+		m.termPreviewDisabled = true
+		m.stopPreview()
+		m.commands.preview = previewState{}
+		return m, (&m).reconcilePreview()
 	}
 	if msg.err != nil {
 		m.commands.preview.status = previewError
@@ -404,6 +469,16 @@ func (m *Model) resizePreviewTerm() {
 	if w == p.termW && h == p.termH {
 		return
 	}
+	// A resize can panic inside the vt/ultraviolet buffer; if it does, drop the
+	// terminal-view and disable it for the session so the preview falls back to
+	// the crash-proof log view on the next reconcile.
+	defer func() {
+		if r := recover(); r != nil {
+			m.termPreviewDisabled = true
+			m.stopPreview()
+			m.commands.preview = previewState{}
+		}
+	}()
 	p.term.Resize(w, h)
 	p.termW, p.termH = w, h
 }
@@ -411,15 +486,22 @@ func (m *Model) resizePreviewTerm() {
 // renderPreviewTerm renders the current emulator frame as preview lines. Each
 // line is defensively terminated with an SGR reset so a style left open at the
 // emulator's truncation boundary cannot bleed past the box's right border.
-func (m Model) renderPreviewTerm() []string {
+func (m Model) renderPreviewTerm() (lines []string) {
 	if m.commands.preview.term == nil {
 		return nil
 	}
-	lines := strings.Split(m.commands.preview.term.Render(), "\n")
-	for i := range lines {
-		lines[i] += ansi.ResetStyle
+	// term.Render reads the emulator buffer, which a prior write may have left in a
+	// state the vt/ultraviolet library mishandles; never let that crash the TUI.
+	defer func() {
+		if r := recover(); r != nil {
+			lines = []string{"(terminal preview unavailable)"}
+		}
+	}()
+	rendered := strings.Split(m.commands.preview.term.Render(), "\n")
+	for i := range rendered {
+		rendered[i] += ansi.ResetStyle
 	}
-	return lines
+	return rendered
 }
 
 // --- attach handoff ---------------------------------------------------------

@@ -55,6 +55,12 @@ type Model struct {
 
 	previewGen int // monotonic generation for terminal-preview drain/tick loops
 
+	// termPreviewDisabled turns off the vt terminal-view preview for the rest of
+	// the session after the emulator panics on a command's output (the vt/
+	// ultraviolet library can panic on some control sequences). Once set, all
+	// previews use the crash-proof sanitized-log view instead.
+	termPreviewDisabled bool
+
 	popupMode bool // running inside a multiplexer popup
 	altScreen bool // render in the alternate screen buffer (set per-View in v2)
 

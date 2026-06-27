@@ -133,3 +133,40 @@ rejected alternatives once decided.
 - **Rejected:** `cli.TabFlagUsage`/`cli.ParseInitialTab` wrappers (earlier draft);
   a `tui.TabFlagUsage()` helper (a later draft) — both unnecessary once `cmd`
   composes usage from `TabKeys()`.
+
+## D12 — vt preview must drain the emulator's response pipe — **RESOLVED (live-bug fix)**
+- **Decision:** The terminal-view drain goroutine continuously drains and
+  discards the vt emulator's internal response pipe (`io.Copy(io.Discard, term)`),
+  and on exit closes only that pipe's *writer* (via the exported `InputPipe()`),
+  never `Emulator.Close()`.
+- **Rationale:** `vt.NewEmulator` backs the terminal's input/response channel with
+  an **unbuffered `io.Pipe`**. A full-screen TUI (claude/codex) constantly emits
+  terminal *queries* (DA1/DA2 `ESC[c`/`ESC[>c`, cursor reports `ESC[6n`, DECRQM
+  mode queries); the emulator answers each by writing the reply into that pipe.
+  Because the preview is read-only (D7/D9) we never call `term.Read()`, so the
+  **first** reply blocked `term.Write` forever — and that block is held under the
+  `SafeEmulator` write lock, which deadlocked `Render()` and froze the whole TUI.
+  This was the real cause of the reported popup hang (a `sleep` test command emits
+  no queries, which is why tests never caught it). Closing the *pipe writer* (not
+  `Emulator.Close()`) ends the discard goroutine without writing vt's
+  unsynchronized `closed` flag, so it stays `-race`-clean.
+- **Rejected:** Per-chunk render on the message loop (floods Update); moving Write
+  off-loop without draining (lock is still shared with Render); `term.Close()` to
+  stop the drain (data-races vt's internal `closed` field under `-race`).
+
+## D13 — vt preview must be crash-proof, with log fallback — **RESOLVED (live-bug fix)**
+- **Decision:** Every emulator interaction (`Write` in the drain, `Render` in the
+  view, `Resize`) is wrapped in `recover()`. On a panic the model sets a session
+  flag `termPreviewDisabled`, tears down the terminal-view, and falls back to the
+  crash-proof sanitized-log preview for the rest of the session.
+- **Rationale:** `vt`/`ultraviolet` (pinned `vt v0.0.0-20260622092256`,
+  `ultraviolet v0.0.0-20260525132238`) **panics** on some real control-sequence
+  combinations a full-screen TUI emits — verified deterministic: scroll region +
+  XTWINOPS resize (`ESC[8;r;c t`) + line-insert →
+  `ultraviolet.(*Buffer).InsertLineArea: index out of range` from inside
+  `Emulator.Write`. This crashed the whole popup TUI when previewing codex. The
+  bug is in the third-party library (read-only module cache), not patchable here;
+  a passive preview must never crash the app, so we recover and degrade to logs.
+- **Rejected:** Removing the vt terminal-view entirely (loses the feature when it
+  works); per-command (vs per-session) disable (more state for negligible gain —
+  if vt panics once it is likely to again).

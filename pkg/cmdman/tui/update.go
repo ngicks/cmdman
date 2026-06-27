@@ -24,7 +24,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		// Resize only the local terminal-view emulator (D9: never the remote PTY).
 		(&m).resizePreviewTerm()
-		return m, nil
+		// Reconcile so a resize that disabled terminal-view (emulator panic) re-opens
+		// the log-view fallback; a normal resize leaves the preview unchanged (no-op).
+		return m, (&m).reconcilePreview()
 	case commandsLoadedMsg:
 		nm, cmd := m.onCommandsLoaded(msg)
 		scmd := (&nm).maybeStartSpinner()

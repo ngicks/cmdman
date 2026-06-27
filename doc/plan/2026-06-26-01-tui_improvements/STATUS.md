@@ -1,10 +1,26 @@
 # STATUS — TUI big improvements
 
 **State:** implementation complete — all five feature workstreams (A–E) have
-landed and the final Docs/tests step is done. DECISION.md holds 11 entries:
-**D0** (workstream split), **D1–D8** (the OQ resolutions), **D9** (vt
-no-remote-resize), **D10** (tabs single source of truth), **D11** (where the
-`--tab` helpers live). No open questions remain.
+landed and the final Docs/tests step is done. Two live-environment correctness
+bugs in the workstream-C vt preview were then found via reproduction and fixed:
+**D12** (drain the emulator's unbuffered response pipe — fixes the popup *hang*)
+and **D13** (recover emulator panics + fall back to the log view — fixes the
+*crash* when previewing codex). DECISION.md holds 13 entries: **D0** (workstream
+split), **D1–D8** (the OQ resolutions), **D9** (vt no-remote-resize), **D10**
+(tabs single source of truth), **D11** (where the `--tab` helpers live), **D12**
+(vt response-pipe drain), **D13** (vt crash-proofing). No open questions remain.
+
+## Live-bug fixes (post-implementation, workstream C)
+- **Hang (D12):** the vt emulator answers terminal queries into an unbuffered
+  `io.Pipe`; the read-only preview never drained it, so the first query reply
+  blocked `term.Write` under the write lock and deadlocked `Render()`. Fixed by a
+  discard-drain goroutine; verified `-race`-clean. Regression test
+  `TestDrainRawDoesNotDeadlockOnQueryResponses`.
+- **Panic (D13):** `vt`/`ultraviolet` panics on some real control sequences
+  (scroll region + XTWINOPS + line-insert) a full-screen TUI emits, killing the
+  popup. Fixed by `recover()` around all emulator calls + per-session fallback to
+  the sanitized log preview. Regression tests `TestDrainRawRecoversEmulatorPanic`,
+  `TestRawClosedPanicDisablesTerminalPreviewAndFallsBack`.
 
 ## Checklist (mirrors PLAN.md steps)
 
