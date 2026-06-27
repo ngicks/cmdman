@@ -1344,7 +1344,7 @@ func TestPreviewTerminalStreamClosesOnSelectionChange(t *testing.T) {
 	fb.rawStreams[0].waitClosed(t)
 }
 
-func TestPreviewTerminalResizeIsLocalOnly(t *testing.T) {
+func TestPreviewTerminalEmulatorSizedToPTYNotPane(t *testing.T) {
 	m := termModel(commandRow{
 		id: "1", name: "shell", workdir: "/w", state: model.EventTypeRunning, tty: true,
 	})
@@ -1355,20 +1355,22 @@ func TestPreviewTerminalResizeIsLocalOnly(t *testing.T) {
 		t.Fatalf("selecting a running tty command should open a raw stream")
 	}
 	m, _ = upd(m, opened)
-	w0, h0 := m.commands.preview.termW, m.commands.preview.termH
-	if w0 == 0 || h0 == 0 {
-		t.Fatalf("the emulator should be sized on open, got %dx%d", w0, h0)
+	term := m.commands.preview.term
+	if term == nil {
+		t.Fatalf("opening the raw stream should create the emulator")
+	}
+	// The emulator opens at the default size; the command's real PTY size arrives
+	// as a resize chunk over the raw stream (D9: the remote PTY is never touched).
+	if term.Width() != defaultPreviewCols || term.Height() != defaultPreviewRows {
+		t.Fatalf("emulator should open at the default size %dx%d, got %dx%d",
+			defaultPreviewCols, defaultPreviewRows, term.Width(), term.Height())
 	}
 
-	// A window resize re-sizes only the local emulator (RawStream has no Resize,
-	// so the remote PTY is structurally untouchable — decision D9).
+	// A window resize must not touch the emulator: it is sized to the PTY, not the
+	// pane, and the preview crops it on render.
 	m, _ = upd(m, tea.WindowSizeMsg{Width: 120, Height: 40})
-	wantW, wantH := m.previewInnerSize()
-	if m.commands.preview.termW != wantW || m.commands.preview.termH != wantH {
-		t.Fatalf("emulator size = %dx%d, want %dx%d",
-			m.commands.preview.termW, m.commands.preview.termH, wantW, wantH)
-	}
-	if wantW == w0 && wantH == h0 {
-		t.Fatalf("a window resize should change the emulator size")
+	if term.Width() != defaultPreviewCols || term.Height() != defaultPreviewRows {
+		t.Fatalf("a window resize must not resize the PTY-sized emulator, got %dx%d",
+			term.Width(), term.Height())
 	}
 }

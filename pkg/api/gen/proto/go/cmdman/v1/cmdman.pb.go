@@ -154,8 +154,13 @@ func (*AttachRequest_Stdin) isAttachRequest_Input() {}
 func (*AttachRequest_Resize) isAttachRequest_Input() {}
 
 type AttachResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Stdout        []byte                 `protobuf:"bytes,1,opt,name=stdout,proto3" json:"stdout,omitempty"` // raw bytes from PTY
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Stdout []byte                 `protobuf:"bytes,1,opt,name=stdout,proto3" json:"stdout,omitempty"` // raw bytes from PTY
+	// resize reports the command's current PTY window size. The monitor sends it
+	// once when a client attaches (and whenever the PTY is resized) so a read-only
+	// viewer can size its local terminal emulator to match the command's actual
+	// render width without resizing the remote PTY.
+	Resize        *ResizeEvent `protobuf:"bytes,2,opt,name=resize,proto3" json:"resize,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -193,6 +198,13 @@ func (*AttachResponse) Descriptor() ([]byte, []int) {
 func (x *AttachResponse) GetStdout() []byte {
 	if x != nil {
 		return x.Stdout
+	}
+	return nil
+}
+
+func (x *AttachResponse) GetResize() *ResizeEvent {
+	if x != nil {
+		return x.Resize
 	}
 	return nil
 }
@@ -831,9 +843,10 @@ const file_cmdman_v1_cmdman_proto_rawDesc = "" +
 	"\rAttachRequest\x12\x16\n" +
 	"\x05stdin\x18\x01 \x01(\fH\x00R\x05stdin\x120\n" +
 	"\x06resize\x18\x02 \x01(\v2\x16.cmdman.v1.ResizeEventH\x00R\x06resizeB\a\n" +
-	"\x05input\"(\n" +
+	"\x05input\"X\n" +
 	"\x0eAttachResponse\x12\x16\n" +
-	"\x06stdout\x18\x01 \x01(\fR\x06stdout\"5\n" +
+	"\x06stdout\x18\x01 \x01(\fR\x06stdout\x12.\n" +
+	"\x06resize\x18\x02 \x01(\v2\x16.cmdman.v1.ResizeEventR\x06resize\"5\n" +
 	"\vResizeEvent\x12\x12\n" +
 	"\x04rows\x18\x01 \x01(\rR\x04rows\x12\x12\n" +
 	"\x04cols\x18\x02 \x01(\rR\x04cols\"\x95\x01\n" +
@@ -914,27 +927,28 @@ var file_cmdman_v1_cmdman_proto_goTypes = []any{
 }
 var file_cmdman_v1_cmdman_proto_depIdxs = []int32{
 	3,  // 0: cmdman.v1.AttachRequest.resize:type_name -> cmdman.v1.ResizeEvent
-	16, // 1: cmdman.v1.LogLine.time:type_name -> google.protobuf.Timestamp
-	0,  // 2: cmdman.v1.LogLine.stream:type_name -> cmdman.v1.LogStream
-	7,  // 3: cmdman.v1.SubscribeResponse.offset:type_name -> cmdman.v1.SubscribeOffset
-	4,  // 4: cmdman.v1.SubscribeResponse.line:type_name -> cmdman.v1.LogLine
-	1,  // 5: cmdman.v1.CommandMonitorService.Attach:input_type -> cmdman.v1.AttachRequest
-	5,  // 6: cmdman.v1.CommandMonitorService.Subscribe:input_type -> cmdman.v1.SubscribeRequest
-	8,  // 7: cmdman.v1.CommandMonitorService.WriteStdin:input_type -> cmdman.v1.WriteStdinRequest
-	10, // 8: cmdman.v1.CommandMonitorService.Signal:input_type -> cmdman.v1.SignalRequest
-	12, // 9: cmdman.v1.CommandMonitorService.Stop:input_type -> cmdman.v1.StopRequest
-	14, // 10: cmdman.v1.CommandMonitorService.Status:input_type -> cmdman.v1.StatusRequest
-	2,  // 11: cmdman.v1.CommandMonitorService.Attach:output_type -> cmdman.v1.AttachResponse
-	6,  // 12: cmdman.v1.CommandMonitorService.Subscribe:output_type -> cmdman.v1.SubscribeResponse
-	9,  // 13: cmdman.v1.CommandMonitorService.WriteStdin:output_type -> cmdman.v1.WriteStdinResponse
-	11, // 14: cmdman.v1.CommandMonitorService.Signal:output_type -> cmdman.v1.SignalResponse
-	13, // 15: cmdman.v1.CommandMonitorService.Stop:output_type -> cmdman.v1.StopResponse
-	15, // 16: cmdman.v1.CommandMonitorService.Status:output_type -> cmdman.v1.StatusResponse
-	11, // [11:17] is the sub-list for method output_type
-	5,  // [5:11] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	3,  // 1: cmdman.v1.AttachResponse.resize:type_name -> cmdman.v1.ResizeEvent
+	16, // 2: cmdman.v1.LogLine.time:type_name -> google.protobuf.Timestamp
+	0,  // 3: cmdman.v1.LogLine.stream:type_name -> cmdman.v1.LogStream
+	7,  // 4: cmdman.v1.SubscribeResponse.offset:type_name -> cmdman.v1.SubscribeOffset
+	4,  // 5: cmdman.v1.SubscribeResponse.line:type_name -> cmdman.v1.LogLine
+	1,  // 6: cmdman.v1.CommandMonitorService.Attach:input_type -> cmdman.v1.AttachRequest
+	5,  // 7: cmdman.v1.CommandMonitorService.Subscribe:input_type -> cmdman.v1.SubscribeRequest
+	8,  // 8: cmdman.v1.CommandMonitorService.WriteStdin:input_type -> cmdman.v1.WriteStdinRequest
+	10, // 9: cmdman.v1.CommandMonitorService.Signal:input_type -> cmdman.v1.SignalRequest
+	12, // 10: cmdman.v1.CommandMonitorService.Stop:input_type -> cmdman.v1.StopRequest
+	14, // 11: cmdman.v1.CommandMonitorService.Status:input_type -> cmdman.v1.StatusRequest
+	2,  // 12: cmdman.v1.CommandMonitorService.Attach:output_type -> cmdman.v1.AttachResponse
+	6,  // 13: cmdman.v1.CommandMonitorService.Subscribe:output_type -> cmdman.v1.SubscribeResponse
+	9,  // 14: cmdman.v1.CommandMonitorService.WriteStdin:output_type -> cmdman.v1.WriteStdinResponse
+	11, // 15: cmdman.v1.CommandMonitorService.Signal:output_type -> cmdman.v1.SignalResponse
+	13, // 16: cmdman.v1.CommandMonitorService.Stop:output_type -> cmdman.v1.StopResponse
+	15, // 17: cmdman.v1.CommandMonitorService.Status:output_type -> cmdman.v1.StatusResponse
+	12, // [12:18] is the sub-list for method output_type
+	6,  // [6:12] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_cmdman_v1_cmdman_proto_init() }

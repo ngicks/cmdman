@@ -435,6 +435,25 @@ func TestDrainRawDoesNotDeadlockOnQueryResponses(t *testing.T) {
 	}
 }
 
+func TestDrainRawResizeSizesEmulatorToPTY(t *testing.T) {
+	// A PTY size report must resize the local emulator to the command's actual
+	// render dimensions (so the preview matches and does not reflow), without any
+	// remote interaction.
+	term := vt.NewSafeEmulator(defaultPreviewCols, defaultPreviewRows)
+	stream := newFakeRawStream(4)
+	stream.ch <- RawChunk{Resize: &RawSize{Rows: 40, Cols: 120}}
+	stream.ch <- RawChunk{Bytes: []byte("hello")}
+	_ = stream.Close()
+
+	_ = drainRawCmd(term, stream, "1", 1)()
+	if w := term.Width(); w != 120 {
+		t.Fatalf("emulator width should match reported PTY cols 120, got %d", w)
+	}
+	if h := term.Height(); h != 40 {
+		t.Fatalf("emulator height should match reported PTY rows 40, got %d", h)
+	}
+}
+
 func TestDrainRawRecoversEmulatorPanic(t *testing.T) {
 	// The vt/ultraviolet emulator panics on some real control-sequence combos a
 	// full-screen TUI (codex) emits: a scroll region + XTWINOPS resize + line

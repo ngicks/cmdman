@@ -60,6 +60,16 @@ func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) err
 	sub := s.monitor.subscribeOutput(true)
 	defer sub.Unsub()
 
+	// Report the current PTY size first so a viewer sizes its terminal emulator
+	// to the command's actual render dimensions before processing scrollback.
+	if rows, cols, ok := s.monitor.PtySize(); ok {
+		if err := stream.Send(&pb.AttachResponse{
+			Resize: &pb.ResizeEvent{Rows: uint32(rows), Cols: uint32(cols)},
+		}); err != nil {
+			return err
+		}
+	}
+
 	if len(sub.Scrollback) > 0 {
 		if err := stream.Send(&pb.AttachResponse{Stdout: sub.Scrollback}); err != nil {
 			return err

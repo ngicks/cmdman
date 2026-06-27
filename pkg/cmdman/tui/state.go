@@ -161,7 +161,7 @@ func (t *layoutTab) moveSelection(delta int) {
 // A command renders in one of two modes. The default is the sanitized log text
 // (lines, fed by stream). A running, TTY-backed command instead renders in
 // terminal-view mode (terminal), where raw attach bytes (raw) drive a persistent
-// vt emulator (term) sized to the preview pane.
+// vt emulator (term) sized to the command's reported PTY size.
 type previewState struct {
 	cmdID  string
 	lines  []string
@@ -169,12 +169,11 @@ type previewState struct {
 	errMsg string
 	stream LogStream // live Tail+Follow reader for cmdID; nil when none
 
-	terminal     bool             // terminal-view mode (vt emulator) is active
-	streaming    bool             // raw drain is live; the repaint tick runs while true
-	gen          int              // generation of the active drain/tick loop (see Model.previewGen)
-	raw          RawStream        // live raw attach stream for cmdID; nil when none
-	term         *vt.SafeEmulator // vt emulator for terminal-view; nil when none
-	termW, termH int              // emulator size, tracked so resizes are idempotent
+	terminal  bool             // terminal-view mode (vt emulator) is active
+	streaming bool             // raw drain is live; the repaint tick runs while true
+	gen       int              // generation of the active drain/tick loop (see Model.previewGen)
+	raw       RawStream        // live raw attach stream for cmdID; nil when none
+	term      *vt.SafeEmulator // vt emulator for terminal-view; nil when none
 }
 
 // defViewerState holds the read-only definition-viewer overlay (Compose tab

@@ -30,13 +30,41 @@ func (s *Session) CloseSend() error {
 	return s.stream.CloseSend()
 }
 
-// Recv reads the next stdout chunk from the attach stream.
-func (s *Session) Recv() ([]byte, error) {
+// AttachMessage is one decoded attach-stream message: either raw stdout bytes or
+// a PTY size report (Resize == true).
+type AttachMessage struct {
+	Stdout []byte
+	Rows   int
+	Cols   int
+	Resize bool
+}
+
+// RecvMessage reads the next attach message, distinguishing a PTY size report
+// from raw stdout bytes.
+func (s *Session) RecvMessage() (AttachMessage, error) {
 	msg, err := s.stream.Recv()
 	if err != nil {
-		return nil, err
+		return AttachMessage{}, err
 	}
-	return msg.Stdout, nil
+	if r := msg.GetResize(); r != nil {
+		return AttachMessage{Resize: true, Rows: int(r.Rows), Cols: int(r.Cols)}, nil
+	}
+	return AttachMessage{Stdout: msg.Stdout}, nil
+}
+
+// Recv reads the next stdout chunk, skipping PTY size reports (the interactive
+// attach drives its own resizes and ignores server size reports).
+func (s *Session) Recv() ([]byte, error) {
+	for {
+		m, err := s.RecvMessage()
+		if err != nil {
+			return nil, err
+		}
+		if m.Resize {
+			continue
+		}
+		return m.Stdout, nil
+	}
 }
 
 // SendStdin forwards stdin bytes to the remote command.

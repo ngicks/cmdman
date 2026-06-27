@@ -22,11 +22,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		// Resize only the local terminal-view emulator (D9: never the remote PTY).
-		(&m).resizePreviewTerm()
-		// Reconcile so a resize that disabled terminal-view (emulator panic) re-opens
-		// the log-view fallback; a normal resize leaves the preview unchanged (no-op).
-		return m, (&m).reconcilePreview()
+		// The terminal-view emulator is sized to the command's PTY (not the pane);
+		// the preview crops it on render, so a window resize needs no emulator work.
+		return m, nil
 	case commandsLoadedMsg:
 		nm, cmd := m.onCommandsLoaded(msg)
 		scmd := (&nm).maybeStartSpinner()

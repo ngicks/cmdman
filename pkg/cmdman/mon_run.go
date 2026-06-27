@@ -9,9 +9,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	cmdstore "github.com/ngicks/cmdman/pkg/cmdman/store"
+)
+
+// Default PTY window size for a TTY-backed command before any client resizes it,
+// so a full-screen program renders at a conventional size even with no attach.
+const (
+	defaultPtyRows uint16 = 24
+	defaultPtyCols uint16 = 80
 )
 
 // RunMonitor is the main entry point for the monitor process.
@@ -197,6 +205,9 @@ func (m *Monitor) writeTty(cmd *exec.Cmd) (func(), error) {
 	}
 	m.ptmx = ptmx
 	m.stdin = ptmx
+	// Give the PTY a conventional default size so a full-screen program renders
+	// sanely even when no interactive client ever attaches to resize it.
+	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: defaultPtyRows, Cols: defaultPtyCols})
 
 	var wg sync.WaitGroup
 

@@ -170,3 +170,27 @@ rejected alternatives once decided.
 - **Rejected:** Removing the vt terminal-view entirely (loses the feature when it
   works); per-command (vs per-session) disable (more state for negligible gain —
   if vt panics once it is likely to again).
+
+## D14 — PTY-size reporting fixes the cluttered preview — **RESOLVED (clutter fix)**
+- **Decision:** The monitor (1) sets a default PTY size of **80×24** when starting
+  a TTY command (`pty.Setsize` in `writeTty`), and (2) reports the current PTY
+  size to a viewer over the attach stream via a new `AttachResponse.resize` field,
+  sent first on attach. The TUI sizes its local vt emulator to that reported PTY
+  size (not the preview pane), and the existing render crop (`clampLines` + `box`
+  ANSI-truncate) clips the correctly-laid-out frame to the pane. The remote PTY is
+  never resized by the preview (still D9).
+- **Rationale:** `pty.Start` created the PTY at 0×0, so a full-screen TUI rendered
+  at an unknown/guessed size while the emulator was sized to the *narrow* preview
+  pane → the lines wrapped/garbled (the reported clutter). Matching the emulator to
+  the command's actual PTY width makes the layout faithful; cropping (not
+  reflowing) to the pane keeps it clean. A new `Session.RecvMessage`/`AttachMessage`
+  surfaces size reports; `Session.Recv` skips them so the interactive attach is
+  unaffected.
+- **Scope note:** The fix lives in the **monitor**, so it applies to a command
+  whose monitor is the new binary. Existing commands on a pre-fix monitor must be
+  restarted (`restart` = stop + start spawns a fresh monitor) or re-run; until
+  then their preview uses the 80×24 emulator default as a best-effort guess.
+- **Rejected:** Resizing the remote PTY to the pane (violates D9, disturbs the live
+  program and any interactive attach); inferring width from the byte stream
+  (unreliable); a static stored size (goes stale on interactive resize — the
+  attach-stream report is always current).

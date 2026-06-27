@@ -328,7 +328,7 @@ type rawStream struct {
 func (r *rawStream) pump() {
 	defer close(r.ch)
 	for {
-		data, err := r.session.Recv()
+		m, err := r.session.RecvMessage()
 		if err != nil {
 			// io.EOF (the command exited or the stream ended) is a clean close:
 			// the consumer observes the channel closing, keeping the last frame.
@@ -341,8 +341,12 @@ func (r *rawStream) pump() {
 			}
 			return
 		}
+		chunk := tui.RawChunk{Bytes: m.Stdout}
+		if m.Resize {
+			chunk = tui.RawChunk{Resize: &tui.RawSize{Rows: m.Rows, Cols: m.Cols}}
+		}
 		select {
-		case r.ch <- tui.RawChunk{Bytes: data}:
+		case r.ch <- chunk:
 		case <-r.done:
 			return
 		}

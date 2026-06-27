@@ -400,6 +400,19 @@ func (m *Monitor) Resize(rows, cols uint16) error {
 	return pty.Setsize(m.ptmx, &pty.Winsize{Rows: rows, Cols: cols})
 }
 
+// PtySize returns the command's current PTY window size. ok is false for a
+// non-TTY command (no PTY) so callers can skip reporting a size.
+func (m *Monitor) PtySize() (rows, cols uint16, ok bool) {
+	if m.ptmx == nil {
+		return 0, 0, false
+	}
+	r, c, err := pty.Getsize(m.ptmx)
+	if err != nil {
+		return 0, 0, false
+	}
+	return uint16(r), uint16(c), true
+}
+
 // SignalProcess sends a raw signal to the running command and any
 // descendants it has spawned within its process group.
 func (m *Monitor) SignalProcess(sig syscall.Signal) error {

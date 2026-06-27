@@ -21,6 +21,15 @@ split), **D1–D8** (the OQ resolutions), **D9** (vt no-remote-resize), **D10**
   popup. Fixed by `recover()` around all emulator calls + per-session fallback to
   the sanitized log preview. Regression tests `TestDrainRawRecoversEmulatorPanic`,
   `TestRawClosedPanicDisablesTerminalPreviewAndFallsBack`.
+- **Clutter (D14):** the PTY was created at 0×0, so the emulator (sized to the
+  narrow pane) never matched the command's render width → reflow garble. Fixed by
+  the monitor setting a default 80×24 PTY and reporting the live PTY size over a
+  new `AttachResponse.resize` field; the TUI sizes the emulator to the reported
+  size and crops to the pane (no remote resize, D9). New proto field + monitor
+  `PtySize` + `Session.RecvMessage`. Regression tests
+  `TestDrainRawResizeSizesEmulatorToPTY`,
+  `TestPreviewTerminalEmulatorSizedToPTYNotPane`. **Applies to commands whose
+  monitor is the new binary — restart/re-run existing commands to pick it up.**
 
 ## Checklist (mirrors PLAN.md steps)
 

@@ -405,8 +405,7 @@ func (m Model) renderPreview(width, height int) string {
 	ch := max(height-2, 1)
 	p := m.commands.preview
 	// Terminal-view mode: render the live vt emulator frame. The emulator is
-	// sized to this pane's inner area (see previewInnerSize), so its rows map
-	// directly onto the box content.
+	// sized to the command's PTY, so clampLines + box crop its rows to the pane.
 	if p.terminal && p.term != nil {
 		content := clampLines(m.renderPreviewTerm(), ch, 0)
 		return box("Preview", content, width, height)

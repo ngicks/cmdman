@@ -33,6 +33,11 @@ message AttachRequest {
 
 message AttachResponse {
   bytes stdout = 1; // raw bytes from PTY
+  // resize reports the command's current PTY window size. The monitor sends it
+  // once when a client attaches (and whenever the PTY is resized) so a read-only
+  // viewer can size its local terminal emulator to match the command's actual
+  // render width without resizing the remote PTY.
+  ResizeEvent resize = 2;
 }
 
 message ResizeEvent {

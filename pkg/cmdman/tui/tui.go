@@ -174,11 +174,19 @@ type LogStream interface {
 	Close() error
 }
 
-// RawChunk is one raw stdout chunk from an attach stream; a non-nil Err is a
-// read error to surface in the preview.
+// RawChunk is one message from an attach stream: raw stdout bytes, a PTY size
+// report (Resize != nil), or a read error (Err != nil).
 type RawChunk struct {
-	Bytes []byte
-	Err   error
+	Bytes  []byte
+	Resize *RawSize
+	Err    error
+}
+
+// RawSize is a reported PTY window size, used to size the terminal-view emulator
+// to the command's actual render dimensions.
+type RawSize struct {
+	Rows int
+	Cols int
 }
 
 // RawStream delivers raw stdout chunks (scrollback replay then live) from a

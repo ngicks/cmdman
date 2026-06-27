@@ -26,6 +26,13 @@ const previewMaxLines = 5000
 // Update/View loop (which starves keypresses and tears frames).
 const rawRefreshInterval = 80 * time.Millisecond
 
+// Default terminal-view emulator size used until the command's real PTY size
+// arrives as the first attach resize report.
+const (
+	defaultPreviewCols = 80
+	defaultPreviewRows = 24
+)
+
 // --- events / debounced re-list --------------------------------------------
 
 type eventsSubscribedMsg struct {
@@ -326,6 +333,12 @@ func drainRawCmd(term *vt.SafeEmulator, stream RawStream, id string, gen int) te
 			if chunk.Err != nil {
 				return rawClosedMsg{cmdID: id, gen: gen, err: chunk.Err}
 			}
+			if chunk.Resize != nil {
+				if chunk.Resize.Cols > 0 && chunk.Resize.Rows > 0 {
+					term.Resize(chunk.Resize.Cols, chunk.Resize.Rows)
+				}
+				continue
+			}
 			if len(chunk.Bytes) > 0 {
 				_, _ = term.Write(chunk.Bytes)
 			}
@@ -361,10 +374,11 @@ func (m Model) onRawOpened(msg rawOpenedMsg) (tea.Model, tea.Cmd) {
 	if p.raw != nil {
 		closeRawAsync(p.raw)
 	}
-	w, h := m.previewInnerSize()
-	term := vt.NewSafeEmulator(w, h)
+	// Create the emulator at a default size; the command's real PTY size arrives
+	// as the first resize chunk over the raw stream and resizes it (D9: the
+	// remote PTY is never touched).
+	term := vt.NewSafeEmulator(defaultPreviewCols, defaultPreviewRows)
 	p.term = term
-	p.termW, p.termH = w, h
 	p.raw = msg.stream
 	p.status = previewOK
 	p.streaming = true
@@ -437,50 +451,6 @@ func (m Model) onRawClosed(msg rawClosedMsg) (tea.Model, tea.Cmd) {
 	// session when the selection finally moves off this command.
 	m.commands.preview.streaming = false
 	return m, nil
-}
-
-// previewInnerSize returns the inner (content) dimensions of the preview pane,
-// mirroring the layout math in viewContent/renderCommandsBody/renderPreview, so
-// the emulator is sized to exactly what renderPreview draws.
-func (m Model) previewInnerSize() (w, h int) {
-	width := m.width
-	if width <= 0 {
-		width = 80
-	}
-	height := m.height
-	if height <= 0 {
-		height = 24
-	}
-	bodyHeight := max(height-7, 3)
-	leftW := width / 2
-	rightW := width - leftW
-	return max(rightW-2, 1), max(bodyHeight-2, 1)
-}
-
-// resizePreviewTerm resizes the local vt emulator to the current pane size. Per
-// decision D9 it never resizes the remote PTY (no Session.Resize); the emulator
-// clips/scrolls locally so a passive preview never disturbs the real command.
-func (m *Model) resizePreviewTerm() {
-	p := &m.commands.preview
-	if p.term == nil {
-		return
-	}
-	w, h := m.previewInnerSize()
-	if w == p.termW && h == p.termH {
-		return
-	}
-	// A resize can panic inside the vt/ultraviolet buffer; if it does, drop the
-	// terminal-view and disable it for the session so the preview falls back to
-	// the crash-proof log view on the next reconcile.
-	defer func() {
-		if r := recover(); r != nil {
-			m.termPreviewDisabled = true
-			m.stopPreview()
-			m.commands.preview = previewState{}
-		}
-	}()
-	p.term.Resize(w, h)
-	p.termW, p.termH = w, h
 }
 
 // renderPreviewTerm renders the current emulator frame as preview lines. Each
