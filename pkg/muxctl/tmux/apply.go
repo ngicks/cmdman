@@ -77,6 +77,15 @@ func (s *Session) ApplyLayout(
 		)
 	}
 
+	// Geometry is now final. Respawn the viewers in a second pass so each reads
+	// its settled pane size at startup, eliminating the respawn-before-resize
+	// race (see realizeLeafAt).
+	for _, rl := range st.leaves {
+		if err := s.stampLeaf(ctx, rl.paneID, rl.leaf, false, marker); err != nil {
+			return nil, err
+		}
+	}
+
 	focusName := pickFocus(root)
 	if focusName != "" {
 		if p, ok := st.panes[focusName]; ok {
@@ -94,7 +103,15 @@ type applyState struct {
 	ctx     context.Context
 	marker  int
 	panes   map[string]muxctl.Pane
+	leaves  []realizedLeaf // leaves to respawn after geometry settles (see realizeLeafAt)
 	skipped []string
+}
+
+// realizedLeaf is a leaf pane whose geometry is placed but whose viewer respawn
+// is deferred until the whole window is built.
+type realizedLeaf struct {
+	paneID string
+	leaf   muxctl.PaneSpec
 }
 
 func (st *applyState) materialize(anchorID string, node muxctl.PaneSpec, w, h int) error {
@@ -153,9 +170,14 @@ const markerOption = "@cmdman_marker"
 const leafOption = "@cmdman_leaf"
 
 func (st *applyState) realizeLeafAt(paneID string, leaf muxctl.PaneSpec) error {
-	if err := st.s.stampLeaf(st.ctx, paneID, leaf, false, st.marker); err != nil {
-		return err
-	}
+	// Record the leaf; its viewer is respawned only AFTER the whole window
+	// geometry is built (see ApplyLayout's respawn pass). Respawning during the
+	// incremental split-window construction boots a viewer at an intermediate
+	// pane size, and the corrective SIGWINCH from a later split is lost in the
+	// viewer's startup window — leaving e.g. neovim sized to a stale, smaller
+	// geometry until a manual border drag. Deferring the respawn until the
+	// geometry is final lets each viewer read its settled size at startup.
+	st.leaves = append(st.leaves, realizedLeaf{paneID: paneID, leaf: leaf})
 	st.panes[leaf.Name] = &Pane{id: paneID, name: leaf.Name}
 	return nil
 }
