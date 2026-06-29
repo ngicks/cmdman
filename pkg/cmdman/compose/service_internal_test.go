@@ -431,6 +431,98 @@ func TestStopWithoutSpecUsesStoredAfterDependents(t *testing.T) {
 	}
 }
 
+// commandPhaseReporter records every event so a test can assert which replica
+// names (and phases) a reconcile walk reported. Safe for the concurrent Report
+// calls a walk makes.
+type commandPhaseReporter struct {
+	mu     sync.Mutex
+	events []Event
+}
+
+func (r *commandPhaseReporter) Report(ev Event) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, ev)
+}
+
+func (r *commandPhaseReporter) reached(command string, phase Phase) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, ev := range r.events {
+		if ev.Command == command && ev.Phase == phase {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *commandPhaseReporter) seen(command string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, ev := range r.events {
+		if ev.Command == command {
+			return true
+		}
+	}
+	return false
+}
+
+// TestReconcileStartReportsEveryScaleIndex verifies the start phase reports each
+// replica of a scaled command by its scale-indexed name ("web-1".."web-3")
+// rather than collapsing them under the bare command name, while the per-command
+// StartOutcome stays keyed by the command name.
+func TestReconcileStartReportsEveryScaleIndex(t *testing.T) {
+	rec := &commandPhaseReporter{}
+	var mu sync.Mutex
+	started := map[string]int{}
+	svc := &Service{
+		reporter: rec,
+		svc: testCmdmanSvc{
+			// No existing replicas: every replica is started fresh.
+			list: func(context.Context, cmdman.ListRequest) ([]store.CommandEntry, error) {
+				return nil, nil
+			},
+			start: func(_ context.Context, genName string) error {
+				mu.Lock()
+				started[genName]++
+				mu.Unlock()
+				return nil
+			},
+		},
+	}
+
+	spec := reconcileSpec(Command{Name: "web", GeneratedName: "gen-web", Scale: 3})
+	outcomes, err := svc.reconcileStart(context.Background(), spec, nil)
+	if err != nil {
+		t.Fatalf("reconcileStart: %v", err)
+	}
+
+	// The outcome stays per command, not per replica.
+	if len(outcomes) != 1 || outcomes[0].Command != "web" {
+		t.Fatalf("expected a single \"web\" outcome, got %#v", outcomes)
+	}
+
+	// Every replica was started by its generated instance name.
+	for _, gen := range []string{"gen-web-1", "gen-web-2", "gen-web-3"} {
+		if started[gen] == 0 {
+			t.Errorf("replica %q was not started", gen)
+		}
+	}
+
+	// The progress trace lists each replica by scale index across starting and
+	// running, and never reports the bare command name.
+	for _, disp := range []string{"web-1", "web-2", "web-3"} {
+		for _, phase := range []Phase{PhaseStarting, PhaseRunning} {
+			if !rec.reached(disp, phase) {
+				t.Errorf("expected %q to reach %q", disp, phase)
+			}
+		}
+	}
+	if rec.seen("web") {
+		t.Errorf("scaled command must not report under its bare name \"web\"")
+	}
+}
+
 // TestReconcileRunningConditionStartsDependentWithoutWaitingForExit verifies a
 // "running" dependency releases its dependent as soon as the dependency starts,
 // without waiting for it to terminate, and without Wait being called for it.

@@ -109,12 +109,10 @@ func stopAllConcurrent(
 	eg, _ := errgroup.WithContext(ctx)
 
 	for _, entry := range entries {
-		cmdName := ""
-		if entry.ConfigJSON != nil {
-			cmdName = entry.ConfigJSON.Labels[LabelCommand]
-		}
+		// Label replicas by scale index so a scaled command shows every replica
+		// rather than collapsing them under the bare command name.
+		name := entryDisplayName(entry)
 		id := entry.ID
-		name := cmdName
 		eg.Go(func() error {
 			s.report(name, PhaseStopping, nil, nil)
 			_, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{id}})

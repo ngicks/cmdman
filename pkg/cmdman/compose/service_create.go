@@ -210,6 +210,27 @@ func instanceDisplayName(cmd Command, scaleIndex int) string {
 	return fmt.Sprintf("%s-%d", cmd.Name, scaleIndex)
 }
 
+// entryDisplayName is [instanceDisplayName] for a stored replica whose desired
+// Command is not in hand (orphan stop, project-only down): it reads the compose
+// command name, replica count, and scale index from the entry's reserved labels.
+// A single-replica command keeps its bare name; a scaled one gets the
+// "<command>-<index>" suffix, so both paths label replicas the same way.
+func entryDisplayName(e store.CommandEntry) string {
+	if e.ConfigJSON == nil {
+		return ""
+	}
+	name := e.ConfigJSON.Labels[LabelCommand]
+	idx := scaleIndexOf(e)
+	scale := 1
+	if n, err := strconv.Atoi(e.ConfigJSON.Labels[LabelScale]); err == nil {
+		scale = n
+	}
+	if scale <= 1 || idx <= 0 {
+		return name
+	}
+	return fmt.Sprintf("%s-%d", name, idx)
+}
+
 // handleExcessReplicas stops (when live) and removes surplus replicas left by a
 // scale-down. Only replicas whose command is in the target set are touched, so a
 // subset operation never tears down a replica it was not asked about. Each

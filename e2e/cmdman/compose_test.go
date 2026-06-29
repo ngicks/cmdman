@@ -927,6 +927,64 @@ func TestComposeProgressJSONL(t *testing.T) {
 	}
 }
 
+// TestComposeProgressScaleIndexJSONL verifies the progress view lists every
+// replica of a scaled command by its scale-indexed name ("<command>-<n>")
+// throughout a lifecycle: the start phase of up and the stop/remove phases of
+// down. This matches the create phase, which already reports per replica, so a
+// scaled command never collapses onto the bare command name.
+func TestComposeProgressScaleIndexJSONL(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-progress-scale"
+	// Replicas idle so they are observably running when down stops them.
+	yaml := fmt.Sprintf(`name: %s
+commands:
+  web:
+    args: [sh, -c, "sleep 30"]
+    scale: 3
+`, project)
+	writeComposeFile(t, wd, yaml)
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	composePath := filepath.Join(wd, "cmd-compose.yaml")
+
+	// up on a piped (non-terminal) stdout resolves to JSONL. Every replica must
+	// appear by its scale-indexed name across create and start.
+	stdout, stderr, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up")
+	if err != nil {
+		t.Fatalf("compose up failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	upEvents := parseProgress(t, stdout)
+	for _, replica := range []string{"web-1", "web-2", "web-3"} {
+		for _, phase := range []string{"created", "running"} {
+			if !progressReached(upEvents, replica, phase) {
+				t.Fatalf("expected %q %s event on up; got:\n%s", replica, phase, stdout)
+			}
+		}
+	}
+	// A scaled command must never report under its bare name; the start phase
+	// previously collapsed all replicas onto "web".
+	if progressReached(upEvents, "web", "running") {
+		t.Fatalf("scaled command should not report bare name \"web\"; got:\n%s", stdout)
+	}
+
+	// down forces JSONL and must list each replica's stop and removal.
+	dOut, dErr, err := env.exec(ctx, "compose",
+		"--workdir", wd, "-f", composePath, "down", "--progress", "json")
+	if err != nil {
+		t.Fatalf("compose down failed: %v\nstdout:\n%s\nstderr:\n%s", err, dOut, dErr)
+	}
+	downEvents := parseProgress(t, dOut)
+	for _, replica := range []string{"web-1", "web-2", "web-3"} {
+		for _, phase := range []string{"stopped", "removed"} {
+			if !progressReached(downEvents, replica, phase) {
+				t.Fatalf("expected %q %s event on down; got:\n%s", replica, phase, dOut)
+			}
+		}
+	}
+}
+
 // TestComposeDownByCwdTargetsAllProjectsInWorkdir verifies that, without -f or
 // --project-name, down resolves the project by working directory and therefore
 // tears down every project sharing that workdir.

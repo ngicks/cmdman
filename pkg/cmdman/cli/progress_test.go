@@ -214,6 +214,54 @@ func TestTTYReporterKeepsStepMilestones(t *testing.T) {
 	}
 }
 
+// TestTTYReporterRepaintHasNoTrailingNewline guards the scroll-leak fix: a
+// repaint must write no newline after its last line. A trailing newline on the
+// terminal's bottom row scrolls the screen every spinner tick, desyncs the
+// cursor-up count, and leaks a copy of the block into scrollback each tick — the
+// reported failure where a scaled `up` printed dozens of duplicate lines. An
+// N-line frame must therefore contain exactly N-1 newlines and not end in one.
+func TestTTYReporterRepaintHasNoTrailingNewline(t *testing.T) {
+	var buf bytes.Buffer
+	r := newTTYReporter(&buf)
+
+	// A 3-line block of in-flight (transient) replicas — the state the spinner
+	// repaints repeatedly.
+	r.Report(compose.Event{Command: "web-1", Phase: compose.PhaseStarting})
+	r.Report(compose.Event{Command: "web-2", Phase: compose.PhaseStarting})
+	r.Report(compose.Event{Command: "web-3", Phase: compose.PhaseStarting})
+
+	// Simulate several spinner repaints of the unchanged block. Holding r.mu makes
+	// the manual render mutually exclusive with the animate goroutine's renders.
+	for range 5 {
+		r.mu.Lock()
+		buf.Reset()
+		r.render()
+		out := buf.String()
+		r.mu.Unlock()
+		if n := strings.Count(out, "\n"); n != 2 {
+			t.Fatalf(
+				"3-line repaint emitted %d newlines, want 2 (no trailing newline):\n%q",
+				n,
+				out,
+			)
+		}
+		if strings.HasSuffix(out, "\n") {
+			t.Fatalf(
+				"repaint must not end with a newline (would scroll at the bottom row):\n%q",
+				out,
+			)
+		}
+	}
+
+	// Close moves the cursor below the block so later output starts on a fresh line.
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if !strings.HasSuffix(buf.String(), "\n") {
+		t.Fatalf("output should end with a newline after Close:\n%q", buf.String())
+	}
+}
+
 // lastFrame returns the body of the renderer's final in-place repaint:
 // everything after the last cursor-up-to-top control it emits at the start of
 // each frame. Earlier frames (including transient phases mid-step) precede it.

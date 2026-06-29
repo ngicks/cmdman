@@ -57,8 +57,8 @@ func (s *Service) reportBlocked(g *reconcileGraph) {
 		return
 	}
 	type blocked struct {
-		name string
-		err  error
+		cmd Command
+		err error
 	}
 	var pending []blocked
 	g.mu.Lock()
@@ -66,11 +66,13 @@ func (s *Service) reportBlocked(g *reconcileGraph) {
 		if v.Command == nil || !v.InClosure || !v.Blocked {
 			continue
 		}
-		pending = append(pending, blocked{name: v.Command.Name, err: v.Err})
+		pending = append(pending, blocked{cmd: *v.Command, err: v.Err})
 	}
 	g.mu.Unlock()
 	for _, b := range pending {
-		s.report(b.name, PhaseError, b.err, nil)
+		// Report the block against every replica so the trace lists each scale
+		// index that never ran, matching the create/start lines above it.
+		s.reportInstances(b.cmd, PhaseError, b.err, nil)
 	}
 }
 
@@ -92,15 +94,19 @@ func (s *Service) upStartAction(
 			in.State == model.EventTypeStarting
 	}
 
+	// Start every replica that is not already active, reporting each by its scale
+	// index (instances[i] is replica i+1) so the trace lists all replicas rather
+	// than collapsing them onto one command line.
 	instances := cmd.InstanceNames()
-	s.report(cmd.Name, PhaseStarting, nil, nil)
-	for _, genName := range instances {
+	for i, genName := range instances {
 		// Idempotency: starting/running replicas are already active. Everything
 		// else (created/exited/failed/absent) gets a Start, matching low-level
 		// cmdman start and project-only compose start.
 		if active[genName] {
 			continue
 		}
+		disp := instanceDisplayName(*cmd, i+1)
+		s.report(disp, PhaseStarting, nil, nil)
 		if err := s.svc.Start(ctx, genName); err != nil {
 			contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: start failed",
 				"command", cmd.Name,
@@ -108,7 +114,7 @@ func (s *Service) upStartAction(
 				"error", err,
 			)
 			werr := fmt.Errorf("start command %q (%s): %w", cmd.Name, genName, err)
-			s.report(cmd.Name, PhaseError, werr, nil)
+			s.report(disp, PhaseError, werr, nil)
 			return actionResult{State: v.Snapshot.State, Err: werr}
 		}
 	}
@@ -116,7 +122,7 @@ func (s *Service) upStartAction(
 	// No dependent waits on our termination: record running and let dependents
 	// on the running condition proceed without blocking on completion.
 	if !g.anyDependentNeedsCompletion(v.ID) {
-		s.report(cmd.Name, PhaseRunning, nil, v.Snapshot.ExitCode)
+		s.reportInstances(*cmd, PhaseRunning, nil, v.Snapshot.ExitCode)
 		return actionResult{State: model.EventTypeRunning, ExitCode: v.Snapshot.ExitCode}
 	}
 
@@ -124,44 +130,49 @@ func (s *Service) upStartAction(
 	// replica this run. cmdman.Service.Start returns nil even if a command exits
 	// before running is observed, so completion must come from Wait(stopped),
 	// never inferred from Start alone.
-	s.report(cmd.Name, PhaseWaiting, nil, nil)
+	s.reportInstances(*cmd, PhaseWaiting, nil, nil)
 	results, werr := s.svc.Wait(ctx, cmdman.WaitRequest{
 		Targets:   instances,
 		Condition: cmdman.WaitConditionStopped,
 	})
 	if werr != nil {
-		s.report(cmd.Name, PhaseError, werr, nil)
+		s.reportInstances(*cmd, PhaseError, werr, nil)
 		return actionResult{State: model.EventTypeRunning, Err: werr}
 	}
 
-	// Reduce per-replica wait results to a single terminal state. A replica with
-	// a recorded exit code exited (possibly non-zero); one without is a
-	// monitor/subprocess failure. completed is satisfied by either; the
+	// Reduce per-replica wait results to a single terminal state for the vertex,
+	// reporting each replica's own terminal phase as we go. Service.Wait returns
+	// one result per target in argument order, so results[i] is replica i+1. A
+	// replica with a recorded exit code exited (possibly non-zero); one without
+	// is a monitor/subprocess failure. completed is satisfied by either; the
 	// successful condition additionally checks the exit code (see aggregate).
 	insts := make([]instanceSnapshot, 0, len(results))
 	var firstErr error
-	for _, r := range results {
+	for i, r := range results {
+		disp := instanceDisplayName(*cmd, i+1)
 		st := model.EventTypeExited
-		if r.Err != nil {
+		switch {
+		case r.Err != nil:
 			st = model.EventTypeFailed
 			if firstErr == nil {
 				firstErr = r.Err
 			}
-		} else if r.ExitCode == nil {
+			s.report(disp, PhaseFailed, r.Err, r.ExitCode)
+		case r.ExitCode == nil:
 			st = model.EventTypeFailed
+			s.report(disp, PhaseFailed, nil, nil)
+		default:
+			s.report(disp, PhaseExited, nil, r.ExitCode)
 		}
 		insts = append(insts, instanceSnapshot{State: st, ExitCode: r.ExitCode})
 	}
 	state, exit := aggregateInstances(insts)
 	switch {
 	case firstErr != nil:
-		s.report(cmd.Name, PhaseFailed, firstErr, exit)
 		return actionResult{State: model.EventTypeFailed, ExitCode: exit, Err: firstErr}
 	case state == model.EventTypeExited:
-		s.report(cmd.Name, PhaseExited, nil, exit)
 		return actionResult{State: model.EventTypeExited, ExitCode: exit}
 	default:
-		s.report(cmd.Name, PhaseFailed, nil, exit)
 		return actionResult{State: model.EventTypeFailed, ExitCode: exit}
 	}
 }
@@ -218,17 +229,19 @@ func (s *Service) stopAction(
 
 	live := snap.activeInstances()
 	if len(live) == 0 {
-		// Nothing to stop: every replica is already terminal. Report skipped, keep
-		// the observed aggregate state for diagnostics.
-		s.report(cmd.Name, PhaseSkipped, nil, snap.ExitCode)
+		// Nothing to stop: every replica is already terminal. Report skipped for
+		// each replica, keeping the observed aggregate state for diagnostics.
+		s.reportInstances(*cmd, PhaseSkipped, nil, snap.ExitCode)
 		return actionResult{State: snap.State, ExitCode: snap.ExitCode}
 	}
 
+	// Report and stop each live replica by its scale index so the trace lists
+	// every replica being stopped rather than one command line.
 	ids := make([]string, len(live))
 	for i, in := range live {
 		ids[i] = in.ID
+		s.report(instanceDisplayName(*cmd, in.ScaleIndex), PhaseStopping, nil, nil)
 	}
-	s.report(cmd.Name, PhaseStopping, nil, nil)
 	if _, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: ids}); err != nil {
 		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: stop failed",
 			"project", project,
@@ -237,10 +250,14 @@ func (s *Service) stopAction(
 			"error", err,
 		)
 		werr := fmt.Errorf("stop command %q (%v): %w", cmd.Name, ids, err)
-		s.report(cmd.Name, PhaseError, werr, nil)
+		for _, in := range live {
+			s.report(instanceDisplayName(*cmd, in.ScaleIndex), PhaseError, werr, nil)
+		}
 		return actionResult{State: snap.State, Err: werr}
 	}
-	s.report(cmd.Name, PhaseStopped, nil, snap.ExitCode)
+	for _, in := range live {
+		s.report(instanceDisplayName(*cmd, in.ScaleIndex), PhaseStopped, nil, snap.ExitCode)
+	}
 	return actionResult{State: model.EventTypeExited, ExitCode: snap.ExitCode}
 }
 

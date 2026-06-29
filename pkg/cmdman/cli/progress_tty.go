@@ -95,6 +95,9 @@ func (r *ttyReporter) Close() error {
 	}
 	r.closed = true
 	r.render() // final frame
+	// render leaves the cursor on the block's last line (no trailing newline);
+	// move below it so the shell prompt / later output starts on a fresh line.
+	_, _ = io.WriteString(r.out, "\n")
 	r.mu.Unlock()
 
 	close(r.stopTick)
@@ -126,17 +129,28 @@ func (r *ttyReporter) animate() {
 // cursor up over the previously drawn lines, then clears and rewrites each line,
 // so a repaint costs no scrollback. The line count only grows (steps are
 // appended, never removed), so the up-count always matches what is on screen.
+//
+// Crucially it writes NO trailing newline after the last line, leaving the
+// cursor on the block's final line rather than on a fresh line below it. A
+// trailing newline at the bottom row of the terminal would scroll the screen on
+// every repaint, desyncing the cursor-up count and leaking a copy of the block
+// into scrollback each spinner tick. Keeping the cursor inside the block means a
+// same-height repaint never emits a newline and so never scrolls. (Growing past
+// the terminal height still scrolls, an inherent limit of inline rendering.)
 func (r *ttyReporter) render() {
 	var b strings.Builder
-	if r.drawn > 0 {
-		fmt.Fprintf(&b, "\x1b[%dA", r.drawn) // cursor up to the top of the block
+	// The cursor sits on the last drawn line; step up to the first one.
+	if r.drawn > 1 {
+		fmt.Fprintf(&b, "\x1b[%dA", r.drawn-1)
 	}
 	total := 0
 	for _, name := range r.order {
 		for _, e := range r.lines[name] {
+			if total > 0 {
+				b.WriteByte('\n') // separate lines; none trails the final line
+			}
 			b.WriteString("\r\x1b[2K") // carriage return + clear entire line
 			b.WriteString(renderProgressLine(name, e, r.frame))
-			b.WriteByte('\n')
 			total++
 		}
 	}
