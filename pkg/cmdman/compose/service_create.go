@@ -328,20 +328,20 @@ func buildCreateRequest(
 	scaleIndex int,
 ) cmdman.CreateRequest {
 	// Inject the replica's identity as environment variables via AppendEnv (not
-	// nc.Env) for two reasons: it keeps them out of the config hash (the index is
-	// a property of the replica, not the command config, so identical replicas
-	// must not look like drift), and it preserves cmdman's OS-env inheritance for
-	// commands that declare no env of their own (a non-empty Env would suppress
-	// the DefaultEnvironment fallback, dropping PATH).
+	// nc.Env) so they stay out of the config hash: the index is a property of the
+	// replica, not the command config, so identical replicas must not look like
+	// drift. Host-env inheritance is governed explicitly by ImportHostEnv below.
 	appendEnv := []string{
 		ENV_CMDMAN_COMPOSE_SCALE_INDEX + "=" + strconv.Itoa(scaleIndex),
 		ENV_CMDMAN_COMPOSE_SCALE + "=" + strconv.Itoa(max(nc.Scale, 1)),
 	}
+	importHostEnv := nc.ImportHostEnv
 	return cmdman.CreateRequest{
 		Name:            instanceName,
 		Dir:             nc.Dir,
 		Argv:            nc.Args,
 		Env:             nc.Env,
+		ImportHostEnv:   &importHostEnv,
 		AppendEnv:       appendEnv,
 		RestartPolicy:   nc.RestartPolicy,
 		MaxRetries:      nc.MaxRetries,

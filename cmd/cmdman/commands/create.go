@@ -16,6 +16,7 @@ type createFlags struct {
 	Name            string
 	Dir             string
 	Env             []string
+	ImportHostEnv   bool
 	Label           []string
 	Restart         string
 	StopSignal      string
@@ -31,6 +32,13 @@ func bindCreateFlags(cmd *cobra.Command, f *createFlags) {
 	flags.StringVarP(&f.Name, "name", "n", "", "Human-readable unique name")
 	flags.StringVarP(&f.Dir, "dir", "C", "", "Working directory for the command")
 	flags.StringArrayVarP(&f.Env, "env", "E", nil, "Environment variable KEY=VALUE (repeatable)")
+	flags.BoolVar(
+		&f.ImportHostEnv,
+		"import-host-env",
+		true,
+		"Import the host environment as the base; --env entries override it. "+
+			"Set to false to start from an empty environment plus --env",
+	)
 	flags.StringArrayVarP(&f.Label, "label", "l", nil, "Metadata label KEY=VALUE (repeatable)")
 	flags.StringVar(
 		&f.Restart,
@@ -139,6 +147,7 @@ func doCreate(
 		Name:            flags.Name,
 		Dir:             flags.Dir,
 		Env:             flags.Env,
+		ImportHostEnv:   &flags.ImportHostEnv,
 		Labels:          labels,
 		RestartPolicy:   restartPolicy,
 		MaxRetries:      maxRetries,

@@ -31,9 +31,13 @@ type CanonicalSpec struct {
 // explicitly (cmdman applies runtime defaults later), so an omitted field means
 // "not set in the compose file", not "set to the default".
 type CanonicalCommand struct {
-	Dir             string                    `yaml:"dir" json:"dir"`
-	Args            []string                  `yaml:"args" json:"args"`
-	Env             []string                  `yaml:"env,omitempty" json:"env,omitzero"`
+	Dir  string   `yaml:"dir" json:"dir"`
+	Args []string `yaml:"args" json:"args"`
+	Env  []string `yaml:"env,omitempty" json:"env,omitzero"`
+	// ImportHostEnv is rendered only when it deviates from the default (true): a
+	// pointer set to false emits "import_host_env: false", while the default
+	// (nil) is omitted so the canonical document round-trips back to true.
+	ImportHostEnv   *bool                     `yaml:"import_host_env,omitempty" json:"import_host_env,omitzero"` //nolint:lll // dual yaml+json snake_case tags exceed the line limit
 	Labels          map[string]string         `yaml:"labels,omitempty" json:"labels,omitzero"`
 	RestartPolicy   string                    `yaml:"restart_policy,omitempty" json:"restart_policy,omitzero"` //nolint:lll // dual yaml+json snake_case tags exceed the line limit
 	StopSignal      string                    `yaml:"stop_signal,omitempty" json:"stop_signal,omitzero"`       //nolint:lll // dual yaml+json snake_case tags exceed the line limit
@@ -74,10 +78,18 @@ func canonicalCommand(c Command) CanonicalCommand {
 			after[a.Name] = CanonicalAfter{Condition: string(a.Condition)}
 		}
 	}
+	var importHostEnv *bool
+	if !c.ImportHostEnv {
+		// Default is true, so only an explicit false is rendered; true is omitted
+		// and round-trips back to the default.
+		disabled := false
+		importHostEnv = &disabled
+	}
 	return CanonicalCommand{
 		Dir:             c.Dir,
 		Args:            c.Args,
 		Env:             c.Env,
+		ImportHostEnv:   importHostEnv,
 		Labels:          c.Labels,
 		RestartPolicy:   canonicalRestartPolicy(c.RestartPolicy, c.MaxRetries),
 		StopSignal:      c.StopSignal,

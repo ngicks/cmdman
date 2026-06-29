@@ -290,6 +290,54 @@ func TestHashChangesOnFieldChange(t *testing.T) {
 	assert.Assert(t, h1 != h2, "hash must change when args change")
 }
 
+func TestHashChangesOnImportHostEnv(t *testing.T) {
+	cmd := compose.Command{
+		Name:          "api",
+		Args:          []string{"go", "run", "./cmd/api"},
+		Dir:           "/work",
+		ImportHostEnv: true,
+	}
+	h1, err := compose.Hash(cmd)
+	assert.NilError(t, err)
+
+	cmd.ImportHostEnv = false
+	h2, err := compose.Hash(cmd)
+	assert.NilError(t, err)
+
+	assert.Assert(t, h1 != h2, "hash must change when import_host_env changes")
+}
+
+func TestImportHostEnvDefaultsTrue(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := `
+name: import-host-env-test
+commands:
+  default-on:
+    args: [echo, a]
+  explicit-off:
+    args: [echo, b]
+    import_host_env: false
+  explicit-on:
+    args: [echo, c]
+    import_host_env: true
+`
+	yamlPath := filepath.Join(dir, "cmd-compose.yaml")
+	assert.NilError(t, os.WriteFile(yamlPath, []byte(yamlContent), 0644))
+
+	raw, err := compose.DecodeFile(yamlPath)
+	assert.NilError(t, err)
+	spec, err := compose.Normalize(context.Background(), yamlPath, raw, compose.NormalizeOpts{})
+	assert.NilError(t, err)
+
+	byName := make(map[string]compose.Command, len(spec.Commands))
+	for _, c := range spec.Commands {
+		byName[c.Name] = c
+	}
+	assert.Equal(t, byName["default-on"].ImportHostEnv, true)
+	assert.Equal(t, byName["explicit-off"].ImportHostEnv, false)
+	assert.Equal(t, byName["explicit-on"].ImportHostEnv, true)
+}
+
 // ---- reserved label rejection -----------------------------------------------
 
 func TestReservedLabelRejection(t *testing.T) {

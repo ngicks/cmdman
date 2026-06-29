@@ -74,10 +74,15 @@ type RawComposeSpec struct {
 
 // RawCommand is the raw YAML shape for a single command.
 type RawCommand struct {
-	Dir             string               `yaml:"dir" json:"dir"`
-	Args            []string             `yaml:"args" json:"args"`
-	Env             []string             `yaml:"env" json:"env"`
-	EnvFile         []EnvFileSpec        `yaml:"env_file" json:"env_file"`
+	Dir     string        `yaml:"dir" json:"dir"`
+	Args    []string      `yaml:"args" json:"args"`
+	Env     []string      `yaml:"env" json:"env"`
+	EnvFile []EnvFileSpec `yaml:"env_file" json:"env_file"`
+	// ImportHostEnv controls whether the host environment is imported as the
+	// base for this command (env_file + env: are layered on top as overrides).
+	// A pointer so absence (nil → default true) is distinguishable from an
+	// explicit false.
+	ImportHostEnv   *bool                `yaml:"import_host_env" json:"import_host_env"` //nolint:lll // pointer detects absence; defaults to true
 	Labels          map[string]string    `yaml:"labels" json:"labels"`
 	RestartPolicy   string               `yaml:"restart_policy" json:"restart_policy"`
 	StopSignal      string               `yaml:"stop_signal" json:"stop_signal"`
@@ -147,6 +152,10 @@ type Command struct {
 	// Env is the merged environment (env_file + env: overrides), interpolated,
 	// in KEY=VALUE form. Does NOT include OS environment; callers inject that.
 	Env []string
+	// ImportHostEnv controls whether the host environment is imported as the
+	// base for this command, with Env layered on top as overrides. Resolved from
+	// RawCommand.ImportHostEnv during normalization; defaults to true.
+	ImportHostEnv bool
 	// Labels are user-supplied labels. Reserved cmdman.compose.* labels are absent here;
 	// they are added by Plan when building CreateRequest inputs.
 	Labels map[string]string

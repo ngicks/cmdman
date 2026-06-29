@@ -450,6 +450,11 @@ func Normalize(
 		envSlice := mapToEnvSlice(commandEnv)
 		genName := GenerateName(wdHash, project, name)
 
+		importHostEnv := true
+		if cmd.ImportHostEnv != nil {
+			importHostEnv = *cmd.ImportHostEnv
+		}
+
 		var (
 			restartPolicy model.RestartPolicy
 			maxRetries    int
@@ -466,6 +471,7 @@ func Normalize(
 			Dir:             cmdDir,
 			Args:            interpolatedArgs,
 			Env:             envSlice,
+			ImportHostEnv:   importHostEnv,
 			Labels:          cmd.Labels,
 			RestartPolicy:   restartPolicy,
 			MaxRetries:      maxRetries,

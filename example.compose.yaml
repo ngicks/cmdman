@@ -12,6 +12,10 @@ commands:
   # yay2: demonstrates interpolation from env — the env: block defines SLEEP_SECS
   # (itself defaulting via ${INPUT_SLEEP:-3}), and args interpolate ${SLEEP_SECS}.
   # It sleeps ~3s so dependents must wait for it to complete.
+  #
+  # The host environment is imported by default (env: entries are layered on top
+  # as overrides), so commands keep PATH and friends. Set `import_host_env: false`
+  # on a command to start it from an empty environment plus its own env:/env_file.
   yay2:
     env:
       - SLEEP_SECS=${INPUT_SLEEP:-3}

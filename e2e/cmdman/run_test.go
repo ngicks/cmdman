@@ -3,6 +3,7 @@ package cmdman_test
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -124,6 +125,89 @@ func TestRun_WithEnvVars(t *testing.T) {
 	}
 	if !found["MY_VAR"] || !found["OTHER_VAR"] {
 		t.Errorf("expected MY_VAR and OTHER_VAR in env, got %v", envList)
+	}
+}
+
+// configEnv returns the resolved Config.env slice for a command as []string.
+func (e *testEnv) configEnv(ctx context.Context, idOrName string) []string {
+	e.t.Helper()
+	info := e.inspectJSON(ctx, idOrName)
+	cfg, _ := info["Config"].(map[string]any)
+	raw, _ := cfg["env"].([]any)
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func envHasKey(env []string, key string) bool {
+	prefix := key + "="
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRun_ImportsHostEnvByDefault verifies the default behavior: the host
+// environment is imported into the command even when --env is also given. This
+// is the post-v0.0.14 behavior — previously any explicit --env suppressed the
+// host environment entirely.
+func TestRun_ImportsHostEnvByDefault(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	// CMDMAN_E2E_HOST_VAR is present in the cmdman process environment, so it is
+	// part of the host environment the command should inherit.
+	stdout, stderr, err := env.execWithExtraEnv(ctx,
+		[]string{"CMDMAN_E2E_HOST_VAR=from-host"},
+		"run", "-E", "MY_VAR=explicit", "--", "/bin/sh", "-c", "true",
+	)
+	if err != nil {
+		t.Fatalf("run failed: %v\nstderr:\n%s", err, stderr)
+	}
+	id := stdout
+	env.waitForState(ctx, id, "exited", defaultTimeout)
+
+	cfgEnv := env.configEnv(ctx, id)
+	if !slices.Contains(cfgEnv, "CMDMAN_E2E_HOST_VAR=from-host") {
+		t.Errorf("expected host env var imported alongside --env, got %v", cfgEnv)
+	}
+	if !slices.Contains(cfgEnv, "MY_VAR=explicit") {
+		t.Errorf("expected explicit --env entry present, got %v", cfgEnv)
+	}
+}
+
+// TestRun_ImportHostEnvDisabled verifies that --import-host-env=false starts the
+// command from an empty environment plus the explicit --env entries (the host
+// environment is not imported).
+func TestRun_ImportHostEnvDisabled(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	stdout, stderr, err := env.execWithExtraEnv(ctx,
+		[]string{"CMDMAN_E2E_HOST_VAR=from-host"},
+		"run", "--import-host-env=false", "-E", "MY_VAR=explicit",
+		"--", "/bin/sh", "-c", "true",
+	)
+	if err != nil {
+		t.Fatalf("run failed: %v\nstderr:\n%s", err, stderr)
+	}
+	id := stdout
+	env.waitForState(ctx, id, "exited", defaultTimeout)
+
+	cfgEnv := env.configEnv(ctx, id)
+	if envHasKey(cfgEnv, "CMDMAN_E2E_HOST_VAR") {
+		t.Errorf("expected host env var to be excluded, got %v", cfgEnv)
+	}
+	if !slices.Contains(cfgEnv, "MY_VAR=explicit") {
+		t.Errorf("expected explicit --env entry present, got %v", cfgEnv)
 	}
 }
 

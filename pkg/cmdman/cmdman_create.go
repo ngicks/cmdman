@@ -17,10 +17,18 @@ type CreateRequest struct {
 	Name string
 	Dir  string
 	Env  []string
+	// ImportHostEnv controls whether the process-wide host environment
+	// (CmdmanConfig.DefaultEnvironment, typically os.Environ()) is used as the
+	// base environment for the command. When true, the host environment is
+	// imported and Env entries are layered on top as overrides; when false, the
+	// command starts from an empty environment plus Env. A nil pointer defaults
+	// to true, so a programmatic caller that leaves it unset inherits the host
+	// environment (and keeps PATH) rather than starting bare.
+	ImportHostEnv *bool
 	// AppendEnv holds environment entries appended after the base environment is
-	// resolved — i.e. after the empty-Env fallback to DefaultEnvironment. Use it
-	// for context the command should always see (e.g. compose scale index)
-	// without suppressing OS-env inheritance the way a non-empty Env does.
+	// resolved (host env import + Env overrides). Use it for context the command
+	// should always see (e.g. compose scale index) without it counting toward
+	// the command's configured environment for drift purposes.
 	AppendEnv       []string
 	Labels          map[string]string
 	RestartPolicy   model.RestartPolicy
@@ -102,12 +110,18 @@ func (s *Service) buildCommandConfig(req CreateRequest) *model.CommandConfig {
 		dir = s.cfg.DefaultWorkingDir
 	}
 
-	env := append([]string(nil), req.Env...)
-	if len(env) == 0 {
+	// Import the host environment as the base unless explicitly disabled, then
+	// layer Env on top. Duplicate keys are resolved at exec time (os/exec keeps
+	// the last occurrence), so a later Env entry overrides the inherited host
+	// value. A nil ImportHostEnv defaults to true.
+	importHostEnv := req.ImportHostEnv == nil || *req.ImportHostEnv
+	var env []string
+	if importHostEnv {
 		env = append(env, s.cfg.DefaultEnvironment...)
 	}
-	// AppendEnv is layered on after the fallback so callers can inject context
-	// vars without an explicit Env defeating DefaultEnvironment inheritance.
+	env = append(env, req.Env...)
+	// AppendEnv is layered on last so callers can inject context vars (e.g. the
+	// compose scale index) regardless of the host-env and Env layers.
 	env = append(env, req.AppendEnv...)
 
 	scrollbackBytes := req.ScrollbackBytes
