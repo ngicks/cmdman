@@ -30,7 +30,7 @@ type createFlags struct {
 func bindCreateFlags(cmd *cobra.Command, f *createFlags) {
 	flags := cmd.Flags()
 	flags.StringVarP(&f.Name, "name", "n", "", "Human-readable unique name")
-	flags.StringVarP(&f.Dir, "dir", "C", "", "Working directory for the command")
+	flags.StringVarP(&f.Dir, "workdir", "w", "", "Working directory for the command")
 	flags.StringArrayVarP(&f.Env, "env", "E", nil, "Environment variable KEY=VALUE (repeatable)")
 	flags.BoolVar(
 		&f.ImportHostEnv,

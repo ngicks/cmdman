@@ -9,6 +9,7 @@
 ```text
 cmdman tui
 cmdman tui --popup[=tmux]
+cmdman tui --workdir DIR
 ```
 
 ## Description
@@ -25,6 +26,9 @@ communicate over an internal IPC endpoint.
 
 - `--popup[=tmux|zellij]`: run the TUI in a multiplexer popup. A bare
   `--popup` infers the driver from the environment; v1 supports tmux.
+- `-w, --workdir DIR`: override the effective work directory used to discover
+  the cwd-active compose project. Without it the process working directory is
+  used.
 
 ## See Also
 

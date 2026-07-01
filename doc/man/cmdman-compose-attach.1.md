@@ -24,7 +24,7 @@ Detaching affects only the client; it does not stop the compose service.
 
 Uses the compose selection flags documented in
 [`cmdman compose`](./cmdman-compose.1.md): `-f, --file`,
-`-p, --project-name`, and `--workdir`.
+`-p, --project-name`, and `-w, --workdir`.
 
 ## Options
 

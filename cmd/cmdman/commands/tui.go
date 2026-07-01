@@ -20,9 +20,10 @@ type tuiPopupFlag struct {
 
 func tuiCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	var (
-		popup   tuiPopupFlag
-		flagTab string
-		geom    cli.PopupGeometry
+		popup       tuiPopupFlag
+		flagTab     string
+		flagWorkDir string
+		geom        cli.PopupGeometry
 	)
 
 	cmd := &cobra.Command{
@@ -31,7 +32,7 @@ func tuiCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTui(cmd, args, rootCfg, popup, flagTab, geom)
+			return runTui(cmd, args, rootCfg, popup, flagTab, flagWorkDir, geom)
 		},
 	}
 
@@ -47,6 +48,9 @@ func tuiCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	cmd.Flags().StringVar(&flagTab, "tab", "commands",
 		"Tab shown on startup: "+strings.Join(tui.TabKeys(), ", "))
 	_ = cmd.RegisterFlagCompletionFunc("tab", tabCompletions)
+
+	cmd.Flags().StringVarP(&flagWorkDir, "workdir", "w", "",
+		"Override the effective work directory for compose project discovery")
 
 	cmd.Flags().StringVar(&geom.Width, "popup-width", "",
 		"Popup width as an explicit percentage, e.g. 80% (requires --popup)")
@@ -68,6 +72,7 @@ func runTui(
 	rootCfg *cmdman.CmdmanConfig,
 	popup tuiPopupFlag,
 	flagTab string,
+	flagWorkDir string,
 	geom cli.PopupGeometry,
 ) error {
 	tab, err := tui.ParseTab(flagTab)
@@ -85,7 +90,7 @@ func runTui(
 
 	if popup.set {
 		return cli.LaunchTUIPopup(
-			cmd.Context(), popup.value, rootCfg.DataDir, rootCfg.RuntimeDir, tab, geom)
+			cmd.Context(), popup.value, rootCfg.DataDir, rootCfg.RuntimeDir, tab, flagWorkDir, geom)
 	}
 
 	svc, err := cmdmanService(rootCfg)
@@ -94,7 +99,7 @@ func runTui(
 	}
 	defer svc.Close()
 
-	return cli.RunTUI(cmd.Context(), svc, tab)
+	return cli.RunTUI(cmd.Context(), svc, tab, flagWorkDir)
 }
 
 // tuiChildCmd registers the hidden `cmdman tui __child` subcommand that runs
@@ -102,8 +107,9 @@ func runTui(
 // over IPC. It is internal and excluded from help and completion.
 func tuiChildCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	var (
-		flagIPC string
-		flagTab string
+		flagIPC     string
+		flagTab     string
+		flagWorkDir string
 	)
 
 	cmd := &cobra.Command{
@@ -113,13 +119,15 @@ func tuiChildCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTuiChild(cmd, args, rootCfg, flagIPC, flagTab)
+			return runTuiChild(cmd, args, rootCfg, flagIPC, flagTab, flagWorkDir)
 		},
 	}
 
 	cmd.Flags().StringVar(&flagIPC, "ipc", "", "IPC endpoint for the popup launcher")
 	cmd.Flags().StringVar(&flagTab, "tab", "commands",
 		"Tab shown on startup: "+strings.Join(tui.TabKeys(), ", "))
+	cmd.Flags().StringVarP(&flagWorkDir, "workdir", "w", "",
+		"Override the effective work directory for compose project discovery")
 
 	parent.AddCommand(cmd)
 }
@@ -128,7 +136,7 @@ func runTuiChild(
 	cmd *cobra.Command,
 	_ []string,
 	rootCfg *cmdman.CmdmanConfig,
-	ipc, flagTab string,
+	ipc, flagTab, flagWorkDir string,
 ) error {
 	tab, err := tui.ParseTab(flagTab)
 	if err != nil {
@@ -141,5 +149,5 @@ func runTuiChild(
 	}
 	defer svc.Close()
 
-	return cli.RunTUIChild(cmd.Context(), svc, ipc, tab)
+	return cli.RunTUIChild(cmd.Context(), svc, ipc, tab, flagWorkDir)
 }

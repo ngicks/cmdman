@@ -87,7 +87,7 @@ func TestRun_WithWorkingDirectory(t *testing.T) {
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
-	id := env.run(ctx, "run", "-C", "/tmp", "--", "/bin/sh", "-c", "pwd")
+	id := env.run(ctx, "run", "--workdir", "/tmp", "--", "/bin/sh", "-c", "pwd")
 	env.waitForState(ctx, id, "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, id)

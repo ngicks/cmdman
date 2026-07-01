@@ -26,7 +26,7 @@ scrollback limit, log driver, labels, and argv are persisted.
 ## Options
 
 - `-n, --name NAME`: assign a unique human-readable target name.
-- `-C, --dir DIR`: child working directory.
+- `-w, --workdir DIR`: child working directory.
 - `-E, --env KEY=VALUE`: stored environment entry; repeatable. An empty env
   set inherits cmdman's complete creation-time environment. Once any explicit
   env entry is provided, only those entries are stored, so include `PATH`,

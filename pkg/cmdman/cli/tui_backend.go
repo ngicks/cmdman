@@ -28,14 +28,24 @@ type serviceBackend struct {
 	svc     *cmdman.Service
 	compose *compose.Service
 	cwd     string
+	// workDir is the raw --workdir override ("" when not given). It overrides the
+	// effective work directory used for cwd-active compose project discovery.
+	workDir string
 }
 
-// newServiceBackend builds a tui.Backend over the given cmdman service.
-func newServiceBackend(svc *cmdman.Service) tui.Backend {
+// newServiceBackend builds a tui.Backend over the given cmdman service. workDir
+// is the --workdir override: when set it replaces the process CWD as the
+// effective work directory for cwd-active grouping and project discovery.
+func newServiceBackend(svc *cmdman.Service, workDir string) tui.Backend {
+	cwd := currentDir()
+	if workDir != "" {
+		cwd = normalizePath(workDir)
+	}
 	return &serviceBackend{
 		svc:     svc,
 		compose: compose.NewService(svc),
-		cwd:     currentDir(),
+		cwd:     cwd,
+		workDir: workDir,
 	}
 }
 
@@ -105,7 +115,7 @@ func (b *serviceBackend) ListProjects(ctx context.Context) ([]tui.ProjectInfo, e
 	}
 	named, _ := compose.ListNamedProjects()
 	infos := mergeProjectInfos(summaries, named)
-	infos = appendCwdProject(infos)
+	infos = appendCwdProject(infos, b.workDir)
 	// Enrich with the mux badge by parsing each project's compose file.
 	for i := range infos {
 		infos[i].HasMux = projectHasMux(infos[i].Name, infos[i].Path)
@@ -120,8 +130,8 @@ func (b *serviceBackend) ListProjects(ctx context.Context) ([]tui.ProjectInfo, e
 // project is already listed (by name) but lacks a compose-file path, the
 // discovered path and workdir are filled in so the mux badge, modified time,
 // and cwd-active marker resolve.
-func appendCwdProject(infos []tui.ProjectInfo) []tui.ProjectInfo {
-	sel, err := compose.LoadOrProject(compose.NormalizeOpts{})
+func appendCwdProject(infos []tui.ProjectInfo, workDir string) []tui.ProjectInfo {
+	sel, err := compose.LoadOrProject(compose.NormalizeOpts{WorkDir: workDir})
 	if err != nil || sel.Spec == nil {
 		return infos
 	}
@@ -492,11 +502,13 @@ func resolveMuxSelection(projectName, composeFile string) (compose.ProjectSelect
 // (D5): the cwd-active mux project, falling back to the Compose-tab selection
 // identified by projectName/composeFile. The resolved project must declare a
 // mux: section.
-func resolveLayoutSelection(projectName, composeFile string) (compose.ProjectSelection, error) {
+func resolveLayoutSelection(
+	projectName, composeFile, workDir string,
+) (compose.ProjectSelection, error) {
 	// Prefer the cwd-active mux project. SelectMuxProject errors when no (or an
 	// ambiguous set of) mux compose is associated with the cwd; in that case fall
 	// back to the explicit Compose-tab selection.
-	if sel, err := compose.SelectMuxProject(compose.NormalizeOpts{}); err == nil {
+	if sel, err := compose.SelectMuxProject(compose.NormalizeOpts{WorkDir: workDir}); err == nil {
 		return sel, nil
 	}
 	return resolveMuxSelection(projectName, composeFile)
@@ -508,7 +520,7 @@ func resolveLayoutSelection(projectName, composeFile string) (compose.ProjectSel
 func (b *serviceBackend) ListLayouts(
 	ctx context.Context, projectName, composeFile string,
 ) (tui.LayoutsInfo, error) {
-	selection, err := resolveLayoutSelection(projectName, composeFile)
+	selection, err := resolveLayoutSelection(projectName, composeFile, b.workDir)
 	if err != nil {
 		return tui.LayoutsInfo{}, err
 	}

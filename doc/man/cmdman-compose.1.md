@@ -25,7 +25,7 @@ lifecycle operations can reconstruct dependency order without loading the file.
   directory when a subcommand needs a file; some read/lifecycle operations can
   instead select an already stored project.
 - `-p, --project-name NAME`: override top-level `name:`.
-- `--workdir DIR`: override the effective work directory.
+- `-w, --workdir DIR`: override the effective work directory.
 
 A different compose file cannot silently take ownership of the same
 `(workdir, project)` pair. Use a different project name to resolve a collision.

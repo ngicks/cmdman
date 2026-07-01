@@ -17,10 +17,11 @@ import (
 )
 
 // RunTUI runs the interactive TUI directly in the current terminal, opening
-// initialTab on startup.
-func RunTUI(ctx context.Context, svc *cmdman.Service, initialTab tui.Tab) error {
+// initialTab on startup. workDir overrides the effective work directory used to
+// discover the cwd-active compose project ("" keeps the process CWD).
+func RunTUI(ctx context.Context, svc *cmdman.Service, initialTab tui.Tab, workDir string) error {
 	return tui.Run(ctx, tui.Options{
-		Backend:    newServiceBackend(svc),
+		Backend:    newServiceBackend(svc, workDir),
 		Version:    cmdman.Version,
 		AltScreen:  true,
 		PopupMode:  false,
@@ -30,12 +31,14 @@ func RunTUI(ctx context.Context, svc *cmdman.Service, initialTab tui.Tab) error 
 
 // RunTUIChild runs the TUI inside a multiplexer popup, reporting startup and
 // final status to the launcher over the IPC endpoint at ipcPath. It is the
-// implementation of the hidden `cmdman tui __child` subcommand.
+// implementation of the hidden `cmdman tui __child` subcommand. workDir mirrors
+// the launcher's --workdir override ("" keeps the process CWD).
 func RunTUIChild(
 	ctx context.Context,
 	svc *cmdman.Service,
 	ipcPath string,
 	initialTab tui.Tab,
+	workDir string,
 ) error {
 	var enc *json.Encoder
 	if ipcPath != "" {
@@ -51,7 +54,7 @@ func RunTUIChild(
 	}
 	send(ipcMessage{Kind: ipcStarted})
 	err := tui.Run(ctx, tui.Options{
-		Backend:    newServiceBackend(svc),
+		Backend:    newServiceBackend(svc, workDir),
 		Version:    cmdman.Version,
 		AltScreen:  true,
 		PopupMode:  true,
@@ -88,6 +91,9 @@ type PopupConfig struct {
 	// Tab is the --tab token (tui.TabKeys() value) forwarded to the popup child
 	// so it opens the same startup tab. Empty is not forwarded.
 	Tab string
+	// WorkDir is the --workdir override forwarded to the popup child so it
+	// discovers the same cwd-active compose project. Empty is not forwarded.
+	WorkDir string
 	// Width, Height, X and Y are explicit-percentage geometry values ("80%")
 	// forwarded to `tmux display-popup` as -w/-h/-x/-y. Empty values are omitted,
 	// leaving tmux's default geometry.
@@ -135,6 +141,7 @@ func LaunchTUIPopup(
 	ctx context.Context,
 	driverValue, dataDir, runtimeDir string,
 	initialTab tui.Tab,
+	workDir string,
 	geom PopupGeometry,
 ) error {
 	if err := geom.Validate(); err != nil {
@@ -153,6 +160,7 @@ func LaunchTUIPopup(
 		RuntimeDir: runtimeDir,
 		ConfPath:   os.Getenv("CMDMAN_CONF"),
 		Tab:        tabToken(initialTab),
+		WorkDir:    workDir,
 		Width:      geom.Width,
 		Height:     geom.Height,
 		X:          geom.X,
@@ -245,6 +253,9 @@ func (cfg PopupConfig) childCommand(ipcPath string) []string {
 	}
 	if cfg.Tab != "" {
 		args = append(args, "--tab", cfg.Tab)
+	}
+	if cfg.WorkDir != "" {
+		args = append(args, "--workdir", cfg.WorkDir)
 	}
 	return args
 }

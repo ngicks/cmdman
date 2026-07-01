@@ -209,6 +209,84 @@ func TestTUI_TabFlagStartsOnCompose(t *testing.T) {
 	}
 }
 
+// --workdir overrides the effective work directory used to discover the
+// cwd-active compose project. A never-run project defined only by a
+// cmd-compose.yaml surfaces in the Compose tab through that discovery path, so
+// its appearance proves `cmdman tui --workdir` is wired end-to-end from the
+// flag down into the backend's project discovery.
+func TestTUI_WorkdirFlagDiscoversComposeProject(t *testing.T) {
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	wd := composeWorkdir(t)
+	writeComposeFile(t, wd, composeBasicYAML("tuiwd"))
+
+	tuiCmd := exec.CommandContext(ctx, cmdmanBin, "tui", "--workdir", wd, "--tab=compose")
+	tuiCmd.Dir = wd
+	tuiCmd.Env = append(os.Environ(),
+		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
+		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
+		"TERM=xterm-256color")
+
+	ptmx, err := pty.StartWithSize(tuiCmd, &pty.Winsize{Rows: 30, Cols: 100})
+	if err != nil {
+		t.Fatalf("start tui pty: %v", err)
+	}
+	defer ptmx.Close()
+
+	var mu sync.Mutex
+	var out bytes.Buffer
+	go func() {
+		b := make([]byte, 8192)
+		for {
+			n, rerr := ptmx.Read(b)
+			if n > 0 {
+				mu.Lock()
+				out.Write(b[:n])
+				mu.Unlock()
+			}
+			if rerr != nil {
+				return
+			}
+		}
+	}()
+	snapshot := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return out.String()
+	}
+
+	waitFor := func(what string, deadline time.Duration) {
+		t.Helper()
+		end := time.Now().Add(deadline)
+		for time.Now().Before(end) {
+			if strings.Contains(snapshot(), what) {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Fatalf("TUI never rendered %q; got:\n%q", what, snapshot())
+	}
+	waitFor("Compose projects", 5*time.Second)
+	// The never-run project is discoverable only via the workdir's compose file,
+	// so listing it proves --workdir reached the backend discovery path.
+	waitFor("tuiwd", 5*time.Second)
+
+	// Quit cleanly with 'q'.
+	_, _ = ptmx.Write([]byte("q"))
+	done := make(chan error, 1)
+	go func() { done <- tuiCmd.Wait() }()
+	select {
+	case werr := <-done:
+		if werr != nil {
+			t.Fatalf("tui exited with error: %v\noutput:\n%q", werr, snapshot())
+		}
+	case <-time.After(4 * time.Second):
+		_ = tuiCmd.Process.Kill()
+		t.Fatalf("TUI did not quit on 'q' within 4s; got:\n%q", snapshot())
+	}
+}
+
 // The popup geometry flags only apply with --popup; using one without it is
 // rejected in RunE before any tmux invocation, so this needs no tmux/terminal.
 func TestTUI_PopupGeometryRequiresPopup(t *testing.T) {

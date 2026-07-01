@@ -48,7 +48,7 @@ func composeCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		"",
 		"Project name (overrides YAML name:)",
 	)
-	pf.StringVar(&flags.WorkDir, "workdir", "", "Override the effective work directory")
+	pf.StringVarP(&flags.WorkDir, "workdir", "w", "", "Override the effective work directory")
 	_ = cmd.RegisterFlagCompletionFunc("file", completeComposeFile)
 
 	composeCreateCmd(cmd, rootCfg, &flags)

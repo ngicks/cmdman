@@ -23,7 +23,7 @@ The signal is required and accepts forms such as `SIGTERM`, `TERM`, `HUP`, and
 
 Uses the compose selection flags documented in
 [`cmdman compose`](./cmdman-compose.1.md): `-f, --file`,
-`-p, --project-name`, and `--workdir`.
+`-p, --project-name`, and `-w, --workdir`.
 
 ## Options
 

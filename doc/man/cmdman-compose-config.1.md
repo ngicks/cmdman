@@ -27,7 +27,7 @@ not the entire host environment used during interpolation.
 
 Uses the compose selection flags documented in
 [`cmdman compose`](./cmdman-compose.1.md): `-f, --file`,
-`-p, --project-name`, and `--workdir`.
+`-p, --project-name`, and `-w, --workdir`.
 
 ## Examples
 

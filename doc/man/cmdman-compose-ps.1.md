@@ -24,7 +24,7 @@ commands or remove orphans.
 
 Uses the compose selection flags documented in
 [`cmdman compose`](./cmdman-compose.1.md): `-f, --file`,
-`-p, --project-name`, and `--workdir`.
+`-p, --project-name`, and `-w, --workdir`.
 
 Unlike the lifecycle subcommands, `ps` does not auto-discover a
 `cmd-compose.yaml` in the working directory to narrow the listing: with neither

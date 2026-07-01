@@ -109,7 +109,7 @@ func TestAppendCwdProjectAddsUnregisteredProject(t *testing.T) {
 	}
 	t.Chdir(dir)
 
-	got := appendCwdProject(nil)
+	got := appendCwdProject(nil, "")
 	if len(got) != 1 {
 		t.Fatalf("want 1 cwd project, got %d", len(got))
 	}
@@ -217,7 +217,7 @@ func TestAppendCwdProjectFillsPathWhenAlreadyListed(t *testing.T) {
 	t.Chdir(dir)
 
 	// Already listed (e.g. from the store) but with no compose-file path.
-	got := appendCwdProject([]tui.ProjectInfo{{Name: "cwdproj"}})
+	got := appendCwdProject([]tui.ProjectInfo{{Name: "cwdproj"}}, "")
 	if len(got) != 1 {
 		t.Fatalf("must not duplicate an already-listed project, got %d", len(got))
 	}
