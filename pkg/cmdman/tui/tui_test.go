@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/mattn/go-runewidth"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
@@ -1025,6 +1026,83 @@ func TestTabBarRendersThreeTabs(t *testing.T) {
 		if !strings.Contains(bar, name) {
 			t.Fatalf("tab bar should render the %q tab, got %q", name, bar)
 		}
+	}
+}
+
+func TestTopBarShowsCwd(t *testing.T) {
+	m := seed() // cwd "/work/local-dev"
+	out := stripANSI(m.renderTopBar(80))
+	if !strings.Contains(out, "cmdman tui") {
+		t.Fatalf("top bar should keep the title, got %q", out)
+	}
+	if !strings.Contains(out, "/work/local-dev") {
+		t.Fatalf("top bar should show the cwd, got %q", out)
+	}
+	if w := runewidth.StringWidth(out); w > 80 {
+		t.Fatalf("top bar must not exceed the width, got %d cells: %q", w, out)
+	}
+}
+
+func TestTopBarOmitsCwdWhenUnknown(t *testing.T) {
+	m := seed()
+	m.cwd = ""
+	out := stripANSI(m.renderTopBar(80))
+	if strings.Contains(out, "cwd:") {
+		t.Fatalf("top bar should omit the cwd label when the cwd is unknown, got %q", out)
+	}
+	if !strings.Contains(out, "cmdman tui") {
+		t.Fatalf("top bar should still render the title, got %q", out)
+	}
+}
+
+func TestTopBarLeftTruncatesLongCwdKeepingLeaf(t *testing.T) {
+	m := seed()
+	m.cwd = "/very/long/path/that/does/not/fit/into/a/narrow/terminal/leafdir"
+	out := stripANSI(m.renderTopBar(40))
+	if !strings.Contains(out, "leafdir") {
+		t.Fatalf("a truncated cwd should keep its leaf visible, got %q", out)
+	}
+	if !strings.Contains(out, "…") {
+		t.Fatalf("a truncated cwd should be marked with an ellipsis, got %q", out)
+	}
+	if w := runewidth.StringWidth(out); w > 40 {
+		t.Fatalf("truncated top bar must fit the width, got %d cells: %q", w, out)
+	}
+}
+
+func TestProjectHeaderShowsWorkdir(t *testing.T) {
+	m := seed()
+	out := stripANSI(m.renderCommandList("Commands", 60, 12))
+	if !strings.Contains(out, "/work/api") {
+		t.Fatalf("a compose project header should show the project workdir, got:\n%s", out)
+	}
+}
+
+func TestStandaloneCommandShowsWorkdir(t *testing.T) {
+	m := seed()
+	// A free-floating command carries no project name and no group header, so its
+	// workdir must appear on the command row itself.
+	m.setGroups(append(m.commands.groups, projectGroup{
+		name:    "",
+		workdir: "/work/loose",
+		commands: []commandRow{
+			{id: "9", name: "loose", workdir: "/work/loose", state: model.EventTypeRunning},
+		},
+	}))
+	out := stripANSI(m.renderCommandList("Commands", 60, 16))
+	if !strings.Contains(out, "/work/loose") {
+		t.Fatalf("a free-floating command row should show its workdir, got:\n%s", out)
+	}
+}
+
+func TestComposeRowShowsWorkdir(t *testing.T) {
+	m := composeSeed(false)
+	out := stripANSI(m.renderComposeBody(90, 8))
+	if !strings.Contains(out, "/work/local-dev") {
+		t.Fatalf("a compose project row should show its workdir, got:\n%s", out)
+	}
+	if !strings.Contains(out, "/other") {
+		t.Fatalf("each compose project row should show its own workdir, got:\n%s", out)
 	}
 }
 

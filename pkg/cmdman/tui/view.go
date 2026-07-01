@@ -33,6 +33,7 @@ var (
 	styleSelected = lipgloss.NewStyle().Bold(true).Foreground(colorOnAcc).Background(colorBorder)
 	styleFooter   = lipgloss.NewStyle().Faint(true)
 	styleVersion  = lipgloss.NewStyle().Foreground(colorAccent)
+	stylePath     = lipgloss.NewStyle().Faint(true) // dim working-directory paths
 	stylePopup    = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(colorBorder).
@@ -113,8 +114,7 @@ func (m Model) viewContent() string {
 	}
 
 	var b strings.Builder
-	b.WriteByte(' ')
-	b.WriteString(styleTitle.Render("cmdman tui"))
+	b.WriteString(m.renderTopBar(width))
 	b.WriteByte('\n')
 	b.WriteByte(' ')
 	b.WriteString(m.renderTabBar())
@@ -239,6 +239,25 @@ func (m Model) renderDefViewer() string {
 	}
 	content := scrollLines(lines, max(h-2, 1), m.defViewer.scroll)
 	return box(title, content, w, h)
+}
+
+// renderTopBar renders the title line: "cmdman tui" on the left and the current
+// working directory on the right. The cwd is the directory used for
+// active-project detection, so surfacing it tells the user which directory the
+// dashboard is scoped to. The path is dimmed and left-truncated so its leaf (the
+// most specific, useful part) stays visible when it does not fit.
+func (m Model) renderTopBar(width int) string {
+	const title = "cmdman tui"
+	left := " " + styleTitle.Render(title)
+	leftW := 1 + runewidth.StringWidth(title)
+	if m.cwd == "" || width-leftW < 8 {
+		return left
+	}
+	label := "cwd: " + m.cwd
+	label = truncateLeft(label, width-leftW-2) // keep a 2-cell gap from the title
+	right := stylePath.Render(label)
+	pad := max(width-leftW-runewidth.StringWidth(label), 1)
+	return left + strings.Repeat(" ", pad) + right
 }
 
 func (m Model) renderTabBar() string {
@@ -366,6 +385,12 @@ func (m Model) renderCommandList(title string, width, height int) string {
 				plain += "   active"
 				styled += "   " + styleActive.Render("active")
 			}
+			// Surface the project's working directory so the user can tell where a
+			// compose project was created, dimmed to keep the name prominent.
+			if g.workdir != "" {
+				plain += "   " + g.workdir
+				styled += "   " + stylePath.Render(g.workdir)
+			}
 		} else {
 			c := m.commands.groups[r.group].commands[r.cmd]
 			prefix := "  "
@@ -374,8 +399,9 @@ func (m Model) renderCommandList(title string, width, height int) string {
 			}
 			// Commands under a project header are indented beneath it; standalone
 			// commands (no project name) sit at the top level with no header.
+			standalone := m.commands.groups[r.group].name == ""
 			indent := "  "
-			if m.commands.groups[r.group].name == "" {
+			if standalone {
 				indent = ""
 			}
 			label := displayLabel(c.state, c.exitCode)
@@ -389,6 +415,12 @@ func (m Model) renderCommandList(title string, width, height int) string {
 			plain = fmt.Sprintf("%s%s%s %-16s %s", indent, prefix, glyph, name, label)
 			styled = fmt.Sprintf("%s%s%s %-16s %s", indent, prefix,
 				statusStyle(c.state, c.pending).Render(glyph), name, label)
+			// Free-floating commands have no project header to carry the workdir, so
+			// show it on the row itself (dimmed).
+			if standalone && c.workdir != "" {
+				plain += "   " + c.workdir
+				styled += "   " + stylePath.Render(c.workdir)
+			}
 		}
 		if selected {
 			// lipgloss Width pads the background to a full-width selection bar.
@@ -455,12 +487,19 @@ func (m Model) renderComposeBody(width, height int) string {
 		if r.hasMux {
 			badge = "mux"
 		}
-		line := fmt.Sprintf("%s%s %-16s %s   %-12s   %s",
+		plain := fmt.Sprintf("%s%s %-16s %s   %-12s   %s",
 			prefix, projectMarker, truncate(r.name, 16), active, meta, badge)
+		styled := plain
+		// Surface each project's working directory (dimmed) so projects sharing a
+		// name across directories are distinguishable at a glance.
+		if r.workdir != "" {
+			plain += "   " + r.workdir
+			styled += "   " + stylePath.Render(r.workdir)
+		}
 		if selected {
-			lines = append(lines, styleSelected.Width(cw).Render(truncate(line, cw)))
+			lines = append(lines, styleSelected.Width(cw).Render(truncate(plain, cw)))
 		} else {
-			lines = append(lines, line)
+			lines = append(lines, styled)
 		}
 	}
 	content := clampLines(lines, ch, m.compose.selected)
@@ -586,6 +625,31 @@ func truncate(s string, w int) string {
 		return ""
 	}
 	return runewidth.Truncate(s, w, "")
+}
+
+// truncateLeft truncates s to w cells keeping the tail, prefixing "…" when it
+// dropped leading cells. It is used for filesystem paths, where the leaf is the
+// most useful part to keep when the whole path does not fit.
+func truncateLeft(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if runewidth.StringWidth(s) <= w {
+		return s
+	}
+	target := w - 1 // reserve one cell for the leading ellipsis
+	r := []rune(s)
+	width := 0
+	i := len(r)
+	for i > 0 {
+		cw := runewidth.RuneWidth(r[i-1])
+		if width+cw > target {
+			break
+		}
+		width += cw
+		i--
+	}
+	return "…" + string(r[i:])
 }
 
 // overlay centers box content on a cleared frame. It is a simple full-redraw

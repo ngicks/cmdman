@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -271,6 +272,86 @@ func TestTUI_WorkdirFlagDiscoversComposeProject(t *testing.T) {
 	// The never-run project is discoverable only via the workdir's compose file,
 	// so listing it proves --workdir reached the backend discovery path.
 	waitFor("tuiwd", 5*time.Second)
+
+	// Quit cleanly with 'q'.
+	_, _ = ptmx.Write([]byte("q"))
+	done := make(chan error, 1)
+	go func() { done <- tuiCmd.Wait() }()
+	select {
+	case werr := <-done:
+		if werr != nil {
+			t.Fatalf("tui exited with error: %v\noutput:\n%q", werr, snapshot())
+		}
+	case <-time.After(4 * time.Second):
+		_ = tuiCmd.Process.Kill()
+		t.Fatalf("TUI did not quit on 'q' within 4s; got:\n%q", snapshot())
+	}
+}
+
+// The TUI's top bar shows the working directory it is scoped to (the process
+// CWD, or the --workdir override). Passing --workdir with a distinctive leaf
+// directory proves the cwd is surfaced in the top bar end-to-end. The leaf name
+// is asserted rather than the whole path because the top bar left-truncates a
+// long path, always keeping the leaf visible.
+func TestTUI_TopBarShowsCwd(t *testing.T) {
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	wd := filepath.Join(composeWorkdir(t), "cwdmarker")
+	if err := os.MkdirAll(wd, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+
+	tuiCmd := exec.CommandContext(ctx, cmdmanBin, "tui", "--workdir", wd)
+	tuiCmd.Dir = wd
+	tuiCmd.Env = append(os.Environ(),
+		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
+		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
+		"TERM=xterm-256color")
+
+	ptmx, err := pty.StartWithSize(tuiCmd, &pty.Winsize{Rows: 30, Cols: 100})
+	if err != nil {
+		t.Fatalf("start tui pty: %v", err)
+	}
+	defer ptmx.Close()
+
+	var mu sync.Mutex
+	var out bytes.Buffer
+	go func() {
+		b := make([]byte, 8192)
+		for {
+			n, rerr := ptmx.Read(b)
+			if n > 0 {
+				mu.Lock()
+				out.Write(b[:n])
+				mu.Unlock()
+			}
+			if rerr != nil {
+				return
+			}
+		}
+	}()
+	snapshot := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return out.String()
+	}
+
+	waitFor := func(what string, deadline time.Duration) {
+		t.Helper()
+		end := time.Now().Add(deadline)
+		for time.Now().Before(end) {
+			if strings.Contains(snapshot(), what) {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Fatalf("TUI never rendered %q; got:\n%q", what, snapshot())
+	}
+	waitFor("cmdman tui", 5*time.Second)
+	// The top bar labels the working directory and keeps its leaf visible.
+	waitFor("cwd:", 5*time.Second)
+	waitFor("cwdmarker", 5*time.Second)
 
 	// Quit cleanly with 'q'.
 	_, _ = ptmx.Write([]byte("q"))
