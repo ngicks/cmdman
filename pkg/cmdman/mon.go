@@ -57,6 +57,10 @@ type Monitor struct {
 	stateChangeBridge *broadcaster[monitorStateChange]
 	logWriter         logdriver.Writer
 	terminalState     *terminalPaneState
+	// screen mirrors a TTY command's output in a server-side emulator so an
+	// attaching client gets a coherent current-screen snapshot instead of raw
+	// scrollback that may have rotated mid-sequence. nil for non-TTY commands.
+	screen *screenTracker
 
 	grpcServer *grpc.Server
 	sockPath   string
@@ -147,6 +151,12 @@ func (m *Monitor) emitEvent(e model.Event) {
 }
 
 func (m *Monitor) Close() error {
+	// End the screen mirror's response-pipe drain goroutine (see screenTracker).
+	m.outputMu.Lock()
+	m.screen.close()
+	m.screen = nil
+	m.outputMu.Unlock()
+
 	var errs []error
 	for _, c := range slices.Backward(m.cleanUp) {
 		err := c()
@@ -397,7 +407,15 @@ func (m *Monitor) Resize(rows, cols uint16) error {
 	if m.ptmx == nil {
 		return fmt.Errorf("no pty")
 	}
-	return pty.Setsize(m.ptmx, &pty.Winsize{Rows: rows, Cols: cols})
+	if err := pty.Setsize(m.ptmx, &pty.Winsize{Rows: rows, Cols: cols}); err != nil {
+		return err
+	}
+	// Keep the server-side screen mirror at the command's real size so its
+	// snapshot preserves the layout.
+	m.outputMu.Lock()
+	m.screen.resize(int(cols), int(rows))
+	m.outputMu.Unlock()
+	return nil
 }
 
 // PtySize returns the command's current PTY window size. ok is false for a

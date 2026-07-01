@@ -194,3 +194,39 @@ rejected alternatives once decided.
   program and any interactive attach); inferring width from the byte stream
   (unreliable); a static stored size (goes stale on interactive resize — the
   attach-stream report is always current).
+
+---
+
+## D15 — server-side screen snapshot on attach (still-boggy fix) — **RESOLVED (live-bug fix)**
+- **Decision:** For a TTY command the monitor keeps a persistent, server-side vt
+  emulator (`screenTracker`) fed with every raw output chunk, and on attach it
+  hands the client a **snapshot** of that emulator's current screen (clear +
+  absolute-positioned per-row repaint + restored cursor) as the "scrollback",
+  instead of the raw ring-buffer bytes. Non-TTY commands and a tracker disabled
+  by a vt panic fall back to raw ring bytes.
+- **Rationale:** The byte scrollback is a fixed 1 MiB ring. A full-screen or
+  incrementally-updating TTY program rotates it, so its oldest bytes — the
+  alt-screen enter, the initial full paint, one-time chrome — scroll out.
+  Replaying that truncated window into the **fresh** emulator a client builds on
+  every attach reconstructs a garbled partial frame; because each Commands-tab
+  selection re-attaches, the preview looked correct on first view and then
+  "broke when transitioning among commands." A persistent server emulator never
+  loses screen state to rotation, so its snapshot reconstructs the exact current
+  screen every time — fixing first view, transitions, and idle programs. No proto
+  or TUI-client change: the snapshot is just the bytes sent where the raw
+  scrollback used to go, and the existing client emulator consumes it unchanged.
+  Also makes attach show the current screen (tmux-like) rather than a raw history
+  dump.
+- **vt hazards contained (contra D13's "vt out of the monitor"):** the tracker
+  owns both known vt failure modes so neither can reach the supervisor's critical
+  output path — a drain goroutine empties the emulator's unbuffered response pipe
+  (D12), and every emulator call (`feed`/`resize`/`snapshot`) recovers a panic
+  (D13) by marking the tracker unhealthy and falling back to raw scrollback. The
+  mirror is fed *after* the ring/log/broadcaster writes, so even a slow emulator
+  never delays them.
+- **Rejected:** Client-side keep-alive cache of live emulators (does not fix a
+  first view that was already garbled by an incomplete ring, and a bigger, riskier
+  refactor of the heavily-tested preview state machine); a new proto field to make
+  the snapshot preview-only (attach showing the current screen is an improvement,
+  and no e2e asserts raw-scrollback-on-attach); inferring a clean scrollback
+  boundary from the ring (cannot recover content that already rotated out).

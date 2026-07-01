@@ -303,6 +303,8 @@ func TestMonitorSubscribeWithScrollbackIncludesTerminalModeReplay(t *testing.T) 
 		outputBridge:      newBroadcaster[logdriver.LogLine](),
 		stateChangeBridge: newBroadcaster[monitorStateChange](),
 		terminalState:     newTerminalPaneState(),
+		// A non-TTY command: scrollback is the raw ring buffer (no screen mirror).
+		cfg: &model.CommandConfig{},
 	}
 	m.terminalState.Observe([]byte("\x1b[?1000;1006;2004h"))
 	_, _ = m.ring.Write([]byte("tail-only\n"))

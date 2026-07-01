@@ -208,6 +208,88 @@ func TestAttach_CtrlCRestoresShellTtyMode(t *testing.T) {
 	}
 }
 
+// TestAttach_ReconstructsScrolledOutScreenFromSnapshot is the end-to-end guard
+// for the server-side screen snapshot (D15). A TTY command paints static chrome
+// once, then emits enough incremental updates to rotate that chrome out of the
+// tiny byte scrollback, then idles. Because the monitor now hands attach a
+// snapshot of its persistent screen mirror instead of the raw (rotated) ring,
+// the one-time chrome must still arrive on a fresh attach — the exact content
+// that "broke when transitioning among commands" in the preview.
+func TestAttach_ReconstructsScrolledOutScreenFromSnapshot(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	// Paint a header once, overflow a 4 KiB scrollback with row-10 updates, idle.
+	script := `printf '\033[?1049h\033[2J\033[H'
+printf '\033[1;1HHEADER-ONCE-MARKER'
+n=0
+pad=paddingpaddingpaddingpaddingpaddingpaddingpaddingpaddingpaddingpaddingpadding
+while [ $n -lt 400 ]; do
+  n=$((n+1))
+  printf '\033[10;1HUPDATE %d %s' "$n" "$pad"
+done
+printf '\033[10;1HFINAL-LINE-MARKER %s' "$pad"
+sleep 300`
+	id := env.run(ctx, "run", "-t", "-n", "snap-recon", "--scrollback-bytes", "4096",
+		"--", "/bin/sh", "-c", script)
+	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
+	env.waitForState(ctx, id, "running", defaultTimeout)
+	time.Sleep(700 * time.Millisecond) // let the update loop finish and the screen settle
+
+	attach := exec.CommandContext(ctx, cmdmanBin, "attach", id)
+	attach.Env = append(os.Environ(),
+		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
+		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir)
+	ptmx, err := pty.Start(attach)
+	if err != nil {
+		t.Fatalf("start attach pty: %v", err)
+	}
+	defer ptmx.Close()
+
+	var mu sync.Mutex
+	var out bytes.Buffer
+	doneRead := make(chan struct{})
+	go func() {
+		defer close(doneRead)
+		b := make([]byte, 8192)
+		for {
+			n, rerr := ptmx.Read(b)
+			if n > 0 {
+				mu.Lock()
+				out.Write(b[:n])
+				mu.Unlock()
+			}
+			if rerr != nil {
+				return
+			}
+		}
+	}()
+
+	// The snapshot (scrollback replacement) is sent immediately on attach.
+	deadline := time.Now().Add(3 * time.Second)
+	snapshot := func() string { mu.Lock(); defer mu.Unlock(); return out.String() }
+	for time.Now().Before(deadline) {
+		if strings.Contains(snapshot(), "HEADER-ONCE-MARKER") &&
+			strings.Contains(snapshot(), "FINAL-LINE-MARKER") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Detach without stopping the command.
+	_, _ = ptmx.Write([]byte{0x10, 0x11})
+
+	got := snapshot()
+	if !strings.Contains(got, "HEADER-ONCE-MARKER") {
+		t.Fatalf("attach snapshot missing the scrolled-out header; the raw ring "+
+			"reconstruction bug is not fixed. got:\n%q", got)
+	}
+	if !strings.Contains(got, "FINAL-LINE-MARKER") {
+		t.Fatalf("attach snapshot missing the latest line. got:\n%q", got)
+	}
+}
+
 func waitAttachExit(t *testing.T, cmd *exec.Cmd, timeout time.Duration) {
 	t.Helper()
 

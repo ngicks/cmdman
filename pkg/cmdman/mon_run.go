@@ -209,6 +209,13 @@ func (m *Monitor) writeTty(cmd *exec.Cmd) (func(), error) {
 	// sanely even when no interactive client ever attaches to resize it.
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: defaultPtyRows, Cols: defaultPtyCols})
 
+	// Start a fresh server-side screen mirror for this run (a restart gets a clean
+	// screen). Sized to the default PTY; Monitor.Resize keeps it in sync.
+	m.outputMu.Lock()
+	m.screen.close()
+	m.screen = newScreenTracker(int(defaultPtyCols), int(defaultPtyRows))
+	m.outputMu.Unlock()
+
 	var wg sync.WaitGroup
 
 	wg.Go(func() {
@@ -276,6 +283,11 @@ func (m *Monitor) logCommandOutput(stream logdriver.Stream, data []byte) {
 			}
 		}
 		m.outputBridge.Send(line)
+	}
+	// Mirror TTY output into the server-side screen last, so a vt hazard never
+	// delays the ring/log/broadcaster writes above. feed is panic-guarded.
+	if m.cfg.Tty {
+		m.screen.feed(data)
 	}
 }
 

@@ -30,6 +30,20 @@ split), **D1–D8** (the OQ resolutions), **D9** (vt no-remote-resize), **D10**
   `TestDrainRawResizeSizesEmulatorToPTY`,
   `TestPreviewTerminalEmulatorSizedToPTYNotPane`. **Applies to commands whose
   monitor is the new binary — restart/re-run existing commands to pick it up.**
+- **Still-boggy on transition (D15):** the client rebuilds a fresh emulator on
+  every attach and reconstructed it from the raw 1 MiB ring, whose oldest bytes
+  (alt-screen enter, initial paint, one-time chrome) rotate out for a busy
+  full-screen program — so the preview looked right on first view and then broke
+  each time the selection moved to another command and re-attached. Fixed by a
+  persistent server-side emulator in the monitor (`screenTracker`) that never
+  loses screen state to ring rotation and hands attach a coherent current-screen
+  **snapshot** in place of the raw scrollback (D9 still holds; no proto/TUI
+  change). The tracker contains the D12 pipe-drain and D13 panic-recover so vt can
+  never reach the supervisor's critical output path. Regression tests
+  `TestScreenTrackerSnapshotReconstructsScrolledOutChrome`,
+  `TestScreenTrackerSnapshotMatchesFullReplay`,
+  `TestScreenTrackerFeedDoesNotDeadlockOnQuery`. **Monitor-side fix — restart/
+  re-run existing commands to pick it up.**
 
 ## Checklist (mirrors PLAN.md steps)
 

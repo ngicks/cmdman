@@ -49,7 +49,16 @@ func (m *Monitor) subscribeOutput(scrollback bool) monitorSubscription {
 		Offset:       offset,
 	}
 	if scrollback {
-		sub.Scrollback = m.ring.Bytes()
+		// For a TTY command, hand over a coherent snapshot of the current screen
+		// from the server-side mirror; it reconstructs exactly regardless of ring
+		// rotation. Fall back to raw ring bytes when the mirror is absent or a vt
+		// hazard disabled it.
+		if m.cfg.Tty {
+			sub.Scrollback = m.screen.snapshot()
+		}
+		if sub.Scrollback == nil {
+			sub.Scrollback = m.ring.Bytes()
+		}
 		sub.TerminalMode = m.terminalState.Replay()
 	}
 	sub.StateChanges, sub.unsubState = m.subscribeStateChange()
