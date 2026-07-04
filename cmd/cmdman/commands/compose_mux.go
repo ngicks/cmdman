@@ -1,10 +1,7 @@
 package commands
 
 import (
-	"errors"
 	"fmt"
-	"os"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -237,12 +234,10 @@ func runComposeMuxUp(
 	args []string,
 	session string,
 ) error {
-	selection, err := resolveComposeMuxSelection(cf)
+	selection, err := compose.ResolveMuxSelection(cf.normalizeOpts())
 	if err != nil {
 		return err
 	}
-	spec := *selection.Spec.Mux
-	windowName := composeMuxWindowName(selection)
 
 	svc, err := cmdmanService(rootCfg)
 	if err != nil {
@@ -250,52 +245,14 @@ func runComposeMuxUp(
 	}
 	defer svc.Close()
 
-	cfg := svc.Config()
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("locate cmdman binary: %w", err)
-	}
-
-	composeSvc := compose.NewService(svc)
-	resolver, replicas, err := composeSvc.MuxLeafResolver(cmd.Context(), selection)
-	if err != nil {
-		return err
-	}
-
-	scalePositions, err := mux.ReadScaleState(cmd.Context(), mux.ScaleStateOptions{
-		Driver:      spec.Driver,
-		DriverOpt:   spec.DriverOpt,
-		SessionName: session,
-		Identity:    selection.ProjectIdentity(),
-	})
-	if err != nil {
-		return fmt.Errorf("read scale state: %w", err)
-	}
-
-	built, err := mux.Build(cmd.Context(), mux.BuildOptions{
-		Spec:     spec,
-		Resolver: resolver,
-		Replicas: replicas,
-		Opts: mux.PaneArgvOpts{
-			Executable: exe,
-			DataDir:    cfg.DataDir,
-			RuntimeDir: cfg.RuntimeDir,
-		},
-		ScalePositions: scalePositions,
-	})
-	if err != nil {
-		return err
-	}
-
 	var layout string
 	if len(args) > 0 {
 		layout = args[0]
 	}
-	return mux.Run(cmd.Context(), built, mux.RunOptions{
-		SessionName: session,
-		WindowName:  windowName,
-		Identity:    selection.ProjectIdentity(),
+	return compose.NewService(svc).MuxUp(cmd.Context(), compose.MuxUpOption{
+		Selection:   selection,
 		Layout:      layout,
+		SessionName: session,
 		Stdout:      cmd.OutOrStdout(),
 	})
 }
@@ -304,24 +261,17 @@ func runComposeMuxUp(
 // cmdman service or leaf resolution — only the project identity and spec driver
 // options are required. The layout argument is irrelevant to teardown.
 func runComposeMuxDown(cmd *cobra.Command, cf *composeFlags, session string) error {
-	selection, err := resolveComposeMuxSelection(cf)
+	selection, err := compose.ResolveMuxSelection(cf.normalizeOpts())
 	if err != nil {
 		return err
 	}
-	spec := *selection.Spec.Mux
-	return mux.Down(cmd.Context(), mux.DownOptions{
-		Driver:    spec.Driver,
-		DriverOpt: spec.DriverOpt,
-		// SessionName is a narrowing filter only; it is not used to derive the
-		// identity. An explicit --session keeps the scan in one session.
+
+	// Down needs no cmdman service — only the project identity derived from the
+	// compose file (see this command's Long help). Pass a nil service.
+	return compose.NewService(nil).MuxDown(cmd.Context(), compose.MuxDownOption{
+		Selection:   selection,
 		SessionName: session,
-		Identity:    selection.ProjectIdentity(),
-		// WindowName feeds identity derivation only when Identity is empty
-		// (unnamed project): it keeps down aligned with what Run stamped
-		// (the project-derived window name) instead of a session-derived
-		// fallback.
-		WindowName: composeMuxWindowName(selection),
-		Stdout:     cmd.OutOrStdout(),
+		Stdout:      cmd.OutOrStdout(),
 	})
 }
 
@@ -331,49 +281,29 @@ func runComposeMuxLs(
 	cf *composeFlags,
 	session, format string,
 ) error {
-	selection, err := resolveComposeMuxSelection(cf)
+	selection, err := compose.ResolveMuxSelection(cf.normalizeOpts())
 	if err != nil {
 		return err
 	}
-	spec := *selection.Spec.Mux
 
-	// For an unnamed project (identity ""), fall back to the window name
-	// ("cmdman") so the filter still matches what up stamped.
-	identity := selection.ProjectIdentity()
-	if identity == "" {
-		identity = composeMuxWindowName(selection)
+	// The cmdman service is only needed for the best-effort live replica counts
+	// in the SCALE column; a service-build failure must not block window listing.
+	// On failure svc is nil, and NewService(nil) degrades the counts to "?".
+	svc, svcErr := cmdmanService(rootCfg)
+	if svcErr == nil {
+		defer svc.Close()
 	}
 
-	windows, err := mux.List(cmd.Context(), mux.ListOptions{
-		Driver:      spec.Driver,
-		DriverOpt:   spec.DriverOpt,
+	result, err := compose.NewService(svc).MuxLs(cmd.Context(), compose.MuxLsOption{
+		Selection:   selection,
 		SessionName: session,
-		Identity:    identity,
 	})
 	if err != nil {
 		return err
 	}
-
-	targets := collectCycleTargets(spec)
-
-	// Resolve live replica counts for the SCALE column. Commands whose count
-	// cannot be resolved (store unavailable, replica missing live) are left
-	// absent from the map and render as "pos/?".
-	replicaCounts := make(map[string]int, len(targets))
-	if svc, svcErr := cmdmanService(rootCfg); svcErr == nil {
-		defer svc.Close()
-		if _, counter, counterErr := compose.NewService(svc).MuxLeafResolver(
-			cmd.Context(), selection,
-		); counterErr == nil && counter != nil {
-			for _, t := range targets {
-				if n, err := counter(cmd.Context(), t); err == nil {
-					replicaCounts[t] = n
-				}
-			}
-		}
-	}
-
-	return cli.RenderMuxWindows(cmd.OutOrStdout(), windows, replicaCounts, targets, format)
+	return cli.RenderMuxWindows(
+		cmd.OutOrStdout(), result.Windows, result.ReplicaCounts, result.CycleTargets, format,
+	)
 }
 
 // runComposeMuxCycleScale advances the replica position for a command across all
@@ -404,11 +334,10 @@ func runComposeMuxCycleScale(
 		position = n
 	}
 
-	selection, err := resolveComposeMuxSelection(cf)
+	selection, err := compose.ResolveMuxSelection(cf.normalizeOpts())
 	if err != nil {
 		return err
 	}
-	spec := *selection.Spec.Mux
 
 	svc, err := cmdmanService(rootCfg)
 	if err != nil {
@@ -416,32 +345,15 @@ func runComposeMuxCycleScale(
 	}
 	defer svc.Close()
 
-	cfg := svc.Config()
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("locate cmdman binary: %w", err)
-	}
-
-	composeSvc := compose.NewService(svc)
-	resolver, replicas, err := composeSvc.MuxLeafResolver(cmd.Context(), selection)
-	if err != nil {
-		return err
-	}
-
-	result, cycleErr := mux.CycleScale(cmd.Context(), mux.CycleScaleOptions{
-		Spec:     spec,
-		Resolver: resolver,
-		Replicas: replicas,
-		Opts: mux.PaneArgvOpts{
-			Executable: exe,
-			DataDir:    cfg.DataDir,
-			RuntimeDir: cfg.RuntimeDir,
+	result, cycleErr := compose.NewService(svc).MuxCycleScale(
+		cmd.Context(),
+		compose.MuxCycleScaleOption{
+			Selection:   selection,
+			SessionName: session,
+			Command:     command,
+			Position:    position,
 		},
-		Identity:    selection.ProjectIdentity(),
-		SessionName: session,
-		Command:     command,
-		Position:    position,
-	})
+	)
 	cli.RenderCycleScaleResult(cmd.OutOrStdout(), result)
 	return cycleErr
 }
@@ -457,7 +369,7 @@ func completeComposeMuxLayout(cf *composeFlags) cobra.CompletionFunc {
 		if len(args) != 0 {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		selection, err := resolveComposeMuxSelection(cf)
+		selection, err := compose.ResolveMuxSelection(cf.normalizeOpts())
 		if err != nil || selection.Spec == nil || selection.Spec.Mux == nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
@@ -480,74 +392,10 @@ func completeComposeMuxCycleScaleTargets(cf *composeFlags) cobra.CompletionFunc 
 		if len(args) != 0 {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		selection, err := resolveComposeMuxSelection(cf)
+		selection, err := compose.ResolveMuxSelection(cf.normalizeOpts())
 		if err != nil || selection.Spec == nil || selection.Spec.Mux == nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		return collectCycleTargets(*selection.Spec.Mux), cobra.ShellCompDirectiveNoFileComp
-	}
-}
-
-// resolveComposeMuxSelection resolves the compose project for the mux
-// subcommand. An explicit -f/--file loads exactly that project; without it the
-// project is auto-selected from the composes associated with the current
-// directory that declare a "mux:" section (see compose.SelectMuxProject).
-// Either way the resolved project must declare a "mux:" section.
-func resolveComposeMuxSelection(cf *composeFlags) (compose.ProjectSelection, error) {
-	opts := cf.normalizeOpts()
-	if opts.File == "" {
-		return compose.SelectMuxProject(opts)
-	}
-	selection, err := compose.LoadOrProject(opts)
-	if err != nil {
-		return compose.ProjectSelection{}, err
-	}
-	if selection.Spec == nil || selection.Spec.Mux == nil {
-		return compose.ProjectSelection{}, errors.New(
-			`compose mux: missing "mux:" section in compose file`,
-		)
-	}
-	return selection, nil
-}
-
-// composeMuxWindowName derives the cmdman-owned window name for a compose
-// project: "cmdman-<project>", or plain "cmdman" when the project is unnamed.
-func composeMuxWindowName(selection compose.ProjectSelection) string {
-	if selection.Project != "" {
-		return "cmdman-" + selection.Project
-	}
-	return "cmdman"
-}
-
-// collectCycleTargets returns a sorted, deduplicated list of unpinned leaf
-// command names (Scale == 0) from all layouts of spec. These are the commands
-// that participate in cycle-scale.
-func collectCycleTargets(spec mux.Spec) []string {
-	seen := make(map[string]struct{})
-	for _, layout := range spec.Layouts {
-		collectUnpinnedLeafCommands(layout.Root, seen)
-	}
-	if len(seen) == 0 {
-		return nil
-	}
-	names := make([]string, 0, len(seen))
-	for name := range seen {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	return names
-}
-
-// collectUnpinnedLeafCommands walks p recursively and adds the command name
-// of each unpinned leaf (Scale == 0) to seen.
-func collectUnpinnedLeafCommands(p mux.PaneSpec, seen map[string]struct{}) {
-	if p.IsLeaf() {
-		if p.Scale == 0 {
-			seen[p.Command] = struct{}{}
-		}
-		return
-	}
-	for _, child := range p.Panes {
-		collectUnpinnedLeafCommands(child, seen)
+		return mux.CollectCycleTargets(*selection.Spec.Mux), cobra.ShellCompDirectiveNoFileComp
 	}
 }

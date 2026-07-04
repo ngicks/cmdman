@@ -26,6 +26,11 @@ type testCmdmanSvc struct {
 	stop     func(context.Context, cmdman.StopRequest) ([]cmdman.StopResult, error)
 	create   func(context.Context, cmdman.CreateRequest) (*cmdman.CreateResult, error)
 	remove   func(context.Context, cmdman.RemoveRequest) ([]cmdman.RemoveResult, error)
+	config   cmdman.CmdmanConfig
+}
+
+func (s testCmdmanSvc) Config() cmdman.CmdmanConfig {
+	return s.config
 }
 
 func (s testCmdmanSvc) Start(ctx context.Context, idOrName string) error {

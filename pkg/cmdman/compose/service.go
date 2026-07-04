@@ -14,6 +14,7 @@ var _ cmdmanSvc = (*cmdman.Service)(nil)
 // Defined here (consumer side) per the small-interface-at-consumer rule.
 // *cmdman.Service satisfies this interface.
 type cmdmanSvc interface {
+	Config() cmdman.CmdmanConfig
 	Start(ctx context.Context, idOrName string) error
 	Wait(ctx context.Context, req cmdman.WaitRequest) ([]cmdman.WaitResult, error)
 	List(ctx context.Context, req cmdman.ListRequest) ([]store.CommandEntry, error)
@@ -39,8 +40,19 @@ type Service struct {
 
 // NewService constructs a compose.Service from an existing cmdman.Service.
 // Options such as WithReporter customize the service.
+//
+// A nil svc is allowed and yields a Service with no underlying cmdman service
+// (s.svc stays a genuine nil interface, not a typed-nil pointer). Such a Service
+// is valid only for verbs that never consume the underlying service — e.g.
+// [Service.MuxDown], whose teardown needs only the project identity, and
+// [Service.MuxLs], which degrades its live replica counts to "unknown".
 func NewService(svc *cmdman.Service, opts ...ServiceOption) *Service {
-	s := &Service{svc: svc}
+	s := &Service{}
+	// Guard the assignment so a nil *cmdman.Service does not become a non-nil
+	// interface holding a typed-nil pointer (which would defeat s.svc != nil).
+	if svc != nil {
+		s.svc = svc
+	}
 	for _, opt := range opts {
 		opt(s)
 	}

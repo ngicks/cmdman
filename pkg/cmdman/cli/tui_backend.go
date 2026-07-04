@@ -404,98 +404,21 @@ func (b *serviceBackend) Attach(ctx context.Context, id string) (string, error) 
 	}
 }
 
-// CycleMux cycles the mux layout for a compose project via the existing compose
-// mux path (compose.LoadOrProject + mux.Build + mux.Run). mux owns its layout
-// state through a persisted tmux window marker; the TUI keeps none.
+// CycleMux cycles the mux layout for a compose project via compose.Service.MuxUp
+// (the same path the CLI uses). An empty layout cycles to the next layout. mux
+// owns its layout state through a persisted tmux window marker; the TUI keeps
+// none. Stdout is discarded so mux's attach hint never bleeds into the TUI
+// surface (the TUI runs inside tmux, so mux prints nothing anyway); no
+// SessionName is passed, so the current tmux session is targeted.
 func (b *serviceBackend) CycleMux(ctx context.Context, projectName, composeFile string) error {
-	selection, err := resolveMuxSelection(projectName, composeFile)
+	selection, err := compose.ResolveMuxSelectionByName(projectName, composeFile)
 	if err != nil {
 		return err
 	}
-	return b.muxRun(ctx, selection, "")
-}
-
-// muxRun rebuilds the project's mux dashboard and applies a layout. An empty
-// layout cycles to the next layout; a non-empty one applies that named/indexed
-// layout (and starts a dashboard at it when none is running). Shared by CycleMux
-// and ApplyLayout.
-func (b *serviceBackend) muxRun(
-	ctx context.Context, selection compose.ProjectSelection, layout string,
-) error {
-	spec := *selection.Spec.Mux
-
-	scalePositions, err := mux.ReadScaleState(ctx, mux.ScaleStateOptions{
-		Driver:    spec.Driver,
-		DriverOpt: spec.DriverOpt,
-		Identity:  selection.ProjectIdentity(),
+	return b.compose.MuxUp(ctx, compose.MuxUpOption{
+		Selection: selection,
+		Stdout:    io.Discard,
 	})
-	if err != nil {
-		return fmt.Errorf("mux: read scale state: %w", err)
-	}
-
-	cfg := b.svc.Config()
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("mux: locate cmdman binary: %w", err)
-	}
-	resolver, replicas, err := b.compose.MuxLeafResolver(ctx, selection)
-	if err != nil {
-		return err
-	}
-	built, err := mux.Build(ctx, mux.BuildOptions{
-		Spec:     spec,
-		Resolver: resolver,
-		Replicas: replicas,
-		Opts: mux.PaneArgvOpts{
-			Executable: exe,
-			DataDir:    cfg.DataDir,
-			RuntimeDir: cfg.RuntimeDir,
-		},
-		ScalePositions: scalePositions,
-	})
-	if err != nil {
-		return err
-	}
-	windowName := "cmdman"
-	if selection.Project != "" {
-		windowName = "cmdman-" + selection.Project
-	}
-	// Discard mux's stdout hint so it never bleeds into the TUI surface; the
-	// TUI runs inside tmux so mux prints nothing anyway.
-	return mux.Run(ctx, built, mux.RunOptions{
-		WindowName: windowName,
-		// Pass the compose project identity so TUI-built dashboards are stamped
-		// identically to CLI-built ones: `mux down` can find them regardless of
-		// whether they were opened from the TUI or the command line.
-		Identity: selection.ProjectIdentity(),
-		Layout:   layout,
-		Stdout:   io.Discard,
-	})
-}
-
-// resolveMuxSelection loads the compose project for a mux operation and verifies
-// it declares a mux: section. composeFile is used directly when set; otherwise it
-// is resolved on demand from the project name.
-func resolveMuxSelection(projectName, composeFile string) (compose.ProjectSelection, error) {
-	opts := compose.NormalizeOpts{File: composeFile}
-	if composeFile == "" {
-		opts.File = projectName
-	}
-	selection, err := compose.LoadOrProject(opts)
-	if err != nil {
-		return compose.ProjectSelection{}, err
-	}
-	if selection.Spec == nil {
-		return compose.ProjectSelection{}, fmt.Errorf(
-			"mux: no compose file found for project %q", projectName,
-		)
-	}
-	if selection.Spec.Mux == nil {
-		return compose.ProjectSelection{}, fmt.Errorf(
-			"mux: project %q has no mux section", projectName,
-		)
-	}
-	return selection, nil
 }
 
 // resolveLayoutSelection resolves the "current" mux project for the Layout tab
@@ -511,7 +434,7 @@ func resolveLayoutSelection(
 	if sel, err := compose.SelectMuxProject(compose.NormalizeOpts{WorkDir: workDir}); err == nil {
 		return sel, nil
 	}
-	return resolveMuxSelection(projectName, composeFile)
+	return compose.ResolveMuxSelectionByName(projectName, composeFile)
 }
 
 // ListLayouts returns the current project's mux layouts in definition order plus
@@ -554,15 +477,19 @@ func (b *serviceBackend) ListLayouts(
 
 // ApplyLayout applies the named layout to the project's running dashboard,
 // starting one at that layout when none is running (D6). It reuses CycleMux's
-// build path with an explicit layout selector.
+// MuxUp path with an explicit layout selector.
 func (b *serviceBackend) ApplyLayout(
 	ctx context.Context, projectName, composeFile, layoutName string,
 ) error {
-	selection, err := resolveMuxSelection(projectName, composeFile)
+	selection, err := compose.ResolveMuxSelectionByName(projectName, composeFile)
 	if err != nil {
 		return err
 	}
-	return b.muxRun(ctx, selection, layoutName)
+	return b.compose.MuxUp(ctx, compose.MuxUpOption{
+		Selection: selection,
+		Layout:    layoutName,
+		Stdout:    io.Discard,
+	})
 }
 
 // ProjectDefinition returns the raw compose YAML file text for the project. It

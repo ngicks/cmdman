@@ -42,6 +42,65 @@ func (s ProjectSelection) ProjectIdentity() string {
 	return GenerateProjectIdentity(workdirHash(s.WorkDir), s.Project)
 }
 
+// MuxWindowName derives the cmdman-owned window name for a compose project:
+// "cmdman-<project>", or plain "cmdman" when the project is unnamed. It is the
+// value passed as [mux.RunOptions.WindowName] / [mux.DownOptions.WindowName] for
+// compose mux dashboards.
+func (s ProjectSelection) MuxWindowName() string {
+	if s.Project != "" {
+		return "cmdman-" + s.Project
+	}
+	return "cmdman"
+}
+
+// ResolveMuxSelection resolves the compose project for the `compose mux`
+// subcommand (the CLI entry point). An explicit opts.File loads exactly that
+// project; without it the project is auto-selected from the composes associated
+// with the current directory that declare a "mux:" section (see
+// [SelectMuxProject]). Either way the resolved project must declare a "mux:"
+// section.
+func ResolveMuxSelection(opts NormalizeOpts) (ProjectSelection, error) {
+	if opts.File == "" {
+		return SelectMuxProject(opts)
+	}
+	selection, err := LoadOrProject(opts)
+	if err != nil {
+		return ProjectSelection{}, err
+	}
+	if selection.Spec == nil || selection.Spec.Mux == nil {
+		return ProjectSelection{}, errors.New(
+			`compose mux: missing "mux:" section in compose file`,
+		)
+	}
+	return selection, nil
+}
+
+// ResolveMuxSelectionByName resolves the compose project for a mux operation
+// driven by a project name (the TUI entry point). composeFile is used directly
+// when set; otherwise it is resolved on demand from projectName. The resolved
+// project must declare a "mux:" section.
+func ResolveMuxSelectionByName(projectName, composeFile string) (ProjectSelection, error) {
+	opts := NormalizeOpts{File: composeFile}
+	if composeFile == "" {
+		opts.File = projectName
+	}
+	selection, err := LoadOrProject(opts)
+	if err != nil {
+		return ProjectSelection{}, err
+	}
+	if selection.Spec == nil {
+		return ProjectSelection{}, fmt.Errorf(
+			"mux: no compose file found for project %q", projectName,
+		)
+	}
+	if selection.Spec.Mux == nil {
+		return ProjectSelection{}, fmt.Errorf(
+			"mux: project %q has no mux section", projectName,
+		)
+	}
+	return selection, nil
+}
+
 // filterByCommandNames returns only the entries whose LabelCommand matches one
 // of the provided names.
 func filterByCommandNames(entries []cmdmanEntry, names []string) []cmdmanEntry {

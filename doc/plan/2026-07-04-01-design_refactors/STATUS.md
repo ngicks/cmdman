@@ -23,7 +23,9 @@ for the small items).
 
 - [x] 1. C5 — flock-based monitor liveness probe (S; latent-bug fix) —
       implemented 2026-07-04 (working tree, awaiting maintainer review)
-- [ ] 2. C1 — compose mux push-down to compose.Service methods (M)
+- [x] 2. C1 — compose mux push-down to compose.Service methods (M) —
+      implemented 2026-07-04 via `doc/plan/compose-02-mux-pushdown/`
+      (working tree, awaiting maintainer review)
 - [ ] 3. C3 — muxctl tier-1 pure-function hoist; scale codec → pkg/cmdman/mux (S)
 - [ ] 4. C2 — sqlc adoption + .sql-file migrations + json_each label queries (M-L)
 - [ ] 5. C6 — broadcaster[T] -race unit test (S)
@@ -33,5 +35,5 @@ for the small items).
 - [ ] 9. C4 — extract pkg/cmdman/monitor subpackage (L; after C5/C6/C10)
 - [ ] 10. C9 — split cli/tui_backend.go by tab (S; after C1, if still needed)
 
-Next action: maintainer reviews the C5 change; then pick up item 2 (C1 — compose
-mux push-down; spin its own plan dir per repo convention).
+Next action: maintainer reviews the C5 + C1 changes (both in working tree);
+then pick up item 3 (C3 — muxctl tier-1 hoist).

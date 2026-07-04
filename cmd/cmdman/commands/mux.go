@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -196,24 +195,12 @@ func runMuxUp(
 		return fmt.Errorf("locate cmdman binary: %w", err)
 	}
 
-	// Standalone mux names concrete cmdman commands, so there is no replica
-	// cycling (nil counter). A leaf may still pin an explicit scale index, which
-	// resolves the suffixed command name "<leaf>-<scaleIndex>".
-	resolver := func(ctx context.Context, leafName string, scaleIndex int) (string, error) {
-		target := leafName
-		if scaleIndex > 0 {
-			target = fmt.Sprintf("%s-%d", leafName, scaleIndex)
-		}
-		out, err := svc.Inspect(ctx, target)
-		if err != nil {
-			return "", err
-		}
-		return out.ID, nil
-	}
-
 	built, err := mux.Build(cmd.Context(), mux.BuildOptions{
-		Spec:     spec,
-		Resolver: resolver,
+		Spec: spec,
+		// Standalone mux names concrete cmdman commands, so there is no replica
+		// cycling (nil counter). A leaf may still pin an explicit scale index,
+		// which resolves the suffixed command name "<leaf>-<scaleIndex>".
+		Resolver: svc.MuxResolver(),
 		Replicas: nil,
 		Opts: mux.PaneArgvOpts{
 			Executable: exe,
