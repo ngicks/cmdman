@@ -7,8 +7,8 @@ import (
 	"os"
 )
 
-func tryLockExclusive(_ *os.File) error {
-	return fmt.Errorf("flock: not supported on this platform")
+func tryLockExclusive(_ *os.File) (bool, error) {
+	return false, fmt.Errorf("flock: not supported on this platform")
 }
 
 func lockExclusive(_ *os.File) error {

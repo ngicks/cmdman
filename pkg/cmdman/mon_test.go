@@ -1,17 +1,22 @@
 package cmdman
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io/fs"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/internal/flock"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/go-common/contextkey"
 	"gotest.tools/v3/assert"
 )
 
@@ -252,11 +257,108 @@ func TestStaleEntryCleanup(t *testing.T) {
 		DefaultEnvironment: testEnv(),
 	}).WithDefaults()
 	assert.NilError(t, err)
-	assert.NilError(t, CleanStaleEntries(st, cfgForCleanup))
+	assert.NilError(t, CleanStaleEntries(t.Context(), st, cfgForCleanup))
 
 	state, _, _, err := st.GetCommandState("stale-1")
 	assert.NilError(t, err)
 	assert.Equal(t, state, model.EventTypeFailed)
+}
+
+func TestIsStaleMonitor(t *testing.T) {
+	cfg, err := (CmdmanConfig{
+		DataDir:            t.TempDir(),
+		RuntimeDir:         t.TempDir(),
+		DefaultWorkingDir:  "/tmp",
+		DefaultEnvironment: testEnv(),
+	}).WithDefaults()
+	assert.NilError(t, err)
+
+	const id = "probe-1"
+
+	// No PID file: the monitor never started or already exited -> stale.
+	stale, err := isStaleMonitor(cfg, id)
+	assert.NilError(t, err)
+	assert.Assert(t, stale)
+
+	// Simulate a live monitor holding the flock on its PID file.
+	pidPath, err := cfg.MonitorPIDPath(id)
+	assert.NilError(t, err)
+	assert.NilError(t, os.MkdirAll(filepath.Dir(pidPath), 0o700))
+	f, err := os.OpenFile(pidPath, os.O_RDWR|os.O_CREATE, 0o644)
+	assert.NilError(t, err)
+	defer f.Close()
+	acquired, err := flock.TryLockExclusive(f)
+	assert.NilError(t, err)
+	assert.Assert(t, acquired)
+
+	// A held lock reads as alive (not stale), even though a stale PID would
+	// have passed the old Signal(0) check.
+	stale, err = isStaleMonitor(cfg, id)
+	assert.NilError(t, err)
+	assert.Assert(t, !stale)
+
+	// Releasing the lock (monitor crashed without removing its PID file)
+	// reads as stale again.
+	assert.NilError(t, flock.Unlock(f))
+	stale, err = isStaleMonitor(cfg, id)
+	assert.NilError(t, err)
+	assert.Assert(t, stale)
+
+	// An unexpected open failure (here a directory where the PID file should
+	// be, which fails with something other than fs.ErrNotExist) is returned
+	// to the caller, not silently classified as stale.
+	const errID = "probe-err"
+	errPidPath, err := cfg.MonitorPIDPath(errID)
+	assert.NilError(t, err)
+	assert.NilError(t, os.MkdirAll(errPidPath, 0o700))
+	_, err = isStaleMonitor(cfg, errID)
+	assert.Assert(t, err != nil)
+	assert.Assert(t, !errors.Is(err, fs.ErrNotExist))
+}
+
+func TestCleanStaleEntrySkipsProbeError(t *testing.T) {
+	st := testStore(t)
+
+	cfg, err := (CmdmanConfig{
+		DataDir:            t.TempDir(),
+		RuntimeDir:         t.TempDir(),
+		DefaultWorkingDir:  "/tmp",
+		DefaultEnvironment: testEnv(),
+	}).WithDefaults()
+	assert.NilError(t, err)
+
+	const id = "probe-skip"
+	cmdCfg := &model.CommandConfig{
+		Argv:            []string{"/bin/true"},
+		Dir:             "/tmp",
+		Env:             testEnv(),
+		RestartPolicy:   model.RestartPolicyNo,
+		ScrollbackBytes: store.DefaultScrollbackBytes,
+		LogDriver:       model.DefaultLogDriver,
+		CommandDir:      "/tmp/cmd/" + id,
+	}
+	assert.NilError(t, st.InsertCommandConfig(id, "", cmdCfg))
+	stateJSON := &model.CommandState{MonitorPID: os.Getpid()}
+	assert.NilError(t, st.InsertCommandState(id, model.EventTypeRunning, stateJSON))
+
+	// Force the liveness probe to fail with an unexpected error by putting a
+	// directory where the PID file is expected.
+	pidPath, err := cfg.MonitorPIDPath(id)
+	assert.NilError(t, err)
+	assert.NilError(t, os.MkdirAll(pidPath, 0o700))
+
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	ctx := contextkey.WithSlogLogger(context.Background(), logger)
+
+	// The probe error is logged and the entry is skipped, not aborted...
+	assert.NilError(t, cleanStaleEntry(ctx, st, cfg, id, model.EventTypeRunning, stateJSON, cmdCfg))
+	assert.Assert(t, strings.Contains(logBuf.String(), "probe monitor liveness failed"))
+
+	// ...and the entry is left running rather than being marked failed.
+	state, _, _, err := st.GetCommandState(id)
+	assert.NilError(t, err)
+	assert.Equal(t, state, model.EventTypeRunning)
 }
 
 func TestMonitorSubscribeCapturesOffsetAndLiveRecordsUnderLock(t *testing.T) {

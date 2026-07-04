@@ -199,8 +199,12 @@ func (m *Monitor) init() (err error) {
 		f.Close,
 	)
 
-	if err := flock.TryLockExclusive(f); err != nil {
+	acquired, err := flock.TryLockExclusive(f)
+	if err != nil {
 		return fmt.Errorf("lock pid file %q: %w", pidPath, err)
+	}
+	if !acquired {
+		return fmt.Errorf("monitor %q already running: pid file %q is locked", m.ID, pidPath)
 	}
 	cleanUp = append(
 		cleanUp,

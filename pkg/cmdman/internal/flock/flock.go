@@ -5,9 +5,12 @@ package flock
 
 import "os"
 
-// TryLockExclusive acquires an exclusive advisory lock on f without blocking.
-// It returns an error if the lock is already held by another fd.
-func TryLockExclusive(f *os.File) error {
+// TryLockExclusive attempts to acquire an exclusive advisory lock on f without
+// blocking. acquired reports whether the lock was taken; when it is false with
+// a nil error the lock is currently held by another fd (lock contention). A
+// non-nil error signals an unexpected failure that is not contention and must
+// not be treated as "lock available".
+func TryLockExclusive(f *os.File) (acquired bool, err error) {
 	return tryLockExclusive(f)
 }
 

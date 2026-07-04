@@ -18,7 +18,7 @@ func (s *Service) List(ctx context.Context, req ListRequest) ([]store.CommandEnt
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	if err := CleanStaleEntries(st, s.cfg); err != nil {
+	if err := CleanStaleEntries(ctx, st, s.cfg); err != nil {
 		return nil, fmt.Errorf("clean stale entries: %w", err)
 	}
 

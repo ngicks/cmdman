@@ -1,34 +1,28 @@
 package cmdman
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"log/slog"
 	"os"
-	"syscall"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/internal/flock"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	cmdstore "github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/go-common/contextkey"
 )
 
-// CheckMonitorAlive checks if a monitor process is still alive by PID.
-func CheckMonitorAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	err = process.Signal(syscall.Signal(0))
-	return err == nil
-}
-
 // CleanStaleEntries checks for stale monitors and marks them as failed.
-func CleanStaleEntries(st *cmdstore.Store, cfg CmdmanConfig) error {
+func CleanStaleEntries(ctx context.Context, st *cmdstore.Store, cfg CmdmanConfig) error {
 	entries, err := st.ListCommands(true, nil)
 	if err != nil {
 		return err
 	}
 	for _, e := range entries {
 		if err := cleanStaleEntry(
+			ctx,
 			st,
 			cfg,
 			e.ID,
@@ -43,6 +37,7 @@ func CleanStaleEntries(st *cmdstore.Store, cfg CmdmanConfig) error {
 }
 
 func cleanStaleEntry(
+	ctx context.Context,
 	st *cmdstore.Store,
 	cfg CmdmanConfig,
 	id string,
@@ -50,7 +45,22 @@ func cleanStaleEntry(
 	stateJSON *model.CommandState,
 	configJSON *model.CommandConfig,
 ) error {
-	if !isStaleCheckState(state) || !isStaleMonitor(stateJSON) {
+	if !isStaleCheckState(state) {
+		return nil
+	}
+
+	stale, err := isStaleMonitor(cfg, id)
+	if err != nil {
+		// An unexpected probe error (permissions, I/O) must not be treated as
+		// a dead monitor: skip the entry and let the ctx logger record it.
+		contextkey.ValueSlogLoggerDefault(ctx).Warn(
+			"clean stale entries: probe monitor liveness failed",
+			slog.String("id", id),
+			slog.String("error", err.Error()),
+		)
+		return nil
+	}
+	if !stale {
 		return nil
 	}
 
@@ -86,6 +96,42 @@ func isStaleCheckState(state model.EventType) bool {
 	return state == model.EventTypeStarting || state == model.EventTypeRunning
 }
 
-func isStaleMonitor(stateJSON *model.CommandState) bool {
-	return stateJSON.MonitorPID > 0 && !CheckMonitorAlive(stateJSON.MonitorPID)
+// isStaleMonitor reports whether the monitor for id has died. It probes
+// liveness by attempting a non-blocking exclusive flock on the monitor's PID
+// file (cfg.MonitorPIDPath). A live monitor holds that lock for its whole
+// lifetime (see Monitor.init), so:
+//   - lock held by another process (try-lock busy) -> alive (not stale);
+//   - lock acquired here, or the PID file is absent -> stale;
+//   - unexpected open/flock errors are returned to the caller unclassified.
+//
+// Unlike a PID + Signal(0) check, this is immune to PID reuse: a recycled PID
+// cannot resurrect a released advisory lock.
+func isStaleMonitor(cfg CmdmanConfig, id string) (bool, error) {
+	pidPath, err := cfg.MonitorPIDPath(id)
+	if err != nil {
+		return false, err
+	}
+
+	// Do not create the file: absence means the monitor already exited (it
+	// removes its PID file on shutdown) and is therefore stale.
+	f, err := os.OpenFile(pidPath, os.O_RDWR, 0o644)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return true, nil
+		}
+		return false, fmt.Errorf("open pid file %q: %w", pidPath, err)
+	}
+	defer f.Close()
+
+	acquired, err := flock.TryLockExclusive(f)
+	if err != nil {
+		return false, fmt.Errorf("lock pid file %q: %w", pidPath, err)
+	}
+	if acquired {
+		// No monitor holds the lock; release it and treat the entry as stale.
+		_ = flock.Unlock(f)
+		return true, nil
+	}
+	// The lock is busy, so a live monitor is holding it.
+	return false, nil
 }
