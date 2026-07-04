@@ -4,6 +4,8 @@ import (
 	"context"
 	"strconv"
 	"strings"
+
+	"github.com/ngicks/cmdman/pkg/muxctl"
 )
 
 // currentWindowToReuse decides whether the caller's current tmux window should
@@ -52,23 +54,16 @@ func currentWindowToReuse(
 	if identity != "" {
 		return id, true
 	}
-	if shouldReuseUnmarkedWindow(name, ownedWindowName, panes) {
+	if muxctl.ShouldReuseUnmarkedWindow(name, ownedWindowName, panes) {
 		return id, true
 	}
 	return "", false
 }
 
-// shouldReuseUnmarkedWindow decides whether an unowned current window should
-// be taken over: when it is already named like ours or has at most a single
-// pane (so repurposing it does not clobber unrelated work).
-func shouldReuseUnmarkedWindow(curName, ownedName string, panes int) bool {
-	return curName == ownedName || panes <= 1
-}
-
 // currentWindowIfOwned returns the caller's current window id when that window
 // carries the @cmdman_window ownership option — i.e. it was stamped by a
 // previous [New] call. Unlike [currentWindowToReuse] it never accepts an
-// unowned window: teardown callers (e.g. [Session.Detach] via [OpenExisting])
+// unowned window: teardown callers (e.g. [Session.Detach] via [Open])
 // must act only on a provably muxctl-owned window, never repurpose an arbitrary
 // window the user happens to be sitting in.
 //

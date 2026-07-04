@@ -1,4 +1,4 @@
-package tmux
+package muxctl_test
 
 import (
 	"slices"
@@ -96,9 +96,9 @@ func TestComputeChildCells(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := computeChildCells(tc.parent, tc.splits)
+			got := muxctl.ComputeChildCells(tc.parent, tc.splits)
 			if !slices.Equal(got, tc.want) {
-				t.Errorf("computeChildCells(%d, %v) = %v, want %v",
+				t.Errorf("ComputeChildCells(%d, %v) = %v, want %v",
 					tc.parent, tc.splits, got, tc.want)
 			}
 		})
@@ -158,10 +158,58 @@ func TestPickFocus(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := pickFocus(tc.root)
+			got := muxctl.PickFocus(tc.root)
 			if got != tc.want {
-				t.Errorf("pickFocus = %q, want %q", got, tc.want)
+				t.Errorf("PickFocus = %q, want %q", got, tc.want)
 			}
 		})
 	}
+}
+
+func TestAppendLeafNames(t *testing.T) {
+	t.Parallel()
+
+	leaf := func(name string) muxctl.PaneSpec {
+		return muxctl.PaneSpec{Leaf: muxctl.Leaf{Name: name, Cmd: []string{"./" + name}}}
+	}
+	container := func(children ...muxctl.PaneSpec) muxctl.PaneSpec {
+		return muxctl.PaneSpec{
+			Container: muxctl.Container{Dir: muxctl.DirHorizontal, Panes: children},
+		}
+	}
+
+	// Nested tree; the repeated "a" pins that AppendLeafNames does not dedup,
+	// and the interleaving pins depth-first document order.
+	root := container(
+		leaf("a"),
+		container(leaf("b"), leaf("c")),
+		leaf("a"),
+	)
+
+	t.Run("collects every leaf name depth-first, no dedup", func(t *testing.T) {
+		t.Parallel()
+		got := muxctl.AppendLeafNames(nil, root)
+		want := []string{"a", "b", "c", "a"}
+		if !slices.Equal(got, want) {
+			t.Errorf("AppendLeafNames(nil, root) = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("appends onto the caller's slice", func(t *testing.T) {
+		t.Parallel()
+		got := muxctl.AppendLeafNames([]string{"pre"}, root)
+		want := []string{"pre", "a", "b", "c", "a"}
+		if !slices.Equal(got, want) {
+			t.Errorf("AppendLeafNames([pre], root) = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("single leaf root", func(t *testing.T) {
+		t.Parallel()
+		got := muxctl.AppendLeafNames(nil, leaf("solo"))
+		want := []string{"solo"}
+		if !slices.Equal(got, want) {
+			t.Errorf("AppendLeafNames(nil, leaf) = %v, want %v", got, want)
+		}
+	})
 }

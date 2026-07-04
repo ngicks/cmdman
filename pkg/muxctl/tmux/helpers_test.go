@@ -52,6 +52,12 @@ func killServer(t *testing.T, socket string) {
 	_ = cmd.Run()
 }
 
+// socketOpt builds the driver-option bag selecting a tmux server by socket
+// name, as carried by [muxctl.Config.DriverOpt] / [muxctl.ListOptions.DriverOpt].
+func socketOpt(socket string) map[string]string {
+	return map[string]string{"socket": socket}
+}
+
 // newSession constructs a Session against a fresh per-test tmux server and
 // registers cleanup to kill the server when the test ends. It wires the
 // ctrl-p,ctrl-q detach sequence (in tmux send-keys syntax) so tests exercising
@@ -60,8 +66,8 @@ func newSession(t *testing.T, windowName string) (*tmuxctl.Session, string) {
 	t.Helper()
 	socket := uniqueSocket(t)
 	t.Cleanup(func() { killServer(t, socket) })
-	sess, err := tmuxctl.New(context.Background(), tmuxctl.Config{
-		Socket:           socket,
+	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
+		DriverOpt:        socketOpt(socket),
 		SessionName:      "cmdman-test",
 		WindowName:       windowName,
 		ViewerDetachKeys: []string{"C-p", "C-q"},

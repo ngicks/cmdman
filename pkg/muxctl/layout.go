@@ -1,9 +1,7 @@
-package tmux
+package muxctl
 
-import "github.com/ngicks/cmdman/pkg/muxctl"
-
-// computeChildCells turns a [muxctl.PaneSpec.Splits] array into concrete
-// cell counts given the parent pane's size in the split direction.
+// ComputeChildCells turns a [PaneSpec.Splits] array into concrete cell counts
+// given the parent pane's size in the split direction.
 //
 // Algorithm:
 //
@@ -20,7 +18,7 @@ import "github.com/ngicks/cmdman/pkg/muxctl"
 // A child whose computed size is < 1 is returned as 0; the caller may
 // treat 0 as "skip, too small" and warn (matches the plan's
 // best-effort-on-too-small-terminal behavior).
-func computeChildCells(parent int, splits []muxctl.Size) []int {
+func ComputeChildCells(parent int, splits []Size) []int {
 	n := len(splits)
 	cells := make([]int, n)
 	if n == 0 {
@@ -78,4 +76,70 @@ func computeChildCells(parent int, splits []muxctl.Size) []int {
 		}
 	}
 	return cells
+}
+
+// ParentDim returns the parent-pane dimension along the container's split
+// direction: width for horizontal, height for vertical.
+func ParentDim(dir Direction, w, h int) int {
+	if dir == DirVertical {
+		return h
+	}
+	return w
+}
+
+// ChildDims returns the (width, height) a child gets given the container's
+// direction, the parent's dims, and the child's allocated cells.
+func ChildDims(dir Direction, parentW, parentH, childCells int) (int, int) {
+	if dir == DirVertical {
+		return parentW, childCells
+	}
+	return childCells, parentH
+}
+
+// PickFocus returns the name of the leaf to focus: the first leaf with
+// Focus=true, or the first leaf in document order. Returns "" if the tree
+// contains no leaves (impossible after Validate, but safe).
+func PickFocus(root PaneSpec) string {
+	var first string
+	var focused string
+	var walk func(p PaneSpec)
+	walk = func(p PaneSpec) {
+		if focused != "" {
+			return
+		}
+		if p.IsLeaf() {
+			if first == "" {
+				first = p.Name
+			}
+			if p.Focus {
+				focused = p.Name
+			}
+			return
+		}
+		for _, c := range p.Panes {
+			walk(c)
+			if focused != "" {
+				return
+			}
+		}
+	}
+	walk(root)
+	if focused != "" {
+		return focused
+	}
+	return first
+}
+
+// AppendLeafNames appends every leaf name under node (depth-first, document
+// order) to dst and returns the extended slice. Drivers use it to report the
+// panes dropped when a terminal is too small to fit the layout.
+func AppendLeafNames(dst []string, node PaneSpec) []string {
+	if node.IsLeaf() {
+		dst = append(dst, node.Name)
+		return dst
+	}
+	for _, c := range node.Panes {
+		dst = AppendLeafNames(dst, c)
+	}
+	return dst
 }

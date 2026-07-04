@@ -1,8 +1,14 @@
-package tmux
+package muxctl_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/ngicks/cmdman/pkg/muxctl"
+)
 
 func TestShouldReuseUnmarkedWindow(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name      string
 		curName   string
@@ -17,10 +23,10 @@ func TestShouldReuseUnmarkedWindow(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := shouldReuseUnmarkedWindow(tc.curName, tc.ownedName, tc.panes)
+			got := muxctl.ShouldReuseUnmarkedWindow(tc.curName, tc.ownedName, tc.panes)
 			if got != tc.want {
 				t.Fatalf(
-					"shouldReuseUnmarkedWindow(%q, %q, %d) = %v, want %v",
+					"ShouldReuseUnmarkedWindow(%q, %q, %d) = %v, want %v",
 					tc.curName, tc.ownedName, tc.panes, got, tc.want,
 				)
 			}

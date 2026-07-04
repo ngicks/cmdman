@@ -12,6 +12,11 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/mux"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
+
+	// Link the tmux muxctl driver so mux.List/MuxLs can resolve "tmux" via
+	// muxctl.LookupDriver in this test binary (the real binary links it from
+	// cmd/cmdman/main.go).
+	_ "github.com/ngicks/cmdman/pkg/muxctl/tmux"
 )
 
 // muxTestSelection returns a minimal ProjectSelection carrying a "mux:" section,
@@ -80,7 +85,7 @@ func TestServiceMuxLs_NilServiceDegrades(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not installed")
 	}
-	// A socket path with no server: ListOwnedWindows treats "error connecting"
+	// A socket path with no server: ListWindows treats "error connecting"
 	// as zero windows, so MuxLs returns an empty listing without a real error.
 	socket := filepath.Join(t.TempDir(), "no-such-server.sock")
 	sel := ProjectSelection{

@@ -4,7 +4,7 @@ package mux
 //   - identity defaulting in Run (opts.Identity="" → windowName)
 //   - identity defaulting in Down (opts.Identity="" → resolveSessionName → windowName)
 //
-// Driver-touching behavior (ListOwnedWindows, OpenExisting, Detach) is covered
+// Driver-touching behavior (ListWindows, Open, Detach) is covered
 // by e2e tests (workstream 5). No tmux server is spawned here.
 
 import (
@@ -14,7 +14,7 @@ import (
 
 // TestIdentityDefaulting_Run verifies the identity-fallback chain for Run:
 // when RunOptions.Identity is empty the resolved window name becomes the
-// identity (same derivation as Run applies to tmux.Config.OwnedIdentity).
+// identity (same derivation as Run applies to muxctl.Config.OwnedIdentity).
 func TestIdentityDefaulting_Run(t *testing.T) {
 	inTmux := []string{"TMUX=/tmp/tmux-1000/default,123,0"}
 	noTmux := []string{"PATH=/usr/bin"}

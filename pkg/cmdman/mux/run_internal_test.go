@@ -2,6 +2,7 @@ package mux
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/ngicks/cmdman/pkg/muxctl"
@@ -90,6 +91,57 @@ func TestResolveLayoutIndex(t *testing.T) {
 		_, err := resolveLayoutIndex("nope", layouts)
 		if err == nil {
 			t.Fatalf("unknown layout name should error")
+		}
+	})
+}
+
+// TestResolveDriver covers driver resolution: the tmux driver (linked into this
+// test binary via scale_rmw_test.go's import) resolves, the known-but-
+// unimplemented names get the friendly "not implemented yet" wording, and any
+// other unregistered name surfaces LookupDriver's naming error. The error
+// branches need no tmux server.
+func TestResolveDriver(t *testing.T) {
+	noTmux := []string{"PATH=/usr/bin"}
+
+	t.Run("tmux resolves", func(t *testing.T) {
+		driver, err := resolveDriver("tmux", noTmux)
+		if err != nil {
+			t.Fatalf("resolveDriver(tmux) = %v, want nil error", err)
+		}
+		if driver == nil {
+			t.Fatal("resolveDriver(tmux) returned nil driver")
+		}
+	})
+
+	t.Run("zellij and wezterm are not-implemented-yet", func(t *testing.T) {
+		for _, name := range []string{"zellij", "wezterm"} {
+			driver, err := resolveDriver(name, noTmux)
+			if err == nil {
+				t.Fatalf("resolveDriver(%q) = %v, want error", name, driver)
+			}
+			if driver != nil {
+				t.Errorf("resolveDriver(%q) driver = %v, want nil", name, driver)
+			}
+			if !strings.Contains(err.Error(), "not implemented yet") {
+				t.Errorf("resolveDriver(%q) error = %q, want \"not implemented yet\"", name, err)
+			}
+		}
+	})
+
+	t.Run("unregistered name surfaces lookup error", func(t *testing.T) {
+		const name = "nonexistent-driver-xyz"
+		driver, err := resolveDriver(name, noTmux)
+		if err == nil {
+			t.Fatalf("resolveDriver(%q) = %v, want error", name, driver)
+		}
+		if driver != nil {
+			t.Errorf("resolveDriver(%q) driver = %v, want nil", name, driver)
+		}
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("resolveDriver(%q) error = %q, want it to name the driver", name, err)
+		}
+		if strings.Contains(err.Error(), "not implemented yet") {
+			t.Errorf("resolveDriver(%q) should not use the not-implemented wording: %q", name, err)
 		}
 	})
 }

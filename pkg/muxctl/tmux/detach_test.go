@@ -27,10 +27,10 @@ func windowOption(t *testing.T, socket, windowID, name string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// TestOpenExisting_ReturnsFalseWhenNoWindow verifies OpenExisting is a no-op
+// TestOpen_ReturnsFalseWhenNoWindow verifies Open is a no-op
 // signal (ok=false, no Session) when the named window does not exist — so a
 // teardown caller never spawns a stray window.
-func TestOpenExisting_ReturnsFalseWhenNoWindow(t *testing.T) {
+func TestOpen_ReturnsFalseWhenNoWindow(t *testing.T) {
 	requireTmux(t)
 	socket := uniqueSocket(t)
 	t.Cleanup(func() { killServer(t, socket) })
@@ -38,32 +38,32 @@ func TestOpenExisting_ReturnsFalseWhenNoWindow(t *testing.T) {
 	// A session exists, but no window named "cmdman".
 	run(t, socket, "new-session", "-d", "-s", "cmdman-test", "-n", "work")
 
-	sess, ok, err := tmuxctl.OpenExisting(context.Background(), tmuxctl.Config{
-		Socket:      socket,
+	sess, ok, err := tmuxctl.Open(context.Background(), muxctl.Config{
+		DriverOpt:   socketOpt(socket),
 		SessionName: "cmdman-test",
 		WindowName:  "cmdman",
 	})
 	if err != nil {
-		t.Fatalf("OpenExisting: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
 	if ok || sess != nil {
 		t.Fatalf("expected ok=false/sess=nil for absent window, got ok=%v sess=%v", ok, sess)
 	}
 }
 
-// TestOpenExisting_FindsNamedWindow verifies OpenExisting locates the dedicated
+// TestOpen_FindsNamedWindow verifies Open locates the dedicated
 // named window a prior New built.
-func TestOpenExisting_FindsNamedWindow(t *testing.T) {
+func TestOpen_FindsNamedWindow(t *testing.T) {
 	requireTmux(t)
 	sess, socket := newSession(t, "cmdman")
 
-	got, ok, err := tmuxctl.OpenExisting(context.Background(), tmuxctl.Config{
-		Socket:      socket,
+	got, ok, err := tmuxctl.Open(context.Background(), muxctl.Config{
+		DriverOpt:   socketOpt(socket),
 		SessionName: "cmdman-test",
 		WindowName:  "cmdman",
 	})
 	if err != nil {
-		t.Fatalf("OpenExisting: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
 	if !ok {
 		t.Fatal("expected to find the named window")
@@ -73,18 +73,18 @@ func TestOpenExisting_FindsNamedWindow(t *testing.T) {
 	}
 }
 
-// TestOpenExisting_FindsOwnedCurrentWindow verifies the reuse-current case: a
+// TestOpen_FindsOwnedCurrentWindow verifies the reuse-current case: a
 // dashboard built into a window whose NAME differs from the owned name is found
 // via the owned-current path (find-by-name "cmdman" would not match "work").
 // Ownership is now determined by the @cmdman_window option, so the session is
 // built with a non-empty OwnedIdentity to ensure the stamp is present.
-func TestOpenExisting_FindsOwnedCurrentWindow(t *testing.T) {
+func TestOpen_FindsOwnedCurrentWindow(t *testing.T) {
 	requireTmux(t)
 	socket := uniqueSocket(t)
 	t.Cleanup(func() { killServer(t, socket) })
 
-	sess, err := tmuxctl.New(context.Background(), tmuxctl.Config{
-		Socket:           socket,
+	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
+		DriverOpt:        socketOpt(socket),
 		SessionName:      "main",
 		WindowName:       "work",
 		OwnedIdentity:    "find-owned-test",
@@ -101,14 +101,14 @@ func TestOpenExisting_FindsOwnedCurrentWindow(t *testing.T) {
 	// Make the owned dashboard the session's current window.
 	run(t, socket, "select-window", "-t", sess.WindowID())
 
-	got, ok, err := tmuxctl.OpenExisting(context.Background(), tmuxctl.Config{
-		Socket:             socket,
+	got, ok, err := tmuxctl.Open(context.Background(), muxctl.Config{
+		DriverOpt:          socketOpt(socket),
 		SessionName:        "main",
 		WindowName:         "cmdman", // deliberately NOT "work"
 		ReuseCurrentWindow: true,
 	})
 	if err != nil {
-		t.Fatalf("OpenExisting: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
 	if !ok {
 		t.Fatal("expected to find the owned current window")
@@ -118,11 +118,11 @@ func TestOpenExisting_FindsOwnedCurrentWindow(t *testing.T) {
 	}
 }
 
-// TestOpenExisting_RejectsUnmarkedSinglePaneCurrent is the key safety case that
-// distinguishes OpenExisting from New: New would TAKE OVER an unmarked
+// TestOpen_RejectsUnmarkedSinglePaneCurrent is the key safety case that
+// distinguishes Open from New: New would TAKE OVER an unmarked
 // single-pane current window (its single-pane reuse rule), but a teardown must
 // never repurpose an arbitrary window the user happens to be sitting in.
-func TestOpenExisting_RejectsUnmarkedSinglePaneCurrent(t *testing.T) {
+func TestOpen_RejectsUnmarkedSinglePaneCurrent(t *testing.T) {
 	requireTmux(t)
 	socket := uniqueSocket(t)
 	t.Cleanup(func() { killServer(t, socket) })
@@ -130,17 +130,17 @@ func TestOpenExisting_RejectsUnmarkedSinglePaneCurrent(t *testing.T) {
 	// A plain single-pane window — the kind New's ReuseCurrentWindow accepts.
 	run(t, socket, "new-session", "-d", "-s", "main", "-n", "work")
 
-	_, ok, err := tmuxctl.OpenExisting(context.Background(), tmuxctl.Config{
-		Socket:             socket,
+	_, ok, err := tmuxctl.Open(context.Background(), muxctl.Config{
+		DriverOpt:          socketOpt(socket),
 		SessionName:        "main",
 		WindowName:         "cmdman",
 		ReuseCurrentWindow: true,
 	})
 	if err != nil {
-		t.Fatalf("OpenExisting: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
 	if ok {
-		t.Fatal("OpenExisting must NOT take over an unmarked single-pane current window")
+		t.Fatal("Open must NOT take over an unmarked single-pane current window")
 	}
 }
 

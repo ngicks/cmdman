@@ -68,6 +68,27 @@ alternatives. Stubs below mirror PLAN.md open questions.
   across two call styles and forces signature churn if MuxDown/MuxLs later need
   the service).
 
+## D10 (reopens D7): Promote muxctl tier-2 driver-contract extraction — RESOLVED 2026-07-04
+
+- Context: after C3 tier 1 landed, the maintainer reviewed the remaining
+  concrete coupling — `pkg/cmdman/mux` imports `pkg/muxctl/tmux` in four files
+  (enumeration via `tmux.ListOwnedWindows`/`OwnedWindow`, constructors
+  `tmux.New`/`OpenExisting`, cycle-scale primitives `FindLeafPane`/
+  `RespawnLeaf`, raw window state `ReadScaleRaw`/`WriteScaleRaw`, plus
+  `*tmux.Session.WindowID`/`.Detach` which `muxctl.Session` lacks) — and judged
+  it a design defect to fix now, not on driver #2's arrival.
+- Choice: reopen D7 and promote the tier-2 extraction to the execution backlog
+  (new item C11, ranked immediately after C3, before C2): reify the driver
+  contract in `pkg/muxctl` so `pkg/cmdman/mux` becomes tmux-free —
+  "tmux-free `pkg/cmdman/mux`" is now a design invariant, not a
+  wait-for-second-driver economy.
+- Still deferred: the ApplyLayout materialize/split core extraction (parent
+  C3 tier-2 third bullet) — it is driver-internal, does not leak into
+  `pkg/cmdman/mux`, and remains highest-effort/lowest-urgency.
+- Rejected: keeping D7's wait-for-second-driver stance (the leaky boundary
+  makes `mux down`/`ls`/`cycle-scale` silently tmux-only and contradicts
+  muxctl/doc.go's stated driver contract).
+
 ## D9 (from OQ9, spawned by D3): Migration mechanism shape — RESOLVED 2026-07-04
 
 - Choice: embedded `.sql` migration files (embed.FS: `0001_init.sql`,

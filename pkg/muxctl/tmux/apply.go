@@ -86,7 +86,7 @@ func (s *Session) ApplyLayout(
 		}
 	}
 
-	focusName := pickFocus(root)
+	focusName := muxctl.PickFocus(root)
 	if focusName != "" {
 		if p, ok := st.panes[focusName]; ok {
 			if _, err := s.exec.run(ctx, "select-pane", "-t", p.PaneId()); err != nil {
@@ -118,11 +118,11 @@ func (st *applyState) materialize(anchorID string, node muxctl.PaneSpec, w, h in
 	if node.IsLeaf() {
 		return st.realizeLeafAt(anchorID, node)
 	}
-	cells := computeChildCells(parentDim(node.Dir, w, h), node.Splits)
+	cells := muxctl.ComputeChildCells(muxctl.ParentDim(node.Dir, w, h), node.Splits)
 
 	last := len(node.Panes) - 1
 	for i, child := range node.Panes {
-		childW, childH := childDims(node.Dir, w, h, cells[i])
+		childW, childH := muxctl.ChildDims(node.Dir, w, h, cells[i])
 
 		if i == last {
 			if err := st.materialize(anchorID, child, childW, childH); err != nil {
@@ -200,15 +200,10 @@ func (st *applyState) split(targetID string, dir muxctl.Direction, cells int) (s
 	return strings.TrimSpace(out), nil
 }
 
-// recordSkipped records every leaf name under skipped (for the warn line).
+// recordSkipped records every leaf name under node in skipped (for the warn
+// line). The leaf-name walk itself lives in [muxctl.AppendLeafNames].
 func (st *applyState) recordSkipped(node muxctl.PaneSpec) {
-	if node.IsLeaf() {
-		st.skipped = append(st.skipped, node.Name)
-		return
-	}
-	for _, c := range node.Panes {
-		st.recordSkipped(c)
-	}
+	st.skipped = muxctl.AppendLeafNames(st.skipped, node)
 }
 
 // resetWindow kills every pane in the cmdman-owned window except the
@@ -262,56 +257,4 @@ func (s *Session) paneSize(ctx context.Context, paneID string) (int, int, error)
 		return 0, 0, fmt.Errorf("tmux: parse pane size %q", out)
 	}
 	return w, h, nil
-}
-
-// parentDim returns the parent-pane dimension along the container's split
-// direction: width for horizontal, height for vertical.
-func parentDim(dir muxctl.Direction, w, h int) int {
-	if dir == muxctl.DirVertical {
-		return h
-	}
-	return w
-}
-
-// childDims returns the (width, height) a child gets given the container's
-// direction, the parent's dims, and the child's allocated cells.
-func childDims(dir muxctl.Direction, parentW, parentH, childCells int) (int, int) {
-	if dir == muxctl.DirVertical {
-		return parentW, childCells
-	}
-	return childCells, parentH
-}
-
-// pickFocus returns the name of the leaf to focus: the first leaf with
-// Focus=true, or the first leaf in document order. Returns "" if the tree
-// contains no leaves (impossible after Validate, but safe).
-func pickFocus(root muxctl.PaneSpec) string {
-	var first string
-	var focused string
-	var walk func(p muxctl.PaneSpec)
-	walk = func(p muxctl.PaneSpec) {
-		if focused != "" {
-			return
-		}
-		if p.IsLeaf() {
-			if first == "" {
-				first = p.Name
-			}
-			if p.Focus {
-				focused = p.Name
-			}
-			return
-		}
-		for _, c := range p.Panes {
-			walk(c)
-			if focused != "" {
-				return
-			}
-		}
-	}
-	walk(root)
-	if focused != "" {
-		return focused
-	}
-	return first
 }

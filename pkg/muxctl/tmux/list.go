@@ -3,57 +3,14 @@ package tmux
 import (
 	"context"
 	"strings"
+
+	"github.com/ngicks/cmdman/pkg/muxctl"
 )
 
-// OwnedWindow is a row returned by [ListOwnedWindows]: it describes a single
-// tmux window that carries the @cmdman_window ownership stamp.
-type OwnedWindow struct {
-	// SessionName is the tmux session the window belongs to.
-	SessionName string
-	// WindowID is the tmux window @id (e.g. "@3").
-	WindowID string
-	// WindowName is the human-visible tmux window name (may differ from the
-	// identity — takeover windows keep their original name).
-	WindowName string
-	// Identity is the value of @cmdman_window — the opaque string the caller
-	// supplied as [Config.OwnedIdentity] when building this dashboard. The
-	// driver stores and returns it verbatim; upper layers interpret it.
-	Identity string
-	// Marker is the layout index last applied to this window (see
-	// [Session.StatWindow]), or -1 when no layout has been applied yet or the
-	// panes carry inconsistent markers. Reading the marker requires an extra
-	// list-panes call per window; it is -1 when the server returns no panes.
-	Marker int
-	// ScalePositions holds the per-command cycle-scale positions decoded from
-	// the window's @cmdman_scale option (command name → 1-based replica
-	// position). Absent commands default to position 1 at consumption time.
-	// Nil when the option is unset or empty.
-	ScalePositions map[string]int
-}
-
-// ListOwnedWindowsOptions controls which windows [ListOwnedWindows] returns.
-type ListOwnedWindowsOptions struct {
-	// Path overrides the tmux binary path. Defaults to "tmux".
-	Path string
-
-	// Socket selects the tmux server by socket name (-L). Empty uses the
-	// default socket (or the server inherited from $TMUX).
-	Socket string
-
-	// Session, when non-empty, restricts the scan to that session only
-	// (list-windows -t <session> instead of list-windows -a). Empty scans
-	// all sessions on the server.
-	Session string
-
-	// Identity, when non-empty, filters the results to windows whose
-	// @cmdman_window option equals this string exactly. Empty returns all
-	// stamped windows regardless of identity.
-	Identity string
-}
-
-// ListOwnedWindows enumerates tmux windows that carry the @cmdman_window
+// ListWindows enumerates tmux windows that carry the @cmdman_window
 // ownership stamp, server-wide (or restricted to one session via
-// opts.Session), and optionally filtered to an exact identity value.
+// opts.Session), and optionally filtered to an exact identity value. It
+// implements [muxctl.Driver.ListWindows] for tmux.
 //
 // When no tmux server is running on the target socket, list-windows exits
 // non-zero with a "no server" message; this is treated as zero results rather
@@ -61,21 +18,30 @@ type ListOwnedWindowsOptions struct {
 // simply "none, the server is not running".
 //
 // Each returned row includes the per-window layout marker from StatWindow so
-// callers can display the active layout index alongside the identity.
-func ListOwnedWindows(
+// callers can display the active layout index alongside the identity, plus the
+// inline per-window state values for the keys named in opts.StateKeys (each key
+// mapped to the window option @cmdman_<key>, fetched in the same list-windows
+// round-trip). A requested key whose option is unset maps to "".
+func ListWindows(
 	ctx context.Context,
-	opts ListOwnedWindowsOptions,
-) ([]OwnedWindow, error) {
-	e := newExecutor(opts.Path, opts.Socket)
+	opts muxctl.ListOptions,
+) ([]muxctl.Window, error) {
+	e := newExecutorFor(opts.DriverOpt)
 
 	// Build the list-windows invocation. -a scans all sessions; -t <session>
 	// restricts to one. The format delivers all per-window fields we need in
 	// one round-trip; we read the marker per-window below.
-	// The format string fetches five tab-separated fields per window.
-	// #{@cmdman_scale} expands as a window option directly in list-windows -F,
-	// so no extra tmux call is needed to read the scale positions.
-	const fmtStr = "#{window_id}\t#{session_name}\t#{window_name}\t#{" +
-		ownerOption + "}\t#{" + scaleOption + "}"
+	//
+	// The base format string fetches four tab-separated fields per window, then
+	// one field per requested state key. #{@cmdman_<key>} expands as a window
+	// option directly in list-windows -F, so no extra tmux call is needed to
+	// read the requested state (e.g. the cycle-scale positions).
+	var fmtBuf strings.Builder
+	fmtBuf.WriteString("#{window_id}\t#{session_name}\t#{window_name}\t#{" + ownerOption + "}")
+	for _, key := range opts.StateKeys {
+		fmtBuf.WriteString("\t#{" + stateOption(key) + "}")
+	}
+	fmtStr := fmtBuf.String()
 	var args []string
 	if opts.Session != "" {
 		args = []string{"list-windows", "-t", opts.Session, "-F", fmtStr}
@@ -109,19 +75,21 @@ func ListOwnedWindows(
 		return nil, nil
 	}
 
-	var rows []OwnedWindow
+	// nFields is the number of tab-separated fields the format string emits:
+	// four base fields plus one per state key.
+	nFields := 4 + len(opts.StateKeys)
+
+	var rows []muxctl.Window
 	for line := range strings.SplitSeq(out, "\n") {
-		// tmux strips trailing empty fields from -F output: a window without
-		// @cmdman_scale set yields 4 fields instead of 5. Accept both.
-		parts := strings.SplitN(line, "\t", 5)
+		// tmux strips trailing empty fields from -F output: a window without a
+		// requested state option set yields fewer fields. SplitN keeps internal
+		// empty fields, and the guards below default any missing trailing state
+		// field (and the whole state map) to empty.
+		parts := strings.SplitN(line, "\t", nFields)
 		if len(parts) < 4 {
 			continue
 		}
 		wid, session, wname, identity := parts[0], parts[1], parts[2], parts[3]
-		scaleRaw := ""
-		if len(parts) == 5 {
-			scaleRaw = parts[4]
-		}
 		if identity == "" {
 			// Window has no ownership stamp — not ours.
 			continue
@@ -129,6 +97,18 @@ func ListOwnedWindows(
 		if opts.Identity != "" && identity != opts.Identity {
 			// Caller requested a specific identity; skip non-matching rows.
 			continue
+		}
+
+		var state map[muxctl.StateKey]string
+		if len(opts.StateKeys) > 0 {
+			state = make(map[muxctl.StateKey]string, len(opts.StateKeys))
+			for i, key := range opts.StateKeys {
+				v := ""
+				if 4+i < len(parts) {
+					v = parts[4+i]
+				}
+				state[key] = v
+			}
 		}
 
 		// Read the layout marker for this window. We construct a throwaway
@@ -141,13 +121,13 @@ func ListOwnedWindows(
 			marker = stat.Marker
 		}
 
-		rows = append(rows, OwnedWindow{
-			SessionName:    session,
-			WindowID:       wid,
-			WindowName:     wname,
-			Identity:       identity,
-			Marker:         marker,
-			ScalePositions: decodeScalePositions(scaleRaw),
+		rows = append(rows, muxctl.Window{
+			SessionName: session,
+			WindowID:    wid,
+			WindowName:  wname,
+			Identity:    identity,
+			Marker:      marker,
+			State:       state,
 		})
 	}
 	return rows, nil

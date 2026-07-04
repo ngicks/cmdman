@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ngicks/cmdman/pkg/muxctl"
 	tmuxctl "github.com/ngicks/cmdman/pkg/muxctl/tmux"
 )
 
@@ -35,8 +36,8 @@ func TestNew_StampsOwnerOption_FindOrCreate(t *testing.T) {
 	t.Cleanup(func() { killServer(t, socket) })
 
 	const identity = "test-project-abc123"
-	sess, err := tmuxctl.New(context.Background(), tmuxctl.Config{
-		Socket:        socket,
+	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
+		DriverOpt:     socketOpt(socket),
 		SessionName:   "stamp-test",
 		WindowName:    "cmdman",
 		OwnedIdentity: identity,
@@ -59,8 +60,8 @@ func TestNew_NoStampWhenIdentityEmpty(t *testing.T) {
 	socket := uniqueSocket(t)
 	t.Cleanup(func() { killServer(t, socket) })
 
-	sess, err := tmuxctl.New(context.Background(), tmuxctl.Config{
-		Socket:        socket,
+	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
+		DriverOpt:     socketOpt(socket),
 		SessionName:   "no-stamp-test",
 		WindowName:    "cmdman",
 		OwnedIdentity: "", // deliberately empty
@@ -101,8 +102,8 @@ func TestNew_StampsOwnerOption_WindowIDPath(t *testing.T) {
 		"-n", "mywindow", "-P", "-F", "#{window_id}")
 
 	const identity = "wid-path-identity"
-	sess, err := tmuxctl.New(context.Background(), tmuxctl.Config{
-		Socket:        socket,
+	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
+		DriverOpt:     socketOpt(socket),
 		WindowID:      wantID,
 		OwnedIdentity: identity,
 	})
@@ -128,8 +129,8 @@ func TestDetach_ClearsOwnerOption(t *testing.T) {
 	t.Cleanup(func() { killServer(t, socket) })
 
 	const identity = "detach-clear-test"
-	sess, err := tmuxctl.New(context.Background(), tmuxctl.Config{
-		Socket:        socket,
+	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
+		DriverOpt:     socketOpt(socket),
 		SessionName:   "detach-test",
 		WindowName:    "cmdman",
 		OwnedIdentity: identity,
@@ -153,7 +154,7 @@ func TestDetach_ClearsOwnerOption(t *testing.T) {
 	}
 }
 
-// TestListOwnedWindows_TwoSessionsTwoIdentities builds two sessions on one
+// TestListWindows_TwoSessionsTwoIdentities builds two sessions on one
 // socket, one dashboard window each with different identities (one window
 // renamed after stamping to simulate a takeover window that kept its original
 // name), and asserts:
@@ -163,7 +164,7 @@ func TestDetach_ClearsOwnerOption(t *testing.T) {
 //   - Identity filter returns only the matching row.
 //   - Session filter restricts results to the named session.
 //   - A non-existent session filter returns empty rows and no error.
-func TestListOwnedWindows_TwoSessionsTwoIdentities(t *testing.T) {
+func TestListWindows_TwoSessionsTwoIdentities(t *testing.T) {
 	requireTmux(t)
 	socket := uniqueSocket(t)
 	t.Cleanup(func() { killServer(t, socket) })
@@ -172,8 +173,8 @@ func TestListOwnedWindows_TwoSessionsTwoIdentities(t *testing.T) {
 	const identB = "project-beta"
 
 	// Session A — window named "dash-a", stamped with identA.
-	sessA, err := tmuxctl.New(context.Background(), tmuxctl.Config{
-		Socket:        socket,
+	sessA, err := tmuxctl.New(context.Background(), muxctl.Config{
+		DriverOpt:     socketOpt(socket),
 		SessionName:   "session-a",
 		WindowName:    "dash-a",
 		OwnedIdentity: identA,
@@ -185,8 +186,8 @@ func TestListOwnedWindows_TwoSessionsTwoIdentities(t *testing.T) {
 	// Session B — window initially named "original", stamped with identB, then
 	// renamed to simulate a takeover window (the window keeps its pre-takeover
 	// name while the identity stamp tracks the true owner).
-	sessB, err := tmuxctl.New(context.Background(), tmuxctl.Config{
-		Socket:        socket,
+	sessB, err := tmuxctl.New(context.Background(), muxctl.Config{
+		DriverOpt:     socketOpt(socket),
 		SessionName:   "session-b",
 		WindowName:    "original",
 		OwnedIdentity: identB,
@@ -199,15 +200,15 @@ func TestListOwnedWindows_TwoSessionsTwoIdentities(t *testing.T) {
 
 	// ── server-wide scan ─────────────────────────────────────────────────────
 
-	all, err := tmuxctl.ListOwnedWindows(context.Background(), tmuxctl.ListOwnedWindowsOptions{
-		Socket: socket,
+	all, err := tmuxctl.ListWindows(context.Background(), muxctl.ListOptions{
+		DriverOpt: socketOpt(socket),
 	})
 	if err != nil {
-		t.Fatalf("ListOwnedWindows (server-wide): %v", err)
+		t.Fatalf("ListWindows (server-wide): %v", err)
 	}
 
 	// Build a map by identity for easy assertions.
-	byIdentity := make(map[string]tmuxctl.OwnedWindow)
+	byIdentity := make(map[string]muxctl.Window)
 	for _, row := range all {
 		byIdentity[row.Identity] = row
 	}
@@ -243,12 +244,12 @@ func TestListOwnedWindows_TwoSessionsTwoIdentities(t *testing.T) {
 
 	// ── identity filter ───────────────────────────────────────────────────────
 
-	filtered, err := tmuxctl.ListOwnedWindows(context.Background(), tmuxctl.ListOwnedWindowsOptions{
-		Socket:   socket,
-		Identity: identA,
+	filtered, err := tmuxctl.ListWindows(context.Background(), muxctl.ListOptions{
+		DriverOpt: socketOpt(socket),
+		Identity:  identA,
 	})
 	if err != nil {
-		t.Fatalf("ListOwnedWindows (identity filter): %v", err)
+		t.Fatalf("ListWindows (identity filter): %v", err)
 	}
 	if len(filtered) != 1 {
 		t.Fatalf("identity filter: want 1 row, got %d: %v", len(filtered), filtered)
@@ -259,15 +260,15 @@ func TestListOwnedWindows_TwoSessionsTwoIdentities(t *testing.T) {
 
 	// ── session filter ────────────────────────────────────────────────────────
 
-	inSessionA, err := tmuxctl.ListOwnedWindows(
+	inSessionA, err := tmuxctl.ListWindows(
 		context.Background(),
-		tmuxctl.ListOwnedWindowsOptions{
-			Socket:  socket,
-			Session: "session-a",
+		muxctl.ListOptions{
+			DriverOpt: socketOpt(socket),
+			Session:   "session-a",
 		},
 	)
 	if err != nil {
-		t.Fatalf("ListOwnedWindows (session filter): %v", err)
+		t.Fatalf("ListWindows (session filter): %v", err)
 	}
 	if len(inSessionA) != 1 {
 		t.Fatalf(
@@ -282,12 +283,12 @@ func TestListOwnedWindows_TwoSessionsTwoIdentities(t *testing.T) {
 
 	// ── nonexistent session → empty, no error ─────────────────────────────────
 
-	gone, err := tmuxctl.ListOwnedWindows(context.Background(), tmuxctl.ListOwnedWindowsOptions{
-		Socket:  socket,
-		Session: "does-not-exist",
+	gone, err := tmuxctl.ListWindows(context.Background(), muxctl.ListOptions{
+		DriverOpt: socketOpt(socket),
+		Session:   "does-not-exist",
 	})
 	if err != nil {
-		t.Fatalf("ListOwnedWindows (nonexistent session): want nil error, got %v", err)
+		t.Fatalf("ListWindows (nonexistent session): want nil error, got %v", err)
 	}
 	if len(gone) != 0 {
 		t.Errorf("nonexistent session: want 0 rows, got %d: %v", len(gone), gone)
@@ -298,9 +299,9 @@ func TestListOwnedWindows_TwoSessionsTwoIdentities(t *testing.T) {
 // splits an extra pane (simulating a user adding a pane to the dashboard
 // window), and asserts that:
 //
-//   - ListOwnedWindows still returns the window (ownership is window-level,
+//   - ListWindows still returns the window (ownership is window-level,
 //     not per-pane, so pane churn cannot break it).
-//   - OpenExisting via WindowID still resolves the window.
+//   - Open via WindowID still resolves the window.
 //   - Detach still collapses the window to a single clean pane.
 //
 // This is the key regression guard for the old all-panes-marked check, which
@@ -311,8 +312,8 @@ func TestOwnership_SurvivesExtraUnmarkedPane(t *testing.T) {
 	t.Cleanup(func() { killServer(t, socket) })
 
 	const identity = "survive-extra-pane"
-	sess, err := tmuxctl.New(context.Background(), tmuxctl.Config{
-		Socket:        socket,
+	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
+		DriverOpt:     socketOpt(socket),
 		SessionName:   "extra-pane-test",
 		WindowName:    "cmdman",
 		OwnedIdentity: identity,
@@ -336,14 +337,14 @@ func TestOwnership_SurvivesExtraUnmarkedPane(t *testing.T) {
 		t.Fatalf("expected 2 panes after manual split, got %d", len(panes))
 	}
 
-	// ── ListOwnedWindows still finds the window ───────────────────────────────
+	// ── ListWindows still finds the window ───────────────────────────────
 
-	rows, err := tmuxctl.ListOwnedWindows(context.Background(), tmuxctl.ListOwnedWindowsOptions{
-		Socket:   socket,
-		Identity: identity,
+	rows, err := tmuxctl.ListWindows(context.Background(), muxctl.ListOptions{
+		DriverOpt: socketOpt(socket),
+		Identity:  identity,
 	})
 	if err != nil {
-		t.Fatalf("ListOwnedWindows: %v", err)
+		t.Fatalf("ListWindows: %v", err)
 	}
 	if len(rows) != 1 {
 		t.Fatalf("want 1 owned window, got %d: %v", len(rows), rows)
@@ -352,17 +353,17 @@ func TestOwnership_SurvivesExtraUnmarkedPane(t *testing.T) {
 		t.Errorf("WindowID = %q, want %q", rows[0].WindowID, sess.WindowID())
 	}
 
-	// ── OpenExisting via WindowID still resolves ──────────────────────────────
+	// ── Open via WindowID still resolves ──────────────────────────────
 
-	reopened, ok, err := tmuxctl.OpenExisting(context.Background(), tmuxctl.Config{
-		Socket:   socket,
-		WindowID: sess.WindowID(),
+	reopened, ok, err := tmuxctl.Open(context.Background(), muxctl.Config{
+		DriverOpt: socketOpt(socket),
+		WindowID:  sess.WindowID(),
 	})
 	if err != nil {
-		t.Fatalf("OpenExisting: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
 	if !ok || reopened == nil {
-		t.Fatal("OpenExisting returned ok=false after extra-pane split")
+		t.Fatal("Open returned ok=false after extra-pane split")
 	}
 	if reopened.WindowID() != sess.WindowID() {
 		t.Errorf("reopened WindowID = %q, want %q", reopened.WindowID(), sess.WindowID())
@@ -382,21 +383,21 @@ func TestOwnership_SurvivesExtraUnmarkedPane(t *testing.T) {
 	}
 }
 
-// TestListOwnedWindows_NeverStartedSocket verifies that querying a socket
+// TestListWindows_NeverStartedSocket verifies that querying a socket
 // that has never had a server started returns an empty slice and no error.
 // This covers the deployment-time case where cmdman asks "any dashboards up?"
 // before the user has ever run tmux.
-func TestListOwnedWindows_NeverStartedSocket(t *testing.T) {
+func TestListWindows_NeverStartedSocket(t *testing.T) {
 	requireTmux(t)
 	// uniqueSocket produces a name that no test has used — no killServer needed
 	// because the server was never started.
 	socket := uniqueSocket(t) + "-never-started"
 
-	rows, err := tmuxctl.ListOwnedWindows(context.Background(), tmuxctl.ListOwnedWindowsOptions{
-		Socket: socket,
+	rows, err := tmuxctl.ListWindows(context.Background(), muxctl.ListOptions{
+		DriverOpt: socketOpt(socket),
 	})
 	if err != nil {
-		t.Fatalf("ListOwnedWindows against never-started socket: want nil error, got %v", err)
+		t.Fatalf("ListWindows against never-started socket: want nil error, got %v", err)
 	}
 	if len(rows) != 0 {
 		t.Errorf("want 0 rows, got %d: %v", len(rows), rows)

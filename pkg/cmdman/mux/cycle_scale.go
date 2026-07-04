@@ -8,7 +8,6 @@ import (
 	"os"
 
 	"github.com/ngicks/cmdman/pkg/muxctl"
-	"github.com/ngicks/cmdman/pkg/muxctl/tmux"
 )
 
 // CycleScaleOptions configures [CycleScale].
@@ -88,18 +87,16 @@ func CycleScale(ctx context.Context, opts CycleScaleOptions) (CycleScaleResult, 
 	}
 
 	// Step 2: resolve driver and find windows.
-	driver := resolveDriver(opts.Spec.Driver, os.Environ())
-	if driver != "tmux" {
-		return CycleScaleResult{}, fmt.Errorf(
-			"mux: driver %q is not implemented yet (v1 ships tmux only)", driver,
-		)
+	driver, err := resolveDriver(opts.Spec.Driver, os.Environ())
+	if err != nil {
+		return CycleScaleResult{}, err
 	}
 
-	rows, err := tmux.ListOwnedWindows(ctx, tmux.ListOwnedWindowsOptions{
-		Path:     opts.Spec.DriverOpt["path"],
-		Socket:   opts.Spec.DriverOpt["socket"],
-		Session:  opts.SessionName,
-		Identity: opts.Identity,
+	rows, err := driver.ListWindows(ctx, muxctl.ListOptions{
+		DriverOpt: opts.Spec.DriverOpt,
+		Session:   opts.SessionName,
+		Identity:  opts.Identity,
+		StateKeys: []muxctl.StateKey{muxctl.StateKeyScale},
 	})
 	if err != nil {
 		return CycleScaleResult{}, fmt.Errorf("mux: enumerate owned windows: %w", err)
@@ -116,13 +113,12 @@ func CycleScale(ctx context.Context, opts CycleScaleOptions) (CycleScaleResult, 
 		errs    []error
 	)
 
-	listOpts := tmux.ListOwnedWindowsOptions{
-		Path:   opts.Spec.DriverOpt["path"],
-		Socket: opts.Spec.DriverOpt["socket"],
+	listOpts := muxctl.ListOptions{
+		DriverOpt: opts.Spec.DriverOpt,
 	}
 
 	for _, window := range rows {
-		res, cycleErr := cycleScaleWindow(ctx, opts, window, listOpts)
+		res, cycleErr := cycleScaleWindow(ctx, driver, opts, window, listOpts)
 		if cycleErr != nil {
 			errs = append(errs, cycleErr)
 			// Still append a partial result when available.
@@ -142,9 +138,10 @@ func CycleScale(ctx context.Context, opts CycleScaleOptions) (CycleScaleResult, 
 // pane (when visible), and persists the position.
 func cycleScaleWindow(
 	ctx context.Context,
+	driver muxctl.Driver,
 	opts CycleScaleOptions,
-	window tmux.OwnedWindow,
-	listOpts tmux.ListOwnedWindowsOptions,
+	window muxctl.Window,
+	listOpts muxctl.ListOptions,
 ) (CycleScaleWindowResult, error) {
 	base := CycleScaleWindowResult{
 		SessionName: window.SessionName,
@@ -176,10 +173,13 @@ func cycleScaleWindow(
 	}
 	n = max(n, 1)
 
-	// 3e: current stored position (default 1), wrapped into [1,n].
+	// 3e: current stored position (default 1), wrapped into [1,n]. The driver
+	// hands back the raw @cmdman_scale string; decoding is a mux-layer concern.
 	storedPos := 1
-	if window.ScalePositions != nil {
-		if sp, ok := window.ScalePositions[opts.Command]; ok {
+	if scalePositions := decodeScalePositions(
+		window.State[muxctl.StateKeyScale],
+	); scalePositions != nil {
+		if sp, ok := scalePositions[opts.Command]; ok {
 			storedPos = sp
 		}
 	}
@@ -212,9 +212,8 @@ func cycleScaleWindow(
 	base.ResolvedName = resolvedName
 
 	// 3i: open existing session.
-	sess, ok, openErr := tmux.OpenExisting(ctx, tmux.Config{
-		Path:             opts.Spec.DriverOpt["path"],
-		Socket:           opts.Spec.DriverOpt["socket"],
+	sess, ok, openErr := driver.Open(ctx, muxctl.Config{
+		DriverOpt:        opts.Spec.DriverOpt,
 		WindowID:         window.WindowID,
 		ViewerDetachKeys: viewerDetachKeys,
 	})
@@ -225,12 +224,12 @@ func cycleScaleWindow(
 		)
 	}
 	if !ok {
-		// Window disappeared between ListOwnedWindows and OpenExisting.
+		// Window disappeared between ListWindows and Open.
 		return base, nil
 	}
 
 	// 3j: find pane by cycle key.
-	paneID, visible, findErr := tmux.FindLeafPane(ctx, listOpts, window.WindowID, opts.Command)
+	paneID, visible, findErr := driver.FindPane(ctx, listOpts, window.WindowID, opts.Command)
 	if findErr != nil {
 		return base, fmt.Errorf(
 			"mux: window %s: find leaf pane for %q: %w",
@@ -256,7 +255,7 @@ func cycleScaleWindow(
 			CmdOpt:   leafSpec.CmdOpt,
 			CycleKey: opts.Command,
 		}
-		if respawnErr := tmux.RespawnLeaf(ctx, sess, paneID, leaf); respawnErr != nil {
+		if respawnErr := sess.RespawnLeaf(ctx, paneID, leaf); respawnErr != nil {
 			return base, fmt.Errorf(
 				"mux: window %s: respawn leaf pane %s: %w",
 				window.WindowID, paneID, respawnErr,
@@ -265,8 +264,8 @@ func cycleScaleWindow(
 	}
 
 	// 3l: persist the new position.
-	if writeErr := tmux.WriteScalePosition(
-		ctx, listOpts, window.WindowID, opts.Command, targetPos,
+	if writeErr := writeScalePosition(
+		ctx, driver, listOpts, window.WindowID, opts.Command, targetPos,
 	); writeErr != nil {
 		return base, fmt.Errorf(
 			"mux: window %s: write scale position for %q: %w",
@@ -277,27 +276,61 @@ func cycleScaleWindow(
 	return base, nil
 }
 
+// writeScalePosition performs the read-modify-write of the driver's scale
+// state (state key muxctl.StateKeyScale) for a single command on windowID: it reads
+// the current raw value, decodes it, sets cmd to pos (pos <= 0 removes cmd),
+// re-encodes, and writes it back through the driver's window-state KV (which
+// unsets the state when the encoding is empty). The scale codec and this RMW
+// live here rather than in the driver so "scale" semantics stay out of muxctl.
+func writeScalePosition(
+	ctx context.Context,
+	driver muxctl.Driver,
+	opts muxctl.ListOptions,
+	windowID, cmd string,
+	pos int,
+) error {
+	raw, err := driver.ReadWindowState(ctx, opts, windowID, muxctl.StateKeyScale)
+	if err != nil {
+		return fmt.Errorf("mux: read scale positions for window %s: %w", windowID, err)
+	}
+	m := decodeScalePositions(raw)
+	if m == nil {
+		m = make(map[string]int)
+	}
+	if pos <= 0 {
+		delete(m, cmd)
+	} else {
+		m[cmd] = pos
+	}
+	return driver.WriteWindowState(
+		ctx,
+		opts,
+		windowID,
+		muxctl.StateKeyScale,
+		encodeScalePositions(m),
+	)
+}
+
 // ReadScaleState discovers windows by identity (and optional session narrowing),
-// merges their ScalePositions maps (last window wins per command key), and
-// returns the merged map. Returns nil, nil when no windows are found.
+// decodes each window's raw scale option, and merges the results (last window
+// wins per command key), returning the merged map. Returns nil, nil when no
+// windows are found.
 func ReadScaleState(ctx context.Context, opts ScaleStateOptions) (map[string]int, error) {
 	env := opts.Env
 	if env == nil {
 		env = os.Environ()
 	}
 
-	driver := resolveDriver(opts.Driver, env)
-	if driver != "tmux" {
-		return nil, fmt.Errorf(
-			"mux: driver %q is not implemented yet (v1 ships tmux only)", driver,
-		)
+	driver, err := resolveDriver(opts.Driver, env)
+	if err != nil {
+		return nil, err
 	}
 
-	rows, err := tmux.ListOwnedWindows(ctx, tmux.ListOwnedWindowsOptions{
-		Path:     opts.DriverOpt["path"],
-		Socket:   opts.DriverOpt["socket"],
-		Session:  opts.SessionName,
-		Identity: opts.Identity,
+	rows, err := driver.ListWindows(ctx, muxctl.ListOptions{
+		DriverOpt: opts.DriverOpt,
+		Session:   opts.SessionName,
+		Identity:  opts.Identity,
+		StateKeys: []muxctl.StateKey{muxctl.StateKeyScale},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("mux: enumerate owned windows: %w", err)
@@ -308,7 +341,7 @@ func ReadScaleState(ctx context.Context, opts ScaleStateOptions) (map[string]int
 
 	merged := make(map[string]int)
 	for _, w := range rows {
-		maps.Copy(merged, w.ScalePositions)
+		maps.Copy(merged, decodeScalePositions(w.State[muxctl.StateKeyScale]))
 	}
 	if len(merged) == 0 {
 		return nil, nil

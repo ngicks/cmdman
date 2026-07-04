@@ -54,8 +54,8 @@ func (s *Session) stampLeaf(
 	marker int,
 ) error {
 	// Set the pane title and marker option BEFORE respawning. respawn-pane -k
-	// SIGHUPs the existing in-pane process tree; when the caller (e.g. the
-	// muxctltester) is running inside that pane, it can die before any
+	// SIGHUPs the existing in-pane process tree; when the process being
+	// replaced is itself driving this tmux command, it can die before any
 	// follow-up tmux command lands. Setting them first lets them persist
 	// regardless — tmux per-pane state survives respawn-pane.
 	title := cmp.Or(leaf.CmdOpt["title"], leaf.Name)
@@ -99,15 +99,17 @@ func (s *Session) stampLeaf(
 	return nil
 }
 
-// FindLeafPane finds the pane in windowID whose @cmdman_leaf option equals
-// cycleKey. It uses list-panes -F '#{pane_id}\t#{@cmdman_leaf}' and returns
-// the first matching pane id. ok is false when no pane carries the key.
-func FindLeafPane(
+// FindPane finds the pane in windowID whose @cmdman_leaf option equals key. It
+// uses list-panes -F '#{pane_id}\t#{@cmdman_leaf}' and returns the first
+// matching pane id. Every runtime pane corresponds to a spec leaf (containers
+// are spec-only), so unstamped placeholder panes simply never match. ok is
+// false when no pane carries the key.
+func FindPane(
 	ctx context.Context,
-	opts ListOwnedWindowsOptions,
-	windowID, cycleKey string,
+	opts muxctl.ListOptions,
+	windowID, key string,
 ) (paneID string, ok bool, err error) {
-	e := newExecutor(opts.Path, opts.Socket)
+	e := newExecutorFor(opts.DriverOpt)
 	out, runErr := e.run(
 		ctx, "list-panes", "-t", windowID,
 		"-F", "#{pane_id}\t#{"+leafOption+"}",
@@ -116,11 +118,11 @@ func FindLeafPane(
 		return "", false, fmt.Errorf("tmux: list panes for %s: %w", windowID, runErr)
 	}
 	for line := range strings.SplitSeq(out, "\n") {
-		id, key, cut := strings.Cut(line, "\t")
+		id, leaf, cut := strings.Cut(line, "\t")
 		if !cut {
 			continue
 		}
-		if key == cycleKey {
+		if leaf == key {
 			return id, true, nil
 		}
 	}
@@ -132,11 +134,10 @@ func FindLeafPane(
 // targeted single-pane counterpart to ApplyLayout — cycle-scale calls it to
 // advance a visible pane to a new replica without rebuilding the whole window.
 //
-// The s parameter must be a Session controlling the window that contains
-// paneID (so s.cfg.ViewerDetachKeys is available for the quiesce step).
-func RespawnLeaf(
+// paneID must belong to the window this Session controls (so
+// s.cfg.ViewerDetachKeys is available for the quiesce step).
+func (s *Session) RespawnLeaf(
 	ctx context.Context,
-	s *Session,
 	paneID string,
 	leaf muxctl.Leaf,
 ) error {

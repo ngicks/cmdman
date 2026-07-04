@@ -181,6 +181,28 @@ driver is real.
 
 Effort: S. Risk: low (pure moves, tests move with them).
 
+### C11. muxctl tier-2 driver-contract extraction (promoted by D10, reopening D7)
+
+Problem: after C3 tier 1, `pkg/cmdman/mux` still imports `pkg/muxctl/tmux`
+concretely in four files (`run.go`, `down.go`, `list.go`, `cycle_scale.go`):
+constructors (`tmux.New`/`OpenExisting` + `tmux.Config`), enumeration
+(`ListOwnedWindows`/`ListOwnedWindowsOptions`/`OwnedWindow`), cycle-scale
+primitives (`FindLeafPane`, `RespawnLeaf`), raw window state
+(`ReadScaleRaw`/`WriteScaleRaw`), plus two `*tmux.Session` methods missing
+from `muxctl.Session` (`WindowID()`, `Detach()`). `muxctl/doc.go:42-55`
+documents stamp+enumerate as a mandatory driver contract but never reifies
+it, so `mux down`/`ls`/`cycle-scale` are silently tmux-only.
+
+Direction (per D10): reify the contract in `pkg/muxctl` (driver interface +
+vocabulary types + registry), have the tmux driver implement and
+self-register it, and make `pkg/cmdman/mux` tmux-free (the binary links the
+driver via blank import at the composition root). ApplyLayout-core
+extraction stays deferred (driver-internal, no leak). Detailed design in
+`doc/plan/muxctl-01-driver-contract/`.
+
+Effort: M. Risk: medium (API churn across muxctl/tmux/cmdman-mux; e2e is
+the safety net).
+
 ### C4. Extract Monitor into a subpackage of `pkg/cmdman`
 
 Problem: `pkg/cmdman` is flat (~40 files) and conflates four responsibilities:

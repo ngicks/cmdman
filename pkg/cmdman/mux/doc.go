@@ -20,8 +20,8 @@
 //     stamping, marker-based layout cycling, and the attach-hint print when
 //     invoked outside a multiplexer.
 //   - down.go   — [Down] / [DownOptions]: identity-based teardown via
-//     [tmux.ListOwnedWindows] — server-wide, no $TMUX dependence, works from
-//     any pane or outside tmux entirely.
+//     [muxctl.Driver.ListWindows] — server-wide, no $TMUX dependence,
+//     works from any pane or outside tmux entirely.
 //   - list.go   — [List] / [ListOptions] / [OwnedWindow]: enumerate stamped
 //     dashboard windows; presentation is pkg/cmdman/cli's job.
 package mux

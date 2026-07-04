@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/ngicks/cmdman/pkg/muxctl/tmux"
+	"github.com/ngicks/cmdman/pkg/muxctl"
 )
 
 // DownOptions configures [Down].
@@ -20,7 +20,7 @@ type DownOptions struct {
 	// when the same socket is supplied here.
 	DriverOpt map[string]string
 	// SessionName, when non-empty, narrows the scan to that session only.
-	// It is a pure filter passed to [tmux.ListOwnedWindows]; it does NOT
+	// It is a pure filter passed to [muxctl.Driver.ListWindows]; it does NOT
 	// participate in identity derivation (only the identity defaulting path
 	// uses the resolved session name). An explicit --session is therefore
 	// optional for teardown: omitting it restores every matching dashboard
@@ -30,7 +30,7 @@ type DownOptions struct {
 	// (standalone-mux default). It is NOT used as a session-filter fallback.
 	// Empty defaults to the resolved session name, exactly as [Run] does.
 	WindowName string
-	// Identity is the opaque ownership string passed to [tmux.ListOwnedWindows]
+	// Identity is the opaque ownership string passed to [muxctl.Driver.ListWindows]
 	// as the filter. When empty, it is derived the same way [Run] defaults it:
 	// resolveSessionName → windowName default → identity = windowName. This
 	// derivation is the documented standalone-mux limitation (a dashboard built
@@ -52,7 +52,7 @@ type DownOptions struct {
 // window to a single shell pane, and unsets the tmux ownership option. The
 // supervised commands keep running — only the disposable viewers are torn down.
 //
-// Down enumerates windows via [tmux.ListOwnedWindows], which requires no
+// Down enumerates windows via [muxctl.Driver.ListWindows], which requires no
 // $TMUX context and works from any pane, from run-shell, or from outside
 // tmux entirely. This is the key improvement over the old Detach: Detach
 // required the caller to be attached to the same session to find the window;
@@ -79,11 +79,9 @@ func Down(ctx context.Context, opts DownOptions) error {
 		stdout = os.Stdout
 	}
 
-	driver := resolveDriver(opts.Driver, env)
-	if driver != "tmux" {
-		return fmt.Errorf(
-			"mux: driver %q is not implemented yet (v1 ships tmux only)", driver,
-		)
+	driver, err := resolveDriver(opts.Driver, env)
+	if err != nil {
+		return err
 	}
 
 	// Derive the identity when the caller did not supply one. The derivation
@@ -101,16 +99,15 @@ func Down(ctx context.Context, opts DownOptions) error {
 		identity = deriveIdentity("", opts.WindowName, sessionName)
 	}
 
-	// SessionName here is purely a narrowing filter for ListOwnedWindows —
+	// SessionName here is purely a narrowing filter for ListWindows —
 	// when empty the scan is server-wide. We do NOT fall back to
 	// resolveSessionName for the filter: that context-dependence (reading
 	// $TMUX / running display-message) is the root cause this plan fixes.
 	// Only the identity *derivation* above may use resolveSessionName.
-	rows, err := tmux.ListOwnedWindows(ctx, tmux.ListOwnedWindowsOptions{
-		Path:     opts.DriverOpt["path"],
-		Socket:   opts.DriverOpt["socket"],
-		Session:  opts.SessionName,
-		Identity: identity,
+	rows, err := driver.ListWindows(ctx, muxctl.ListOptions{
+		DriverOpt: opts.DriverOpt,
+		Session:   opts.SessionName,
+		Identity:  identity,
 	})
 	if err != nil {
 		return fmt.Errorf("mux: enumerate owned windows: %w", err)
@@ -136,9 +133,8 @@ func Down(ctx context.Context, opts DownOptions) error {
 
 	var errs []error
 	for _, row := range rows {
-		sess, ok, openErr := tmux.OpenExisting(ctx, tmux.Config{
-			Path:             opts.DriverOpt["path"],
-			Socket:           opts.DriverOpt["socket"],
+		sess, ok, openErr := driver.Open(ctx, muxctl.Config{
+			DriverOpt:        opts.DriverOpt,
 			WindowID:         row.WindowID,
 			ViewerDetachKeys: viewerDetachKeys,
 		})
@@ -150,7 +146,7 @@ func Down(ctx context.Context, opts DownOptions) error {
 			continue
 		}
 		if !ok {
-			// Window disappeared between ListOwnedWindows and OpenExisting; not
+			// Window disappeared between ListWindows and Open; not
 			// an error — another process or the user already tore it down.
 			continue
 		}

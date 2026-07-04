@@ -21,6 +21,13 @@ func newExecutor(path, socket string) *executor {
 	return &executor{path: path, socket: socket}
 }
 
+// newExecutorFor builds an executor from a driver-option bag, honoring the
+// tmux-specific "path" and "socket" keys carried by [muxctl.Config.DriverOpt]
+// and [muxctl.ListOptions.DriverOpt]. A nil opt map reads as all-empty.
+func newExecutorFor(opt map[string]string) *executor {
+	return newExecutor(opt["path"], opt["socket"])
+}
+
 // run invokes tmux with the configured prefix (-L socket) plus args and
 // returns trimmed stdout. The error wraps stderr to surface tmux's own
 // diagnostics.

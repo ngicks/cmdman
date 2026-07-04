@@ -69,9 +69,9 @@ func fakeTmux(t *testing.T) (path string, recorded func() []string) {
 func TestApplyLayout_RespawnsAfterAllSplits(t *testing.T) {
 	path, recorded := fakeTmux(t)
 
-	sess, err := tmuxctl.New(context.Background(), tmuxctl.Config{
-		Path:     path,
-		WindowID: "@1",
+	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
+		DriverOpt: map[string]string{"path": path},
+		WindowID:  "@1",
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

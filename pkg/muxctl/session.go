@@ -25,9 +25,9 @@ type Session interface {
 	// marker is an opaque non-negative integer the driver records on each
 	// pane in driver-specific state (the tmux driver uses a per-pane user
 	// option); muxctl does not interpret it. Pass marker < 0 to skip
-	// recording it. Consumers (the cmdman mux family, the muxctltester)
-	// typically pass the layout's position in MuxSpec.Layouts so re-running
-	// can cycle by reading the previous marker back via [Session.StatWindow].
+	// recording it. Consumers (the cmdman mux family) typically pass the
+	// layout's position in MuxSpec.Layouts so re-running can cycle by reading
+	// the previous marker back via [Session.StatWindow].
 	// Cycling itself is a consumer concern; muxctl provides only the
 	// read/write primitives.
 	//
@@ -47,6 +47,30 @@ type Session interface {
 	// be the Session's own controlled window — callers probe other windows
 	// via this method to decide "is this someone else's muxctl window".
 	StatWindow(ctx context.Context, windowID string) (WindowStat, error)
+
+	// WindowID returns the driver-native id of the controlled window (e.g.
+	// tmux "@7"). Useful for callers that query the window via [StatWindow]
+	// or address it outside the driver.
+	WindowID() string
+
+	// Detach tears the controlled window down to a single clean shell pane and
+	// removes the driver state this Session installed, restoring the window to
+	// roughly its pre-cmdman state: it gracefully detaches the in-pane viewers
+	// (via [Config.ViewerDetachKeys]), collapses the window to one shell pane,
+	// and clears the ownership stamp so the window is no longer enumerable.
+	// Like ApplyLayout and Close, Detach MUST NOT stop any process the panes
+	// were observing — the viewers it tears down are disposable. It is the
+	// explicit "I'm done with this dashboard, give me my window back"
+	// operation, distinct from Close (which kills the whole window).
+	Detach(ctx context.Context) error
+
+	// RespawnLeaf quiesces any in-pane viewer for paneID (via
+	// [Config.ViewerDetachKeys]), then stamps leaf's title/state and respawns
+	// the pane with leaf's command. It is the targeted single-pane counterpart
+	// to ApplyLayout: consumers advance one visible pane to a new command
+	// without rebuilding the whole window, preserving the window's layout
+	// marker. paneID MUST belong to this Session's controlled window.
+	RespawnLeaf(ctx context.Context, paneID string, leaf Leaf) error
 }
 
 // Pane is the runtime identity of a realized pane returned by

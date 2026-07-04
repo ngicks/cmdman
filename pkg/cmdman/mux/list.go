@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ngicks/cmdman/pkg/muxctl/tmux"
+	"github.com/ngicks/cmdman/pkg/muxctl"
 )
 
 // OwnedWindow is a mux-layer row returned by [List]: it describes a single
-// cmdman-owned multiplexer window. The fields mirror [tmux.OwnedWindow] but
+// cmdman-owned multiplexer window. The fields mirror [muxctl.Window] but
 // are defined here so future non-tmux drivers fit without exposing a
 // driver-private type to the rest of the stack.
 type OwnedWindow struct {
@@ -57,10 +57,12 @@ type ListOptions struct {
 }
 
 // List returns the cmdman-owned windows visible on the target multiplexer
-// server. It is a thin layer over [tmux.ListOwnedWindows]: it resolves the
-// driver (returning a "not implemented" error for non-tmux drivers, as [Run]
-// does), maps the caller options to driver options, and re-exports the rows as
-// mux-level [OwnedWindow] values so upper layers (pkg/cmdman/cli presentation,
+// server. It is a thin layer over [muxctl.Driver.ListWindows]: it resolves
+// the driver via [resolveDriver] (mapping the known-but-unimplemented
+// "zellij"/"wezterm" to a "not implemented yet" error and any other
+// unregistered driver name to a lookup error, exactly as [Run] does), maps the
+// caller options to driver options, and re-exports the rows as mux-level
+// [OwnedWindow] values so upper layers (pkg/cmdman/cli presentation,
 // cmd/cmdman/commands) never import a driver-private type.
 //
 // No printing is performed here — presentation is [pkg/cmdman/cli]'s job
@@ -71,18 +73,16 @@ func List(ctx context.Context, opts ListOptions) ([]OwnedWindow, error) {
 		env = os.Environ()
 	}
 
-	driver := resolveDriver(opts.Driver, env)
-	if driver != "tmux" {
-		return nil, fmt.Errorf(
-			"mux: driver %q is not implemented yet (v1 ships tmux only)", driver,
-		)
+	driver, err := resolveDriver(opts.Driver, env)
+	if err != nil {
+		return nil, err
 	}
 
-	rows, err := tmux.ListOwnedWindows(ctx, tmux.ListOwnedWindowsOptions{
-		Path:     opts.DriverOpt["path"],
-		Socket:   opts.DriverOpt["socket"],
-		Session:  opts.SessionName,
-		Identity: opts.Identity,
+	rows, err := driver.ListWindows(ctx, muxctl.ListOptions{
+		DriverOpt: opts.DriverOpt,
+		Session:   opts.SessionName,
+		Identity:  opts.Identity,
+		StateKeys: []muxctl.StateKey{muxctl.StateKeyScale},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("mux: enumerate owned windows: %w", err)
@@ -100,7 +100,7 @@ func List(ctx context.Context, opts ListOptions) ([]OwnedWindow, error) {
 			WindowName:     r.WindowName,
 			Identity:       r.Identity,
 			Marker:         r.Marker,
-			ScalePositions: r.ScalePositions,
+			ScalePositions: decodeScalePositions(r.State[muxctl.StateKeyScale]),
 		}
 	}
 	return out, nil

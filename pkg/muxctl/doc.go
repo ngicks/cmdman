@@ -7,14 +7,17 @@
 //
 // Two layers live here:
 //
-//   - The runtime: [Session] and [Pane] interfaces. Drivers under
-//     pkg/muxctl/<driver> implement these (only tmux is planned today). The
-//     Session interface is intentionally minimal — ApplyLayout, Close, and
-//     StatWindow — so that driver-specific concerns (session reuse, sockets,
-//     dedicated servers, teardown/detach, ...) live in each driver's
-//     constructor or driver-specific methods, not on the interface.
-//     A Session controls one cmdman-owned window; switching among named
-//     layouts is repeated ApplyLayout calls on that window.
+//   - The runtime: the [Driver] interface plus the [Session] and [Pane]
+//     interfaces it hands back. Drivers under pkg/muxctl/<driver> implement
+//     these (only tmux is implemented today); a driver registers itself under
+//     a name via [RegisterDriver] and callers reach it through [LookupDriver].
+//     [Driver] owns the session-less capabilities (constructors, enumeration,
+//     leaf-find, per-window state) so they work from any calling context;
+//     [Session] owns the per-window operations. Driver-specific knobs (binary
+//     path, sockets, dedicated servers) travel through [Config.DriverOpt] and
+//     [ListOptions.DriverOpt] rather than widening the interfaces. A Session
+//     controls one cmdman-owned window; switching among named layouts is
+//     repeated ApplyLayout calls on that window.
 //
 //   - The spec: [MuxSpec], [Layout], [PaneSpec], [Size], [Direction]. A
 //     driver-agnostic description of the switchable layouts the user can
@@ -41,18 +44,26 @@
 //
 // # Driver contract: identity stamp and enumeration
 //
-// Every driver MUST support two semantic capabilities:
+// The contract is reified as Go types: the [Driver] interface (with the
+// vocabulary types [Config], [ListOptions], and [Window]) and the
+// [Session] interface. Every driver MUST support two semantic capabilities:
 //
-//  1. Stamp an opaque, caller-supplied identity on the window-equivalent at
-//     build time (when the driver constructor resolves the window). The identity
-//     is an arbitrary string chosen by the caller; the driver stores and returns
-//     it verbatim without interpretation.
+//  1. Stamp an opaque, caller-supplied identity ([Config.OwnedIdentity]) on
+//     the window-equivalent at build time (when [Driver.New] resolves the
+//     window). The identity is an arbitrary string chosen by the caller; the
+//     driver stores and returns it verbatim without interpretation.
 //
-//  2. Enumerate windows that carry the stamp, server-wide or filtered to one
-//     session, by exact identity. This enumeration must not depend on $TMUX,
-//     an attached client, or the current window — it must work from any calling
-//     context including run-shell, command-prompt, and outside the multiplexer
-//     entirely.
+//  2. Enumerate windows that carry the stamp ([Driver.ListWindows]),
+//     server-wide or filtered to one session, by exact identity. This
+//     enumeration must not depend on $TMUX, an attached client, or the current
+//     window — it must work from any calling context including run-shell,
+//     command-prompt, and outside the multiplexer entirely.
+//
+// Per-window state beyond the identity stamp (e.g. the layout marker, or the
+// caller's own opaque key/value data via [Driver.ReadWindowState] /
+// [Driver.WriteWindowState] / [ListOptions.StateKeys]) rides the same native
+// per-window storage. muxctl treats those keys and values as opaque; their
+// meaning belongs to the caller (see pkg/cmdman/mux).
 //
 // WHERE the stamp lives is private to each driver:
 //

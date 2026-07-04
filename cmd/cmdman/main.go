@@ -10,6 +10,11 @@ import (
 	"github.com/ngicks/cmdman/cmd/cmdman/commands"
 	"github.com/ngicks/cmdman/internal/cmdsignals"
 	"github.com/ngicks/cmdman/pkg/cmdman/cli"
+
+	// Link the tmux muxctl driver: it registers itself under "tmux" in init,
+	// which is how pkg/cmdman/mux resolves it via muxctl.LookupDriver without
+	// importing the driver package directly.
+	_ "github.com/ngicks/cmdman/pkg/muxctl/tmux"
 )
 
 func main() {
