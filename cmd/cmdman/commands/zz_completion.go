@@ -172,6 +172,29 @@ func completeComposeFile(
 	return out, cobra.ShellCompDirectiveDefault
 }
 
+// completeComposeMuxLayout completes the optional layout argument with the
+// project's layout names, best-effort (a load failure yields no completions).
+func completeComposeMuxLayout(cf *composeFlags) cobra.CompletionFunc {
+	return func(
+		cmd *cobra.Command,
+		args []string,
+		toComplete string,
+	) ([]string, cobra.ShellCompDirective) {
+		if len(args) != 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		selection, err := compose.ResolveMuxSelection(cf.normalizeOpts())
+		if err != nil || selection.Spec == nil || selection.Spec.Mux == nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		var names []string
+		for _, l := range selection.Spec.Mux.Layouts {
+			names = append(names, l.Name)
+		}
+		return names, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
 // signalCompletions offers the common POSIX signal names. hrstr.ParseSignal also
 // accepts bare names (TERM) and numbers (15); these canonical hints cover the
 // usual cases without enumerating every platform signal.

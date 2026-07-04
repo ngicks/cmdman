@@ -4,16 +4,21 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/pkg/cmdman/compose"
 )
 
-func composeMuxCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeMuxUpCmd(
+	parent *cobra.Command,
+	rootCfg *cmdman.CmdmanConfig,
+	cf *composeFlags,
+	parentSession *string,
+) {
 	var flagSession string
 
 	cmd := &cobra.Command{
-		Use:   "mux [layout]",
+		Use:   "up [layout]",
 		Short: "Open a multiplexer dashboard for a compose project",
-		Long: `Open a multiplexer dashboard described by the compose file's "mux:" section
-(alias of "compose mux up").
+		Long: `Open a multiplexer dashboard described by the compose file's "mux:" section.
 
 Each leaf references a compose service name; panes run cmdman attach by default,
 or cmdman logs when mode: logs.
@@ -27,14 +32,15 @@ With no --session, the dashboard targets the current tmux session when run
 inside tmux, otherwise a session named "cmdman".
 
 The compose file must contain a top-level "mux:" section; a missing section
-is an error (no synthesized default).
-
-Subcommands: up, down, ls, cycle-scale. A layout literally named "up", "down",
-"ls", or "cycle-scale" must be passed as: cmdman compose mux up <name>.`,
+is an error (no synthesized default).`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeComposeMuxLayout(cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeMuxUp(cmd, rootCfg, cf, args, flagSession)
+			sess := flagSession
+			if !cmd.Flags().Changed("session") && parentSession != nil {
+				sess = *parentSession
+			}
+			return runComposeMuxUp(cmd, rootCfg, cf, args, sess)
 		},
 	}
 	cmd.Flags().StringVarP(
@@ -42,10 +48,35 @@ Subcommands: up, down, ls, cycle-scale. A layout literally named "up", "down",
 		"Target tmux session (default: current session when inside tmux, else cmdman)",
 	)
 
-	composeMuxUpCmd(cmd, rootCfg, cf, &flagSession)
-	composeMuxDownCmd(cmd, cf, &flagSession)
-	composeMuxLsCmd(cmd, rootCfg, cf, &flagSession)
-	composeMuxCycleScaleCmd(cmd, rootCfg, cf, &flagSession)
-
 	parent.AddCommand(cmd)
+}
+
+func runComposeMuxUp(
+	cmd *cobra.Command,
+	rootCfg *cmdman.CmdmanConfig,
+	cf *composeFlags,
+	args []string,
+	session string,
+) error {
+	selection, err := compose.ResolveMuxSelection(cf.normalizeOpts())
+	if err != nil {
+		return err
+	}
+
+	svc, err := cmdmanService(rootCfg)
+	if err != nil {
+		return err
+	}
+	defer svc.Close()
+
+	var layout string
+	if len(args) > 0 {
+		layout = args[0]
+	}
+	return compose.NewService(svc).MuxUp(cmd.Context(), compose.MuxUpOption{
+		Selection:   selection,
+		Layout:      layout,
+		SessionName: session,
+		Stdout:      cmd.OutOrStdout(),
+	})
 }
