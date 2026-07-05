@@ -172,6 +172,21 @@ func (e *testEnv) muxExecInDir(
 	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
 }
 
+// tmuxTmpdirEnv returns a copy of the current environment with the inherited
+// TMUX=, ZELLIJ=, and TMUX_TMPDIR= entries stripped and TMUX_TMPDIR set to
+// tmuxTmpdir. Stripping TMUX= (and ZELLIJ=) is what keeps a flagless `tmux`
+// invocation from ever reaching the enclosing interactive server: tmux
+// resolves its target from $TMUX ahead of TMUX_TMPDIR, so leaving $TMUX in
+// place would let a bare `tmux kill-server` kill the developer's real session.
+func tmuxTmpdirEnv(tmuxTmpdir string) []string {
+	env := slices.DeleteFunc(os.Environ(), func(s string) bool {
+		return strings.HasPrefix(s, "TMUX=") ||
+			strings.HasPrefix(s, "ZELLIJ=") ||
+			strings.HasPrefix(s, "TMUX_TMPDIR=")
+	})
+	return append(env, "TMUX_TMPDIR="+tmuxTmpdir)
+}
+
 // muxExecWithTmpdir is like muxExec but also sets TMUX_TMPDIR to tmuxTmpdir in
 // the child's environment. This redirects the default tmux socket path so tests
 // that need to use the default socket (e.g. `mux ls`, which has no --socket
@@ -185,13 +200,8 @@ func (e *testEnv) muxExecWithTmpdir(
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, cmdmanBin, args...)
-	base := slices.DeleteFunc(os.Environ(), func(s string) bool {
-		return strings.HasPrefix(s, "TMUX=") ||
-			strings.HasPrefix(s, "ZELLIJ=") ||
-			strings.HasPrefix(s, "TMUX_TMPDIR=")
-	})
-	base = append(base,
-		"TMUX_TMPDIR="+tmuxTmpdir,
+	base := append(
+		tmuxTmpdirEnv(tmuxTmpdir),
 		cmdman.ENV_CMDMAN_DATA_DIR+"="+e.dataHome,
 		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+e.runtimeDir,
 		cmdman.ENV_CMDMAN_CONF+"="+e.confPath,
@@ -210,12 +220,7 @@ func (e *testEnv) muxExecWithTmpdir(
 func tmuxRunWithTmpdir(t *testing.T, tmuxTmpdir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("tmux", args...)
-	cmd.Env = append(
-		slices.DeleteFunc(os.Environ(), func(s string) bool {
-			return strings.HasPrefix(s, "TMUX_TMPDIR=")
-		}),
-		"TMUX_TMPDIR="+tmuxTmpdir,
-	)
+	cmd.Env = tmuxTmpdirEnv(tmuxTmpdir)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("tmux %s: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -228,12 +233,7 @@ func tmuxRunWithTmpdir(t *testing.T, tmuxTmpdir string, args ...string) string {
 func killDefaultTmuxServer(t *testing.T, tmuxTmpdir string) {
 	t.Helper()
 	cmd := exec.Command("tmux", "kill-server")
-	cmd.Env = append(
-		slices.DeleteFunc(os.Environ(), func(s string) bool {
-			return strings.HasPrefix(s, "TMUX_TMPDIR=")
-		}),
-		"TMUX_TMPDIR="+tmuxTmpdir,
-	)
+	cmd.Env = tmuxTmpdirEnv(tmuxTmpdir)
 	_ = cmd.Run()
 }
 
