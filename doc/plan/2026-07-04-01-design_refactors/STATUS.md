@@ -38,13 +38,16 @@ for the small items).
       tree, awaiting maintainer review). Note: one D9 deviation — sqlc cannot
       parse `ALTER TABLE ... ADD COLUMN`, so its schema input is a
       drift-test-guarded `schema.sql` squash (store-00-sqlc DECISION.md D5).
-- [ ] 6. C6 — broadcaster[T] -race unit test (S)
+- [x] 6. C6 — broadcaster[T] -race unit test (S) — implemented 2026-07-05
+      directly (per D1, no plan dir): `pkg/cmdman/broadcaster_test.go`, six
+      tests incl. slow-consumer drop and concurrent stress; verified under
+      `-race -count=5` (working tree, awaiting maintainer review)
 - [ ] 7. C10 — log cleanup errors in markMonitorDied (S)
 - [ ] 8. C8 — extract detach-key lexer from cli/attach.go (S)
 - [ ] 9. C7 — split compose/load.go into discover.go/normalize.go (S-M)
 - [ ] 10. C4 — extract pkg/cmdman/monitor subpackage (L; after C5/C6/C10)
 - [ ] 11. C9 — split cli/tui_backend.go by tab (S; after C1, if still needed)
 
-Next action: maintainer reviews the C2 change (working tree); then pick up
-item 6 (C6 — broadcaster[T] -race unit test). C5 + C1 + C3 + C11 are
-committed (through 0bba598).
+Next action: maintainer reviews the C2 + C6 changes (working tree); then pick
+up item 7 (C10 — log cleanup errors in markMonitorDied). C5 + C1 + C3 + C11
+are committed (through 0bba598).
