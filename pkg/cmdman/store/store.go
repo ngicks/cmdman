@@ -1,6 +1,15 @@
 // Package store is the SQLite-backed persistence layer for cmdman: it
 // holds command definitions, runtime state, and exit history, and runs
 // schema migrations on open.
+//
+// Code generation: the domain queries are sqlc-generated into gen/query/.
+// Regenerate with "go generate ./..." from this directory (pkg/cmdman/store/),
+// or "go tool sqlc generate", whenever schema/query/*.sql or the schema change;
+// the generated code in gen/query/ must not be hand-edited. sqlc parses
+// schema/schema.sql, a hand-maintained squash of the migration chain in
+// migration/ that must stay in sync with it (the drift test
+// TestSchemaSQLMatchesMigrationChain enforces this); the chain remains the
+// runtime source of truth.
 package store
 
 import (
@@ -13,6 +22,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/store/gen/query"
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 )
@@ -25,7 +35,8 @@ const (
 
 // Store provides access to the SQLite database for command management.
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	queries *query.Queries
 }
 
 // OpenStore opens the SQLite database at the given path, configuring WAL mode,
@@ -75,7 +86,7 @@ func openStore(ctx context.Context, dbPath string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, queries: query.New(db)}, nil
 }
 
 // DB returns the underlying *sql.DB.

@@ -1,0 +1,16 @@
+version: "2"
+sql:
+  - engine: "sqlite"
+    # schema/schema.sql is a hand-maintained squash of migration/*.sql's end
+    # state. It is NOT the runtime source of truth (the migration chain is) — it
+    # exists only because sqlc v1.31.1's SQLite engine ignores ALTER TABLE ADD
+    # COLUMN, so pointing at the raw chain would hide CommandConfig.CreatedAt.
+    # Keep it in sync with the chain whenever a migration is added.
+    schema: "schema/schema.sql"
+    queries: "schema/query"
+    gen:
+      go:
+        package: "query"
+        out: "gen/query"
+        sql_package: "database/sql"
+        emit_methods_with_db_argument: false

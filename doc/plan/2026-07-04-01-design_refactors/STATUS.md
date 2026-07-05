@@ -33,7 +33,11 @@ for the small items).
       `pkg/cmdman/mux` (M; promoted by D10, reopening D7) — implemented
       2026-07-04 via `doc/plan/muxctl-01-driver-contract/` (working tree,
       awaiting maintainer review)
-- [ ] 5. C2 — sqlc adoption + .sql-file migrations + json_each label queries (M-L)
+- [x] 5. C2 — sqlc adoption + .sql-file migrations + json_each label queries
+      (M-L) — implemented 2026-07-05 via `doc/plan/store-00-sqlc/` (working
+      tree, awaiting maintainer review). Note: one D9 deviation — sqlc cannot
+      parse `ALTER TABLE ... ADD COLUMN`, so its schema input is a
+      drift-test-guarded `schema.sql` squash (store-00-sqlc DECISION.md D5).
 - [ ] 6. C6 — broadcaster[T] -race unit test (S)
 - [ ] 7. C10 — log cleanup errors in markMonitorDied (S)
 - [ ] 8. C8 — extract detach-key lexer from cli/attach.go (S)
@@ -41,5 +45,6 @@ for the small items).
 - [ ] 10. C4 — extract pkg/cmdman/monitor subpackage (L; after C5/C6/C10)
 - [ ] 11. C9 — split cli/tui_backend.go by tab (S; after C1, if still needed)
 
-Next action: maintainer reviews the C5 + C1 + C3 + C11 changes (all in
-working tree); then pick up item 5 (C2 — sqlc adoption).
+Next action: maintainer reviews the C2 change (working tree); then pick up
+item 6 (C6 — broadcaster[T] -race unit test). C5 + C1 + C3 + C11 are
+committed (through 0bba598).

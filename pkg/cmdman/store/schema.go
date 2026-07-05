@@ -5,11 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/ngicks/cmdman/pkg/cmdman/store/migration"
 )
 
-// schemaVersion is the current schema version.
-// Bump this and add a corresponding migration for each schema change.
-const schemaVersion = 2
+// schemaVersion is the highest schema version in the embedded migration chain.
+// A schema change means adding a migration .sql file; the version is derived
+// from the chain rather than maintained by hand.
+var schemaVersion = migration.MaxVersion()
 
 func validateDB(ctx context.Context, db *sql.DB) error {
 	if err := initOrCheckSchema(ctx, db); err != nil {
@@ -31,17 +34,13 @@ func initOrCheckSchema(ctx context.Context, db *sql.DB) error {
 	if !exists {
 		// Fresh database or pre-DBConfig database.
 		// Check if CommandConfig table exists (pre-DBConfig v1 database).
-		var check int
-		err := db.QueryRowContext(
-			ctx,
-			`SELECT 1 FROM sqlite_master WHERE type='table' AND name='CommandConfig'`,
-		).Scan(&check)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("checking existing tables: %w", err)
+		legacy, err := commandConfigExists(ctx, db)
+		if err != nil {
+			return err
 		}
-		if errors.Is(err, sql.ErrNoRows) || check != 1 {
-			// Truly fresh database: create everything at current version.
-			return createSchema(ctx, db)
+		if !legacy {
+			// Truly fresh database: replay the whole migration chain.
+			return runMigrations(ctx, db)
 		}
 		// Pre-DBConfig database (v1): needs migration.
 		return fmt.Errorf(
@@ -70,71 +69,26 @@ func initOrCheckSchema(ctx context.Context, db *sql.DB) error {
 	)
 }
 
-// createSchema creates all tables at the current schema version for a fresh database.
-func createSchema(ctx context.Context, db *sql.DB) error {
-	schema := `
-CREATE TABLE IF NOT EXISTS DBConfig (
-    ID            INTEGER PRIMARY KEY NOT NULL,
-    SchemaVersion INTEGER NOT NULL,
-    CHECK (ID IN (1))
-);
-
-CREATE TABLE IF NOT EXISTS CommandConfig (
-    ID              TEXT PRIMARY KEY,
-    Name            TEXT UNIQUE,
-    CreatedAt       TEXT NOT NULL DEFAULT '',
-    JSON            TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_command_config_name ON CommandConfig(Name);
-
-CREATE TABLE IF NOT EXISTS CommandState (
-    ID              TEXT PRIMARY KEY,
-    State           TEXT NOT NULL,
-    ExitCode        INTEGER CHECK (ExitCode BETWEEN -1 AND 255),
-    JSON            TEXT NOT NULL,
-    FOREIGN KEY (ID) REFERENCES CommandConfig(ID)
-        ON DELETE CASCADE
-        DEFERRABLE INITIALLY DEFERRED
-);
-
-CREATE INDEX IF NOT EXISTS idx_command_state_state ON CommandState(State);
-
-CREATE TABLE IF NOT EXISTS CommandExitCode (
-    ID              TEXT NOT NULL,
-    Timestamp       TEXT NOT NULL,
-    ExitCode        INTEGER NOT NULL CHECK (ExitCode BETWEEN -1 AND 255),
-    FOREIGN KEY (ID) REFERENCES CommandConfig(ID)
-        ON DELETE CASCADE
-        DEFERRABLE INITIALLY DEFERRED
-);
-
-CREATE INDEX IF NOT EXISTS idx_command_exit_code_id_ts ON CommandExitCode(ID, Timestamp);
-`
-	if _, err := db.ExecContext(ctx, schema); err != nil {
-		return fmt.Errorf("create schema: %w", err)
-	}
-	if _, err := db.ExecContext(
-		ctx,
-		`INSERT OR IGNORE INTO DBConfig (ID, SchemaVersion) VALUES (1, ?)`,
-		schemaVersion,
-	); err != nil {
-		return fmt.Errorf("insert DBConfig: %w", err)
-	}
-	return nil
+func dbConfigExists(ctx context.Context, db *sql.DB) (bool, error) {
+	return tableExists(ctx, db, "DBConfig")
 }
 
-func dbConfigExists(ctx context.Context, db *sql.DB) (bool, error) {
+func commandConfigExists(ctx context.Context, db *sql.DB) (bool, error) {
+	return tableExists(ctx, db, "CommandConfig")
+}
+
+func tableExists(ctx context.Context, db *sql.DB, name string) (bool, error) {
 	var check int
 	err := db.QueryRowContext(
 		ctx,
-		`SELECT 1 FROM sqlite_master WHERE type='table' AND name='DBConfig'`,
+		`SELECT 1 FROM sqlite_master WHERE type='table' AND name=?`,
+		name,
 	).Scan(&check)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("checking DBConfig table: %w", err)
+		return false, fmt.Errorf("checking %s table: %w", name, err)
 	}
 	return check == 1, nil
 }

@@ -1,14 +1,22 @@
 package store
 
-import "time"
+import (
+	"context"
+	"time"
+
+	"github.com/ngicks/cmdman/pkg/cmdman/store/gen/query"
+)
 
 // InsertCommandExitCode records an exit code for a command.
 func (s *Store) InsertCommandExitCode(id string, exitCode int) error {
-	_, err := s.db.Exec(
-		`INSERT INTO CommandExitCode (ID, Timestamp, ExitCode) VALUES (?, ?, ?)`,
-		id, time.Now().UTC().Format(time.RFC3339), exitCode,
+	return s.queries.InsertCommandExitCode(
+		context.Background(),
+		query.InsertCommandExitCodeParams{
+			ID:        id,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Exitcode:  int64(exitCode),
+		},
 	)
-	return err
 }
 
 // ExitRecord represents an entry in CommandExitCode.
@@ -24,22 +32,16 @@ type ExitRecord struct {
 
 // GetExitHistory retrieves exit code history for a command.
 func (s *Store) GetExitHistory(id string) ([]ExitRecord, error) {
-	rows, err := s.db.Query(
-		`SELECT Timestamp, ExitCode FROM CommandExitCode WHERE ID = ? ORDER BY Timestamp`,
-		id,
-	)
+	rows, err := s.queries.GetExitHistory(context.Background(), id)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
 	var records []ExitRecord
-	for rows.Next() {
-		var r ExitRecord
-		if err := rows.Scan(&r.Timestamp, &r.ExitCode); err != nil {
-			return nil, err
-		}
-		records = append(records, r)
+	for _, r := range rows {
+		records = append(records, ExitRecord{
+			Timestamp: r.Timestamp,
+			ExitCode:  int(r.Exitcode),
+		})
 	}
-	return records, rows.Err()
+	return records, nil
 }

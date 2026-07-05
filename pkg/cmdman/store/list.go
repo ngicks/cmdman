@@ -1,11 +1,11 @@
 package store
 
 import (
-	"database/sql"
+	"context"
 	"encoding/json"
-	"strings"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
+	"github.com/ngicks/cmdman/pkg/cmdman/store/gen/query"
 )
 
 // CommandEntry represents a joined row from CommandConfig and CommandState.
@@ -21,118 +21,78 @@ type CommandEntry struct {
 
 // ListCommands lists commands, optionally filtering by state and labels.
 func (s *Store) ListCommands(allStates bool, labels map[string]string) ([]CommandEntry, error) {
-	var query strings.Builder
-	query.WriteString(`SELECT c.ID, c.Name, c.CreatedAt, s.State, s.ExitCode, c.JSON, s.JSON
-		FROM CommandConfig c
-		JOIN CommandState s ON c.ID = s.ID`)
-
-	var args []any
-	var conditions []string
-
-	if !allStates {
-		conditions = append(conditions, `s.State IN (?, ?, ?)`)
-		args = append(
-			args,
-			string(model.EventTypeCreated),
-			string(model.EventTypeStarting),
-			string(model.EventTypeRunning),
-		)
-	}
-
-	for k, v := range labels {
-		conditions = append(conditions, `json_extract(c.JSON, ?) = ?`)
-		args = append(args, labelJSONPath(k), v)
-	}
-
-	if len(conditions) > 0 {
-		query.WriteString(" WHERE ")
-		for i, c := range conditions {
-			if i > 0 {
-				query.WriteString(" AND ")
-			}
-			query.WriteString(c)
-		}
-	}
-
-	query.WriteString(" ORDER BY c.CreatedAt")
-
-	rows, err := s.db.Query(query.String(), args...)
+	statesJSON, err := json.Marshal([]string{
+		string(model.EventTypeCreated),
+		string(model.EventTypeStarting),
+		string(model.EventTypeRunning),
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	labelsJSON, err := marshalLabels(labels)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListCommands(context.Background(), query.ListCommandsParams{
+		AllStates:  allStates,
+		States:     string(statesJSON),
+		Labels:     labelsJSON,
+		LabelCount: int64(len(labels)),
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	var entries []CommandEntry
-	for rows.Next() {
-		var e CommandEntry
-		var nameSQL sql.NullString
-		var ecSQL sql.NullInt64
-		var cfgStr, stateJSONStr, stateStr string
-		if err := rows.Scan(
-			&e.ID,
-			&nameSQL,
-			&e.CreatedAt,
-			&stateStr,
-			&ecSQL,
-			&cfgStr,
-			&stateJSONStr,
-		); err != nil {
-			return nil, err
+	for _, r := range rows {
+		e := CommandEntry{
+			ID:        r.ID,
+			CreatedAt: r.Createdat,
+			State:     model.EventType(r.State),
 		}
-		e.State = model.EventType(stateStr)
-		if nameSQL.Valid {
-			e.Name = nameSQL.String
+		if r.Name.Valid {
+			e.Name = r.Name.String
 		}
-		if ecSQL.Valid {
-			ec := int(ecSQL.Int64)
+		if r.Exitcode.Valid {
+			ec := int(r.Exitcode.Int64)
 			e.ExitCode = &ec
 		}
 		e.ConfigJSON = &model.CommandConfig{}
-		if err := json.Unmarshal([]byte(cfgStr), e.ConfigJSON); err != nil {
+		if err := json.Unmarshal([]byte(r.ConfigJson), e.ConfigJSON); err != nil {
 			return nil, err
 		}
 		e.ConfigJSON.BackfillDefaults()
 		e.StateJSON = &model.CommandState{}
-		if err := json.Unmarshal([]byte(stateJSONStr), e.StateJSON); err != nil {
+		if err := json.Unmarshal([]byte(r.StateJson), e.StateJSON); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
 	}
-	return entries, rows.Err()
+	return entries, nil
 }
 
 // FindByLabels returns command IDs matching all the given labels.
 func (s *Store) FindByLabels(labels map[string]string) ([]string, error) {
-	var query strings.Builder
-	query.WriteString(`SELECT ID FROM CommandConfig WHERE 1=1`)
-	var args []any
-	for k, v := range labels {
-		query.WriteString(` AND json_extract(JSON, ?) = ?`)
-		args = append(args, labelJSONPath(k), v)
-	}
-	rows, err := s.db.Query(query.String(), args...)
+	labelsJSON, err := marshalLabels(labels)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+	return s.queries.FindByLabels(context.Background(), query.FindByLabelsParams{
+		Labels:     labelsJSON,
+		LabelCount: int64(len(labels)),
+	})
 }
 
-// labelJSONPath returns a SQLite json_extract path expression that selects
-// the label whose key is k. Label keys can contain dots (e.g.
-// "cmdman.compose.workdir"), which json_extract would otherwise interpret as
-// nested property access. Quoting the key as $.labels."<k>" ensures it is
-// treated as a single property name; any embedded double quotes inside k are
-// escaped by doubling them, matching SQLite's quoting rules.
-func labelJSONPath(k string) string {
-	escaped := strings.ReplaceAll(k, `"`, `""`)
-	return `$.labels."` + escaped + `"`
+// marshalLabels renders a label filter as a JSON object for the json_each
+// queries, mapping a nil map to an empty object so json_each never receives a
+// JSON null.
+func marshalLabels(labels map[string]string) (string, error) {
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	data, err := json.Marshal(labels)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }

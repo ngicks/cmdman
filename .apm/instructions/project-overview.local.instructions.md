@@ -175,6 +175,7 @@ order per op file: `<Op>Option` → `<Op>Result` → `<Verb>Outcome` → methods
   PostToolUse hooks auto-run `golangci-lint fmt` + `golangci-lint run` after every Edit/Write
   (`.claude/settings.json`).
 - Proto regen: `buf generate` from `pkg/api` (needs `protoc-gen-go`, `protoc-gen-go-grpc`).
+- sqlc regen: `go generate ./pkg/cmdman/store` (or `go tool sqlc generate` from that dir) — `schema/schema.sql` is sqlc's parser input, kept in sync with `migration/` by `TestSchemaSQLMatchesMigrationChain`; don't hand-edit `gen/query/`.
 - APM primitives: `apm.yml` / `apm.lock.yaml`; `AGENTS.md` is generated (`apm compile`) — don't hand-edit.
 
 ## Skills to invoke when editing

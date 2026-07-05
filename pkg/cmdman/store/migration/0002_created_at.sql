@@ -1,0 +1,1 @@
+ALTER TABLE CommandConfig ADD COLUMN CreatedAt TEXT NOT NULL DEFAULT '';

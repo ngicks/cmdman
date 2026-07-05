@@ -1,6 +1,6 @@
 package store
 
-import "fmt"
+import "context"
 
 // DeleteCommand removes all rows and the command directory for a command.
 func (s *Store) DeleteCommand(id string) error {
@@ -10,10 +10,16 @@ func (s *Store) DeleteCommand(id string) error {
 	}
 	defer tx.Rollback()
 
-	for _, table := range []string{"CommandExitCode", "CommandState", "CommandConfig"} {
-		if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s WHERE ID = ?", table), id); err != nil {
-			return err
-		}
+	ctx := context.Background()
+	q := s.queries.WithTx(tx)
+	if err := q.DeleteCommandExitCode(ctx, id); err != nil {
+		return err
+	}
+	if err := q.DeleteCommandState(ctx, id); err != nil {
+		return err
+	}
+	if err := q.DeleteCommandConfig(ctx, id); err != nil {
+		return err
 	}
 
 	return tx.Commit()

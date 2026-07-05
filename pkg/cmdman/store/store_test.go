@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
@@ -38,6 +39,25 @@ func TestSchemaCreation(t *testing.T) {
 
 	err = st.DB().QueryRow(`SELECT count(*) FROM CommandExitCode`).Scan(&count)
 	assert.NilError(t, err)
+}
+
+// TestFreshDBReplaysMigrationChain proves a fresh database is built by replaying
+// the embedded .sql chain to its final version, so the end-state schema matches
+// what the migrations describe (CreatedAt is added by 0002_created_at.sql).
+func TestFreshDBReplaysMigrationChain(t *testing.T) {
+	st := testStore(t)
+
+	var ver int
+	err := st.DB().QueryRow(`SELECT SchemaVersion FROM DBConfig WHERE ID = 1`).Scan(&ver)
+	assert.NilError(t, err)
+	assert.Equal(t, ver, schemaVersion)
+
+	var ddl string
+	err = st.DB().QueryRow(
+		`SELECT sql FROM sqlite_master WHERE type='table' AND name='CommandConfig'`,
+	).Scan(&ddl)
+	assert.NilError(t, err)
+	assert.Assert(t, strings.Contains(ddl, "CreatedAt"), "CommandConfig DDL: %s", ddl)
 }
 
 func TestOpenStoreConfiguresSQLitePragmas(t *testing.T) {
