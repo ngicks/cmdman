@@ -42,12 +42,15 @@ for the small items).
       directly (per D1, no plan dir): `pkg/cmdman/broadcaster_test.go`, six
       tests incl. slow-consumer drop and concurrent stress; verified under
       `-race -count=5` (working tree, awaiting maintainer review)
-- [ ] 7. C10 — log cleanup errors in markMonitorDied (S)
+- [x] 7. C10 — log cleanup errors in markMonitorDied (S) — implemented
+      2026-07-05 directly (per D1): ctx threaded through both callers, both
+      os.RemoveAll failures warn via the contextkey logger, mirroring
+      maybeAutoRemove (working tree, awaiting maintainer review)
 - [ ] 8. C8 — extract detach-key lexer from cli/attach.go (S)
 - [ ] 9. C7 — split compose/load.go into discover.go/normalize.go (S-M)
 - [ ] 10. C4 — extract pkg/cmdman/monitor subpackage (L; after C5/C6/C10)
 - [ ] 11. C9 — split cli/tui_backend.go by tab (S; after C1, if still needed)
 
-Next action: maintainer reviews the C2 + C6 changes (working tree); then pick
-up item 7 (C10 — log cleanup errors in markMonitorDied). C5 + C1 + C3 + C11
-are committed (through 0bba598).
+Next action: maintainer reviews the C2 + C6 + C10 changes (working tree);
+then pick up item 8 (C8 — extract detach-key lexer from cli/attach.go).
+C5 + C1 + C3 + C11 are committed (through 0bba598).

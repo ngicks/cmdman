@@ -95,7 +95,7 @@ func (s *Service) stop(
 
 	if err := s.sendStop(ctx, st, id, sig); err != nil {
 		if isMonitorUnavailable(err) {
-			return markMonitorDied(st, s.cfg, id, stateJSON, cfg)
+			return markMonitorDied(ctx, st, s.cfg, id, stateJSON, cfg)
 		}
 		return err
 	}

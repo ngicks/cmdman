@@ -13,7 +13,7 @@ applyTo: "*"
 ## What it is
 
 A **daemonless** shell-command supervisor in Go. Self-description from `root.go`:
-*"podman without pods, the tmux without terminals."* It starts blocking commands in the
+_"podman without pods, the tmux without terminals."_ It starts blocking commands in the
 background, persists their config/state, and lets you control them over CLI and a TUI.
 
 - Module: `github.com/ngicks/cmdman` · Go `1.26.0`
@@ -33,12 +33,14 @@ Two process roles per command:
 2. **Monitor** (long-lived, detached): supervises one child command. Code: `Monitor` in `mon*.go`.
 
 **Spawn path** (`Service.Start` → `mon_spawn.go`):
-- Re-execs the *same binary* with the hidden `__monitor --id <id>` subcommand.
+
+- Re-execs the _same binary_ with the hidden `__monitor --id <id>` subcommand.
 - `detachProcess` (`detach_posix.go`) sets `Setsid=true` and redirects stdio → `/dev/null`;
   CLI calls `cmd.Process.Release()` to orphan it, then polls the SQLite store (every 50 ms)
   for the state to flip `starting` → `running`.
 
 **Monitor lifecycle** (`mon_run.go`, `mon.go`):
+
 - `RunMonitor` opens the store, takes an exclusive `flock` on a PID file (dedupe guard),
   writes its PID + socket path into the state JSON, listens on a Unix socket, serves gRPC.
 - `runLoop` re-reads config from disk each iteration (live edits apply on restart) and honors
@@ -125,18 +127,20 @@ support `--format` Go templates via the shared `cli/template.go` `templateFuncMa
 ## Conventions / codex
 
 **Layering (enforced by `go-design-preference`):**
+
 - `./cmd` parses flags/args and calls a service — **no business logic, no presentation**.
 - Presentation (tables, color, progress, tty detection, prompts) lives in `pkg/cmdman/cli`.
 - Services are programmatic-caller-first; the CLI is a wrapper. Services never import `./cmd`.
 - `main`/`Run` return errors; never `os.Exit` from business code (only `main.go` exits).
 
 **Go idioms used throughout:**
+
 - Context first param; never stored in a struct. Cancellable work takes `ctx`.
 - Errors are values: wrap with `fmt.Errorf("...: %w", err)`; `errors.Join` for cleanup; no panic
   for normal failures.
 - Concurrency: prefer `golang.org/x/sync/errgroup` / `semaphore` / `singleflight` over hand-wired
   `sync.WaitGroup`+`chan struct{}`. (`Monitor.wg` is a deliberate exception: per-RPC goroutines are
-  joined by the supervisor *after* `GracefulStop`, to avoid a stream-handler deadlock.)
+  joined by the supervisor _after_ `GracefulStop`, to avoid a stream-handler deadlock.)
 - Small interfaces defined at the consumer (`compose.cmdmanSvc`, `cli.AttachSession`,
   `tui.Backend`), not at the implementer.
 - Generics for fan-out (`broadcaster[T]`); non-blocking send drops slow consumers.
@@ -144,6 +148,7 @@ support `--format` Go templates via the shared `cli/template.go` `templateFuncMa
   `config.go` `WithDefaults`).
 
 **Logging (project-specific — see `go-cmdman-review-checklist`):**
+
 - In service/library code, **never** `slog.Default()`. Derive from ctx:
   `contextkey.ValueSlogLoggerDefault(ctx)` (from `github.com/ngicks/go-common/contextkey`).
 - A function that logs takes `ctx` first; goroutines log via the captured `ctx`.
@@ -151,6 +156,7 @@ support `--format` Go templates via the shared `cli/template.go` `templateFuncMa
 - Prefer `WarnContext`/`InfoContext`. `root.go` injects the logger into the command context.
 
 **Cross-platform build tags:**
+
 - `//go:build !plan9 && !windows && !wasm` → `*_posix.go` (setsid/setpgid/pty, flock).
 - `//go:build linux` / `!linux` → inotify vs poll event watcher (`config_{linux,other}.go`).
 - `unix` / `windows` / `plan9` variants for file identity (`eventlog/file_ident_*.go`).

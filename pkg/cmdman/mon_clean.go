@@ -64,10 +64,11 @@ func cleanStaleEntry(
 		return nil
 	}
 
-	return markMonitorDied(st, cfg, id, stateJSON, configJSON)
+	return markMonitorDied(ctx, st, cfg, id, stateJSON, configJSON)
 }
 
 func markMonitorDied(
+	ctx context.Context,
 	st *cmdstore.Store,
 	cfg CmdmanConfig,
 	id string,
@@ -83,10 +84,15 @@ func markMonitorDied(
 		if err := st.DeleteCommand(id); err != nil {
 			return err
 		}
-		_ = os.RemoveAll(configJSON.CommandDir)
+		logger := contextkey.ValueSlogLoggerDefault(ctx)
+		if err := os.RemoveAll(configJSON.CommandDir); err != nil {
+			logger.Warn("auto-remove dir failed", slog.String("error", err.Error()))
+		}
 		runtimeDir, err := cfg.MonitorRuntimeDir(id)
 		if err == nil {
-			_ = os.RemoveAll(runtimeDir)
+			if err := os.RemoveAll(runtimeDir); err != nil {
+				logger.Warn("auto-remove runtime dir failed", slog.String("error", err.Error()))
+			}
 		}
 	}
 	return nil
