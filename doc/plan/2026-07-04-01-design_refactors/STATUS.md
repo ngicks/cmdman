@@ -46,11 +46,16 @@ for the small items).
       2026-07-05 directly (per D1): ctx threaded through both callers, both
       os.RemoveAll failures warn via the contextkey logger, mirroring
       maybeAutoRemove (working tree, awaiting maintainer review)
-- [ ] 8. C8 — extract detach-key lexer from cli/attach.go (S)
+- [x] 8. C8 — extract detach-key lexer from cli/attach.go (S) — implemented
+      2026-07-08 directly (per D1): lexer (`detachKeyReader`,
+      `parseDetachKeys*`) moved verbatim to `cli/attach_detachkeys.go`, its
+      tests to `cli/attach_detachkeys_test.go`; `errDetach` stays in attach.go
+      (shared). Reviewed (approve) + full `go test ./...` incl. e2e green
+      (working tree, awaiting maintainer review)
 - [ ] 9. C7 — split compose/load.go into discover.go/normalize.go (S-M)
 - [ ] 10. C4 — extract pkg/cmdman/monitor subpackage (L; after C5/C6/C10)
 - [ ] 11. C9 — split cli/tui_backend.go by tab (S; after C1, if still needed)
 
-Next action: maintainer reviews the C2 + C6 + C10 changes (working tree);
-then pick up item 8 (C8 — extract detach-key lexer from cli/attach.go).
-C5 + C1 + C3 + C11 are committed (through 0bba598).
+Next action: maintainer reviews the C8 change (working tree); then pick up
+item 9 (C7 — split compose/load.go into discover.go/normalize.go).
+C5 + C1 + C3 + C11 + C2 + C6 + C10 are committed (through 345c8dc).
