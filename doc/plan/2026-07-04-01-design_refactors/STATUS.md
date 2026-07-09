@@ -52,10 +52,14 @@ for the small items).
       tests to `cli/attach_detachkeys_test.go`; `errDetach` stays in attach.go
       (shared). Reviewed (approve) + full `go test ./...` incl. e2e green
       (working tree, awaiting maintainer review)
-- [ ] 9. C7 — split compose/load.go into discover.go/normalize.go (S-M)
+- [x] 9. C7 — split compose/load.go into discover.go/normalize.go (S-M) —
+      implemented 2026-07-08 via `doc/plan/compose-03-load-split/`: load.go
+      deleted, decls moved verbatim to discover.go/normalize.go (working
+      tree, awaiting maintainer review)
 - [ ] 10. C4 — extract pkg/cmdman/monitor subpackage (L; after C5/C6/C10)
 - [ ] 11. C9 — split cli/tui_backend.go by tab (S; after C1, if still needed)
 
-Next action: maintainer reviews the C8 change (working tree); then pick up
-item 9 (C7 — split compose/load.go into discover.go/normalize.go).
+Next action: maintainer reviews the C8 + C7 changes (working tree); then
+pick up item 10 (C4 — extract pkg/cmdman/monitor subpackage; its
+prerequisites C5/C6/C10 are all landed).
 C5 + C1 + C3 + C11 + C2 + C6 + C10 are committed (through 345c8dc).
