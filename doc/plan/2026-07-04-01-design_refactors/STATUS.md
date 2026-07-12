@@ -57,9 +57,17 @@ for the small items).
       deleted, decls moved verbatim to discover.go/normalize.go (working
       tree, awaiting maintainer review)
 - [ ] 10. C4 — extract pkg/cmdman/monitor subpackage (L; after C5/C6/C10)
-- [ ] 11. C9 — split cli/tui_backend.go by tab (S; after C1, if still needed)
+- [x] 11. C9 — split cli/tui_backend.go by tab (S; after C1, if still needed) —
+      re-checked 2026-07-12: still 718 lines post-C1, split warranted.
+      Implemented directly (per D1): tui_backend.go kept as core
+      (serviceBackend, ctor, Cwd, shared path helpers); decls moved verbatim
+      to tui_backend_commands.go / _compose.go / _mux.go; tui_backend_test.go
+      split to match (original deleted). Reviewed (approve, move-only
+      verified) + `go build ./...` and full `go test ./...` green (one
+      unrelated eventlog flake, passes 5/5 in isolation) (working tree,
+      awaiting maintainer review)
 
-Next action: maintainer reviews the C8 + C7 changes (working tree); then
-pick up item 10 (C4 — extract pkg/cmdman/monitor subpackage; its
-prerequisites C5/C6/C10 are all landed).
-C5 + C1 + C3 + C11 + C2 + C6 + C10 are committed (through 345c8dc).
+Next action: pick up item 10 (C4 — extract pkg/cmdman/monitor subpackage;
+its prerequisites C5/C6/C10 are all landed). C9 was done out of order
+because C4 is in flight in a separate working tree state.
+C5 + C1 + C3 + C11 + C2 + C6 + C10 + C8 + C7 + C9 are committed.
