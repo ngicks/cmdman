@@ -1,4 +1,8 @@
-package cmdman
+// Package monitor implements the per-command monitor process: it supervises a
+// single child command, serves the command's gRPC control socket, and manages
+// scrollback, log fan-out, terminal emulation, and restart policy. The Service
+// in pkg/cmdman spawns one detached monitor per command.
+package monitor
 
 import (
 	"context"
@@ -22,6 +26,7 @@ import (
 	"google.golang.org/grpc"
 
 	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
+	"github.com/ngicks/cmdman/pkg/cmdman/config"
 	"github.com/ngicks/cmdman/pkg/cmdman/eventlog"
 	"github.com/ngicks/cmdman/pkg/cmdman/internal/flock"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
@@ -34,7 +39,7 @@ type Monitor struct {
 	ID         string
 	CommandDir string
 	DBPath     string
-	Config     CmdmanConfig
+	Config     config.CmdmanConfig
 	Logger     *slog.Logger
 
 	cleanUp []func() error
@@ -79,7 +84,7 @@ type Monitor struct {
 func newMonitor(
 	ctx context.Context,
 	id string,
-	cfg CmdmanConfig,
+	cfg config.CmdmanConfig,
 	logger *slog.Logger,
 ) (*Monitor, error) {
 	commandDir, err := cfg.CommandDir(id)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
+	"github.com/ngicks/cmdman/pkg/cmdman/monitor"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"gotest.tools/v3/assert"
 )
@@ -136,7 +137,7 @@ func TestServiceSendKeys(t *testing.T) {
 
 	runErrCh := make(chan error, 1)
 	go func() {
-		runErrCh <- RunMonitor(ctx, id, appCfg, logger)
+		runErrCh <- monitor.RunMonitor(ctx, id, appCfg, logger)
 	}()
 
 	deadline := time.Now().Add(5 * time.Second)

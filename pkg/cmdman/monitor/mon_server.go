@@ -1,4 +1,4 @@
-package cmdman
+package monitor
 
 import (
 	"context"

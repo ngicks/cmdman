@@ -1,6 +1,6 @@
 //go:build !linux
 
-package cmdman
+package config
 
 import "github.com/ngicks/cmdman/pkg/cmdman/eventlog"
 

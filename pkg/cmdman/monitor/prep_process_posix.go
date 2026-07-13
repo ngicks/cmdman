@@ -1,6 +1,6 @@
 //go:build !plan9 && !windows && !wasm
 
-package cmdman
+package monitor
 
 import (
 	"os"

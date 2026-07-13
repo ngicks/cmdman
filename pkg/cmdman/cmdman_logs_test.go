@@ -12,6 +12,7 @@ import (
 
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver/k8sfile"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
+	"github.com/ngicks/cmdman/pkg/cmdman/monitor"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"gotest.tools/v3/assert"
 )
@@ -69,7 +70,7 @@ func TestServiceLogsFollowNoDuplicatesAcrossStorageAndLive(t *testing.T) {
 			os.Stderr,
 			&slog.HandlerOptions{Level: slog.LevelWarn},
 		))
-		monitorErr <- RunMonitor(monitorCtx, id, appCfg, logger)
+		monitorErr <- monitor.RunMonitor(monitorCtx, id, appCfg, logger)
 	}()
 	t.Cleanup(func() {
 		stopMonitor()

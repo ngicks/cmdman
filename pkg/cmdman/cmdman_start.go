@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
+	"github.com/ngicks/cmdman/pkg/cmdman/monitor"
 )
 
 func (s *Service) Start(ctx context.Context, idOrName string) error {
@@ -39,10 +40,10 @@ func (s *Service) Start(ctx context.Context, idOrName string) error {
 		)
 	}
 
-	if err := SpawnMonitor(s.cfg, id); err != nil {
+	if err := monitor.SpawnMonitor(s.cfg, id); err != nil {
 		return fmt.Errorf("spawn monitor: %w", err)
 	}
-	if finalState, err := WaitForState(st, id, model.EventTypeRunning, 100); err != nil {
+	if finalState, err := monitor.WaitForState(st, id, model.EventTypeRunning, 100); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}

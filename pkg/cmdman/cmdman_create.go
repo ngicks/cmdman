@@ -6,6 +6,7 @@ import (
 	"maps"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/config"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
@@ -60,7 +61,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 		return nil, err
 	}
 	cfg.CommandDir = commandDir
-	cfg.Env = withCommandContextEnv(cfg.Env, s.cfg, id, commandDir)
+	cfg.Env = config.WithCommandContextEnv(cfg.Env, s.cfg, id, commandDir)
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}

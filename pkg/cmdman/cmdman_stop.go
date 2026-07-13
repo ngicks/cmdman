@@ -9,6 +9,7 @@ import (
 
 	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
+	"github.com/ngicks/cmdman/pkg/cmdman/monitor"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"github.com/ngicks/cmdman/pkg/hrstr"
 )
@@ -95,7 +96,7 @@ func (s *Service) stop(
 
 	if err := s.sendStop(ctx, st, id, sig); err != nil {
 		if isMonitorUnavailable(err) {
-			return markMonitorDied(ctx, st, s.cfg, id, stateJSON, cfg)
+			return monitor.MarkMonitorDied(ctx, st, s.cfg, id, stateJSON, cfg)
 		}
 		return err
 	}

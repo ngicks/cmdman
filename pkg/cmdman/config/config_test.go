@@ -1,4 +1,4 @@
-package cmdman
+package config
 
 import (
 	"os"

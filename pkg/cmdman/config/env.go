@@ -1,8 +1,11 @@
-package cmdman
+package config
 
 import "strings"
 
-func withCommandContextEnv(env []string, cfg CmdmanConfig, id, commandDir string) []string {
+// WithCommandContextEnv strips any caller-supplied ENV_CMDMAN_* variables from
+// env and appends the ones describing the command's own context (data/runtime
+// dirs, per-command dir, and id).
+func WithCommandContextEnv(env []string, cfg CmdmanConfig, id, commandDir string) []string {
 	prefixes := []string{
 		ENV_CMDMAN_DATA_DIR + "=",
 		ENV_CMDMAN_RUNTIME_DIR + "=",

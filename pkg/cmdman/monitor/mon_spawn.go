@@ -1,4 +1,4 @@
-package cmdman
+package monitor
 
 import (
 	"fmt"
@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/config"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
@@ -19,7 +20,7 @@ import (
 // newMonitorCmd builds an exec.Cmd that re-runs the current binary's hidden
 // __monitor command for id. extraEnv is appended to the inherited environment;
 // pass nil to inherit it unchanged.
-func newMonitorCmd(cfg CmdmanConfig, id string, extraEnv []string) (*exec.Cmd, error) {
+func newMonitorCmd(cfg config.CmdmanConfig, id string, extraEnv []string) (*exec.Cmd, error) {
 	commandCfg, err := cfg.WithDefaults()
 	if err != nil {
 		return nil, err

@@ -1,4 +1,4 @@
-package cmdman
+package monitor
 
 import (
 	"bytes"
@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/config"
 	"github.com/ngicks/cmdman/pkg/cmdman/internal/flock"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
@@ -22,7 +23,7 @@ import (
 
 func TestMonitorRunAndExit(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := CmdmanConfig{
+	appCfg := config.CmdmanConfig{
 		DataDir:            dir,
 		RuntimeDir:         dir,
 		DefaultWorkingDir:  dir,
@@ -79,7 +80,7 @@ func TestMonitorRunAndExit(t *testing.T) {
 
 func TestMonitorNonZeroExit(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := CmdmanConfig{
+	appCfg := config.CmdmanConfig{
 		DataDir:            dir,
 		RuntimeDir:         dir,
 		DefaultWorkingDir:  dir,
@@ -128,7 +129,7 @@ func TestMonitorNonZeroExit(t *testing.T) {
 
 func TestMonitorAutoRemove(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := CmdmanConfig{
+	appCfg := config.CmdmanConfig{
 		DataDir:            dir,
 		RuntimeDir:         dir,
 		DefaultWorkingDir:  dir,
@@ -180,7 +181,7 @@ func TestMonitorAutoRemove(t *testing.T) {
 
 func TestMonitorGracefulShutdown(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := CmdmanConfig{
+	appCfg := config.CmdmanConfig{
 		DataDir:            dir,
 		RuntimeDir:         dir,
 		DefaultWorkingDir:  dir,
@@ -250,7 +251,7 @@ func TestStaleEntryCleanup(t *testing.T) {
 	stateJSON := &model.CommandState{MonitorPID: 99999999}
 	assert.NilError(t, st.InsertCommandState("stale-1", model.EventTypeRunning, stateJSON))
 
-	cfgForCleanup, err := (CmdmanConfig{
+	cfgForCleanup, err := (config.CmdmanConfig{
 		DataDir:            t.TempDir(),
 		RuntimeDir:         t.TempDir(),
 		DefaultWorkingDir:  "/tmp",
@@ -265,7 +266,7 @@ func TestStaleEntryCleanup(t *testing.T) {
 }
 
 func TestIsStaleMonitor(t *testing.T) {
-	cfg, err := (CmdmanConfig{
+	cfg, err := (config.CmdmanConfig{
 		DataDir:            t.TempDir(),
 		RuntimeDir:         t.TempDir(),
 		DefaultWorkingDir:  "/tmp",
@@ -319,7 +320,7 @@ func TestIsStaleMonitor(t *testing.T) {
 func TestCleanStaleEntrySkipsProbeError(t *testing.T) {
 	st := testStore(t)
 
-	cfg, err := (CmdmanConfig{
+	cfg, err := (config.CmdmanConfig{
 		DataDir:            t.TempDir(),
 		RuntimeDir:         t.TempDir(),
 		DefaultWorkingDir:  "/tmp",

@@ -5,6 +5,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/pkg/cmdman/monitor"
 )
 
 func monitorCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
@@ -33,5 +34,5 @@ func runMonitor(cmd *cobra.Command, _ []string, rootCfg *cmdman.CmdmanConfig, id
 		return err
 	}
 	logger := contextkey.ValueSlogLoggerDefault(cmd.Context())
-	return cmdman.DaemonizeMonitor(cmd.Context(), id, cfg, logger)
+	return monitor.DaemonizeMonitor(cmd.Context(), id, cfg, logger)
 }

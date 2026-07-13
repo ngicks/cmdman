@@ -1,4 +1,4 @@
-package cmdman
+package monitor
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/config"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"gotest.tools/v3/assert"
@@ -15,7 +16,7 @@ import (
 
 func TestRestartPolicyOnFailure(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := CmdmanConfig{
+	appCfg := config.CmdmanConfig{
 		DataDir:            dir,
 		RuntimeDir:         dir,
 		DefaultWorkingDir:  dir,
@@ -86,7 +87,7 @@ exit 0
 
 func TestRestartPolicyAlways(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := CmdmanConfig{
+	appCfg := config.CmdmanConfig{
 		DataDir:            dir,
 		RuntimeDir:         dir,
 		DefaultWorkingDir:  dir,
@@ -135,7 +136,7 @@ func TestRestartPolicyAlways(t *testing.T) {
 
 func TestRestartPolicyOnFailureMaxRetries(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := CmdmanConfig{
+	appCfg := config.CmdmanConfig{
 		DataDir:            dir,
 		RuntimeDir:         dir,
 		DefaultWorkingDir:  dir,

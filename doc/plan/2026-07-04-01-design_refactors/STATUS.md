@@ -56,7 +56,11 @@ for the small items).
       implemented 2026-07-08 via `doc/plan/compose-03-load-split/`: load.go
       deleted, decls moved verbatim to discover.go/normalize.go (working
       tree, awaiting maintainer review)
-- [ ] 10. C4 — extract pkg/cmdman/monitor subpackage (L; after C5/C6/C10)
+- [x] 10. C4 — extract pkg/cmdman/monitor subpackage (L; after C5/C6/C10) —
+      implemented 2026-07-10 via `doc/plan/monitor-00-subpackage/`: monitor
+      machinery → `pkg/cmdman/monitor`; import cycle broken by hoisting
+      config*.go + env.go → new leaf `pkg/cmdman/config` with aliases in
+      `pkg/cmdman` (working tree, awaiting maintainer review)
 - [x] 11. C9 — split cli/tui_backend.go by tab (S; after C1, if still needed) —
       re-checked 2026-07-12: still 718 lines post-C1, split warranted.
       Implemented directly (per D1): tui_backend.go kept as core
@@ -67,7 +71,8 @@ for the small items).
       unrelated eventlog flake, passes 5/5 in isolation) (working tree,
       awaiting maintainer review)
 
-Next action: pick up item 10 (C4 — extract pkg/cmdman/monitor subpackage;
-its prerequisites C5/C6/C10 are all landed). C9 was done out of order
-because C4 is in flight in a separate working tree state.
-C5 + C1 + C3 + C11 + C2 + C6 + C10 + C8 + C7 + C9 are committed.
+Next action: maintainer reviews the C4 change (working tree). All eleven
+backlog items are now implemented — this plan is complete pending that
+review.
+C5 + C1 + C3 + C11 + C2 + C6 + C10 + C8 + C7 + C9 are committed (through
+c39a74a).

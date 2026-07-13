@@ -1,4 +1,4 @@
-package cmdman
+package monitor
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/ngicks/cmdman/pkg/cmdman/config"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	cmdstore "github.com/ngicks/cmdman/pkg/cmdman/store"
@@ -24,7 +25,12 @@ const (
 
 // RunMonitor is the main entry point for the monitor process.
 // It reads config, starts the command, and serves gRPC until the command exits.
-func RunMonitor(ctx context.Context, id string, cfg CmdmanConfig, logger *slog.Logger) error {
+func RunMonitor(
+	ctx context.Context,
+	id string,
+	cfg config.CmdmanConfig,
+	logger *slog.Logger,
+) error {
 	m, err := newMonitor(ctx, id, cfg, logger)
 	if err != nil {
 		return err
@@ -111,7 +117,7 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 func (m *Monitor) wireUpCmd(ctx context.Context) (*exec.Cmd, error) {
 	cmd := exec.CommandContext(ctx, m.cfg.Argv[0], m.cfg.Argv[1:]...)
 	cmd.Dir = m.cfg.Dir
-	cmd.Env = withCommandContextEnv(m.cfg.Env, m.Config, m.ID, m.cfg.CommandDir)
+	cmd.Env = config.WithCommandContextEnv(m.cfg.Env, m.Config, m.ID, m.cfg.CommandDir)
 	if len(cmd.Env) == 0 {
 		return nil, fmt.Errorf("command config env is empty")
 	}
