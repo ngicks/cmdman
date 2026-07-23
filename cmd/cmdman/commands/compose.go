@@ -7,14 +7,12 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/compose"
 )
 
-// composeFlags holds the common flags shared across all compose subcommands.
 type composeFlags struct {
 	File        string
 	ProjectName string
 	WorkDir     string
 }
 
-// normalizeOpts converts the parsed CLI flags into the service-layer options.
 func (cf *composeFlags) normalizeOpts() compose.NormalizeOpts {
 	return compose.NormalizeOpts{
 		File:        cf.File,

@@ -48,8 +48,6 @@ func commandInfos(entries []store.CommandEntry) []tui.CommandInfo {
 		project := labels[compose.LabelProject]
 		workdir, hasWorkdir := labels[compose.LabelWorkdir]
 		if !hasWorkdir {
-			// Standalone (or partially-labelled) command: use its own working
-			// directory so cwd-active grouping still works.
 			workdir = dir
 		}
 		name := e.Name
@@ -122,7 +120,6 @@ func (e *eventStream) pump() {
 		if rec.Err != nil {
 			sig.Err = rec.Err
 		}
-		// Coalesce bursts: drop a new signal when one is already pending.
 		select {
 		case e.ch <- sig:
 		default:

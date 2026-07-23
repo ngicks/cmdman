@@ -147,7 +147,6 @@ func resolveStopTargetCommands(spec ComposeSpec, names []string) map[string]stru
 		}
 		return target
 	}
-	// dependents maps a command to the commands that declare it in their After.
 	dependents := make(map[string][]string)
 	for _, nc := range spec.Commands {
 		for _, dep := range nc.After {
@@ -312,7 +311,6 @@ func buildReconcileGraph(
 		}
 	}
 
-	// Virtual edges for every command.
 	for i := range spec.Commands {
 		id := vertexID(spec.Commands[i].Name)
 		be := graphEdge{From: beginVertex, To: id}
@@ -324,7 +322,6 @@ func buildReconcileGraph(
 		g.Vertices[id].Children[endVertex] = ee
 	}
 
-	// Real dependency edges: dependency -> dependent.
 	for i := range spec.Commands {
 		c := &spec.Commands[i]
 		depID := vertexID(c.Name)

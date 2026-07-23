@@ -9,16 +9,13 @@ func TestStop_RunningCommand(t *testing.T) {
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
-	// Start a long-running command.
 	id := env.run(ctx, "run", "-n", "sleeper", "--", "/bin/sh", "-c", "sleep 300")
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
 
 	env.waitForState(ctx, "sleeper", "running", defaultTimeout)
 
-	// Stop it.
 	env.run(ctx, "stop", "sleeper")
 
-	// Wait for it to reach exited state.
 	env.waitForState(ctx, "sleeper", "exited", defaultTimeout)
 
 	info := env.inspectJSON(ctx, "sleeper")
@@ -37,7 +34,6 @@ func TestStop_ByID(t *testing.T) {
 
 	env.waitForState(ctx, id, "running", defaultTimeout)
 
-	// Stop by ID.
 	env.run(ctx, "stop", id)
 
 	env.waitForState(ctx, id, "exited", defaultTimeout)
@@ -53,7 +49,6 @@ func TestStop_WithSignal(t *testing.T) {
 
 	env.waitForState(ctx, "sig-test", "running", defaultTimeout)
 
-	// Send SIGKILL explicitly.
 	env.run(ctx, "stop", "-s", "SIGKILL", "sig-test")
 
 	env.waitForState(ctx, "sig-test", "exited", defaultTimeout)
@@ -85,12 +80,10 @@ func TestStop_AlreadyExited(t *testing.T) {
 	// The important thing is the command remains in exited state.
 	stdout, stderr, _ := env.exec(ctx, "stop", id)
 	combined := stdout + " " + stderr
-	// Should indicate an error (connection refused, no socket, etc.)
 	if combined == " " {
 		t.Log("stop on exited command produced no output (error was silent)")
 	}
 
-	// State should still be exited.
 	info := env.inspectJSON(ctx, id)
 	if info["State"] != "exited" {
 		t.Errorf("expected state=exited, got %v", info["State"])

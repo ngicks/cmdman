@@ -86,8 +86,6 @@ func TestWithDefaults_EnvBeatsConfigFile(t *testing.T) {
 
 func TestWithDefaults_MissingConfigFileIsOK(t *testing.T) {
 	home := configFileTestEnv(t)
-	// CMDMAN_CONF is set to a non-existent path; WithDefaults must not
-	// fail.
 	dataExplicit := filepath.Join(home, "data")
 	runtimeExplicit := filepath.Join(home, "runtime")
 	cfg, err := CmdmanConfig{
@@ -109,8 +107,6 @@ func TestWithDefaults_MalformedConfigFileFails(t *testing.T) {
 	assert.ErrorContains(t, err, "parse config file")
 }
 
-// itoa is a minimal int-to-decimal helper so the test file stays free of
-// the "strconv" import (keeping its surface narrow and easy to read).
 func itoa(n int) string {
 	if n == 0 {
 		return "0"

@@ -126,13 +126,11 @@ func (a AfterSpec) Validate() error {
 
 // ComposeSpec is the validated, resolved compose configuration.
 type ComposeSpec struct {
-	// ComposeFile is the absolute path to the compose file used.
+	// ComposeFile and WorkDir are absolute; WorkDir is canonicalized.
 	ComposeFile string
-	// Project is the effective project name.
-	Project string
-	// WorkDir is the canonical absolute work directory.
-	WorkDir string
-	// Commands is the ordered list of normalized commands.
+	Project     string
+	WorkDir     string
+	// Commands preserves normalization order.
 	Commands []Command
 	// Mux is the embedded "mux:" layout from the compose file (nil when
 	// absent), with project-scoped service names still in its leaves.
@@ -143,11 +141,8 @@ type ComposeSpec struct {
 
 // Command is a single command after normalization.
 type Command struct {
-	// Name is the compose command name (YAML map key).
 	Name string
-	// Dir is the resolved absolute working directory for this command.
-	Dir string
-	// Args is the interpolated argv.
+	Dir  string
 	Args []string
 	// Env is the merged environment (env_file + env: overrides), interpolated,
 	// in KEY=VALUE form. Does NOT include OS environment; callers inject that.
@@ -158,24 +153,17 @@ type Command struct {
 	ImportHostEnv bool
 	// Labels are user-supplied labels. Reserved cmdman.compose.* labels are absent here;
 	// they are added by Plan when building CreateRequest inputs.
-	Labels map[string]string
-	// RestartPolicy from the YAML.
+	Labels        map[string]string
 	RestartPolicy model.RestartPolicy
 	// MaxRetries is the on-failure restart cap parsed from restart_policy
 	// ("on-failure:N"). Zero means unlimited.
-	MaxRetries int
-	// StopSignal from the YAML.
-	StopSignal string
-	// Tty from the YAML.
-	Tty bool
-	// ScrollbackBytes from the YAML.
+	MaxRetries      int
+	StopSignal      string
+	Tty             bool
 	ScrollbackBytes int
-	// LogDriver from the YAML.
-	LogDriver logdriver.LogDriver
-	// LogOpts from the YAML.
-	LogOpts map[string]string
-	// After is the expanded dependency list.
-	After []AfterSpec
+	LogDriver       logdriver.LogDriver
+	LogOpts         map[string]string
+	After           []AfterSpec
 	// Scale is the desired replica count (>= 1). Each replica is a distinct
 	// cmdman command named <GeneratedName>-<index> for index in 1..Scale.
 	Scale int

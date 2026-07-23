@@ -91,7 +91,6 @@ type projectGroup struct {
 	commands []commandRow
 }
 
-// key uniquely identifies a project group across refreshes (workdir+name).
 func (g projectGroup) key() string { return g.workdir + "\x00" + g.name }
 
 type commandsTab struct {
@@ -137,12 +136,11 @@ type layoutTab struct {
 	loaded   bool   // whether layouts have been loaded at least once
 }
 
-// layoutRow is a single mux layout in the Layout tab.
 type layoutRow struct {
 	name string
 }
 
-// moveSelection moves the layout selection by delta, clamped to the rows.
+// moveSelection applies delta and clamps the layout selection to existing rows.
 func (t *layoutTab) moveSelection(delta int) {
 	if len(t.rows) == 0 {
 		return
@@ -249,7 +247,7 @@ type visRow struct {
 	cmd   int // index into group.commands (visCommand only)
 }
 
-// folded reports whether the group at index gi is folded.
+// folded reports the fold state for group index gi; invalid indexes are unfolded.
 func (c *commandsTab) folded(gi int) bool {
 	if gi < 0 || gi >= len(c.groups) {
 		return false
@@ -257,7 +255,7 @@ func (c *commandsTab) folded(gi int) bool {
 	return c.fold[c.groups[gi].key()]
 }
 
-// setFolded records the fold state for a group.
+// setFolded sets group index gi to v; invalid indexes are ignored.
 func (c *commandsTab) setFolded(gi int, v bool) {
 	if gi < 0 || gi >= len(c.groups) {
 		return
@@ -298,7 +296,6 @@ func (c *commandsTab) visibleRows() []visRow {
 	return rows
 }
 
-// clampSelection keeps selected within [0, len(rows)).
 func (c *commandsTab) clampSelection() {
 	rows := c.visibleRows()
 	if len(rows) == 0 {
@@ -313,7 +310,8 @@ func (c *commandsTab) clampSelection() {
 	}
 }
 
-// selectedRow returns the currently selected visible row and whether one exists.
+// selectedRow returns the selected visible row and whether any row exists.
+// An invalid selection returns the last row without changing selected.
 func (c *commandsTab) selectedRow() (visRow, bool) {
 	rows := c.visibleRows()
 	if len(rows) == 0 {
@@ -335,7 +333,7 @@ func (c *commandsTab) selectedCommand() (commandRow, bool) {
 	return c.groups[r.group].commands[r.cmd], true
 }
 
-// moveSelection moves the selection by delta across visible rows only.
+// moveSelection applies delta across visible rows and clamps the selection.
 func (c *commandsTab) moveSelection(delta int) {
 	rows := c.visibleRows()
 	if len(rows) == 0 {
@@ -350,7 +348,8 @@ func (c *commandsTab) moveSelection(delta int) {
 	}
 }
 
-// selectedComposeRow returns the highlighted compose row.
+// selectedComposeRow returns the selected compose row and whether any row exists.
+// An invalid selection returns the last row without changing selected.
 func (t *composeTab) selectedComposeRow() (composeRow, bool) {
 	rows := t.visibleRows()
 	if len(rows) == 0 {
@@ -362,7 +361,6 @@ func (t *composeTab) selectedComposeRow() (composeRow, bool) {
 	return rows[t.selected], true
 }
 
-// visibleRows returns the compose rows that match the active filter.
 func (t *composeTab) visibleRows() []composeRow {
 	if t.filter == "" {
 		return t.rows
@@ -406,7 +404,6 @@ func (m *Model) setGroups(groups []projectGroup) {
 	m.commands.clampSelection()
 }
 
-// setComposeRows replaces the Compose-tab rows, sorting active projects first.
 func (m *Model) setComposeRows(rows []composeRow) {
 	for i := range rows {
 		rows[i].active = rows[i].workdir != "" && rows[i].workdir == m.cwd

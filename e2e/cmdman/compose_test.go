@@ -126,8 +126,6 @@ commands:
 		t.Fatalf("compose up failed: %v", err)
 	}
 
-	// Three replicas exist, named "<base>-1".."<base>-3" with distinct
-	// scale-index labels.
 	wantIdx := map[string]bool{"1": false, "2": false, "3": false}
 	entries := env.lsJSON(ctx,
 		"-l", "cmdman.compose.workdir="+wd,
@@ -155,7 +153,6 @@ commands:
 		}
 	}
 
-	// Each replica saw its own injected scale index in the environment.
 	logs, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "logs")
 	if err != nil {
 		t.Fatalf("compose logs failed: %v", err)
@@ -166,7 +163,6 @@ commands:
 		}
 	}
 
-	// Scale down to 1: the surplus replicas are removed, one remains.
 	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath,
 		"scale", "web=1"); err != nil {
 		t.Fatalf("compose scale web=1 failed: %v", err)
@@ -295,7 +291,6 @@ commands:
 		cleanupProject(ctx, env, wd, projB)
 	})
 
-	// Bring both projects up from wd: projA via auto-discovery, projB via -f.
 	if _, stderr, err := env.execInDir(ctx, wd, "compose", "up"); err != nil {
 		t.Fatalf("compose up (projA) failed: %v\nstderr:\n%s", err, stderr)
 	}
@@ -313,7 +308,6 @@ commands:
 		t.Fatalf("expected ps to list both alpha and beta; got:\n%s", psOut)
 	}
 
-	// Explicit -f still narrows to the named project (only beta, not alpha).
 	psOut, psErr, err = env.execInDir(ctx, wd, "compose", "-f", projB, "ps")
 	if err != nil {
 		t.Fatalf("compose -f %s ps failed: %v\nstdout:\n%s\nstderr:\n%s", projB, err, psOut, psErr)
@@ -322,7 +316,6 @@ commands:
 		t.Fatalf("expected -f ps to list only beta; got:\n%s", psOut)
 	}
 
-	// Explicit -p still narrows to the named project (only alpha, not beta).
 	psOut, psErr, err = env.execInDir(ctx, wd, "compose", "-p", projA, "ps")
 	if err != nil {
 		t.Fatalf("compose -p %s ps failed: %v\nstdout:\n%s\nstderr:\n%s", projA, err, psOut, psErr)
@@ -411,7 +404,6 @@ func TestComposeUpRecreateOnArgsChange(t *testing.T) {
 		idsBefore[composeCommandLabel(e)] = e["ID"].(string)
 	}
 
-	// Change alpha only; beta is unchanged.
 	changed := strings.Replace(composeBasicYAML(project),
 		`"echo alpha"`, `"echo alpha-v2"`, 1)
 	must(t, os.WriteFile(composePath, []byte(changed), 0o644))
@@ -485,8 +477,6 @@ func TestComposeUpRecreateRunningCommand(t *testing.T) {
 		t.Fatalf("compose up #2 failed: %v\nstdout:\n%s", err, stdout)
 	}
 
-	// The progress trace must show the running instance going down (stopping →
-	// stopped) before it is recreated and started again.
 	events := parseProgress(t, stdout)
 	for _, phase := range []string{"stopping", "stopped", "recreated", "running"} {
 		if !progressReached(events, "alpha", phase) {
@@ -546,7 +536,6 @@ func TestComposeOrphanWarnByDefault(t *testing.T) {
 	writeComposeFile(t, wd, composeBasicYAML(project))
 	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
 
-	// Initial create: both alpha and beta.
 	if _, _, err := env.exec(
 		ctx,
 		"compose",
@@ -559,10 +548,8 @@ func TestComposeOrphanWarnByDefault(t *testing.T) {
 		t.Fatalf("initial compose create failed: %v", err)
 	}
 
-	// Rewrite to alpha only; beta becomes an orphan.
 	must(t, os.WriteFile(composePath, []byte(composeSingleYAML(project)), 0o644))
 
-	// Enable warn-level logging so slog.Warn output reaches stderr.
 	stdout, stderr, err := env.execWithExtraEnv(ctx,
 		[]string{"CMDMAN_LOG_LEVEL=warn"},
 		"compose", "--workdir", wd, "-f", composePath, "create",
@@ -576,7 +563,6 @@ func TestComposeOrphanWarnByDefault(t *testing.T) {
 		)
 	}
 
-	// Both commands must still exist.
 	entries := env.lsJSON(ctx,
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
@@ -590,8 +576,6 @@ func TestComposeOrphanWarnByDefault(t *testing.T) {
 		)
 	}
 
-	// Orphan warning must appear on stderr (slog default writer, enabled via
-	// CMDMAN_LOG_LEVEL=warn).
 	if !strings.Contains(stderr, "orphan") {
 		t.Fatalf("expected orphan warning on stderr; got:\n%s", stderr)
 	}
@@ -609,7 +593,6 @@ func TestComposeOrphanRemoved(t *testing.T) {
 	writeComposeFile(t, wd, composeBasicYAML(project))
 	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
 
-	// Initial create: both alpha and beta.
 	if _, _, err := env.exec(
 		ctx,
 		"compose",
@@ -622,7 +605,6 @@ func TestComposeOrphanRemoved(t *testing.T) {
 		t.Fatalf("initial compose create failed: %v", err)
 	}
 
-	// Rewrite to alpha only; beta becomes an orphan.
 	must(t, os.WriteFile(composePath, []byte(composeSingleYAML(project)), 0o644))
 
 	stdout, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath,
@@ -631,7 +613,6 @@ func TestComposeOrphanRemoved(t *testing.T) {
 		t.Fatalf("compose create --remove-orphan failed: %v\nstdout:\n%s", err, stdout)
 	}
 
-	// Only alpha should remain.
 	entries := env.lsJSON(ctx,
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
@@ -643,7 +624,6 @@ func TestComposeOrphanRemoved(t *testing.T) {
 		t.Fatalf("remaining command should be alpha; got label %q", composeCommandLabel(entries[0]))
 	}
 
-	// Summary must include a remove-orphan line for beta.
 	if !strings.Contains(stdout, "remove-orphan") || !strings.Contains(stdout, "beta") {
 		t.Fatalf("expected remove-orphan beta in summary; got:\n%s", stdout)
 	}
@@ -662,12 +642,10 @@ func TestComposeRunningOrphanSkipped(t *testing.T) {
 	writeComposeFile(t, wd, composeLongRunningYAML(project))
 	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
 
-	// Create + start alpha (sleep 30) so it ends up running.
 	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up"); err != nil {
 		t.Fatalf("compose up failed: %v", err)
 	}
 
-	// Wait until alpha is running.
 	entries := env.lsJSON(ctx,
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
@@ -678,14 +656,12 @@ func TestComposeRunningOrphanSkipped(t *testing.T) {
 	alphaID := entries[0]["ID"].(string)
 	env.waitForState(ctx, alphaID, "running", 10*time.Second)
 
-	// Clean up alpha on test exit.
 	t.Cleanup(func() {
 		env.exec(ctx, "stop", alphaID)
 		time.Sleep(300 * time.Millisecond)
 		env.exec(ctx, "rm", "-f", alphaID)
 	})
 
-	// Rewrite compose file to be empty of commands — alpha becomes an orphan.
 	emptyYAML := fmt.Sprintf("name: %s\ncommands: {}\n", project)
 	must(t, os.WriteFile(composePath, []byte(emptyYAML), 0o644))
 
@@ -694,7 +670,6 @@ func TestComposeRunningOrphanSkipped(t *testing.T) {
 	// The command exits with error because the skipped orphan is reported as an action error.
 	_ = err
 
-	// Alpha must still exist (it is running and was skipped).
 	remaining := env.lsJSON(ctx,
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
@@ -704,7 +679,6 @@ func TestComposeRunningOrphanSkipped(t *testing.T) {
 			len(remaining), stdout, stderr)
 	}
 
-	// A "skipped" line must appear in stdout (summary) or a warning in stderr.
 	hasSkippedInSummary := strings.Contains(stdout, "skipped") || strings.Contains(stdout, "error")
 	hasSkippedInLog := strings.Contains(stderr, "skipping removal") ||
 		strings.Contains(stderr, "running")
@@ -746,7 +720,6 @@ func TestComposeStop(t *testing.T) {
 		t.Fatalf("compose up failed: %v", err)
 	}
 
-	// Wait until alpha is running before stopping.
 	for _, e := range env.lsJSON(ctx,
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
@@ -793,7 +766,6 @@ func TestComposeStopProjectOnly(t *testing.T) {
 		env.waitForState(ctx, e["ID"].(string), "running", 5*time.Second)
 	}
 
-	// Second invocation: project + workdir only, no -f.
 	stdout, stderr, err := env.exec(ctx, "compose",
 		"--workdir", wd, "--project-name", project, "stop")
 	if err != nil {
@@ -898,7 +870,6 @@ func TestComposeProgressJSONL(t *testing.T) {
 		}
 	}
 
-	// quiet: no progress output at all.
 	qOut, qErr, err := env.exec(ctx, "compose",
 		"--workdir", wd, "-f", composePath, "up", "--progress", "quiet")
 	if err != nil {
@@ -908,7 +879,6 @@ func TestComposeProgressJSONL(t *testing.T) {
 		t.Fatalf("expected no stdout with --progress quiet; got:\n%s", qOut)
 	}
 
-	// down with an explicit --progress json forces JSONL and reports removals.
 	dOut, dErr, err := env.exec(ctx, "compose",
 		"--workdir", wd, "-f", composePath, "down", "--progress", "json")
 	if err != nil {
@@ -969,7 +939,6 @@ commands:
 		t.Fatalf("scaled command should not report bare name \"web\"; got:\n%s", stdout)
 	}
 
-	// down forces JSONL and must list each replica's stop and removal.
 	dOut, dErr, err := env.exec(ctx, "compose",
 		"--workdir", wd, "-f", composePath, "down", "--progress", "json")
 	if err != nil {
@@ -1043,7 +1012,6 @@ func TestComposeDownRemovesOrphans(t *testing.T) {
 		t.Fatalf("compose create failed: %v", err)
 	}
 
-	// Rewrite YAML to drop beta; beta is now an orphan.
 	writeComposeFile(t, wd, composeSingleYAML(project))
 
 	// Project-only down (no -f) should still tear down the entire (workdir, project) pair.
@@ -1084,12 +1052,10 @@ func TestComposeRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose restart failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
-	// Restart should produce a line per command.
 	if !strings.Contains(stdout, "alpha") {
 		t.Fatalf("expected alpha line in restart output; got:\n%s", stdout)
 	}
 
-	// After restart, alpha should be running again.
 	for _, e := range env.lsJSON(ctx,
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
@@ -1111,7 +1077,6 @@ func TestComposeReverseDepOrderStop(t *testing.T) {
 		t.Fatalf("compose up failed: %v", err)
 	}
 
-	// Wait for both commands to reach running.
 	for _, e := range env.lsJSON(ctx,
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
@@ -1174,7 +1139,6 @@ func TestComposeStopByNameStopsDependents(t *testing.T) {
 		t.Fatalf("expected worker (dependent) stopped before api; got:\n%s", stdout)
 	}
 
-	// Both commands must now be terminal.
 	for _, e := range env.lsJSON(ctx,
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
@@ -1318,7 +1282,6 @@ func TestComposeLogsMerged(t *testing.T) {
 		t.Fatalf("compose up failed: %v", err)
 	}
 
-	// Wait for both commands to exit so logs are present.
 	for _, e := range env.lsJSON(ctx,
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
@@ -1440,7 +1403,6 @@ func TestComposeUpDependencyOrdered(t *testing.T) {
 		t.Fatalf("compose up failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 
-	// Wait for both to exit.
 	for _, e := range env.lsJSON(ctx,
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.project="+project,
@@ -1448,7 +1410,6 @@ func TestComposeUpDependencyOrdered(t *testing.T) {
 		env.waitForState(ctx, e["ID"].(string), "exited", 10*time.Second)
 	}
 
-	// Inspect worker's logs via cmdman logs.
 	var workerID string
 	for _, e := range env.lsJSON(ctx,
 		"-l", "cmdman.compose.workdir="+wd,
@@ -1560,7 +1521,6 @@ func TestComposeEmptyProjectTarget(t *testing.T) {
 			stderr,
 		)
 	}
-	// A structured log event should appear in stderr describing the empty target.
 	if !strings.Contains(stderr, "tc-empty") &&
 		!strings.Contains(stderr, "no commands") &&
 		!strings.Contains(stderr, "empty") {
@@ -1730,7 +1690,6 @@ func TestComposeStartFromFailedState(t *testing.T) {
 	}
 	env.waitForState(ctx, alphaID, "failed", 10*time.Second)
 
-	// Materialise the binary; start from failed must now succeed.
 	must(t, os.WriteFile(scriptPath, []byte("#!/bin/sh\nexit 0\n"), 0o755))
 
 	stdout, stderr, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "start")
@@ -1776,7 +1735,6 @@ func TestComposeUpRunningConditionDoesNotWaitForExit(t *testing.T) {
 		)
 	}
 
-	// Both commands should be running concurrently; neither has exited.
 	for _, name := range []string{"api", "worker"} {
 		id := composeCommandID(ctx, env, wd, project, name)
 		if id == "" {
@@ -1809,7 +1767,6 @@ func TestComposeUpReRunHonorsCompletedDependency(t *testing.T) {
 		return out
 	}
 
-	// First run: api writes the marker, worker observes it after api completes.
 	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up"); err != nil {
 		t.Fatalf("first compose up failed: %v", err)
 	}

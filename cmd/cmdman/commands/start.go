@@ -25,7 +25,6 @@ func runStart(cmd *cobra.Command, args []string, rootCfg *cmdman.CmdmanConfig) e
 	return doStart(cmd, args[0], rootCfg)
 }
 
-// doStart spawns the monitor for an existing command in "created" state.
 func doStart(cmd *cobra.Command, idOrName string, rootCfg *cmdman.CmdmanConfig) error {
 	svc, err := cmdmanService(rootCfg)
 	if err != nil {

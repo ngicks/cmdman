@@ -49,18 +49,15 @@ func TestDecodeAcceptsBareLeafShorthand(t *testing.T) {
 	assert.Equal(t, root.Dir, mux.DirHorizontal)
 	assert.Equal(t, len(root.Panes), 3)
 
-	// First pane: bare-string shorthand becomes a leaf with Command set.
 	assert.Equal(t, root.Panes[0].Command, "api")
 	assert.Equal(t, root.Panes[0].Mode, mux.Mode(""))
 	assert.Assert(t, root.Panes[0].IsLeaf())
 
-	// Second pane: full mapping form with mode/cmd_opt/focus.
 	assert.Equal(t, root.Panes[1].Command, "worker")
 	assert.Equal(t, root.Panes[1].Mode, mux.ModeLogs)
 	assert.Equal(t, root.Panes[1].CmdOpt["title"], "w")
 	assert.Assert(t, root.Panes[1].Focus)
 
-	// Third pane: nested container with two bare-string leaves.
 	nested := root.Panes[2]
 	assert.Assert(t, nested.IsContainer())
 	assert.Equal(t, nested.Dir, mux.DirVertical)
@@ -223,7 +220,6 @@ mux:
 	)
 	assert.NilError(t, err)
 
-	// Exactly one layout — no expansion.
 	assert.Equal(t, len(built.Layouts), 1)
 	assert.Equal(t, built.Layouts[0].Name, "dash")
 

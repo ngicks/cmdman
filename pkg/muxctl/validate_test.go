@@ -8,8 +8,6 @@ import (
 	"github.com/ngicks/cmdman/pkg/muxctl"
 )
 
-// Constructors that keep the validation table compact and readable.
-
 func leaf(name string, focus ...bool) muxctl.PaneSpec {
 	p := muxctl.PaneSpec{Leaf: muxctl.Leaf{Name: name, Cmd: []string{"./" + name}}}
 	if len(focus) > 0 && focus[0] {
@@ -216,7 +214,6 @@ func TestMuxSpec_Validate_Errors(t *testing.T) {
 						Splits: []muxctl.Size{{N: 1}, {N: 1}},
 						Panes: []muxctl.PaneSpec{
 							leaf("a"),
-							// empty container
 							{Container: muxctl.Container{Dir: muxctl.DirVertical}},
 						},
 					},
@@ -232,8 +229,6 @@ func TestMuxSpec_Validate_Errors(t *testing.T) {
 	}
 }
 
-// TestMuxSpec_Validate_FocusOk guards against the focus-counter regressing
-// to "any > 0 fails" — a single focused leaf must pass.
 func TestMuxSpec_Validate_FocusOk(t *testing.T) {
 	t.Parallel()
 
@@ -244,8 +239,6 @@ func TestMuxSpec_Validate_FocusOk(t *testing.T) {
 	assert.NilError(t, spec.Validate())
 }
 
-// TestMuxSpec_Validate_FocusScopedPerLayout ensures the focus counter is
-// reset per layout — a single focus in each of several layouts is fine.
 func TestMuxSpec_Validate_FocusScopedPerLayout(t *testing.T) {
 	t.Parallel()
 
@@ -256,8 +249,6 @@ func TestMuxSpec_Validate_FocusScopedPerLayout(t *testing.T) {
 	assert.NilError(t, spec.Validate())
 }
 
-// TestMuxSpec_Validate_NameUniquenessScopedPerLayout ensures the same pane
-// name may appear in two different layouts.
 func TestMuxSpec_Validate_NameUniquenessScopedPerLayout(t *testing.T) {
 	t.Parallel()
 

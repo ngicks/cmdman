@@ -86,7 +86,6 @@ func Normalize(
 		return ComposeSpec{}, fmt.Errorf("get working directory: %w", err)
 	}
 
-	// effective compose file path
 	if !filepath.IsAbs(composeFilePath) {
 		composeFilePath = filepath.Join(cwd, composeFilePath)
 	}
@@ -102,7 +101,6 @@ func Normalize(
 	baseEnv[ENV_CMDMAN_COMPOSE_DIR] = filepath.Dir(composeFilePath)
 	baseLookup := buildLookup(baseEnv)
 
-	// effective work directory
 	effectiveWorkDir := opts.WorkDir
 	if effectiveWorkDir == "" {
 		effectiveWorkDir = raw.WorkDir
@@ -117,10 +115,9 @@ func Normalize(
 	if !filepath.IsAbs(effectiveWorkDir) {
 		effectiveWorkDir = filepath.Join(cwd, effectiveWorkDir)
 	}
-	// Canonicalize: Clean+Abs only; no EvalSymlinks (resolved-decision 22).
+	// Preserve symlinks because compose identity is based on the cleaned path.
 	effectiveWorkDir = filepath.Clean(effectiveWorkDir)
 
-	// project name
 	project := opts.ProjectName
 	if project == "" {
 		project = raw.Name
@@ -144,7 +141,6 @@ func Normalize(
 
 	wdHash := workdirHash(effectiveWorkDir)
 
-	// sort command names for deterministic ordering
 	cmdNames := make([]string, 0, len(raw.Commands))
 	for n := range raw.Commands {
 		cmdNames = append(cmdNames, n)
@@ -296,7 +292,6 @@ func buildCommandEnv(
 	cmd RawCommand,
 	osEnv map[string]string,
 ) (commandEnv, finalEnv map[string]string, err error) {
-	// Layer 2: env_files in order.
 	envFileAccum := make(map[string]string)
 
 	for i, ef := range cmd.EnvFile {
@@ -338,25 +333,20 @@ func buildCommandEnv(
 		maps.Copy(envFileAccum, fileVars)
 	}
 
-	// envFileMerged = OS + env_file (for env: interpolation lookup).
 	envFileMerged := make(map[string]string, len(osEnv)+len(envFileAccum))
 	maps.Copy(envFileMerged, osEnv)
 	maps.Copy(envFileMerged, envFileAccum)
 	envFileLookup := buildLookup(envFileMerged)
 
-	// commandEnv starts with env_file results; env: overrides.
 	cmdEnv := make(map[string]string, len(envFileAccum))
 	maps.Copy(cmdEnv, envFileAccum)
 
-	// Layer 3: env: entries.
 	for j, entry := range cmd.Env {
 		k, v, hasVal := strings.Cut(entry, "=")
 		if !hasVal {
-			// Bare key: inherit from envFileMerged (OS or env_file).
 			if val, found := envFileMerged[k]; found {
 				cmdEnv[k] = val
 			}
-			// If not present, skip (value is undefined at normalization time).
 			continue
 		}
 		interpolated, interpErr := template.Substitute(v, envFileLookup)
@@ -366,7 +356,6 @@ func buildCommandEnv(
 		cmdEnv[k] = interpolated
 	}
 
-	// finalEnv = OS + commandEnv (for args interpolation).
 	fin := make(map[string]string, len(osEnv)+len(cmdEnv))
 	maps.Copy(fin, osEnv)
 	maps.Copy(fin, cmdEnv)

@@ -9,47 +9,28 @@ import (
 	"go.yaml.in/yaml/v4"
 )
 
-// MuxSpec is the parsed, driver-agnostic spec: a driver selector plus a list
-// of switchable layouts. A single command invocation creates one window and
-// applies one of these layouts; subsequent calls switch the window's pane
-// tree among the layouts. MuxSpec deliberately knows nothing about cmdman;
-// leaves carry already-resolved argv ([]string) and a per-pane CmdOpt map for
-// any driver-specific hints. Higher layers (see pkg/cmdman/...) parse their
-// own user-facing YAML and emit a MuxSpec.
+// MuxSpec is a driver-agnostic set of switchable layouts. Leaves contain
+// resolved argv; higher layers translate their own user-facing specs.
 type MuxSpec struct {
-	// Driver names the backend ("tmux" today; "zellij"/"wezterm" later). Empty
-	// means "let the caller autodetect" — autodetect itself lives above muxctl,
-	// since it depends on process env ($TMUX/$ZELLIJ).
+	// Driver names the backend. Empty lets the caller autodetect it.
 	Driver string `yaml:"driver,omitempty"`
 
-	// DriverOpt is a driver-specific options bag passed to the driver's
-	// constructor (e.g. tmux.New). Examples: tmux socket name, dedicated
-	// server, session name overrides.
+	// DriverOpt is passed to the driver.
 	DriverOpt map[string]string `yaml:"driver_opt,omitempty"`
 
-	// Layouts is the list of switchable layouts. Each must have a unique
-	// name; the cmdman mux family uses the name as the user-facing handle
-	// for switching.
+	// Layouts must have unique names.
 	Layouts []Layout `yaml:"layouts"`
 
-	// Unknown captures unrecognized top-level keys. Decode does NOT hard-fail
-	// on unknown keys (following the project YAML convention: don't silently
-	// drop, don't hard-fail). Callers may iterate these in sorted order to
-	// warn about typos or forward-compat fields.
+	// Unknown captures unrecognized top-level keys for caller warnings.
 	Unknown map[string]any `yaml:",inline"`
 }
 
-// Layout is one named, switchable layout: a name + a single pane tree.
-//
-// A Session controls one cmdman-owned window. ApplyLayout-ing different
-// Layouts on that window is how the user switches among them.
+// Layout is a named pane tree.
 type Layout struct {
-	// Name is the layout name. Required and unique within MuxSpec.Layouts;
-	// it is the user-facing handle for switching to this layout.
+	// Name is required and unique within MuxSpec.Layouts.
 	Name string `yaml:"name"`
 
-	// Root is the layout's pane tree: a leaf (Cmd) or a container
-	// (Dir+Splits+Panes).
+	// Root is either a leaf or container.
 	Root PaneSpec `yaml:"root"`
 
 	// Unknown captures unrecognized keys at the layout level; see
@@ -57,8 +38,7 @@ type Layout struct {
 	Unknown map[string]any `yaml:",inline"`
 }
 
-// Container holds the fields that make a [PaneSpec] a container node
-// (Dir + Splits + Panes). All-zero means "not a container."
+// Container holds a [PaneSpec] container's fields. All-zero means absent.
 type Container struct {
 	// Dir is the split direction: "h" (panes side by side) or "v" (stacked).
 	// Single-letter tmux convention. Required for a container; must be empty
@@ -74,12 +54,10 @@ type Container struct {
 	// ratio.
 	Splits []Size `yaml:"splits,omitempty"`
 
-	// Panes is the list of child panes (containers or leaves).
 	Panes []PaneSpec `yaml:"panes,omitempty"`
 }
 
-// Leaf holds the fields that make a [PaneSpec] a leaf node (Name + Cmd +
-// CmdOpt + Focus). All-zero means "not a leaf."
+// Leaf holds a [PaneSpec] leaf's fields. All-zero means absent.
 type Leaf struct {
 	// Name is the pane name. For leaves it is required and serves as the map
 	// key under which the runtime Pane is returned by [Session.ApplyLayout];
@@ -91,10 +69,7 @@ type Leaf struct {
 	// and rc-file behavior are not concerns of muxctl.
 	Cmd []string `yaml:"cmd,omitempty"`
 
-	// CmdOpt is a per-pane driver-specific options bag (mirror of
-	// [MuxSpec.DriverOpt] but scoped to one pane): e.g. tmux pane title,
-	// working directory hints. Drivers pick out the keys they understand and
-	// ignore the rest.
+	// CmdOpt carries per-pane driver options.
 	CmdOpt map[string]string `yaml:"cmd_opt,omitempty"`
 
 	// Focus, when true, requests this leaf as the initial focus for its
@@ -110,16 +85,7 @@ type Leaf struct {
 	CycleKey string `yaml:"cycle_key,omitempty"`
 }
 
-// PaneSpec is a layout-tree node: a [Container] XOR a [Leaf]. Embedding both
-// keeps PaneSpec a single value-typed node while letting each field group be
-// described and constructed separately.
-//
-//   - Container: Dir + Splits + Panes (children). Splits is index-parallel to
-//     Panes (len(Splits) == len(Panes)). The container itself has no command.
-//
-//   - Leaf: Name + Cmd ([]string argv). The leaf has no Dir/Splits/Panes.
-//
-// [MuxSpec.Validate] enforces the XOR.
+// PaneSpec is a [Container] XOR a [Leaf], enforced by [MuxSpec.Validate].
 type PaneSpec struct {
 	Container `yaml:",inline"`
 	Leaf      `yaml:",inline"`
@@ -155,14 +121,11 @@ func (p PaneSpec) IsContainer() bool {
 // weight ("N"). N is always > 0. At most one of Absolute/Percent is true;
 // both false means a bare weight.
 type Size struct {
-	// N is the magnitude. Always > 0. For Percent sizes N is the percent in
-	// 1..100; for Absolute and weight sizes N is a positive count.
+	// N is positive; percentages are in 1..100.
 	N int
-	// Absolute is true when N is in character cells ("Nc"). Mutually
-	// exclusive with Percent.
+	// Absolute denotes character cells ("Nc").
 	Absolute bool
-	// Percent is true when N is a percent of the parent dimension ("N%").
-	// Mutually exclusive with Absolute.
+	// Percent denotes a percentage of the parent dimension ("N%").
 	Percent bool
 }
 

@@ -178,8 +178,6 @@ func TestAppendLeafNames(t *testing.T) {
 		}
 	}
 
-	// Nested tree; the repeated "a" pins that AppendLeafNames does not dedup,
-	// and the interleaving pins depth-first document order.
 	root := container(
 		leaf("a"),
 		container(leaf("b"), leaf("c")),

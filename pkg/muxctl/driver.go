@@ -6,67 +6,30 @@ import (
 	"sync"
 )
 
-// Config configures a multiplexer [Session] built by a [Driver].
-//
-// Every field except DriverOpt is driver-agnostic; DriverOpt carries the
-// per-driver knobs (the tmux driver honors "path" and "socket"). A driver
-// resolves its target window either from SessionName+WindowName
-// (find-or-create by name) or from WindowID (target an existing window
-// directly). Constructing a Session applies no layout — call
-// [Session.ApplyLayout] to populate the window.
+// Config selects the window controlled by a new multiplexer [Session].
 type Config struct {
-	// SessionName names the multiplexer session this driver targets. Required
-	// unless WindowID is set (the window already identifies its session). When
-	// required, the session is created if it does not already exist; a driver
-	// never kills a session it did not create.
+	// SessionName is required unless WindowID is set.
 	SessionName string
 
-	// WindowName names the cmdman-owned window within SessionName. Required
-	// when WindowID is empty (find-or-create by name); ignored when WindowID
-	// is set. The driver operates exclusively on the resolved window; sibling
-	// windows are left untouched.
+	// WindowName is required when WindowID is empty.
 	WindowName string
 
-	// WindowID, when non-empty, targets the existing window with this
-	// driver-native id (e.g. tmux "@7") and skips find-or-create by
-	// WindowName. Used by callers that pick the target window themselves —
-	// e.g. "apply to the caller's current window" or "create a fresh window
-	// per invocation and target it." When set, SessionName/WindowName are not
-	// consulted.
+	// WindowID directly targets an existing driver-native window.
 	WindowID string
 
-	// OwnedIdentity, when non-empty, is stamped onto the resolved window as
-	// the durable ownership signal enumerated by [Driver.ListWindows].
-	// It survives pane churn, manual pane splits, and window renames. Callers
-	// supply an opaque string (e.g. a workdir-hash+project prefix for compose,
-	// or the window name for standalone mux); the driver stores and returns it
-	// verbatim, never interpreting it. Empty disables stamping — useful for
-	// one-off callers that do not need enumeration.
+	// OwnedIdentity is an opaque durable stamp used by [Driver.ListWindows].
+	// Empty disables stamping.
 	OwnedIdentity string
 
-	// ReuseCurrentWindow, when true and WindowID is empty, applies the layout
-	// to the caller's current window instead of a window found-or-created by
-	// name — but only when that current window is safe to take over (it is
-	// already cmdman-owned, already named WindowName, or has a single pane).
-	// When the current window cannot be resolved or is not safe to reuse, the
-	// driver falls back to find-or-create by name. Callers set this when
-	// running inside a multiplexer client without an explicit session.
+	// ReuseCurrentWindow permits taking over a safe current window when
+	// WindowID is empty; otherwise the driver finds or creates WindowName.
 	ReuseCurrentWindow bool
 
-	// ViewerDetachKeys is the send-keys key sequence (in driver syntax; e.g.
-	// tmux {"C-p", "C-q"}) that [Session.ApplyLayout], [Session.Detach], and
-	// [Session.RespawnLeaf] send to the in-pane viewers of a previous build to
-	// make them detach gracefully before the panes are torn down and rebuilt.
-	// It MUST match the detach sequence those viewers actually honor. Empty
-	// disables graceful detach — the old panes are killed directly, which
-	// SIGKILLs the in-pane processes mid-frame.
+	// ViewerDetachKeys gracefully detach old in-pane viewers before teardown.
+	// They must match the sequence the viewers honor; empty disables detaching.
 	ViewerDetachKeys []string
 
-	// DriverOpt carries driver-specific options that have no driver-agnostic
-	// meaning. The tmux driver honors "path" (the tmux binary path, default
-	// "tmux") and "socket" (the -L socket name; empty uses tmux's default
-	// socket, or the server inherited from $TMUX — a non-empty socket selects
-	// a dedicated server, the opt-in isolation mode).
+	// DriverOpt carries driver-specific options.
 	DriverOpt map[string]string
 }
 
@@ -77,27 +40,18 @@ type Config struct {
 // a closed, code-declared vocabulary — not arbitrary external input.
 type StateKey string
 
-// The closed vocabulary of per-window state slots. Drivers persist and return
-// these verbatim, never interpreting them; the semantics and wire encoding of
-// each slot's value are owned by the consuming layer (e.g. pkg/cmdman/mux owns
-// the "scale" codec), keeping that vocabulary out of muxctl.
+// State keys are interpreted by their consumers, not drivers.
 const (
 	// StateKeyScale holds the per-command cycle-scale replica positions.
 	StateKeyScale StateKey = "scale"
 )
 
-// ListOptions controls enumeration and per-window state access on a [Driver]:
-// [Driver.ListWindows], [Driver.FindPane], [Driver.ReadWindowState], and
-// [Driver.WriteWindowState]. Unlike [Config] it names no window to build; it
-// selects the server (via DriverOpt) and, for listing, filters the results.
+// ListOptions controls window enumeration and state access.
 type ListOptions struct {
-	// Session, when non-empty, restricts a scan to that session only. Empty
-	// scans all sessions on the server.
+	// Session restricts scans to one session; empty scans the server.
 	Session string
 
-	// Identity, when non-empty, filters [Driver.ListWindows] to windows whose
-	// ownership stamp equals this string exactly. Empty returns every stamped
-	// window regardless of identity.
+	// Identity filters ownership stamps exactly; empty returns all stamped windows.
 	Identity string
 
 	// StateKeys lists the per-window state slots [Driver.ListWindows] fetches
@@ -106,19 +60,15 @@ type ListOptions struct {
 	// constraint the driver relies on.
 	StateKeys []StateKey
 
-	// DriverOpt carries driver-specific options, matching [Config.DriverOpt]
-	// (the tmux driver honors "path" and "socket"). It MUST match the options
-	// used when the dashboard was built for enumeration to find it.
+	// DriverOpt must select the same server used to build the window.
 	DriverOpt map[string]string
 }
 
 // Window is a row returned by [Driver.ListWindows]: one window that carries a
 // cmdman ownership stamp.
 type Window struct {
-	// SessionName is the multiplexer session the window belongs to.
 	SessionName string
 
-	// WindowID is the driver-native window id (e.g. tmux "@3").
 	WindowID string
 
 	// WindowName is the human-visible window name. It may differ from Identity
@@ -126,8 +76,7 @@ type Window struct {
 	// cmdman-assigned ownership value.
 	WindowName string
 
-	// Identity is the value stamped via [Config.OwnedIdentity]. The driver
-	// stores and returns it verbatim; upper layers interpret it.
+	// Identity is the opaque [Config.OwnedIdentity] stamp.
 	Identity string
 
 	// Marker is the layout index last applied to the window (see

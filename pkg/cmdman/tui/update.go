@@ -130,14 +130,12 @@ func (m Model) onProjectsLoaded(msg projectsLoadedMsg) Model {
 }
 
 func (m Model) onActionDone(msg actionDoneMsg) (tea.Model, tea.Cmd) {
-	// Clear any pending marker for the affected command.
 	m.clearPending(msg.id)
 	if msg.err != nil {
 		m.status = fmt.Sprintf("%s %s: %v", msg.verb, msg.name, msg.err)
 	} else {
 		m.status = fmt.Sprintf("%s %s: ok", msg.verb, msg.name)
 	}
-	// Refresh both views after a lifecycle action completes.
 	return m, tea.Batch(m.loadCommandsCmd(), m.loadProjectsCmd())
 }
 

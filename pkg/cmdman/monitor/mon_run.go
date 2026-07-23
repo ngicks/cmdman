@@ -79,7 +79,6 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 
 		exitCode, err := m.runOnce(ctx)
 		if err != nil {
-			// If context was cancelled, treat as graceful stop.
 			if ctx.Err() != nil {
 				m.outputBridge.Close()
 				m.setExited(-1)
@@ -89,11 +88,9 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 			return err
 		}
 
-		// Record exit.
 		m.stateJSON.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 		_ = m.store.InsertCommandExitCode(m.ID, exitCode)
 
-		// Check restart policy.
 		switch m.cfg.RestartPolicy {
 		case model.RestartPolicyNo:
 		case model.RestartPolicyOnFailure:
@@ -187,7 +184,6 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 
 	m.setRunning()
 
-	// Wait for command exit.
 	err = cmd.Wait()
 	m.ptmx = nil
 	m.stdin = nil

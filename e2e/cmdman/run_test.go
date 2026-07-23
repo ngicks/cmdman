@@ -22,19 +22,15 @@ func TestRun_BasicCommand(t *testing.T) {
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
-	// Run a command that exits immediately.
 	stdout := env.run(ctx, "run", "--", "/bin/sh", "-c", "echo hello")
 
-	// stdout should contain the command ID (32-char hex string).
 	id := stdout
 	if len(id) != 32 {
 		t.Fatalf("expected 32-char hex ID in output, got %q (len=%d)", id, len(id))
 	}
 
-	// Wait for it to exit.
 	env.waitForState(ctx, id, "exited", defaultTimeout)
 
-	// Verify the command exited with code 0.
 	info := env.inspectJSON(ctx, id)
 	if info["State"] != "exited" {
 		t.Errorf("expected state=exited, got %v", info["State"])
@@ -50,17 +46,14 @@ func TestRun_WithName(t *testing.T) {
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
-	// Run with a human-readable name.
 	stdout := env.run(ctx, "run", "-n", "my-echo", "--", "/bin/sh", "-c", "echo named")
 
-	// stdout should be the name, not the ID.
 	if stdout != "my-echo" {
 		t.Errorf("expected name %q in output, got %q", "my-echo", stdout)
 	}
 
 	env.waitForState(ctx, "my-echo", "exited", defaultTimeout)
 
-	// Inspect by name.
 	info := env.inspectJSON(ctx, "my-echo")
 	if info["Name"] != "my-echo" {
 		t.Errorf("expected name=my-echo, got %v", info["Name"])
@@ -275,7 +268,6 @@ func TestRun_AutoRemove(t *testing.T) {
 
 	id := env.run(ctx, "run", "--rm", "--", "/bin/sh", "-c", "echo ephemeral")
 
-	// Wait for auto-removal. The command should disappear from ls.
 	waitUntil(t, defaultTimeout, func() bool {
 		entries := env.lsJSON(ctx)
 		for _, e := range entries {
@@ -292,13 +284,11 @@ func TestRun_DuplicateName(t *testing.T) {
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
-	// Run a long-lived command with a name.
 	env.run(ctx, "run", "-n", "unique-name", "--", "/bin/sh", "-c", "sleep 60")
 	t.Cleanup(func() { env.cleanupCommand(ctx, "unique-name") })
 
 	env.waitForState(ctx, "unique-name", "running", defaultTimeout)
 
-	// Running another command with the same name should fail.
 	stdout, stderr, err := env.exec(
 		ctx,
 		"run",

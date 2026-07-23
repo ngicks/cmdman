@@ -33,7 +33,7 @@ const (
 	openStoreInitialBackoff = 100 * time.Millisecond
 )
 
-// Store provides access to the SQLite database for command management.
+// Store provides access to cmdman's SQLite database.
 type Store struct {
 	db      *sql.DB
 	queries *query.Queries
@@ -89,12 +89,10 @@ func openStore(ctx context.Context, dbPath string) (*Store, error) {
 	return &Store{db: db, queries: query.New(db)}, nil
 }
 
-// DB returns the underlying *sql.DB.
 func (s *Store) DB() *sql.DB {
 	return s.db
 }
 
-// Close closes the database connection.
 func (s *Store) Close() error {
 	return s.db.Close()
 }

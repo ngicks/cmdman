@@ -42,16 +42,13 @@ func topoLayers(commands []Command) ([][]string, error) {
 		return nil, nil
 	}
 
-	// Build adjacency: edges[name] = set of names that name depends on.
-	// inDegree[name] = count of dependencies not yet satisfied.
 	inDegree := make(map[string]int, len(commands))
-	// dependents[dep] = list of commands that depend on dep
 	dependents := make(map[string][]string, len(commands))
 
 	nameSet := make(map[string]struct{}, len(commands))
 	for _, c := range commands {
 		nameSet[c.Name] = struct{}{}
-		inDegree[c.Name] = 0 // ensure key exists with zero value
+		inDegree[c.Name] = 0
 	}
 
 	for _, c := range commands {
@@ -68,7 +65,6 @@ func topoLayers(commands []Command) ([][]string, error) {
 	remaining := len(commands)
 
 	for remaining > 0 {
-		// Collect all commands with inDegree == 0.
 		layer := make([]string, 0)
 		for _, c := range commands {
 			if inDegree[c.Name] == 0 {
@@ -76,18 +72,15 @@ func topoLayers(commands []Command) ([][]string, error) {
 			}
 		}
 		if len(layer) == 0 {
-			// All remaining commands have inDegree > 0 → cycle.
 			cycle := detectCycle(commands, inDegree)
 			return nil, fmt.Errorf("dependency cycle detected: %s", cycle)
 		}
 
-		// Sort for determinism.
 		slices.Sort(layer)
 		layers = append(layers, layer)
 
-		// Remove processed nodes.
 		for _, name := range layer {
-			inDegree[name] = -1 // mark as processed
+			inDegree[name] = -1
 			remaining--
 			for _, dep := range dependents[name] {
 				inDegree[dep]--
@@ -101,7 +94,6 @@ func topoLayers(commands []Command) ([][]string, error) {
 // detectCycle finds and formats a description of a cycle among commands whose
 // inDegree > 0. It does a simple DFS to find the cycle members.
 func detectCycle(commands []Command, inDegree map[string]int) string {
-	// Collect names still in the graph.
 	var stuck []string
 	for _, c := range commands {
 		if inDegree[c.Name] > 0 {

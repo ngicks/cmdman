@@ -10,7 +10,6 @@ func TestLabels_MultipleLabelsANDLogic(t *testing.T) {
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
-	// Create commands with different label combinations.
 	id1 := env.run(
 		ctx,
 		"run",
@@ -57,7 +56,6 @@ func TestLabels_MultipleLabelsANDLogic(t *testing.T) {
 	env.waitForState(ctx, id2, "running", defaultTimeout)
 	env.waitForState(ctx, id3, "running", defaultTimeout)
 
-	// Filter by both labels (AND logic): env=prod AND tier=web.
 	stdout := env.run(ctx, "ls", "-q", "-l", "env=prod", "-l", "tier=web")
 	if !strings.Contains(stdout, id1) {
 		t.Errorf("expected %s (env=prod, tier=web) in output", id1)
@@ -85,7 +83,6 @@ func TestLabels_SingleLabel(t *testing.T) {
 	env.waitForState(ctx, id1, "running", defaultTimeout)
 	env.waitForState(ctx, id2, "running", defaultTimeout)
 
-	// Filter by single label.
 	stdout := env.run(ctx, "ls", "-q", "-l", "role=worker")
 	if !strings.Contains(stdout, id1) {
 		t.Errorf("expected %s in output for role=worker", id1)
@@ -104,7 +101,6 @@ func TestLabels_NoMatch(t *testing.T) {
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
 	env.waitForState(ctx, id, "running", defaultTimeout)
 
-	// Filter by a non-existent label value.
 	entries := env.lsJSON(ctx, "-l", "color=red")
 	if len(entries) != 0 {
 		t.Errorf("expected 0 entries for color=red, got %d", len(entries))
@@ -124,10 +120,8 @@ func TestLabels_RmByLabel(t *testing.T) {
 	env.waitForState(ctx, id2, "exited", defaultTimeout)
 	env.waitForState(ctx, id3, "exited", defaultTimeout)
 
-	// Remove only disposable=yes.
 	env.run(ctx, "rm", "-l", "disposable=yes")
 
-	// Only id3 should remain.
 	entries := env.lsJSON(ctx)
 	for _, e := range entries {
 		eid, _ := e["ID"].(string)
@@ -136,7 +130,6 @@ func TestLabels_RmByLabel(t *testing.T) {
 		}
 	}
 
-	// Clean up the remaining one.
 	env.run(ctx, "rm", id3)
 }
 

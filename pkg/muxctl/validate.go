@@ -2,22 +2,8 @@ package muxctl
 
 import "fmt"
 
-// Validate checks structural invariants of the spec. It does not contact the
-// driver, verify runnability of Cmd, or measure the terminal; it only checks
-// shape:
-//
-//   - Each Layout has a non-empty Name.
-//   - Layout names are unique within MuxSpec.Layouts.
-//   - For each PaneSpec: it is either a leaf (Cmd set) XOR a container
-//     (Dir+Splits+Panes set).
-//   - Container Dir is "h" or "v".
-//   - Container has at least one child, and len(Splits) == len(Panes).
-//   - Leaf Name is non-empty.
-//   - Leaf names are unique within their layout.
-//   - At most one PaneSpec.Focus == true per layout.
-//
-// Validate returns the first error encountered, wrapping the package's
-// sentinel errors with positional context.
+// Validate checks layout and pane-tree shape, returning the first error with
+// positional context. It does not contact a driver or run leaf commands.
 func (s MuxSpec) Validate() error {
 	seenLayout := make(map[string]struct{}, len(s.Layouts))
 	for i := range s.Layouts {
@@ -56,14 +42,10 @@ func (s MuxSpec) Validate() error {
 	return nil
 }
 
-// validateShape checks the leaf-XOR-container invariant, container fields'
-// internal consistency, and leaf Name presence, recursively.
 func (p PaneSpec) validateShape() error {
 	leaf := p.IsLeaf()
 	cont := p.IsContainer()
 	if leaf == cont {
-		// Both false (empty pane) or both true (impossible by definition;
-		// kept as a safety net) — neither well-formed.
 		return ErrLeafXorContainer
 	}
 	if leaf {
@@ -72,7 +54,6 @@ func (p PaneSpec) validateShape() error {
 		}
 		return nil
 	}
-	// container
 	if p.Dir != DirHorizontal && p.Dir != DirVertical {
 		return fmt.Errorf("%w: got %q", ErrInvalidDirection, p.Dir)
 	}
@@ -93,9 +74,8 @@ func (p PaneSpec) validateShape() error {
 	return nil
 }
 
-// walkLeaves invokes f on each leaf in document order, stopping at the first
-// error. Containers are descended into; non-leaf, non-container panes are
-// rejected upstream by validateShape, so we treat them as no-ops here.
+// walkLeaves calls f for every leaf in document order, stopping and returning
+// the first error.
 func walkLeaves(p PaneSpec, f func(PaneSpec) error) error {
 	if p.IsLeaf() {
 		return f(p)

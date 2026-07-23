@@ -110,19 +110,16 @@ type hashAfterSpec struct {
 // The hash is computed over a small canonical struct that excludes compose
 // metadata (file path, project name) and generated labels.
 func Hash(cmd Command) (string, error) {
-	// Sort log opts keys for determinism.
 	var logOpts map[string]string
 	if len(cmd.LogOpts) > 0 {
 		logOpts = cmd.LogOpts
 	}
 
-	// Sort user labels.
 	var userLabels map[string]string
 	if len(cmd.Labels) > 0 {
 		userLabels = cmd.Labels
 	}
 
-	// Build sorted after list (already sorted during normalization, but be explicit).
 	var afterList []hashAfterSpec
 	if len(cmd.After) > 0 {
 		afterList = make([]hashAfterSpec, len(cmd.After))
@@ -134,7 +131,6 @@ func Hash(cmd Command) (string, error) {
 		})
 	}
 
-	// Env is already sorted by mapToEnvSlice; copy to be safe.
 	envCopy := make([]string, len(cmd.Env))
 	copy(envCopy, cmd.Env)
 	slices.Sort(envCopy)

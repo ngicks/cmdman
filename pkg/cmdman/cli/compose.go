@@ -38,7 +38,6 @@ func PrintComposeLogs(out, errOut io.Writer, msgs <-chan compose.LogMessage) err
 		); err != nil {
 			return fmt.Errorf("write logs for command %q: %w", msg.Command, err)
 		}
-		// Add a newline when the line doesn't already end with one (partial lines).
 		if len(line) > 0 && line[len(line)-1] != '\n' {
 			if _, err := fmt.Fprintln(w); err != nil {
 				return fmt.Errorf("write logs for command %q: %w", msg.Command, err)
@@ -279,10 +278,6 @@ func printActions(out io.Writer, actions []compose.ActionOutcome) []error {
 func PrintCreateResult(out, errOut io.Writer, result *compose.CreateResult) error {
 	return reportErrors(errOut, "compose action", printActions(out, result.Actions))
 }
-
-// Note: compose up/start/stop/down no longer print a static summary here; they
-// stream a live state trace (or JSONL) through cli.ComposeProgress and derive
-// the command exit status from {Up,Start,Stop,Down}ResultErr in progress.go.
 
 // PrintSignalResult writes a status line per signal outcome and returns a
 // combined error when any signal failed.

@@ -11,33 +11,24 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 )
 
-// scanOutcome is what scanFile reports to its caller.
 type scanOutcome int
 
 const (
-	// scanContinue means the file was fully consumed (EOF) on a non-tailable
-	// scan; the caller may proceed to the next file (e.g. active after archive)
-	// or, for one-shot reads of the active file, exit cleanly.
+	// scanContinue means a non-tailable file reached EOF.
 	scanContinue scanOutcome = iota
-	// scanRotated means the file ended with a rotation marker; the caller
-	// should close this fd and reopen the active path.
+	// scanRotated means the file ended with a rotation marker.
 	scanRotated
-	// scanStop means the reader must exit entirely: ctx cancelled, send to
-	// channel failed, Until boundary reached, or a fatal read error already
-	// surfaced on the channel.
+	// scanStop means the reader must exit.
 	scanStop
 )
 
-// scan reads from f until EOF (and waits on the watcher when follow is
-// set) or a rotation marker. See scanOutcome for the result enum.
+// scan reads until EOF or a rotation marker, following when configured.
 func (r *Reader) scan(ctx context.Context, f *os.File) scanOutcome {
 	return r.scanFile(ctx, f, r.opt.Follow)
 }
 
-// scanFile is the parameterized core of scan(). When tailable is true and
-// EOF is reached it waits on the watcher for more content; when false it
-// returns scanContinue immediately (used for archive replay and one-shot
-// reads where there is no "more content" to wait for).
+// scanFile waits at EOF when tailable is true; otherwise it returns
+// scanContinue for archive replay or a one-shot read.
 func (r *Reader) scanFile(ctx context.Context, f *os.File, tailable bool) scanOutcome {
 	br := bufio.NewReader(f)
 	for {
@@ -76,7 +67,6 @@ func (r *Reader) scanFile(ctx context.Context, f *os.File, tailable bool) scanOu
 			}
 			return scanStop
 		}
-		// EOF on partial line: caller decides whether to wait for more.
 		if !tailable {
 			return scanContinue
 		}
@@ -86,13 +76,9 @@ func (r *Reader) scanFile(ctx context.Context, f *os.File, tailable bool) scanOu
 	}
 }
 
-// parseLine decodes one JSONL line. It reports:
-//   - skip=true for empty/blank lines (no record to deliver, no error).
-//   - rotation=true for the internal rotation marker (no record to deliver).
-//   - err for malformed JSON.
-//
-// When skip and rotation are both false and err is nil, ev is the decoded
-// event ready for delivery.
+// parseLine decodes one JSONL line. skip means blank input with no event or error;
+// rotation means an internal marker with no event; err means malformed JSON.
+// Otherwise ev is deliverable.
 func parseLine(line []byte) (ev model.Event, skip, rotation bool, err error) {
 	if len(line) == 0 {
 		return model.Event{}, true, false, nil

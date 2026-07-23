@@ -11,42 +11,15 @@ import (
 	"github.com/ngicks/cmdman/pkg/muxctl"
 )
 
-// ApplyLayout resets the cmdman-owned window and rebuilds it from root.
-//
-// Algorithm:
-//
-//  1. Reset the window to a single anchor pane (kill all others).
-//
-//  2. Query the anchor pane's width/height for cell-budget computation.
-//
-//  3. Walk root depth-first:
-//
-//     - At a leaf, respawn the anchor pane with the leaf's argv, set its
-//     pane-border title to <base> (CmdOpt["title"] or the leaf name), and
-//     record the marker in the per-pane option markerOption.
-//     - At a container, peel each non-last child off the anchor with
-//     split-window (in node.Dir, taking cells[i] of the anchor's split
-//     dim); the last child takes over the anchor.
-//
-//  4. Select the focused pane (first leaf with Focus=true; otherwise the
-//     first leaf in document order).
-//
-// marker is an opaque non-negative int that is stored on every pane via the
-// per-pane option markerOption (see [Session.StatWindow] for the read side).
-// Pass < 0 to skip recording it (and clear any stale value).
-//
-// If a child's computed cell budget is < 1, the child is skipped and the
-// dropped pane names are emitted via the context-scoped logger
-// (contextkey.ValueSlogLoggerDefault). This implements the plan's
-// best-effort behavior for under-sized terminals.
+// ApplyLayout resets the controlled window and rebuilds root depth-first.
+// A nonnegative marker is an opaque layout index persisted on every realized
+// pane and read by [Session.StatWindow]; a negative marker skips recording and
+// clears stale values. Panes too small to realize are skipped and logged.
 func (s *Session) ApplyLayout(
 	ctx context.Context,
 	root muxctl.PaneSpec,
 	marker int,
 ) (map[string]muxctl.Pane, error) {
-	// Detach any in-pane viewers before tearing the window down so they
-	// restore their panes and disconnect from the daemon cleanly, instead of
-	// being SIGKILLed mid-frame by respawn-pane -k (see quiesceViewers).
 	restore := s.quiesceViewers(ctx)
 	defer restore()
 
@@ -147,36 +120,14 @@ func (st *applyState) materialize(anchorID string, node muxctl.PaneSpec, w, h in
 	return nil
 }
 
-// markerOption is the per-pane tmux user option that records the applied
-// layout index, read back by [Session.StatWindow] to cycle layouts. It
-// replaces the older scheme of appending "#<marker>" to the pane border
-// title, which overloaded display text (the pane name) with control state.
-//
-// NOTE: per-pane user options ("@name", set/read with the -p flag) are a
-// tmux-specific feature. A future zellij or wezterm driver has no equivalent
-// and would need a different mechanism to persist the layout marker across
-// invocations — e.g. a sidecar file keyed by session/window, or that driver's
-// own native pane metadata.
+// markerOption records the applied layout index independently of pane titles.
 const markerOption = "@cmdman_marker"
 
-// leafOption is the per-pane tmux user option that records the cycle-scale
-// command key for this pane, set by realizeLeafAt when the leaf is a cycle
-// target (Leaf.CycleKey non-empty) and cleared otherwise.
-//
-// NOTE: per-pane user options ("@name", set/read with the -p flag) are a
-// tmux-specific feature. A future zellij or wezterm driver has no equivalent
-// and would need a different mechanism — e.g. a sidecar file or that
-// driver's own native pane metadata (same caveat as markerOption above).
+// leafOption records the cycle-scale command key.
 const leafOption = "@cmdman_leaf"
 
 func (st *applyState) realizeLeafAt(paneID string, leaf muxctl.PaneSpec) error {
-	// Record the leaf; its viewer is respawned only AFTER the whole window
-	// geometry is built (see ApplyLayout's respawn pass). Respawning during the
-	// incremental split-window construction boots a viewer at an intermediate
-	// pane size, and the corrective SIGWINCH from a later split is lost in the
-	// viewer's startup window — leaving e.g. neovim sized to a stale, smaller
-	// geometry until a manual border drag. Deferring the respawn until the
-	// geometry is final lets each viewer read its settled size at startup.
+	// Starting viewers before later splits can leave them with stale geometry.
 	st.leaves = append(st.leaves, realizedLeaf{paneID: paneID, leaf: leaf})
 	st.panes[leaf.Name] = &Pane{id: paneID, name: leaf.Name}
 	return nil
@@ -200,15 +151,11 @@ func (st *applyState) split(targetID string, dir muxctl.Direction, cells int) (s
 	return strings.TrimSpace(out), nil
 }
 
-// recordSkipped records every leaf name under node in skipped (for the warn
-// line). The leaf-name walk itself lives in [muxctl.AppendLeafNames].
 func (st *applyState) recordSkipped(node muxctl.PaneSpec) {
 	st.skipped = muxctl.AppendLeafNames(st.skipped, node)
 }
 
-// resetWindow kills every pane in the cmdman-owned window except the
-// first one (in tmux's list order) and returns the surviving pane's id.
-// The survivor is then used as the apply anchor.
+// resetWindow reduces the window to its first pane and returns that anchor.
 func (s *Session) resetWindow(ctx context.Context) (string, error) {
 	out, err := s.exec.run(
 		ctx, "list-panes", "-t", s.windowID, "-F", "#{pane_id}",
@@ -228,9 +175,8 @@ func (s *Session) resetWindow(ctx context.Context) (string, error) {
 	return ids[0], nil
 }
 
-// respawnPane replaces the in-pane process with argv (killing the
-// previous process via -k). respawn-pane spawns argv directly, not
-// through a shell, so quoting concerns do not apply to argv elements.
+// respawnPane kills the prior pane process and executes argv directly, without
+// shell or quoting interpretation.
 func (s *Session) respawnPane(ctx context.Context, paneID string, argv []string) error {
 	args := []string{"respawn-pane", "-k", "-t", paneID, "--"}
 	args = append(args, argv...)

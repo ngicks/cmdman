@@ -62,7 +62,6 @@ func (m Model) onLayoutsLoaded(msg layoutsLoadedMsg) (tea.Model, tea.Cmd) {
 	m.layout.project = msg.info.Project
 	m.layout.path = msg.info.Path
 	m.layout.current = msg.info.Current
-	// Default the selection to the displayed layout so focus lands on it.
 	sel := msg.info.Current
 	if sel < 0 || sel >= len(rows) {
 		sel = 0

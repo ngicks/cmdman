@@ -58,8 +58,7 @@ func (w *inotifyWatcher) Run(ctx context.Context) error {
 	}
 	defer func() { _, _ = unix.InotifyRmWatch(fd, uint32(wd)) }()
 
-	// Emit an initial token so readers consume existing content
-	// immediately rather than waiting for the next filesystem event.
+	// Wake readers for content already on disk.
 	w.send()
 
 	buf := make([]byte, 4096)
@@ -67,8 +66,7 @@ func (w *inotifyWatcher) Run(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return nil
 		}
-		// Set a poll timeout so ctx cancellation is observed promptly even
-		// when no inotify events are arriving.
+		// Bound cancellation latency while the directory is idle.
 		pfd := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 		_, err := unix.Poll(pfd, 250)
 		if err != nil && !errors.Is(err, syscall.EINTR) {
@@ -90,8 +88,7 @@ func (w *inotifyWatcher) Run(ctx context.Context) error {
 		if n <= 0 {
 			continue
 		}
-		// Scan returned events; surface a single notification per batch
-		// when at least one event targets our basename.
+		// Coalesce matching events into one notification per batch.
 		matched := false
 		for off := 0; off+unix.SizeofInotifyEvent <= n; {
 			rawEvent := (*unix.InotifyEvent)(unsafe.Pointer(&buf[off]))
@@ -107,8 +104,6 @@ func (w *inotifyWatcher) Run(ctx context.Context) error {
 					matched = true
 				}
 			} else if rawEvent.Mask&unix.IN_MODIFY != 0 {
-				// Watch on the dir does not produce IN_MODIFY without a
-				// name, but be safe.
 				matched = true
 			}
 			off += unix.SizeofInotifyEvent + nameLen
@@ -127,7 +122,7 @@ func (w *inotifyWatcher) send() {
 }
 
 func bytesToString(b []byte) string {
-	// Strip NUL padding inotify appends to the name field.
+	// Inotify NUL-pads names.
 	for i, c := range b {
 		if c == 0 {
 			return string(b[:i])

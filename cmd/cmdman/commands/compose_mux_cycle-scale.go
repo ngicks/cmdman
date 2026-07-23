@@ -62,15 +62,15 @@ argument to "compose mux up".`,
 	parent.AddCommand(cmd)
 }
 
-// runComposeMuxCycleScale advances the replica position for a command across all
-// matching dashboard windows.
+// runComposeMuxCycleScale advances a command across matching dashboard windows.
+// arg has the form <command>[=N], where an explicit N is a 1-based position.
+// A nonempty session narrows the operation to that tmux session; empty is server-wide.
 func runComposeMuxCycleScale(
 	cmd *cobra.Command,
 	rootCfg *cmdman.CmdmanConfig,
 	cf *composeFlags,
 	arg, session string,
 ) error {
-	// Parse <command>[=N]: split on "="; N must be >= 1 when present.
 	command, posStr, hasPos := strings.Cut(arg, "=")
 	if command == "" {
 		return fmt.Errorf("cycle-scale: command name is empty in argument %q", arg)

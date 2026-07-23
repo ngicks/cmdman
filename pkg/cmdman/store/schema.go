@@ -32,17 +32,13 @@ func initOrCheckSchema(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	if !exists {
-		// Fresh database or pre-DBConfig database.
-		// Check if CommandConfig table exists (pre-DBConfig v1 database).
 		legacy, err := commandConfigExists(ctx, db)
 		if err != nil {
 			return err
 		}
 		if !legacy {
-			// Truly fresh database: replay the whole migration chain.
 			return runMigrations(ctx, db)
 		}
-		// Pre-DBConfig database (v1): needs migration.
 		return fmt.Errorf(
 			"database needs migration (no DBConfig table found), run 'cmdman migrate'",
 		)

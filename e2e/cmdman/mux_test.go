@@ -290,7 +290,6 @@ func TestMux_BuildsPanesBoundToCommands(t *testing.T) {
 
 	wid := tmuxWindowID(t, socket, "cmdman")
 
-	// One pane per command, titled by command name (first run ⇒ marker 0).
 	if got, want := windowPaneBases(
 		t,
 		socket,
@@ -443,7 +442,6 @@ func TestMux_CyclesToNextLayoutOnRerun(t *testing.T) {
 
 	specPath := writeSpecFile(t, cycleMuxYAML(socket))
 
-	// First run → layout index 0 ("wide"): two panes, marker 0.
 	if _, stderr, err := env.muxExec(ctx, "mux", specPath); err != nil {
 		t.Fatalf("first cmdman mux failed: %v\nstderr:\n%s", err, stderr)
 	}
@@ -455,7 +453,6 @@ func TestMux_CyclesToNextLayoutOnRerun(t *testing.T) {
 		t.Fatalf("after first run marker = %d, want 0", got)
 	}
 
-	// Second run → layout index 1 ("solo"): single pane, marker 1.
 	if _, stderr, err := env.muxExec(ctx, "mux", specPath); err != nil {
 		t.Fatalf("second cmdman mux failed: %v\nstderr:\n%s", err, stderr)
 	}
@@ -515,7 +512,6 @@ func TestMux_KillingSessionLeavesCommandRunning(t *testing.T) {
 		t.Fatalf("want 1 pane before kill, got %d", got)
 	}
 
-	// Tear the viewer down entirely.
 	killTmuxServer(t, socket)
 	// Let any SIGHUP-driven teardown that would (wrongly) reach the command
 	// have time to land before we assert it did not.
@@ -673,7 +669,6 @@ func TestComposeMux_NoFileAutoSelectsCwdFile(t *testing.T) {
 	composePath := writeComposeFile(t, wd, composeMuxYAML(project, socket))
 	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
 
-	// Bring the services up (explicit flags; this step is not under test).
 	if _, stderr, err := env.exec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "up",
 	); err != nil {
@@ -741,7 +736,6 @@ func TestComposeMux_DownFindsWindowServerWide(t *testing.T) {
 	composePath := writeComposeFile(t, wd, composeMuxYAML(project, socket))
 	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
 
-	// Bring the services up.
 	if _, stderr, err := env.exec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "up",
 	); err != nil {
@@ -754,7 +748,6 @@ func TestComposeMux_DownFindsWindowServerWide(t *testing.T) {
 		env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
 	}
 
-	// Build the dashboard (from outside tmux — muxExec strips $TMUX).
 	if _, stderr, err := env.muxExec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "mux",
 	); err != nil {
@@ -777,7 +770,6 @@ func TestComposeMux_DownFindsWindowServerWide(t *testing.T) {
 			downErr, downStdout, downStderr,
 		)
 	}
-	// Assert the "Restored window ..." output line (exact format from mux/down.go).
 	if !strings.Contains(downStdout, "Restored window") {
 		t.Fatalf("expected 'Restored window ...' on stdout; got:\n%s", downStdout)
 	}
@@ -785,14 +777,12 @@ func TestComposeMux_DownFindsWindowServerWide(t *testing.T) {
 		t.Fatalf("expected window name %q in down output; got:\n%s", window, downStdout)
 	}
 
-	// The window still exists (restored, not killed) but has collapsed to one pane.
 	if got := tmuxWindowID(t, socket, window); got != wid {
 		t.Fatalf("window id changed across down: %s vs %s", wid, got)
 	}
 	if got := len(tmuxPaneField(t, socket, wid, "#{pane_id}")); got != 1 {
 		t.Fatalf("want 1 pane after down, got %d", got)
 	}
-	// The ownership option is cleared.
 	if got := tmuxWindowOption(t, socket, wid, "@cmdman_window"); got != "" {
 		t.Errorf("@cmdman_window still set after down: %q", got)
 	}
@@ -859,18 +849,15 @@ func TestMuxLs_ListsDashboard(t *testing.T) {
 
 	specPath := writeSpecFile(t, muxLsYAML())
 
-	// Build the dashboard on the default socket (redirected to tmuxTmpdir).
 	// Outside tmux: session = "cmdman", window = "cmdman", identity = "cmdman".
 	if _, stderr, err := env.muxExecWithTmpdir(ctx, tmuxTmpdir, "mux", specPath); err != nil {
 		t.Fatalf("cmdman mux failed: %v\nstderr:\n%s", err, stderr)
 	}
 
-	// Verify the window exists on the default server.
 	tmuxRunWithTmpdir(t, tmuxTmpdir,
 		"list-windows", "-a", "-F", "#{window_name}\t#{window_id}",
 	)
 
-	// List using a stable --format template so the assertion is whitespace-independent.
 	stdout, stderr, err := env.muxExecWithTmpdir(
 		ctx, tmuxTmpdir,
 		"mux", "ls", "--format", "{{.SessionName}}\t{{.Identity}}",
@@ -923,7 +910,6 @@ func TestComposeMuxLs_ListsDashboard(t *testing.T) {
 	composePath := writeComposeFile(t, wd, composeMuxLsYAML(project))
 	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
 
-	// Bring the services up (explicit flags).
 	if _, stderr, err := env.exec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "up",
 	); err != nil {
@@ -936,7 +922,6 @@ func TestComposeMuxLs_ListsDashboard(t *testing.T) {
 		env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
 	}
 
-	// Build the dashboard on the default socket (redirected to tmuxTmpdir).
 	if _, stderr, err := env.muxExecWithTmpdir(
 		ctx, tmuxTmpdir,
 		"compose", "--workdir", wd, "-f", composePath, "mux",
@@ -944,7 +929,6 @@ func TestComposeMuxLs_ListsDashboard(t *testing.T) {
 		t.Fatalf("compose mux failed: %v\nstderr:\n%s", err, stderr)
 	}
 
-	// List using a stable --format template.
 	stdout, stderr, err := env.muxExecWithTmpdir(
 		ctx, tmuxTmpdir,
 		"compose", "--workdir", wd, "-f", composePath,
@@ -1023,11 +1007,9 @@ func TestMux_RootAliasEqualsUp(t *testing.T) {
 				t.Fatalf("cmdman %s failed: %v\nstdout:\n%s\nstderr:\n%s",
 					tc.name, err, stdout, stderr)
 			}
-			// Both forms must print the attach hint when outside tmux.
 			if !strings.Contains(stdout, "tmux attach -t cmdman") {
 				t.Fatalf("expected attach hint; got:\n%s", stdout)
 			}
-			// Both must create the dashboard window.
 			wid := tmuxWindowID(t, socket, "cmdman")
 			if got := len(tmuxPaneField(t, socket, wid, "#{pane_title}")); got != 1 {
 				t.Fatalf("want 1 pane, got %d", got)
@@ -1085,7 +1067,6 @@ func TestMux_DetachRestoresWindowAndKeepsCommands(t *testing.T) {
 
 	specPath := writeSpecFile(t, standaloneMuxYAML(socket))
 
-	// Build the dashboard: three panes, pane-border-status enabled.
 	if _, stderr, err := env.muxExec(ctx, "mux", specPath); err != nil {
 		t.Fatalf("cmdman mux failed: %v\nstderr:\n%s", err, stderr)
 	}
@@ -1097,7 +1078,6 @@ func TestMux_DetachRestoresWindowAndKeepsCommands(t *testing.T) {
 		t.Fatalf("pane-border-status before detach = %q, want top", got)
 	}
 
-	// Detach: restore the window (new CLI: mux down <path>).
 	{
 		stdout, stderr, err := env.muxExec(ctx, "mux", "down", specPath)
 		if err != nil {
@@ -1108,16 +1088,13 @@ func TestMux_DetachRestoresWindowAndKeepsCommands(t *testing.T) {
 		}
 	}
 
-	// The owned window survives (restored, not killed) ...
 	if got := tmuxWindowID(t, socket, "cmdman"); got != wid {
 		t.Fatalf("window id changed across detach: %s vs %s", wid, got)
 	}
-	// ... collapsed to a single pane ...
 	// Count by pane_id, not pane_title: detach clears the restored pane's title.
 	if got := len(tmuxPaneField(t, socket, wid, "#{pane_id}")); got != 1 {
 		t.Fatalf("want 1 pane after detach, got %d", got)
 	}
-	// ... with cmdman's tmux options cleared.
 	for _, m := range tmuxPaneField(t, socket, wid, "#{@cmdman_marker}") {
 		if m != "" {
 			t.Errorf("after detach, pane still carries a marker: %q", m)
@@ -1167,11 +1144,9 @@ func TestMuxLs_HonorsDriverOpt(t *testing.T) {
 	// target the same isolated server.
 	specPath := writeSpecFile(t, singleMuxYAML(socket))
 
-	// Build the dashboard on the custom socket.
 	if _, stderr, err := env.muxExec(ctx, "mux", specPath); err != nil {
 		t.Fatalf("cmdman mux failed: %v\nstderr:\n%s", err, stderr)
 	}
-	// Confirm the window exists.
 	wid := tmuxWindowID(t, socket, "cmdman")
 	if got := len(tmuxPaneField(t, socket, wid, "#{pane_title}")); got != 1 {
 		t.Fatalf("want 1 pane after up, got %d", got)
@@ -1226,7 +1201,6 @@ func TestComposeMuxLs_HonorsDriverOpt(t *testing.T) {
 	composePath := writeComposeFile(t, wd, composeMuxCustomSocketYAML(project, socket))
 	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
 
-	// Bring the services up.
 	if _, stderr, err := env.exec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "up",
 	); err != nil {
@@ -1239,7 +1213,6 @@ func TestComposeMuxLs_HonorsDriverOpt(t *testing.T) {
 		env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
 	}
 
-	// Build the dashboard on the custom socket.
 	if _, stderr, err := env.muxExec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "mux",
 	); err != nil {
@@ -1329,7 +1302,6 @@ func TestComposeMux_DetachRestoresWindow(t *testing.T) {
 		t.Fatalf("want 2 panes before detach, got %d", got)
 	}
 
-	// Detach: restore the window (new CLI: compose mux down).
 	if downStdout, downStderr, downErr := env.muxExec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "mux", "down",
 	); downErr != nil {

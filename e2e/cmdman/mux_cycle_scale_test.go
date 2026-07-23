@@ -1,19 +1,5 @@
 package cmdman_test
 
-// e2e tests for `compose mux cycle-scale` and related cycle-scale features.
-// These tests require a real tmux binary (guarded by requireTmux).
-//
-// Scenarios covered:
-//  1. cycle-scale happy path: up → cycle-scale web → web-2; cycle-scale web=3 → web-3;
-//     wrap back to web-1.
-//  2. Layout cycle (compose mux up again) after cycle-scale keeps the replica position.
-//  3. cycle-scale with no dashboard window → error mentioning "compose mux up".
-//  4. compose mux ls shows the SCALE column: web=1/3 after up, web=2/3 after
-//     cycle-scale web.
-//  5. compose mux down then up → position reset to 1.
-//  6. Static validation: compose file with mux: leaf scale: 4 against commands:
-//     scale: 2 fails to load with the mux validation error.
-
 import (
 	"fmt"
 	"slices"
@@ -97,18 +83,6 @@ func waitForPaneTitle(
 	return nil
 }
 
-// TestComposeMuxCycleScale_HappyPath is the primary cycle-scale e2e test.
-//
-// Setup: a compose project with `web` scaled to 3 replicas; the mux: spec has
-// a single-pane layout with an unpinned `web` leaf.
-//
-// Sequence:
-//  1. compose mux up → pane title = "web-1".
-//  2. compose mux cycle-scale web → pane title = "web-2"; stdout includes
-//     "<session>:<window> web -> web-2".
-//  3. compose mux cycle-scale web=3 → pane title = "web-3"; stdout includes
-//     "<session>:<window> web -> web-3".
-//  4. compose mux cycle-scale web (wrap) → pane title = "web-1".
 func TestComposeMuxCycleScale_HappyPath(t *testing.T) {
 	t.Parallel()
 	requireTmux(t)
@@ -122,7 +96,6 @@ func TestComposeMuxCycleScale_HappyPath(t *testing.T) {
 	composePath := writeComposeFile(t, wd, composeMuxCycleScaleYAML(project, socket))
 	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
 
-	// Bring web replicas up.
 	if _, stderr, err := env.exec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "up",
 	); err != nil {
@@ -135,7 +108,6 @@ func TestComposeMuxCycleScale_HappyPath(t *testing.T) {
 		env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
 	}
 
-	// Step 1: compose mux up — pane shows replica 1.
 	if _, stderr, err := env.muxExec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "mux",
 	); err != nil {
@@ -144,24 +116,19 @@ func TestComposeMuxCycleScale_HappyPath(t *testing.T) {
 	window := "cmdman-" + project
 	wid := tmuxWindowID(t, socket, window)
 
-	// Pane title should be "web-1" (replica 1 on first up).
 	waitForPaneTitle(t, socket, wid, "web-1", 3*time.Second)
 
-	// Step 2: cycle-scale web → advance to replica 2.
 	stdout, stderr, err := env.muxExec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "mux", "cycle-scale", "web",
 	)
 	if err != nil {
 		t.Fatalf("cycle-scale web failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
-	// stdout: "<session>:<window> web -> web-2"
 	if !strings.Contains(stdout, "web -> web-2") {
 		t.Fatalf("expected 'web -> web-2' in output; got:\n%s", stdout)
 	}
-	// Pane title reflects the new replica.
 	waitForPaneTitle(t, socket, wid, "web-2", 3*time.Second)
 
-	// Step 3: cycle-scale web=3 → jump to replica 3.
 	stdout, stderr, err = env.muxExec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "mux", "cycle-scale", "web=3",
 	)
@@ -173,7 +140,6 @@ func TestComposeMuxCycleScale_HappyPath(t *testing.T) {
 	}
 	waitForPaneTitle(t, socket, wid, "web-3", 3*time.Second)
 
-	// Step 4: cycle-scale web again — wraps back to replica 1 (3+1 % 3 = 1).
 	stdout, stderr, err = env.muxExec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "mux", "cycle-scale", "web",
 	)
@@ -205,7 +171,6 @@ func TestComposeMuxCycleScale_PersistsAcrossLayoutCycle(t *testing.T) {
 	)
 	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
 
-	// Bring services up.
 	if _, stderr, err := env.exec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "up",
 	); err != nil {
@@ -218,7 +183,6 @@ func TestComposeMuxCycleScale_PersistsAcrossLayoutCycle(t *testing.T) {
 		env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
 	}
 
-	// First compose mux up → layout "wide" (two panes), web-1.
 	if _, stderr, err := env.muxExec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "mux",
 	); err != nil {
@@ -231,7 +195,6 @@ func TestComposeMuxCycleScale_PersistsAcrossLayoutCycle(t *testing.T) {
 	}
 	waitForPaneTitle(t, socket, wid, "web-1", 3*time.Second)
 
-	// Advance web to replica 2.
 	if stdout, stderr, err := env.muxExec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "mux", "cycle-scale", "web",
 	); err != nil {
@@ -239,7 +202,6 @@ func TestComposeMuxCycleScale_PersistsAcrossLayoutCycle(t *testing.T) {
 	}
 	waitForPaneTitle(t, socket, wid, "web-2", 3*time.Second)
 
-	// Second compose mux up → cycles to layout "solo" (marker 1), single pane.
 	if _, stderr, err := env.muxExec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "mux",
 	); err != nil {
@@ -264,12 +226,9 @@ func TestComposeMuxCycleScale_NoWindowError(t *testing.T) {
 	wd := composeWorkdir(t)
 	project := "cs-nowin"
 	socket := muxSocket(t)
-	// No cleanup needed: we never start a tmux server in this test.
-
 	composePath := writeComposeFile(t, wd, composeMuxCycleScaleYAML(project, socket))
 	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
 
-	// Bring web replicas up but do NOT run compose mux up.
 	if _, stderr, err := env.exec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "up",
 	); err != nil {
@@ -282,7 +241,6 @@ func TestComposeMuxCycleScale_NoWindowError(t *testing.T) {
 		env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
 	}
 
-	// cycle-scale must fail with an error mentioning "compose mux up".
 	stdout, stderr, err := env.muxExec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "mux", "cycle-scale", "web",
 	)
@@ -333,7 +291,6 @@ mux:
 `, project))
 	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
 
-	// Bring web replicas up.
 	if _, stderr, err := env.exec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "up",
 	); err != nil {
@@ -346,7 +303,6 @@ mux:
 		env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
 	}
 
-	// compose mux up.
 	if _, stderr, err := env.muxExecWithTmpdir(
 		ctx, tmuxTmpdir,
 		"compose", "--workdir", wd, "-f", composePath, "mux",
@@ -354,7 +310,6 @@ mux:
 		t.Fatalf("compose mux up failed: %v\nstderr:\n%s", err, stderr)
 	}
 
-	// compose mux ls: SCALE column should show web=1/3.
 	stdout, stderr, err := env.muxExecWithTmpdir(
 		ctx, tmuxTmpdir,
 		"compose", "--workdir", wd, "-f", composePath,
@@ -370,7 +325,6 @@ mux:
 		t.Fatalf("expected 'web=1/3' in ls output after up; got:\n%s", stdout)
 	}
 
-	// cycle-scale web → advance to replica 2.
 	if stdout2, stderr2, err2 := env.muxExecWithTmpdir(
 		ctx, tmuxTmpdir,
 		"compose", "--workdir", wd, "-f", composePath, "mux", "cycle-scale", "web",
@@ -381,7 +335,6 @@ mux:
 		)
 	}
 
-	// compose mux ls: SCALE column should now show web=2/3.
 	stdout, stderr, err = env.muxExecWithTmpdir(
 		ctx, tmuxTmpdir,
 		"compose", "--workdir", wd, "-f", composePath,
@@ -414,7 +367,6 @@ func TestComposeMuxCycleScale_DownResetsPosition(t *testing.T) {
 	composePath := writeComposeFile(t, wd, composeMuxCycleScaleYAML(project, socket))
 	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
 
-	// Bring web replicas up.
 	if _, stderr, err := env.exec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "up",
 	); err != nil {
@@ -427,7 +379,6 @@ func TestComposeMuxCycleScale_DownResetsPosition(t *testing.T) {
 		env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
 	}
 
-	// First compose mux up.
 	if _, stderr, err := env.muxExec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "mux",
 	); err != nil {
@@ -437,7 +388,6 @@ func TestComposeMuxCycleScale_DownResetsPosition(t *testing.T) {
 	wid := tmuxWindowID(t, socket, window)
 	waitForPaneTitle(t, socket, wid, "web-1", 3*time.Second)
 
-	// Advance to replica 2.
 	if stdout, stderr, err := env.muxExec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "mux", "cycle-scale", "web",
 	); err != nil {
@@ -447,12 +397,10 @@ func TestComposeMuxCycleScale_DownResetsPosition(t *testing.T) {
 	}
 	waitForPaneTitle(t, socket, wid, "web-2", 3*time.Second)
 
-	// Verify @cmdman_scale is set before down.
 	if got := tmuxWindowOption(t, socket, wid, "@cmdman_scale"); !strings.Contains(got, "web=2") {
 		t.Fatalf("expected @cmdman_scale to contain 'web=2' before down; got: %q", got)
 	}
 
-	// compose mux down.
 	if downStdout, downStderr, downErr := env.muxExec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "mux", "down",
 	); downErr != nil {
@@ -462,12 +410,10 @@ func TestComposeMuxCycleScale_DownResetsPosition(t *testing.T) {
 		)
 	}
 
-	// The @cmdman_scale option should be cleared after down.
 	if got := tmuxWindowOption(t, socket, wid, "@cmdman_scale"); got != "" {
 		t.Errorf("@cmdman_scale still set after down: %q", got)
 	}
 
-	// Second compose mux up — position must reset to 1.
 	if _, stderr, err := env.muxExec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "mux",
 	); err != nil {
@@ -492,7 +438,6 @@ func TestComposeMux_MuxValidationScaleExceedsCommand(t *testing.T) {
 
 	wd := composeWorkdir(t)
 	project := "cs-validate"
-	// commands.web has scale: 2 but the mux: leaf pins scale: 4 — should fail.
 	composePath := writeComposeFile(t, wd, fmt.Sprintf(`name: %s
 commands:
   web:
@@ -506,9 +451,6 @@ mux:
         command: web
         scale: 4
 `, project))
-	// No compose up — we expect load to fail.
-
-	// Any compose mux subcommand that parses the spec should fail at validation.
 	stdout, stderr, err := env.muxExec(
 		ctx, "compose", "--workdir", wd, "-f", composePath, "mux",
 	)

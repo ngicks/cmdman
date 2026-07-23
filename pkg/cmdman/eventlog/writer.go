@@ -16,15 +16,11 @@ import (
 // DefaultMaxSize is the active log file size at which the writer rotates.
 const DefaultMaxSize int64 = 5 * 1024 * 1024 // 5 MiB
 
-// ArchiveSuffix is appended to the active log path to form the single
-// retained archive filename.
+// ArchiveSuffix forms the single retained archive filename.
 const ArchiveSuffix = ".1"
 
-// Writer appends events to the on-disk log. Each Append takes an exclusive
-// advisory lock on a sibling lock file (".<base>.lock") so multiple processes
-// serialise around append+rotation. The lock file is a stable coordination
-// sentinel — never renamed, never carrying data — so a writer cannot inherit
-// a lock on an inode that has already been rotated out from under it.
+// Writer appends events under a sibling advisory lock. The lock file remains
+// stable while the data file rotates.
 type Writer struct {
 	path     string
 	lockPath string
@@ -34,8 +30,8 @@ type Writer struct {
 	mu sync.Mutex
 }
 
-// NewWriter constructs a Writer rooted at path. The active file is opened
-// (and created if absent) on the first Append call.
+// NewWriter requires a nonempty path and creates its parent directories. The
+// active log file is created lazily by the first Append.
 func NewWriter(path string) (*Writer, error) {
 	if path == "" {
 		return nil, fmt.Errorf("eventlog: log path is empty")
@@ -70,9 +66,6 @@ func (w *Writer) Append(e model.Event) error {
 		return fmt.Errorf("eventlog: marshal event: %w", err)
 	}
 
-	// Acquire the cross-process lock first. The lock file's name is
-	// stable, so a rename of w.path during rotation cannot strand us with
-	// a lock on the old inode.
 	lockF, err := os.OpenFile(w.lockPath, os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
 		return fmt.Errorf("eventlog: open lock file: %w", err)
@@ -85,8 +78,7 @@ func (w *Writer) Append(e model.Event) error {
 		return fmt.Errorf("eventlog: lock log file: %w", err)
 	}
 
-	// Open the active file fresh after acquiring the lock so we always see
-	// the post-rotation state.
+	// Open after locking to observe any preceding rotation.
 	f, err := os.OpenFile(w.path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("eventlog: open log file: %w", err)
@@ -105,8 +97,6 @@ func (w *Writer) Append(e model.Event) error {
 		if err != nil {
 			return err
 		}
-		// rotateLocked closed the old fd on success; swap so the deferred
-		// cleanup targets the new fd.
 		f = newF
 	}
 
@@ -119,12 +109,9 @@ func (w *Writer) Append(e model.Event) error {
 	return nil
 }
 
-// rotateLocked writes the rotation marker into f, removes any existing
-// archive, renames the active path to the archive path, and returns a fresh
-// fd opened on the active path. The caller must hold the writer's lock file
-// across the entire rotation. On success ownership of f transfers to
-// rotateLocked: it closes f before returning the new fd. On error f is left
-// untouched and the caller retains ownership.
+// rotateLocked rotates f and returns a fresh active descriptor. The caller
+// must hold the writer lock. On success it closes f; on error ownership stays
+// with the caller.
 func (w *Writer) rotateLocked(f *os.File) (*os.File, error) {
 	marker, err := rotationMarker(w.now())
 	if err != nil {

@@ -125,7 +125,6 @@ func TestNewReader_K8sFile_FullLines(t *testing.T) {
 func TestNewReader_K8sFile_JoinsPartials(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "console.log")
-	// "lin" was a partial; "e2\n" completed the line. Expected reconstruction: "line2\n".
 	writeFixture(t, path,
 		"2023-08-07T19:56:34.223758260Z stdout P lin\n"+
 			"2023-08-07T19:56:34.223758260Z stdout F e2\n",
@@ -211,7 +210,6 @@ func TestNewReader_K8sFile_FollowReadsAppendedContent(t *testing.T) {
 		done <- nil
 	}()
 
-	// Append a second entry while the reader is following.
 	time.Sleep(k8sfile.FollowPollInterval + 50*time.Millisecond)
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
 	assert.NilError(t, err)
@@ -219,7 +217,6 @@ func TestNewReader_K8sFile_FollowReadsAppendedContent(t *testing.T) {
 	assert.NilError(t, err)
 	assert.NilError(t, f.Close())
 
-	// Wait for the appended content to surface, then cancel.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if buf.contains("second") {

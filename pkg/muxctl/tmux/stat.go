@@ -44,7 +44,6 @@ func (s *Session) StatWindow(ctx context.Context, windowID string) (muxctl.Windo
 	consistent := true
 	sawAnyMarker := false
 	for _, line := range lines {
-		// The format is "<marker>\t<title>"; an unset option expands to "".
 		markerStr, title, _ := strings.Cut(line, "\t")
 		names = append(names, title)
 

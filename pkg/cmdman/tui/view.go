@@ -74,7 +74,6 @@ func statusGlyph(state model.EventType, pending string, frame int) string {
 	}
 }
 
-// statusStyle returns the color style paired with statusGlyph.
 func statusStyle(state model.EventType, pending string) lipgloss.Style {
 	if pending != "" || state == model.EventTypeStarting {
 		return styleMarkProgress
@@ -122,7 +121,6 @@ func (m Model) viewContent() string {
 	b.WriteString(m.renderFilterBox(width))
 	b.WriteByte('\n')
 
-	// title(1) + tabbar(1) + filter box(3) + footer(2) = 7
 	bodyHeight := max(height-7, 3)
 	body := m.renderBody(width, bodyHeight)
 	b.WriteString(body)
@@ -273,7 +271,6 @@ func (m Model) renderTabBar() string {
 	return strings.Join(parts, " ")
 }
 
-// renderFilterBox renders the filter input as a bordered "Filter" section.
 func (m Model) renderFilterBox(width int) string {
 	var filter string
 	var focused bool
@@ -354,7 +351,6 @@ func (m Model) renderCommandsBody(width, height int) string {
 	leftW := width / 2
 	rightW := width - leftW
 	if rightW < 12 {
-		// Too narrow for a side-by-side preview; show the list full width.
 		return m.renderCommandList("Commands", width, height)
 	}
 	left := m.renderCommandList("Commands", leftW, height)
@@ -423,7 +419,6 @@ func (m Model) renderCommandList(title string, width, height int) string {
 			}
 		}
 		if selected {
-			// lipgloss Width pads the background to a full-width selection bar.
 			lines = append(lines, styleSelected.Width(cw).Render(truncate(plain, cw)))
 		} else {
 			lines = append(lines, styled)
@@ -458,7 +453,6 @@ func (m Model) renderPreview(width, height int) string {
 	default:
 		lines = []string{styleActive.Render("No output yet.")}
 	}
-	// box truncates each line ANSI-aware to the inner width.
 	content := clampLines(lines, ch, 0)
 	return box("Preview", content, width, height)
 }
@@ -675,7 +669,6 @@ func overlay(box string, width, height int) string {
 	return b.String()
 }
 
-// stripANSI is a tiny helper to measure rendered width ignoring escape codes.
 func stripANSI(s string) string {
 	var b strings.Builder
 	inEsc := false

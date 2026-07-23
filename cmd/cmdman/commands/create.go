@@ -11,7 +11,6 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
 
-// createFlags holds all flags shared between `create` and `run`.
 type createFlags struct {
 	Name            string
 	Dir             string
@@ -111,7 +110,8 @@ func runCreate(
 	return nil
 }
 
-// doCreate creates a command entry in the store and returns the generated ID and name.
+// doCreate treats args as the supervised command's argv. On success it returns
+// the generated ID and the optional configured name.
 func doCreate(
 	cmd *cobra.Command,
 	args []string,

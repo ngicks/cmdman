@@ -9,28 +9,19 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman/internal/flock"
 )
 
-// openSnapshot opens the archive (if it exists) and the active file under a
-// shared advisory lock on the writer's lock file, so the pair cannot be
-// rotated out from under the reader between the two opens.
-//
-// On platforms or filesystems where the lock cannot be acquired the
-// snapshot proceeds best-effort without coordination: this matches the
-// writer's own behavior (its exclusive lock is also best-effort on
-// unsupported platforms).
+// openSnapshot opens the archive and active file under the writer's lock.
+// If either path is absent, its corresponding result is nil with a nil error.
+// Unsupported locks degrade to an uncoordinated best-effort snapshot.
 func (r *Reader) openSnapshot() (archive, active *os.File, err error) {
 	dir := filepath.Dir(r.path)
 	base := filepath.Base(r.path)
 	lockPath := filepath.Join(dir, "."+base+".lock")
 
-	// Best-effort: ensure the lock file's directory exists. If MkdirAll
-	// fails (e.g. permission), fall through and try the open paths
-	// without coordination.
+	// Failure here also degrades to an uncoordinated snapshot.
 	_ = os.MkdirAll(dir, 0o755)
 
 	if lockF, lerr := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, 0o644); lerr == nil {
-		// Acquire shared lock for the brief open window. Errors here
-		// (unsupported platform, EINTR loops) are non-fatal: we proceed
-		// without coordination.
+		// Lock errors are non-fatal on unsupported platforms.
 		_ = flock.LockShared(lockF)
 		defer func() {
 			_ = flock.Unlock(lockF)

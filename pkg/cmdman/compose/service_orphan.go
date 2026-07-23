@@ -41,8 +41,6 @@ func (s *Service) handleOrphans(
 			continue
 		}
 
-		// --remove-orphan path.
-		// Running/starting orphans: skip and report.
 		if orphan.State == model.EventTypeRunning || orphan.State == model.EventTypeStarting {
 			contextkey.ValueSlogLoggerDefault(ctx).
 				Warn("compose: orphan command is running; skipping removal",
@@ -64,7 +62,6 @@ func (s *Service) handleOrphans(
 			continue
 		}
 
-		// Stopped orphan: remove it.
 		results, err := s.svc.Remove(ctx, cmdman.RemoveRequest{
 			Targets: []string{orphan.ID},
 		})

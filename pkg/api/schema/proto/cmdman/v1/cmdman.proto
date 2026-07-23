@@ -5,34 +5,34 @@ package cmdman.v1;
 import "google/protobuf/timestamp.proto";
 
 service CommandMonitorService {
-  // Bidirectional streaming — PTY I/O + control
+  // Exchange stdin and resize requests for command output and PTY size events.
   rpc Attach(stream AttachRequest) returns (stream AttachResponse);
 
-  // Subscribe to live structured output records.
+  // Stream the current log offset followed by live structured output records.
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
 
-  // Write raw stdin bytes to the command PTY
+  // Write the request's raw bytes to the command's standard input.
   rpc WriteStdin(WriteStdinRequest) returns (WriteStdinResponse);
 
-  // Send signal to the command process
+  // Send the request's OS signal number to the command process group.
   rpc Signal(SignalRequest) returns (SignalResponse);
 
   // Stop the command and prevent restart policy from re-spawning it
   rpc Stop(StopRequest) returns (StopResponse);
 
-  // Query monitor status
+  // Return the monitor's current state, exit code, and command PID.
   rpc Status(StatusRequest) returns (StatusResponse);
 }
 
 message AttachRequest {
   oneof input {
-    bytes stdin = 1; // raw bytes to write to PTY
-    ResizeEvent resize = 2; // terminal resize (SIGWINCH)
+    bytes stdin = 1; // raw command input
+    ResizeEvent resize = 2; // new PTY dimensions
   }
 }
 
 message AttachResponse {
-  bytes stdout = 1; // raw bytes from PTY
+  bytes stdout = 1; // raw command output
   // resize reports the command's current PTY window size. The monitor sends it
   // once when a client attaches (and whenever the PTY is resized) so a read-only
   // viewer can size its local terminal emulator to match the command's actual
@@ -73,7 +73,7 @@ message SubscribeOffset {
 }
 
 message WriteStdinRequest {
-  bytes stdin = 1; // raw bytes to write to PTY
+  bytes stdin = 1;
 }
 
 message WriteStdinResponse {}

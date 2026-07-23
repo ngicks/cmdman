@@ -77,8 +77,6 @@ type ScaleStateOptions struct {
 // and others fail — the caller can inspect CycleScaleResult.Results for
 // successful windows and the returned error for all collected failures.
 func CycleScale(ctx context.Context, opts CycleScaleOptions) (CycleScaleResult, error) {
-	// Step 1: static target check — opts.Command must appear as an unpinned
-	// leaf (Scale == 0) with a non-nil ReplicaCounter in at least one layout.
 	if !isCycleScaleTarget(opts.Spec, opts.Command, opts.Replicas) {
 		return CycleScaleResult{}, fmt.Errorf(
 			"mux: %q is not a cycle-scale target: not an unpinned leaf in any layout",
@@ -86,7 +84,6 @@ func CycleScale(ctx context.Context, opts CycleScaleOptions) (CycleScaleResult, 
 		)
 	}
 
-	// Step 2: resolve driver and find windows.
 	driver, err := resolveDriver(opts.Spec.Driver, os.Environ())
 	if err != nil {
 		return CycleScaleResult{}, err
@@ -107,7 +104,6 @@ func CycleScale(ctx context.Context, opts CycleScaleOptions) (CycleScaleResult, 
 		)
 	}
 
-	// Step 3: per-window loop.
 	var (
 		results []CycleScaleWindowResult
 		errs    []error
@@ -150,7 +146,6 @@ func cycleScaleWindow(
 		Command:     opts.Command,
 	}
 
-	// 3a: validate marker index.
 	if window.Marker < 0 || window.Marker >= len(opts.Spec.Layouts) {
 		return base, fmt.Errorf(
 			"mux: window %s (%s in session %s): marker %d out of range [0,%d)",
@@ -159,11 +154,9 @@ func cycleScaleWindow(
 		)
 	}
 
-	// 3b: current layout.
 	currentLayout := opts.Spec.Layouts[window.Marker]
 	base.LayoutName = currentLayout.Name
 
-	// 3d: live replica count.
 	n, err := opts.Replicas(ctx, opts.Command)
 	if err != nil {
 		return base, fmt.Errorf(
@@ -186,10 +179,8 @@ func cycleScaleWindow(
 	curPos := ((storedPos - 1) % n) + 1
 	base.OldPosition = curPos
 
-	// 3f: build pinnedIndices for this layout + command.
 	pinnedIndices := pinnedScaleIndices(currentLayout, opts.Command)
 
-	// 3f: compute target position.
 	targetPos, err := computeTargetPosition(curPos, opts.Position, n, pinnedIndices)
 	if err != nil {
 		return base, fmt.Errorf(
@@ -198,7 +189,6 @@ func cycleScaleWindow(
 	}
 	base.NewPosition = targetPos
 
-	// 3g: resolve replica id.
 	id, err := opts.Resolver(ctx, opts.Command, targetPos)
 	if err != nil {
 		return base, fmt.Errorf(
@@ -207,11 +197,9 @@ func cycleScaleWindow(
 		)
 	}
 
-	// 3h: human-readable replica name.
 	resolvedName := fmt.Sprintf("%s-%d", opts.Command, targetPos)
 	base.ResolvedName = resolvedName
 
-	// 3i: open existing session.
 	sess, ok, openErr := driver.Open(ctx, muxctl.Config{
 		DriverOpt:        opts.Spec.DriverOpt,
 		WindowID:         window.WindowID,
@@ -228,7 +216,6 @@ func cycleScaleWindow(
 		return base, nil
 	}
 
-	// 3j: find pane by cycle key.
 	paneID, visible, findErr := driver.FindPane(ctx, listOpts, window.WindowID, opts.Command)
 	if findErr != nil {
 		return base, fmt.Errorf(
@@ -238,12 +225,9 @@ func cycleScaleWindow(
 	}
 	base.Visible = visible
 
-	// 3k: respawn if visible.
 	if visible {
-		// Locate the unpinned leaf for this command to get its Mode and CmdOpt.
 		leafSpec, found := findUnpinnedLeaf(currentLayout, opts.Command)
 		if !found {
-			// Should not happen (we verified it's a target), but be safe.
 			return base, fmt.Errorf(
 				"mux: window %s: unpinned leaf for %q disappeared from layout %q",
 				window.WindowID, opts.Command, currentLayout.Name,
@@ -263,7 +247,6 @@ func cycleScaleWindow(
 		}
 	}
 
-	// 3l: persist the new position.
 	if writeErr := writeScalePosition(
 		ctx, driver, listOpts, window.WindowID, opts.Command, targetPos,
 	); writeErr != nil {

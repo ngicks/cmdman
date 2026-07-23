@@ -9,26 +9,19 @@ import (
 	"github.com/charmbracelet/x/vt"
 )
 
-// renderVia replays raw bytes into a fresh emulator (as a re-attaching client
-// would) and returns its rendered screen.
+// renderVia replays raw in a fresh cols-by-rows emulator and returns its screen.
 func renderVia(cols, rows int, raw []byte) string {
 	term := vt.NewEmulator(cols, rows)
 	_, _ = term.Write(raw)
 	return term.Render()
 }
 
-// TestScreenTrackerSnapshotReconstructsScrolledOutChrome is the regression for
-// the "preview breaks when transitioning among commands" bug: static chrome that
-// a program painted once and then pushed out of the byte scrollback must still
-// appear in the snapshot handed to a re-attaching client, because the tracker
-// keeps live screen state instead of replaying a rotated byte window.
 func TestScreenTrackerSnapshotReconstructsScrolledOutChrome(t *testing.T) {
 	const cols, rows = 80, 24
 	tr := newScreenTracker(cols, rows)
 	t.Cleanup(tr.close)
 
-	// Paint static chrome once (row 1 + row 3), then emit many incremental
-	// single-region updates (row 10) as a full-screen program would.
+	// Paint chrome once, then push it out of the raw byte window.
 	tr.feed([]byte("\x1b[?1049h\x1b[2J\x1b[H"))
 	tr.feed([]byte("\x1b[1;1HHEADER-ONCE"))
 	tr.feed([]byte("\x1b[3;1H+--frame--+"))
@@ -56,9 +49,7 @@ func TestScreenTrackerSnapshotReconstructsScrolledOutChrome(t *testing.T) {
 		}
 	}
 
-	// Sanity: a re-attaching client that only received the LAST 256 raw bytes
-	// (a rotated ring) reconstructs a broken frame missing the one-time chrome —
-	// which is exactly the bug the snapshot fixes.
+	// A rotated raw window cannot reconstruct the one-time chrome.
 	full := raw.String()
 	tail := full[len(full)-256:]
 	broken := renderVia(cols, rows, []byte(tail))
@@ -67,9 +58,6 @@ func TestScreenTrackerSnapshotReconstructsScrolledOutChrome(t *testing.T) {
 	}
 }
 
-// TestScreenTrackerSnapshotMatchesFullReplay proves the snapshot is a faithful
-// stand-in for replaying the entire raw history: both reconstruct the same
-// screen on a fresh client emulator.
 func TestScreenTrackerSnapshotMatchesFullReplay(t *testing.T) {
 	const cols, rows = 40, 10
 	tr := newScreenTracker(cols, rows)
@@ -93,10 +81,6 @@ func TestScreenTrackerSnapshotMatchesFullReplay(t *testing.T) {
 	}
 }
 
-// TestScreenTrackerFeedDoesNotDeadlockOnQuery guards the D12 hazard: a program
-// that emits a terminal query (here DA1, ESC[c) makes the emulator write a reply
-// into its unbuffered response pipe; without the drain goroutine that write would
-// block feed() forever under the monitor's outputMu. feed must return promptly.
 func TestScreenTrackerFeedDoesNotDeadlockOnQuery(t *testing.T) {
 	tr := newScreenTracker(80, 24)
 	t.Cleanup(tr.close)
@@ -120,8 +104,6 @@ func TestScreenTrackerFeedDoesNotDeadlockOnQuery(t *testing.T) {
 	}
 }
 
-// TestScreenTrackerNilSafe verifies the nil-receiver guards so the monitor can
-// call methods before a run has started a mirror (non-TTY commands keep it nil).
 func TestScreenTrackerNilSafe(t *testing.T) {
 	var tr *screenTracker
 	tr.feed([]byte("x"))

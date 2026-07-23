@@ -22,11 +22,8 @@ var (
 	onceStderr sync.Once
 )
 
-// Stdin returns an [io.ReadCloser] which is piped to [os.Stdin] through an [io.Pipe].
-//
-// This is necessary because Read calls on [os.Stdin] cannot be unblocked by closing it.
-//
-// Only one invocation is allowed per process; a second call will panic.
+// Stdin returns a cancellable [io.ReadCloser] for [os.Stdin].
+// A second call panics.
 func Stdin(ctx context.Context) io.ReadCloser {
 	var pr *io.PipeReader
 	called := false
@@ -102,20 +99,14 @@ func (w *stdoutWriteCloser) Close() error {
 	}
 }
 
-// Stdout returns an [io.WriteCloser] which is piped to [os.Stdout] through an [io.Pipe].
-//
-// This is necessary because Write calls on [os.Stdout] cannot be unblocked by closing it.
-//
-// Only one invocation is allowed per process; a second call will panic.
+// Stdout returns a cancellable [io.WriteCloser] for [os.Stdout].
+// A second call panics.
 func Stdout(ctx context.Context) io.WriteCloser {
 	return stdOutput(ctx, "Stdout", os.Stdout, &onceStdout)
 }
 
-// Stderr returns an [io.WriteCloser] which is piped to [os.Stderr] through an [io.Pipe].
-//
-// This is necessary because Write calls on [os.Stderr] cannot be unblocked by closing it.
-//
-// Only one invocation is allowed per process; a second call will panic.
+// Stderr returns a cancellable [io.WriteCloser] for [os.Stderr].
+// A second call panics.
 func Stderr(ctx context.Context) io.WriteCloser {
 	return stdOutput(ctx, "Stderr", os.Stderr, &onceStderr)
 }

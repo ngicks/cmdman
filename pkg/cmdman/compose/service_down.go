@@ -116,7 +116,6 @@ func (s *Service) Down(
 		removeTargets = selected
 	}
 
-	// Remove phase: fully concurrent, regardless of stop errors.
 	removes := removeAllConcurrent(ctx, s, removeTargets, selection.Project)
 
 	return &DownResult{Stops: stops, Removes: removes}, nil

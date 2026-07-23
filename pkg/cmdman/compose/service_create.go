@@ -79,9 +79,7 @@ func (s *Service) Create(
 	var actions []ActionOutcome
 	// Orphan handling is a whole-project concern; skip it when a subset is targeted.
 	if len(opts.CommandNames) == 0 {
-		// Step 4 (action ordering): handle orphans before create/recreate/unchanged.
 		orphanOutcomes := s.handleOrphans(ctx, spec, plan.Orphans, opts.RemoveOrphan)
-		// Prepend orphan outcomes so they appear first in the summary.
 		actions = append(actions, orphanOutcomes...)
 	}
 
@@ -168,7 +166,6 @@ func (s *Service) executeAction(
 		}
 
 		s.report(disp, PhaseRecreating, nil, nil)
-		// Remove then recreate.
 		results, err := s.svc.Remove(ctx, cmdman.RemoveRequest{
 			Targets: []string{existing.ID},
 		})

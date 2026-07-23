@@ -28,20 +28,16 @@ const (
 // CommandAction describes the required action for a single compose command
 // replica (one scale instance).
 type CommandAction struct {
-	// Kind is the action type.
 	Kind ActionKind
 	// Desired is the normalized command (service definition) from the compose
 	// spec; every replica of the command shares it.
-	Desired Command
-	// ScaleIndex is the 1-based replica index this action targets.
+	Desired    Command
 	ScaleIndex int
 	// InstanceName is the concrete cmdman command name for this replica
 	// (Desired.GeneratedName with the scale-index suffix).
 	InstanceName string
-	// Existing is the current store entry, nil for ActionCreate.
-	Existing *store.CommandEntry
-	// DesiredHash is the computed hash of the desired command config.
-	DesiredHash string
+	Existing     *store.CommandEntry
+	DesiredHash  string
 }
 
 // Plan is the result of reconciling a desired compose spec against existing
@@ -73,12 +69,10 @@ type Plan struct {
 //     (workdir, project) labels but a different cmdman.compose.file label than
 //     spec.ComposeFile. Both file paths are included in the error.
 func ComputePlan(spec ComposeSpec, existing []store.CommandEntry) (Plan, error) {
-	// Validate the dependency graph before building actions.
 	if err := ValidateDAG(spec.Commands); err != nil {
 		return Plan{}, fmt.Errorf("dependency graph: %w", err)
 	}
 
-	// Index desired commands by name.
 	desiredByName := make(map[string]Command, len(spec.Commands))
 	for _, c := range spec.Commands {
 		desiredByName[c.Name] = c
@@ -115,13 +109,11 @@ func ComputePlan(spec ComposeSpec, existing []store.CommandEntry) (Plan, error) 
 		}
 	}
 
-	// Build topological layers for action ordering.
 	layers, err := TopoLayers(spec.Commands)
 	if err != nil {
 		return Plan{}, fmt.Errorf("dependency graph: %w", err)
 	}
 
-	// Build name→Command index for layer lookup.
 	cmdByName := make(map[string]Command, len(spec.Commands))
 	for _, c := range spec.Commands {
 		cmdByName[c.Name] = c
@@ -133,7 +125,6 @@ func ComputePlan(spec ComposeSpec, existing []store.CommandEntry) (Plan, error) 
 		for _, name := range layer {
 			desired := cmdByName[name]
 
-			// All replicas share the same runtime config, hence the same hash.
 			desiredHash, err := Hash(desired)
 			if err != nil {
 				return Plan{}, fmt.Errorf("hash command %q: %w", name, err)
@@ -155,7 +146,6 @@ func ComputePlan(spec ComposeSpec, existing []store.CommandEntry) (Plan, error) 
 					actions = append(actions, action)
 					continue
 				}
-				// Consume the matched instance so it is not later flagged excess.
 				delete(existingByInstance, key)
 
 				storedHash := ""

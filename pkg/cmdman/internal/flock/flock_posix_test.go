@@ -17,7 +17,6 @@ func TestTryLockExclusive(t *testing.T) {
 	}
 	defer f1.Close()
 
-	// An unheld lock is acquired.
 	acquired, err := TryLockExclusive(f1)
 	if err != nil {
 		t.Fatalf("TryLockExclusive f1: %v", err)
@@ -26,8 +25,7 @@ func TestTryLockExclusive(t *testing.T) {
 		t.Fatal("TryLockExclusive f1: expected to acquire an unheld lock")
 	}
 
-	// An independent fd cannot take the busy lock; contention is reported as
-	// acquired=false with a nil error, not as an error.
+	// Contention is not an error.
 	f2, err := os.OpenFile(path, os.O_RDWR, 0o644)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +40,6 @@ func TestTryLockExclusive(t *testing.T) {
 		t.Fatal("TryLockExclusive f2: acquired a lock already held by f1")
 	}
 
-	// Once f1 releases, f2 can take it.
 	if err := Unlock(f1); err != nil {
 		t.Fatalf("Unlock f1: %v", err)
 	}

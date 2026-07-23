@@ -25,9 +25,7 @@ import (
 type Service struct {
 	cfg CmdmanConfig
 
-	mu sync.Mutex
-	// mutex guarded fields
-	// No direct access
+	mu      sync.Mutex
 	store   *store.Store
 	evtLog  *eventlog.Writer
 	evtLogE error
@@ -175,8 +173,6 @@ func (s *Service) connectMonitor(
 	_ context.Context,
 	state *model.CommandState,
 ) (conn *grpc.ClientConn, err error) {
-	// Hide transport details because we may add other transports later
-
 	if state.SocketPath == "" {
 		return nil, fmt.Errorf("no socket path for command")
 	}
@@ -188,8 +184,6 @@ func (s *Service) connectMonitor(
 	if err != nil {
 		return nil, fmt.Errorf("connect to monitor: %w", err)
 	}
-
-	// store conn
 
 	return conn, nil
 }

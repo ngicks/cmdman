@@ -26,8 +26,6 @@ func (s *Service) reconcileStart(
 	spec ComposeSpec,
 	names []string,
 ) ([]StartOutcome, error) {
-	// Cycle validation stays strict (unlike Docker Compose, this project rejects
-	// cyclic graphs) before any service action runs.
 	if err := ValidateDAG(spec.Commands); err != nil {
 		return nil, err
 	}
@@ -86,8 +84,6 @@ func (s *Service) upStartAction(
 ) actionResult {
 	cmd := v.Command
 
-	// Index the snapshot by replica name so each desired replica can be checked
-	// for activeness before being (idempotently) started.
 	active := make(map[string]bool, len(v.Snapshot.Instances))
 	for _, in := range v.Snapshot.Instances {
 		active[in.GenName] = in.State == model.EventTypeRunning ||
@@ -276,7 +272,6 @@ func (s *Service) snapshotCommands(
 	if err != nil {
 		return nil, fmt.Errorf("list existing commands before start: %w", err)
 	}
-	// Group replicas under their compose command name, then aggregate.
 	byName := make(map[string][]instanceSnapshot, len(existing))
 	for _, e := range existing {
 		if e.ConfigJSON == nil {

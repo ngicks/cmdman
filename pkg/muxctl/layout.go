@@ -1,23 +1,10 @@
 package muxctl
 
-// ComputeChildCells turns a [PaneSpec.Splits] array into concrete cell counts
-// given the parent pane's size in the split direction.
-//
-// Algorithm:
-//
-//  1. Reserve cells for absolute sizes ("Nc") and percent sizes ("N%",
-//     resolved as floor(parent*N/100)).
-//
-//  2. Reserve one cell per inter-pane separator (len(splits) - 1).
-//
-//  3. Distribute the remaining cells across weighted sizes by ratio.
-//
-//  4. Hand any rounding remainder to the last weighted child so the cells
-//     sum (plus separators) equals parent.
-//
-// A child whose computed size is < 1 is returned as 0; the caller may
-// treat 0 as "skip, too small" and warn (matches the plan's
-// best-effort-on-too-small-terminal behavior).
+// ComputeChildCells resolves absolute and percentage sizes, then distributes
+// remaining cells by weight. Separators consume one cell each, and rounding
+// remainder goes to the last weighted child. parent is the parent pane's cell
+// count in the split direction; splits is index-parallel to its children. A zero
+// result lets the caller skip a child that is too small to realize.
 func ComputeChildCells(parent int, splits []Size) []int {
 	n := len(splits)
 	cells := make([]int, n)
@@ -25,7 +12,6 @@ func ComputeChildCells(parent int, splits []Size) []int {
 		return cells
 	}
 
-	// Pre-resolve absolute and percent sizes; sum weights.
 	reserved := make([]int, n)
 	sumReserved := 0
 	sumWeight := 0
@@ -45,8 +31,6 @@ func ComputeChildCells(parent int, splits []Size) []int {
 	separators := n - 1
 	leftover := max(parent-sumReserved-separators, 0)
 
-	// First pass: assign reserved sizes and proportional shares (rounded
-	// down).
 	assignedWeighted := 0
 	lastWeightedIdx := -1
 	for i, s := range splits {
@@ -63,13 +47,10 @@ func ComputeChildCells(parent int, splits []Size) []int {
 		lastWeightedIdx = i
 	}
 
-	// Hand the rounding remainder to the last weighted child so the cells
-	// (plus separators) fill the parent exactly.
 	if lastWeightedIdx >= 0 && assignedWeighted < leftover {
 		cells[lastWeightedIdx] += leftover - assignedWeighted
 	}
 
-	// Clamp any pane that came out < 1 to 0 (caller treats 0 as skip).
 	for i := range cells {
 		if cells[i] < 1 {
 			cells[i] = 0
@@ -78,8 +59,7 @@ func ComputeChildCells(parent int, splits []Size) []int {
 	return cells
 }
 
-// ParentDim returns the parent-pane dimension along the container's split
-// direction: width for horizontal, height for vertical.
+// ParentDim returns width for horizontal splits and height for vertical ones.
 func ParentDim(dir Direction, w, h int) int {
 	if dir == DirVertical {
 		return h
@@ -87,8 +67,7 @@ func ParentDim(dir Direction, w, h int) int {
 	return w
 }
 
-// ChildDims returns the (width, height) a child gets given the container's
-// direction, the parent's dims, and the child's allocated cells.
+// ChildDims returns child width and height for an allocated split size.
 func ChildDims(dir Direction, parentW, parentH, childCells int) (int, int) {
 	if dir == DirVertical {
 		return parentW, childCells
@@ -96,9 +75,7 @@ func ChildDims(dir Direction, parentW, parentH, childCells int) (int, int) {
 	return childCells, parentH
 }
 
-// PickFocus returns the name of the leaf to focus: the first leaf with
-// Focus=true, or the first leaf in document order. Returns "" if the tree
-// contains no leaves (impossible after Validate, but safe).
+// PickFocus returns the first focused leaf, then the first leaf, or "" if none.
 func PickFocus(root PaneSpec) string {
 	var first string
 	var focused string
@@ -130,9 +107,8 @@ func PickFocus(root PaneSpec) string {
 	return first
 }
 
-// AppendLeafNames appends every leaf name under node (depth-first, document
-// order) to dst and returns the extended slice. Drivers use it to report the
-// panes dropped when a terminal is too small to fit the layout.
+// AppendLeafNames appends all leaves under node to dst in document order,
+// retaining duplicates, and returns the extended slice.
 func AppendLeafNames(dst []string, node PaneSpec) []string {
 	if node.IsLeaf() {
 		dst = append(dst, node.Name)

@@ -1,9 +1,4 @@
-// Package versioninfo combines a project-supplied version string with the
-// VCS / build info embedded by `go build` (via runtime/debug.ReadBuildInfo).
-//
-// The project's version constant lives in pkg/<name>/version.go (rewritten
-// by the release helper at internal/cmd/release). Callers pass that
-// constant into ReadVersionInfo to get the full picture.
+// Package versioninfo combines a project version with Go VCS build metadata.
 package versioninfo
 
 import "runtime/debug"
@@ -20,9 +15,8 @@ type Info struct {
 	GoVersion  string // bi.GoVersion (the toolchain that built the binary)
 }
 
-// ReadVersionInfo combines version with the VCS / build info recorded by
-// `go build`. Pass the project's Version constant; the rest is derived
-// from runtime/debug.ReadBuildInfo.
+// ReadVersionInfo combines the supplied project version with build metadata
+// returned by runtime/debug.ReadBuildInfo.
 func ReadVersionInfo(version string) Info {
 	info := Info{Version: version}
 	bi, ok := debug.ReadBuildInfo()

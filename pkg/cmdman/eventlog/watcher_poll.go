@@ -44,8 +44,7 @@ func (w *pollWatcher) Run(ctx context.Context) error {
 		return size, ident, modNs, true
 	}
 
-	// Emit an initial token so readers wake up and consume any data
-	// already on disk before the first poll interval elapses.
+	// Wake readers for content already on disk.
 	w.send()
 
 	for {
@@ -56,8 +55,7 @@ func (w *pollWatcher) Run(ctx context.Context) error {
 		}
 		size, ident, modNs, ok := stat()
 		if !ok {
-			// File may have been rotated away (and not yet recreated by
-			// the next writer). Surface a wake-up so readers can reopen.
+			// Rotation may briefly remove the active path.
 			if lastIdent != (fileIdent{}) || lastSize != 0 {
 				lastSize = 0
 				lastIdent = fileIdent{}

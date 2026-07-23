@@ -10,34 +10,24 @@ import (
 
 // CommandConfig is the canonical command configuration stored in CommandConfig.JSON.
 type CommandConfig struct {
-	// Argv is the command and its arguments.
-	Argv []string `json:"argv"`
-	// Dir is the working directory for the command.
-	Dir string `json:"dir,omitzero"`
-	// Env is environment variables for the command.
-	Env []string `json:"env,omitzero"`
-	// RestartPolicy is one of "no", "on-failure", "always".
+	Argv          []string      `json:"argv"`
+	Dir           string        `json:"dir,omitzero"`
+	Env           []string      `json:"env,omitzero"`
 	RestartPolicy RestartPolicy `json:"restart_policy"`
 	// MaxRetries caps the number of automatic restarts under the "on-failure"
 	// policy. Zero means unlimited. It is only valid with "on-failure".
-	MaxRetries int `json:"max_retries,omitzero"`
-	// StopSignal is the default signal used by stop when no override is provided.
-	StopSignal string `json:"stop_signal,omitzero"`
-	// Tty controls whether the command is attached to a pseudo-terminal.
-	Tty bool `json:"tty"`
-	// ScrollbackBytes is the scrollback buffer size in bytes.
-	ScrollbackBytes int `json:"scrollback_bytes"`
-	// LogDriver controls how command output is persisted to disk.
-	LogDriver logdriver.LogDriver `json:"log_driver"`
+	MaxRetries      int                 `json:"max_retries,omitzero"`
+	StopSignal      string              `json:"stop_signal,omitzero"`
+	Tty             bool                `json:"tty"`
+	ScrollbackBytes int                 `json:"scrollback_bytes"`
+	LogDriver       logdriver.LogDriver `json:"log_driver"`
 	// LogOpts is a driver-specific bag of options, mirroring podman's
 	// `--log-opt KEY=VALUE` mechanism. Valid keys depend on LogDriver.
 	LogOpts map[string]string `json:"log_opts,omitzero"`
-	// Labels are user-defined key-value metadata.
-	Labels map[string]string `json:"labels,omitzero"`
-	// Annotations are system metadata (e.g., auto-remove).
+	Labels  map[string]string `json:"labels,omitzero"`
+	// Annotations hold system metadata rather than user-defined labels.
 	Annotations map[string]string `json:"annotations,omitzero"`
-	// CommandDir is the per-command directory path.
-	CommandDir string `json:"command_dir"`
+	CommandDir  string            `json:"command_dir"`
 }
 
 // Validate rejects incomplete command configs so runtime code can assume values are present.
@@ -110,16 +100,13 @@ func (c *CommandConfig) BackfillDefaults() {
 
 // CommandState stores mutable runtime fields in CommandState.JSON.
 type CommandState struct {
-	// MonitorPID is the PID of the monitor process.
+	// MonitorPID identifies the process supervising this command.
 	MonitorPID int `json:"monitor_pid,omitzero"`
-	// SocketPath is the Unix socket path for the monitor gRPC server.
+	// SocketPath is the monitor's Unix-domain gRPC endpoint.
 	SocketPath string `json:"socket_path,omitzero"`
-	// StartedAt is the RFC3339 timestamp when the command started.
-	StartedAt string `json:"started_at,omitzero"`
-	// FinishedAt is the RFC3339 timestamp when the command finished.
-	FinishedAt string `json:"finished_at,omitzero"`
-	// RestartCount is how many times the command has been restarted.
-	RestartCount int `json:"restart_count"`
-	// Error contains error details when the command is in failed state.
-	Error string `json:"error,omitzero"`
+	// StartedAt and FinishedAt are RFC3339 command lifecycle timestamps.
+	StartedAt    string `json:"started_at,omitzero"`
+	FinishedAt   string `json:"finished_at,omitzero"`
+	RestartCount int    `json:"restart_count"`
+	Error        string `json:"error,omitzero"`
 }
