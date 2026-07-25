@@ -14,7 +14,8 @@ import (
 
 // fakeTmux writes an executable stub that stands in for the tmux binary so a
 // test can drive ApplyLayout without a real tmux server and inspect the exact
-// order of subcommands it issues (Config.Path routes the executor at it).
+// order of subcommands it issues (ServerConfig.Executable routes the executor at
+// it).
 //
 // The stub appends each invocation's verb (its first argument) to a record file
 // and emulates just enough of tmux for ApplyLayout to complete: list-panes
@@ -69,9 +70,14 @@ func fakeTmux(t *testing.T) (path string, recorded func() []string) {
 func TestApplyLayout_RespawnsAfterAllSplits(t *testing.T) {
 	path, recorded := fakeTmux(t)
 
-	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
-		DriverOpt: map[string]string{"path": path},
-		WindowID:  "@1",
+	srv, err := tmuxctl.Driver{}.Connect(
+		context.Background(), muxctl.ServerConfig{Executable: path},
+	)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	sess, err := srv.New(context.Background(), muxctl.Config{
+		WindowID: "@1",
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

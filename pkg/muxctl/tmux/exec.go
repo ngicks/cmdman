@@ -3,6 +3,7 @@ package tmux
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -21,15 +22,8 @@ func newExecutor(path, socket string) *executor {
 	return &executor{path: path, socket: socket}
 }
 
-// newExecutorFor builds an executor from a driver-option bag, honoring the
-// tmux-specific "path" and "socket" keys carried by [muxctl.Config.DriverOpt]
-// and [muxctl.ListOptions.DriverOpt]. A nil opt map reads as all-empty.
-func newExecutorFor(opt map[string]string) *executor {
-	return newExecutor(opt["path"], opt["socket"])
-}
-
-// run invokes tmux with the configured prefix (-L socket) plus args and
-// returns trimmed stdout. The error wraps stderr to surface tmux's own
+// run invokes tmux with the configured socket prefix (see buildArgs) plus args
+// and returns trimmed stdout. The error wraps stderr to surface tmux's own
 // diagnostics.
 func (e *executor) run(ctx context.Context, args ...string) (string, error) {
 	full := e.buildArgs(args)
@@ -47,9 +41,17 @@ func (e *executor) run(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
+// buildArgs prefixes the socket-selecting flag. A socket value containing a
+// path separator is a socket file path (tmux -S <path>); a bare name selects a
+// named server in tmux's default socket dir (tmux -L <name>); empty selects the
+// default server (no flag).
 func (e *executor) buildArgs(args []string) []string {
-	if e.socket != "" {
+	switch {
+	case e.socket == "":
+		return args
+	case strings.ContainsRune(e.socket, os.PathSeparator):
+		return append([]string{"-S", e.socket}, args...)
+	default:
 		return append([]string{"-L", e.socket}, args...)
 	}
-	return args
 }

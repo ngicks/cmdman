@@ -23,8 +23,8 @@ func TestEmbeddedMuxLayoutParsed(t *testing.T) {
 	assert.NilError(t, err)
 
 	assert.Assert(t, spec.Mux != nil, "embedded mux section should be decoded")
-	assert.Equal(t, spec.Mux.Driver, "tmux")
-	assert.Equal(t, spec.Mux.DriverOpt["socket"], "cmdman")
+	assert.Equal(t, spec.Mux.Driver.Name, "tmux")
+	assert.Equal(t, spec.Mux.Driver.Socket, "cmdman")
 	assert.Equal(t, len(spec.Mux.Layouts), 2)
 
 	// Layout "services".

@@ -44,7 +44,6 @@ func (s *Service) MuxUp(ctx context.Context, opts MuxUpOption) error {
 
 	scalePositions, err := mux.ReadScaleState(ctx, mux.ScaleStateOptions{
 		Driver:      spec.Driver,
-		DriverOpt:   spec.DriverOpt,
 		SessionName: opts.SessionName,
 		Identity:    selection.ProjectIdentity(),
 	})
@@ -97,8 +96,7 @@ func (s *Service) MuxDown(ctx context.Context, opts MuxDownOption) error {
 	selection := opts.Selection
 	spec := *selection.Spec.Mux
 	return mux.Down(ctx, mux.DownOptions{
-		Driver:    spec.Driver,
-		DriverOpt: spec.DriverOpt,
+		Driver: spec.Driver,
 		// SessionName is a narrowing filter only; it is not used to derive the
 		// identity. An explicit session keeps the scan in one session.
 		SessionName: opts.SessionName,
@@ -148,7 +146,6 @@ func (s *Service) MuxLs(ctx context.Context, opts MuxLsOption) (MuxLsResult, err
 
 	windows, err := mux.List(ctx, mux.ListOptions{
 		Driver:      spec.Driver,
-		DriverOpt:   spec.DriverOpt,
 		SessionName: opts.SessionName,
 		Identity:    identity,
 	})

@@ -5,27 +5,28 @@ import (
 	"os"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/mux"
+	"github.com/ngicks/cmdman/pkg/muxctl"
 )
 
-// specDriverOpts extracts the driver and driver_opt fields from the spec at
-// path. It is used by runMuxDown and runMuxLs to honour a custom socket when
+// specDriver extracts the driver spec (name, path, socket, opts) from the spec
+// at path. It is used by runMuxDown and runMuxLs to honour a custom socket when
 // one is declared in the spec without requiring the caller to resolve the full
 // layout. The stdin default ("-") is treated as no file, so teardown/listing
 // uses the default driver rather than blocking on stdin.
-func specDriverOpts(path string) (driver string, driverOpt map[string]string, err error) {
+func specDriver(path string) (muxctl.DriverSpec, error) {
 	if path == "-" {
-		return "", nil, nil
+		return muxctl.DriverSpec{}, nil
 	}
 	src, closer, err := openSpecSource(path)
 	if err != nil {
-		return "", nil, err
+		return muxctl.DriverSpec{}, err
 	}
 	defer closer()
 	spec, err := mux.Decode(src)
 	if err != nil {
-		return "", nil, err
+		return muxctl.DriverSpec{}, err
 	}
-	return spec.Driver, spec.DriverOpt, nil
+	return spec.Driver, nil
 }
 
 // openSpecSource opens the spec source. An empty or "-" path reads from stdin

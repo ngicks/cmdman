@@ -52,22 +52,28 @@ func killServer(t *testing.T, socket string) {
 	_ = cmd.Run()
 }
 
-// socketOpt builds the driver-option bag selecting a tmux server by socket
-// name, as carried by [muxctl.Config.DriverOpt] / [muxctl.ListOptions.DriverOpt].
-func socketOpt(socket string) map[string]string {
-	return map[string]string{"socket": socket}
+// newServer connects a tmux [muxctl.Server] to the per-test socket via the
+// registered driver, exercising the same Connect path production code takes.
+// socket is a bare -L name (see uniqueSocket); an -S socket-path binding is
+// covered separately in exec_test.go.
+func newServer(t *testing.T, socket string) muxctl.Server {
+	t.Helper()
+	srv, err := tmuxctl.Driver{}.Connect(context.Background(), muxctl.ServerConfig{Socket: socket})
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	return srv
 }
 
 // newSession constructs a Session against a fresh per-test tmux server and
 // registers cleanup to kill the server when the test ends. It wires the
 // ctrl-p,ctrl-q detach sequence (in tmux send-keys syntax) so tests exercising
 // the graceful-detach path on re-apply behave like the real cmdman caller.
-func newSession(t *testing.T, windowName string) (*tmuxctl.Session, string) {
+func newSession(t *testing.T, windowName string) (muxctl.Session, string) {
 	t.Helper()
 	socket := uniqueSocket(t)
 	t.Cleanup(func() { killServer(t, socket) })
-	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
-		DriverOpt:        socketOpt(socket),
+	sess, err := newServer(t, socket).New(context.Background(), muxctl.Config{
 		SessionName:      "cmdman-test",
 		WindowName:       windowName,
 		ViewerDetachKeys: []string{"C-p", "C-q"},
@@ -129,7 +135,7 @@ func sortedKeys(panes map[string]muxctl.Pane) []string {
 
 // waitForMarker polls StatWindow until the window's marker equals want or the
 // deadline passes (after which the test fails).
-func waitForMarker(t *testing.T, sess *tmuxctl.Session, want int) {
+func waitForMarker(t *testing.T, sess muxctl.Session, want int) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	var last int

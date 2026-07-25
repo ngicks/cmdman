@@ -40,13 +40,12 @@ const scaleOption = userOptionPrefix + "scale"
 // option returns "" (no error). muxctl does not interpret the value; decoding
 // it is the caller's responsibility (see pkg/cmdman/mux, which owns the scale
 // codec), keeping "scale" semantics out of the driver.
-func ReadWindowState(
+func (srv *Server) ReadWindowState(
 	ctx context.Context,
-	opts muxctl.ListOptions,
 	windowID string,
 	key muxctl.StateKey,
 ) (string, error) {
-	e := newExecutorFor(opts.DriverOpt)
+	e := srv.exec
 	out, err := e.run(
 		ctx, "show-options", "-w", "-t", windowID, "-v", stateOption(key),
 	)
@@ -62,14 +61,13 @@ func ReadWindowState(
 // a fully-cleared state leaves no stale value behind. muxctl treats the value
 // as opaque; the caller owns any encoding (the scale read-modify-write over the
 // decoded map lives in pkg/cmdman/mux, which owns the scale codec).
-func WriteWindowState(
+func (srv *Server) WriteWindowState(
 	ctx context.Context,
-	opts muxctl.ListOptions,
 	windowID string,
 	key muxctl.StateKey,
 	value string,
 ) error {
-	e := newExecutorFor(opts.DriverOpt)
+	e := srv.exec
 	if value == "" {
 		// Nothing to store: unset the option entirely.
 		_, _ = e.run(ctx, "set-option", "-w", "-u", "-t", windowID, stateOption(key))

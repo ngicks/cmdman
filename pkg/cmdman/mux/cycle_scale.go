@@ -59,8 +59,10 @@ type CycleScaleResult struct {
 
 // ScaleStateOptions configures [ReadScaleState].
 type ScaleStateOptions struct {
-	Driver    string
-	DriverOpt map[string]string
+	// Driver selects and configures the multiplexer server. An empty Driver.Name
+	// autodetects from Env; Path/Socket/Opts feed [muxctl.Driver.Connect] to
+	// bind the server.
+	Driver muxctl.DriverSpec
 	// SessionName narrows discovery.
 	SessionName string
 	// Identity filters windows by ownership stamp.
@@ -84,13 +86,12 @@ func CycleScale(ctx context.Context, opts CycleScaleOptions) (CycleScaleResult, 
 		)
 	}
 
-	driver, err := resolveDriver(opts.Spec.Driver, os.Environ())
+	server, err := resolveServer(ctx, opts.Spec.Driver, os.Environ())
 	if err != nil {
 		return CycleScaleResult{}, err
 	}
 
-	rows, err := driver.ListWindows(ctx, muxctl.ListOptions{
-		DriverOpt: opts.Spec.DriverOpt,
+	rows, err := server.ListWindows(ctx, muxctl.ListOptions{
 		Session:   opts.SessionName,
 		Identity:  opts.Identity,
 		StateKeys: []muxctl.StateKey{muxctl.StateKeyScale},
@@ -109,12 +110,8 @@ func CycleScale(ctx context.Context, opts CycleScaleOptions) (CycleScaleResult, 
 		errs    []error
 	)
 
-	listOpts := muxctl.ListOptions{
-		DriverOpt: opts.Spec.DriverOpt,
-	}
-
 	for _, window := range rows {
-		res, cycleErr := cycleScaleWindow(ctx, driver, opts, window, listOpts)
+		res, cycleErr := cycleScaleWindow(ctx, server, opts, window)
 		if cycleErr != nil {
 			errs = append(errs, cycleErr)
 			// Still append a partial result when available.
@@ -134,10 +131,9 @@ func CycleScale(ctx context.Context, opts CycleScaleOptions) (CycleScaleResult, 
 // pane (when visible), and persists the position.
 func cycleScaleWindow(
 	ctx context.Context,
-	driver muxctl.Driver,
+	server muxctl.Server,
 	opts CycleScaleOptions,
 	window muxctl.Window,
-	listOpts muxctl.ListOptions,
 ) (CycleScaleWindowResult, error) {
 	base := CycleScaleWindowResult{
 		SessionName: window.SessionName,
@@ -200,8 +196,7 @@ func cycleScaleWindow(
 	resolvedName := fmt.Sprintf("%s-%d", opts.Command, targetPos)
 	base.ResolvedName = resolvedName
 
-	sess, ok, openErr := driver.Open(ctx, muxctl.Config{
-		DriverOpt:        opts.Spec.DriverOpt,
+	sess, ok, openErr := server.Open(ctx, muxctl.Config{
 		WindowID:         window.WindowID,
 		ViewerDetachKeys: viewerDetachKeys,
 	})
@@ -216,7 +211,7 @@ func cycleScaleWindow(
 		return base, nil
 	}
 
-	paneID, visible, findErr := driver.FindPane(ctx, listOpts, window.WindowID, opts.Command)
+	paneID, visible, findErr := server.FindPane(ctx, window.WindowID, opts.Command)
 	if findErr != nil {
 		return base, fmt.Errorf(
 			"mux: window %s: find leaf pane for %q: %w",
@@ -248,7 +243,7 @@ func cycleScaleWindow(
 	}
 
 	if writeErr := writeScalePosition(
-		ctx, driver, listOpts, window.WindowID, opts.Command, targetPos,
+		ctx, server, window.WindowID, opts.Command, targetPos,
 	); writeErr != nil {
 		return base, fmt.Errorf(
 			"mux: window %s: write scale position for %q: %w",
@@ -259,20 +254,19 @@ func cycleScaleWindow(
 	return base, nil
 }
 
-// writeScalePosition performs the read-modify-write of the driver's scale
+// writeScalePosition performs the read-modify-write of the server's scale
 // state (state key muxctl.StateKeyScale) for a single command on windowID: it reads
 // the current raw value, decodes it, sets cmd to pos (pos <= 0 removes cmd),
-// re-encodes, and writes it back through the driver's window-state KV (which
+// re-encodes, and writes it back through the server's window-state KV (which
 // unsets the state when the encoding is empty). The scale codec and this RMW
-// live here rather than in the driver so "scale" semantics stay out of muxctl.
+// live here rather than in the server so "scale" semantics stay out of muxctl.
 func writeScalePosition(
 	ctx context.Context,
-	driver muxctl.Driver,
-	opts muxctl.ListOptions,
+	server muxctl.Server,
 	windowID, cmd string,
 	pos int,
 ) error {
-	raw, err := driver.ReadWindowState(ctx, opts, windowID, muxctl.StateKeyScale)
+	raw, err := server.ReadWindowState(ctx, windowID, muxctl.StateKeyScale)
 	if err != nil {
 		return fmt.Errorf("mux: read scale positions for window %s: %w", windowID, err)
 	}
@@ -285,9 +279,8 @@ func writeScalePosition(
 	} else {
 		m[cmd] = pos
 	}
-	return driver.WriteWindowState(
+	return server.WriteWindowState(
 		ctx,
-		opts,
 		windowID,
 		muxctl.StateKeyScale,
 		encodeScalePositions(m),
@@ -304,13 +297,12 @@ func ReadScaleState(ctx context.Context, opts ScaleStateOptions) (map[string]int
 		env = os.Environ()
 	}
 
-	driver, err := resolveDriver(opts.Driver, env)
+	server, err := resolveServer(ctx, opts.Driver, env)
 	if err != nil {
 		return nil, err
 	}
 
-	rows, err := driver.ListWindows(ctx, muxctl.ListOptions{
-		DriverOpt: opts.DriverOpt,
+	rows, err := server.ListWindows(ctx, muxctl.ListOptions{
 		Session:   opts.SessionName,
 		Identity:  opts.Identity,
 		StateKeys: []muxctl.StateKey{muxctl.StateKeyScale},

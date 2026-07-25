@@ -21,7 +21,7 @@ func muxComposeYAML(name, workDir string) string {
 	}
 	return "name: " + name + "\n" + wd +
 		"commands:\n  a:\n    args: [echo, a]\n" +
-		"mux:\n  driver: tmux\n  layouts:\n    - name: solo\n      root: a\n"
+		"mux:\n  driver:\n    name: tmux\n  layouts:\n    - name: solo\n      root: a\n"
 }
 
 // plainComposeYAML builds a compose file with no mux: section.

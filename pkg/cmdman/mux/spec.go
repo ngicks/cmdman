@@ -15,11 +15,14 @@ import (
 // (cmdman command name/ID or compose service name) and a [PaneSpec.Mode],
 // which [Build] turns into concrete argv.
 type Spec struct {
-	Driver    string            `yaml:"driver,omitempty"`
-	DriverOpt map[string]string `yaml:"driver_opt,omitempty"`
-	Layouts   []Layout          `yaml:"layouts"`
+	// Driver selects and configures the backend multiplexer server; its Name
+	// picks the driver (empty autodetects), the rest maps onto a
+	// [muxctl.ServerConfig] via [muxctl.DriverSpec.ServerConfig].
+	Driver  muxctl.DriverSpec `yaml:"driver,omitempty"`
+	Layouts []Layout          `yaml:"layouts"`
 	// Unknown captures unrecognized top-level keys (per project convention:
-	// surface, never silently drop).
+	// surface, never silently drop). The removed top-level driver_opt key of the
+	// old string-driver form lands here on legacy specs.
 	Unknown map[string]any `yaml:",inline"`
 }
 

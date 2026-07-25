@@ -18,10 +18,22 @@ import (
 // across layout re-applies.
 const ownerOption = "@cmdman_window"
 
-// Session is a tmux-backed [muxctl.Session] controlling one window. It is
-// configured by a [muxctl.Config]; the tmux driver reads the "path" and
-// "socket" keys from [muxctl.Config.DriverOpt] and treats the rest of the
-// config as driver-agnostic.
+// Server is a tmux server bound once by [Driver.Connect]. It builds, enumerates,
+// and stores per-window state for cmdman-owned windows through a single shared
+// executor — the tmux binary and -L socket captured at Connect time — so its
+// session-less operations no longer thread that addressing per call. It
+// implements [muxctl.Server]; the sessions [Server.New] and [Server.Open] return
+// run their commands through the same executor.
+type Server struct {
+	exec *executor
+}
+
+var _ muxctl.Server = (*Server)(nil)
+
+// Session is a tmux-backed [muxctl.Session] controlling one window. It is built
+// by [Server.New] or [Server.Open] and runs its tmux commands through the
+// executor shared with the parent [Server]; the retained [muxctl.Config] supplies
+// the driver-agnostic window settings (e.g. ViewerDetachKeys).
 type Session struct {
 	cfg      muxctl.Config
 	exec     *executor
@@ -30,12 +42,26 @@ type Session struct {
 
 var _ muxctl.Session = (*Session)(nil)
 
+// CurrentSessionName implements [muxctl.Server.CurrentSessionName]. It runs
+// "display-message -p '#{session_name}'" through the shared executor, which
+// resolves the session of the attached client. Any failure (no server, no
+// attached client, tmux error) means "not inside the multiplexer": it yields
+// ok=false with a nil error rather than surfacing the tmux diagnostic, mirroring
+// the tolerance the mux layer applied when it shelled out to tmux itself.
+func (srv *Server) CurrentSessionName(ctx context.Context) (name string, ok bool, err error) {
+	out, runErr := srv.exec.run(ctx, "display-message", "-p", "#{session_name}")
+	if runErr != nil || out == "" {
+		return "", false, nil
+	}
+	return out, true, nil
+}
+
 // New constructs a Session targeting either a known window (cfg.WindowID)
 // or a window found-or-created by name (cfg.SessionName + cfg.WindowName).
 // It does not apply any layout — call [Session.ApplyLayout] to populate
 // the window.
-func New(ctx context.Context, cfg muxctl.Config) (*Session, error) {
-	e := newExecutorFor(cfg.DriverOpt)
+func (srv *Server) New(ctx context.Context, cfg muxctl.Config) (muxctl.Session, error) {
+	e := srv.exec
 
 	var wid string
 	switch {
@@ -113,8 +139,8 @@ func New(ctx context.Context, cfg muxctl.Config) (*Session, error) {
 //     (find-only). A missing session or window yields ok=false rather than an
 //     error: from a teardown caller's view, "no session/window" simply means
 //     "nothing to detach".
-func Open(ctx context.Context, cfg muxctl.Config) (*Session, bool, error) {
-	e := newExecutorFor(cfg.DriverOpt)
+func (srv *Server) Open(ctx context.Context, cfg muxctl.Config) (muxctl.Session, bool, error) {
+	e := srv.exec
 
 	var wid string
 	switch {

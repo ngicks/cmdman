@@ -25,39 +25,12 @@ func uniqueName(t *testing.T) string {
 	return t.Name() + "#" + strconv.FormatUint(nameSeq.Add(1), 10)
 }
 
-// stubDriver is a no-op [muxctl.Driver] used only to exercise the registry.
+// stubDriver is a no-op [muxctl.Driver] used only to exercise the registry, so
+// its Connect never needs to yield a working [muxctl.Server].
 type stubDriver struct{}
 
-func (stubDriver) New(context.Context, muxctl.Config) (muxctl.Session, error) {
+func (stubDriver) Connect(context.Context, muxctl.ServerConfig) (muxctl.Server, error) {
 	return nil, errors.New("stub")
-}
-
-func (stubDriver) Open(context.Context, muxctl.Config) (muxctl.Session, bool, error) {
-	return nil, false, nil
-}
-
-func (stubDriver) ListWindows(
-	context.Context, muxctl.ListOptions,
-) ([]muxctl.Window, error) {
-	return nil, nil
-}
-
-func (stubDriver) FindPane(
-	context.Context, muxctl.ListOptions, string, string,
-) (string, bool, error) {
-	return "", false, nil
-}
-
-func (stubDriver) ReadWindowState(
-	context.Context, muxctl.ListOptions, string, muxctl.StateKey,
-) (string, error) {
-	return "", nil
-}
-
-func (stubDriver) WriteWindowState(
-	context.Context, muxctl.ListOptions, string, muxctl.StateKey, string,
-) error {
-	return nil
 }
 
 // TestRegisterAndLookupDriver covers the happy path: a registered driver is

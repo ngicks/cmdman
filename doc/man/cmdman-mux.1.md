@@ -23,7 +23,7 @@ their detached monitors: destroying the tmux window only destroys viewers.
 When invoked inside tmux, `mux up` targets the current session by default and
 may reuse a safe current window. Outside tmux it creates or updates a detached
 session named `cmdman` and prints an attach command. The v1 driver is tmux;
-`driver_opt.path` and `driver_opt.socket` can select a binary or isolated tmux
+`driver.path` and `driver.socket` can select a binary or isolated tmux
 server.
 
 Layouts are trees of horizontal (`h`) or vertical (`v`) containers with
@@ -62,8 +62,8 @@ in-pane viewers are detached, the window collapses to a single clean pane,
 and the tmux options cmdman set are cleared. The supervised commands keep
 running — only the disposable viewers are torn down.
 
-The spec path is optional: when given it is read only to extract `driver` and
-`driver_opt` (for example a custom socket). With no path or the stdin default
+The spec path is optional: when given it is read only to extract the `driver`
+object (for example a custom socket). With no path or the stdin default
 `-`, teardown uses the default driver.
 
 Window discovery is server-wide with no dependence on `$TMUX`: `down` works
@@ -99,8 +99,8 @@ Discovery is server-wide and requires no `$TMUX` context; it works from any
 pane, from `run-shell`, or outside tmux. `--session` narrows the listing to
 one session.
 
-The spec path is optional: when given it is read only to extract `driver` and
-`driver_opt` (for example a custom socket). With no path or the stdin default
+The spec path is optional: when given it is read only to extract the `driver`
+object (for example a custom socket). With no path or the stdin default
 `-`, listing uses the default driver with no custom options.
 
 Columns: `SESSION`, `WINDOW`, `ID`, `IDENTITY`, `LAYOUT`, `SCALE`.
@@ -141,7 +141,8 @@ Columns: `SESSION`, `WINDOW`, `ID`, `IDENTITY`, `LAYOUT`, `SCALE`.
 
 ```yaml
 mux:
-  driver: tmux
+  driver:
+    name: tmux
   layouts:
     - name: main
       root:

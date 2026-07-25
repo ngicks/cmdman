@@ -12,7 +12,6 @@ import (
 	"github.com/ngicks/go-common/contextkey"
 
 	"github.com/ngicks/cmdman/pkg/muxctl"
-	tmuxctl "github.com/ngicks/cmdman/pkg/muxctl/tmux"
 )
 
 func TestNew_CreatesSessionAndWindow(t *testing.T) {
@@ -32,8 +31,7 @@ func TestNew_FindsExistingWindow(t *testing.T) {
 	requireTmux(t)
 	sess1, socket := newSession(t, "cmdman")
 
-	sess2, err := tmuxctl.New(context.Background(), muxctl.Config{
-		DriverOpt:   socketOpt(socket),
+	sess2, err := newServer(t, socket).New(context.Background(), muxctl.Config{
 		SessionName: "cmdman-test",
 		WindowName:  "cmdman",
 	})
@@ -60,9 +58,8 @@ func TestNew_WindowIDBypassesFindOrCreate(t *testing.T) {
 	wantID := run(t, socket, "new-window", "-d", "-t", "preexisting",
 		"-n", "byid", "-P", "-F", "#{window_id}")
 
-	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
-		DriverOpt: socketOpt(socket),
-		WindowID:  wantID,
+	sess, err := newServer(t, socket).New(context.Background(), muxctl.Config{
+		WindowID: wantID,
 	})
 	if err != nil {
 		t.Fatalf("New with WindowID: %v", err)
@@ -99,8 +96,7 @@ func TestNew_ReusesSinglePaneCurrentWindow(t *testing.T) {
 	run(t, socket, "new-session", "-d", "-s", "main", "-n", "work")
 	curID := run(t, socket, "display-message", "-t", "main:work", "-p", "#{window_id}")
 
-	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
-		DriverOpt:          socketOpt(socket),
+	sess, err := newServer(t, socket).New(context.Background(), muxctl.Config{
 		SessionName:        "main",
 		WindowName:         "cmdman",
 		ReuseCurrentWindow: true,
@@ -127,8 +123,7 @@ func TestNew_DoesNotReuseMultiPaneCurrentWindow(t *testing.T) {
 	run(t, socket, "split-window", "-t", "main:work")
 	curID := run(t, socket, "display-message", "-t", "main:work", "-p", "#{window_id}")
 
-	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
-		DriverOpt:          socketOpt(socket),
+	sess, err := newServer(t, socket).New(context.Background(), muxctl.Config{
 		SessionName:        "main",
 		WindowName:         "cmdman",
 		ReuseCurrentWindow: true,
@@ -157,8 +152,8 @@ func TestNew_ReusesOwnedCurrentWindow(t *testing.T) {
 
 	// Build the initial session with an ownership stamp so currentWindowToReuse
 	// recognises it via @cmdman_window regardless of pane count or name.
-	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
-		DriverOpt:        socketOpt(socket),
+	srv := newServer(t, socket)
+	sess, err := srv.New(context.Background(), muxctl.Config{
 		SessionName:      "cmdman-test",
 		WindowName:       "cmdman-owned",
 		OwnedIdentity:    "my-project",
@@ -176,8 +171,7 @@ func TestNew_ReusesOwnedCurrentWindow(t *testing.T) {
 	// Make the owned window the session's current window.
 	run(t, socket, "select-window", "-t", ownedID)
 
-	sess2, err := tmuxctl.New(context.Background(), muxctl.Config{
-		DriverOpt:          socketOpt(socket),
+	sess2, err := srv.New(context.Background(), muxctl.Config{
 		SessionName:        "cmdman-test",
 		WindowName:         "unrelated-name",
 		ReuseCurrentWindow: true,

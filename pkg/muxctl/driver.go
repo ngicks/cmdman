@@ -17,24 +17,21 @@ type Config struct {
 	// WindowID directly targets an existing driver-native window.
 	WindowID string
 
-	// OwnedIdentity is an opaque durable stamp used by [Driver.ListWindows].
+	// OwnedIdentity is an opaque durable stamp used by [Server.ListWindows].
 	// Empty disables stamping.
 	OwnedIdentity string
 
 	// ReuseCurrentWindow permits taking over a safe current window when
-	// WindowID is empty; otherwise the driver finds or creates WindowName.
+	// WindowID is empty; otherwise the server finds or creates WindowName.
 	ReuseCurrentWindow bool
 
 	// ViewerDetachKeys gracefully detach old in-pane viewers before teardown.
 	// They must match the sequence the viewers honor; empty disables detaching.
 	ViewerDetachKeys []string
-
-	// DriverOpt carries driver-specific options.
-	DriverOpt map[string]string
 }
 
-// StateKey names a per-window state slot addressed by [Driver.ReadWindowState],
-// [Driver.WriteWindowState], and [ListOptions.StateKeys]. A StateKey MUST be a
+// StateKey names a per-window state slot addressed by [Server.ReadWindowState],
+// [Server.WriteWindowState], and [ListOptions.StateKeys]. A StateKey MUST be a
 // short [A-Za-z0-9_-] token: drivers splice it into their native identifiers
 // unescaped (the tmux driver forms the window option "@cmdman_<key>"), so it is
 // a closed, code-declared vocabulary — not arbitrary external input.
@@ -54,17 +51,14 @@ type ListOptions struct {
 	// Identity filters ownership stamps exactly; empty returns all stamped windows.
 	Identity string
 
-	// StateKeys lists the per-window state slots [Driver.ListWindows] fetches
+	// StateKeys lists the per-window state slots [Server.ListWindows] fetches
 	// inline into each [Window.State], so callers avoid a round-trip per
 	// window. Empty leaves each row's State nil. See [StateKey] for the token
 	// constraint the driver relies on.
 	StateKeys []StateKey
-
-	// DriverOpt must select the same server used to build the window.
-	DriverOpt map[string]string
 }
 
-// Window is a row returned by [Driver.ListWindows]: one window that carries a
+// Window is a row returned by [Server.ListWindows]: one window that carries a
 // cmdman ownership stamp.
 type Window struct {
 	SessionName string
@@ -90,17 +84,49 @@ type Window struct {
 	State map[StateKey]string
 }
 
-// Driver is a multiplexer backend: it builds and enumerates cmdman-owned
-// windows without owning any multiplexer state of its own. A driver package
-// registers itself under a name in its init function via [RegisterDriver]
-// (the database/sql idiom); the composition root blank-imports each driver it
-// wants linked and retrieves it with [LookupDriver].
+// ServerConfig selects which multiplexer server a [Driver] binds to. Executable
+// and Socket name concepts common to every multiplexer, so they are first-class
+// fields here rather than well-known keys buried in the DriverOpt bag.
+type ServerConfig struct {
+	// Executable is the multiplexer binary to run. Empty selects the driver's
+	// default binary (the tmux driver runs "tmux").
+	Executable string
+
+	// Socket selects the server instance. Empty binds to the driver's default
+	// server; how a non-empty value is resolved is driver-defined (the tmux
+	// driver treats a value containing a path separator as a socket file path
+	// and a bare name as a named socket in tmux's default directory).
+	Socket string
+
+	// DriverOpt carries genuinely driver-specific keys only — Executable and
+	// Socket are named fields, not entries here. The tmux driver defines no
+	// such keys today.
+	DriverOpt map[string]string
+}
+
+// Driver binds to one multiplexer backend selected by a [ServerConfig].
+// A driver package registers itself under a name in its init function via
+// [RegisterDriver] (the database/sql idiom); the composition root blank-imports
+// each driver it wants linked and retrieves it with [LookupDriver].
 //
-// The session-less capabilities (constructors, enumeration, leaf-find,
-// per-window state) live on Driver because they must work from any calling
-// context with no attached session; the per-session operations live on
-// [Session].
+// The contract is three tiers: a Driver [Driver.Connect]s to a [Server], the
+// server builds and enumerates cmdman-owned windows, and a [Session] controls
+// one such window. Server addressing is captured once at Connect time, so the
+// session-less operations on [Server] no longer thread it per call.
 type Driver interface {
+	// Connect binds to the server selected by cfg. It is a pure binding — no
+	// I/O, no server spawn — so a missing server surfaces later as zero rows
+	// from [Server.ListWindows] or ok=false from [Server.Open], never as a
+	// Connect error.
+	Connect(ctx context.Context, cfg ServerConfig) (Server, error)
+}
+
+// Server is one multiplexer server: it builds, enumerates, and stores
+// per-window state for cmdman-owned windows on that server. A Server is bound
+// once by [Driver.Connect]; its session-less capabilities (constructors,
+// enumeration, leaf-find, per-window state) must work from any calling context
+// with no attached session, while the per-session operations live on [Session].
+type Server interface {
 	// New builds (or finds-or-creates) the cmdman-owned window described by
 	// cfg and returns a Session controlling it. It applies no layout — call
 	// [Session.ApplyLayout] to populate the window.
@@ -128,35 +154,26 @@ type Driver interface {
 	// pane corresponds to a spec leaf (containers are spec-only and never
 	// realize a pane), so unstamped placeholder panes simply never match. ok
 	// is false (with a nil error) when no pane carries the key.
-	FindPane(
-		ctx context.Context,
-		opts ListOptions,
-		windowID, key string,
-	) (paneID string, ok bool, err error)
+	FindPane(ctx context.Context, windowID, key string) (paneID string, ok bool, err error)
 
 	// ReadWindowState reads the opaque per-window state value stored under key
-	// on windowID. An absent key reads as "" with a nil error. The driver maps
+	// on windowID. An absent key reads as "" with a nil error. The server maps
 	// key onto its own native per-window storage (the tmux driver forms the
 	// window option "@cmdman_<key>"); muxctl interprets neither the key nor the
 	// value (encoding is the caller's concern). See [StateKey] for the token
 	// constraint.
-	ReadWindowState(
-		ctx context.Context,
-		opts ListOptions,
-		windowID string,
-		key StateKey,
-	) (string, error)
+	ReadWindowState(ctx context.Context, windowID string, key StateKey) (string, error)
 
 	// WriteWindowState stores value under key on windowID. An empty value
 	// unsets the key entirely, leaving no stale value behind. As with
 	// ReadWindowState the key and value are opaque to muxctl.
-	WriteWindowState(
-		ctx context.Context,
-		opts ListOptions,
-		windowID string,
-		key StateKey,
-		value string,
-	) error
+	WriteWindowState(ctx context.Context, windowID string, key StateKey, value string) error
+
+	// CurrentSessionName reports the name of the multiplexer session the
+	// calling terminal is attached to ("inside the multiplexer"), with ok
+	// false when the caller is not attached or the session is undetectable. It
+	// returns a session name, not a [Session]: it opens nothing.
+	CurrentSessionName(ctx context.Context) (name string, ok bool, err error)
 }
 
 var (

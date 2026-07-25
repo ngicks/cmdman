@@ -39,12 +39,11 @@ type OwnedWindow struct {
 
 // ListOptions configures [List].
 type ListOptions struct {
-	// Driver selects the multiplexer driver. Empty autodetects from Env the
-	// same way [Run] does ($TMUX > $ZELLIJ > tmux).
-	Driver string
-	// DriverOpt carries driver-specific options; the tmux driver honors "path"
-	// and "socket". Must match the options used when [Run] built the dashboard.
-	DriverOpt map[string]string
+	// Driver selects and configures the multiplexer server. An empty Driver.Name
+	// autodetects from Env the same way [Run] does ($TMUX > $ZELLIJ > tmux);
+	// Path/Socket/Opts feed [muxctl.Driver.Connect] and must match those used
+	// when [Run] built the dashboard.
+	Driver muxctl.DriverSpec
 	// SessionName, when non-empty, restricts the listing to that session only.
 	// Empty returns all stamped windows on the server.
 	SessionName string
@@ -57,8 +56,8 @@ type ListOptions struct {
 }
 
 // List returns the cmdman-owned windows visible on the target multiplexer
-// server. It is a thin layer over [muxctl.Driver.ListWindows]: it resolves
-// the driver via [resolveDriver] (mapping the known-but-unimplemented
+// server. It is a thin layer over [muxctl.Server.ListWindows]: it resolves
+// the server via [resolveServer] (mapping the known-but-unimplemented
 // "zellij"/"wezterm" to a "not implemented yet" error and any other
 // unregistered driver name to a lookup error, exactly as [Run] does), maps the
 // caller options to driver options, and re-exports the rows as mux-level
@@ -73,13 +72,12 @@ func List(ctx context.Context, opts ListOptions) ([]OwnedWindow, error) {
 		env = os.Environ()
 	}
 
-	driver, err := resolveDriver(opts.Driver, env)
+	server, err := resolveServer(ctx, opts.Driver, env)
 	if err != nil {
 		return nil, err
 	}
 
-	rows, err := driver.ListWindows(ctx, muxctl.ListOptions{
-		DriverOpt: opts.DriverOpt,
+	rows, err := server.ListWindows(ctx, muxctl.ListOptions{
 		Session:   opts.SessionName,
 		Identity:  opts.Identity,
 		StateKeys: []muxctl.StateKey{muxctl.StateKeyScale},

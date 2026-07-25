@@ -20,6 +20,7 @@ A simple shell command daemonizor written in Go which runs blocking commands in 
 ├── cmd                Entry point. cobra subcommand structure.
 │   └── cmdman
 ├── doc
+│   ├── man            internal helper entry points
 │   └── plan           old plan files. You may not read this
 ├── e2e
 │   └── cmdman

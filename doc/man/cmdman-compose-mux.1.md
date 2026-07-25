@@ -111,8 +111,8 @@ server-wide and requires no `$TMUX` context; it works from any pane, from
 
 Unlike standalone `mux ls`, `compose mux ls` filters to the resolved project
 identity, so only windows belonging to this project are shown. Listing targets
-the server selected by the spec's `driver` and `driver_opt` (including a
-custom socket), the same server `compose mux down` queries.
+the server selected by the spec's `driver` object (including a custom socket),
+the same server `compose mux down` queries.
 
 `compose mux ls` opens the cmdman store to resolve live replica counts for the
 SCALE column. If the store is unavailable or a command has no live replicas,
@@ -224,7 +224,8 @@ commands:
     args: ["./worker"]
 
 mux:
-  driver: tmux
+  driver:
+    name: tmux
   layouts:
     - name: dev
       root:

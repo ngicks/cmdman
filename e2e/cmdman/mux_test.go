@@ -241,8 +241,8 @@ func killDefaultTmuxServer(t *testing.T, tmuxTmpdir string) {
 // bound to commands api/worker/cache, on the given dedicated tmux socket.
 func standaloneMuxYAML(socket string) string {
 	return fmt.Sprintf(`mux:
-  driver: tmux
-  driver_opt:
+  driver:
+    name: tmux
     socket: %s
   layouts:
     - name: services
@@ -369,8 +369,8 @@ func TestMux_AttachPaneExposesApplicationMouseFlags(t *testing.T) {
 	env.waitForState(ctx, "mouseapp", "running", defaultTimeout)
 
 	specPath := writeSpecFile(t, fmt.Sprintf(`mux:
-  driver: tmux
-  driver_opt:
+  driver:
+    name: tmux
     socket: %s
   layouts:
     - name: editor
@@ -405,8 +405,8 @@ func TestMux_AttachPaneExposesApplicationMouseFlags(t *testing.T) {
 // and switch the window to the next layout.
 func cycleMuxYAML(socket string) string {
 	return fmt.Sprintf(`mux:
-  driver: tmux
-  driver_opt:
+  driver:
+    name: tmux
     socket: %s
   layouts:
     - name: wide
@@ -474,8 +474,8 @@ func TestMux_CyclesToNextLayoutOnRerun(t *testing.T) {
 // singleMuxYAML is a one-pane layout bound to a single command "solo".
 func singleMuxYAML(socket string) string {
 	return fmt.Sprintf(`mux:
-  driver: tmux
-  driver_opt:
+  driver:
+    name: tmux
     socket: %s
   layouts:
     - name: only
@@ -558,8 +558,8 @@ commands:
   beta:
     args: [sleep, "300"]
 mux:
-  driver: tmux
-  driver_opt:
+  driver:
+    name: tmux
     socket: %s
   layouts:
     - name: services
@@ -794,7 +794,8 @@ func TestComposeMux_DownFindsWindowServerWide(t *testing.T) {
 // calling test redirects the default socket via TMUX_TMPDIR.
 func muxLsYAML() string {
 	return `mux:
-  driver: tmux
+  driver:
+    name: tmux
   layouts:
     - name: only
       root:
@@ -814,7 +815,8 @@ commands:
   beta:
     args: [sleep, "300"]
 mux:
-  driver: tmux
+  driver:
+    name: tmux
   layouts:
     - name: services
       root:

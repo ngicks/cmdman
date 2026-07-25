@@ -24,7 +24,7 @@ Discovery is server-wide and requires no $TMUX context; it works from any
 pane, run-shell, or outside tmux. --session narrows the listing to one session.
 
 A layout file path is optional: when given it is read only to extract the
-driver and driver_opt (for example a custom socket). With no path or the stdin
+driver configuration (for example a custom socket). With no path or the stdin
 default "-", listing uses the default driver with no custom options.
 
 Columns: SESSION, WINDOW, ID, IDENTITY, LAYOUT (-1 displayed as "-"), SCALE.
@@ -54,14 +54,13 @@ func runMuxLs(cmd *cobra.Command, args []string, session, format string) error {
 		path = args[0]
 	}
 
-	driver, driverOpt, err := specDriverOpts(path)
+	driver, err := specDriver(path)
 	if err != nil {
 		return err
 	}
 
 	windows, err := mux.List(cmd.Context(), mux.ListOptions{
 		Driver:      driver,
-		DriverOpt:   driverOpt,
 		SessionName: session,
 	})
 	if err != nil {

@@ -14,8 +14,8 @@ import (
 
 const sampleSpec = `
 mux:
-  driver: tmux
-  driver_opt:
+  driver:
+    name: tmux
     socket: cmdman
   layouts:
     - name: services
@@ -41,8 +41,8 @@ func TestDecodeAcceptsBareLeafShorthand(t *testing.T) {
 
 	spec, err := mux.Decode(strings.NewReader(sampleSpec))
 	assert.NilError(t, err)
-	assert.Equal(t, spec.Driver, "tmux")
-	assert.Equal(t, spec.DriverOpt["socket"], "cmdman")
+	assert.Equal(t, spec.Driver.Name, "tmux")
+	assert.Equal(t, spec.Driver.Socket, "cmdman")
 	assert.Equal(t, len(spec.Layouts), 1)
 
 	root := spec.Layouts[0].Root

@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -9,25 +10,26 @@ import (
 )
 
 func TestResolveSessionName(t *testing.T) {
-	okQuery := func() (string, error) { return "work", nil }
-	errQuery := func() (string, error) { return "", errors.New("not in tmux") }
+	okQuery := func() (string, bool, error) { return "work", true, nil }
+	errQuery := func() (string, bool, error) { return "", false, errors.New("not in tmux") }
+	notAttachedQuery := func() (string, bool, error) { return "", false, nil }
 	inTmux := []string{"TMUX=/tmp/tmux-1000/default,123,0"}
 	noTmux := []string{"PATH=/usr/bin"}
 
 	t.Run("explicit override wins", func(t *testing.T) {
 		// Override is used verbatim, without querying tmux.
-		if got := resolveSessionName("custom", inTmux, func() (string, error) {
+		if got := resolveSessionName("custom", inTmux, func() (string, bool, error) {
 			t.Fatal("queryCurrent must not be called when override is set")
-			return "", nil
+			return "", false, nil
 		}); got != "custom" {
 			t.Fatalf("got %q, want %q", got, "custom")
 		}
 	})
 
 	t.Run("outside tmux falls back to cmdman", func(t *testing.T) {
-		if got := resolveSessionName("", noTmux, func() (string, error) {
+		if got := resolveSessionName("", noTmux, func() (string, bool, error) {
 			t.Fatal("queryCurrent must not be called outside tmux")
-			return "", nil
+			return "", false, nil
 		}); got != "cmdman" {
 			t.Fatalf("got %q, want %q", got, "cmdman")
 		}
@@ -41,6 +43,12 @@ func TestResolveSessionName(t *testing.T) {
 
 	t.Run("inside tmux but query fails falls back to cmdman", func(t *testing.T) {
 		if got := resolveSessionName("", inTmux, errQuery); got != "cmdman" {
+			t.Fatalf("got %q, want %q", got, "cmdman")
+		}
+	})
+
+	t.Run("inside tmux but not attached falls back to cmdman", func(t *testing.T) {
+		if got := resolveSessionName("", inTmux, notAttachedQuery); got != "cmdman" {
 			t.Fatalf("got %q, want %q", got, "cmdman")
 		}
 	})
@@ -95,53 +103,55 @@ func TestResolveLayoutIndex(t *testing.T) {
 	})
 }
 
-// TestResolveDriver covers driver resolution: the tmux driver (linked into this
-// test binary via scale_rmw_test.go's import) resolves, the known-but-
-// unimplemented names get the friendly "not implemented yet" wording, and any
-// other unregistered name surfaces LookupDriver's naming error. The error
-// branches need no tmux server.
-func TestResolveDriver(t *testing.T) {
+// TestResolveServer covers server resolution: the tmux driver (linked into this
+// test binary via scale_rmw_test.go's import) connects — Connect is a pure
+// binding, so no tmux server is needed — while the known-but-unimplemented names
+// get the friendly "not implemented yet" wording, and any other unregistered
+// name surfaces LookupDriver's naming error. The error branches need no tmux
+// server.
+func TestResolveServer(t *testing.T) {
+	ctx := context.Background()
 	noTmux := []string{"PATH=/usr/bin"}
 
 	t.Run("tmux resolves", func(t *testing.T) {
-		driver, err := resolveDriver("tmux", noTmux)
+		server, err := resolveServer(ctx, muxctl.DriverSpec{Name: "tmux"}, noTmux)
 		if err != nil {
-			t.Fatalf("resolveDriver(tmux) = %v, want nil error", err)
+			t.Fatalf("resolveServer(tmux) = %v, want nil error", err)
 		}
-		if driver == nil {
-			t.Fatal("resolveDriver(tmux) returned nil driver")
+		if server == nil {
+			t.Fatal("resolveServer(tmux) returned nil server")
 		}
 	})
 
 	t.Run("zellij and wezterm are not-implemented-yet", func(t *testing.T) {
 		for _, name := range []string{"zellij", "wezterm"} {
-			driver, err := resolveDriver(name, noTmux)
+			server, err := resolveServer(ctx, muxctl.DriverSpec{Name: name}, noTmux)
 			if err == nil {
-				t.Fatalf("resolveDriver(%q) = %v, want error", name, driver)
+				t.Fatalf("resolveServer(%q) = %v, want error", name, server)
 			}
-			if driver != nil {
-				t.Errorf("resolveDriver(%q) driver = %v, want nil", name, driver)
+			if server != nil {
+				t.Errorf("resolveServer(%q) server = %v, want nil", name, server)
 			}
 			if !strings.Contains(err.Error(), "not implemented yet") {
-				t.Errorf("resolveDriver(%q) error = %q, want \"not implemented yet\"", name, err)
+				t.Errorf("resolveServer(%q) error = %q, want \"not implemented yet\"", name, err)
 			}
 		}
 	})
 
 	t.Run("unregistered name surfaces lookup error", func(t *testing.T) {
 		const name = "nonexistent-driver-xyz"
-		driver, err := resolveDriver(name, noTmux)
+		server, err := resolveServer(ctx, muxctl.DriverSpec{Name: name}, noTmux)
 		if err == nil {
-			t.Fatalf("resolveDriver(%q) = %v, want error", name, driver)
+			t.Fatalf("resolveServer(%q) = %v, want error", name, server)
 		}
-		if driver != nil {
-			t.Errorf("resolveDriver(%q) driver = %v, want nil", name, driver)
+		if server != nil {
+			t.Errorf("resolveServer(%q) server = %v, want nil", name, server)
 		}
 		if !strings.Contains(err.Error(), name) {
-			t.Errorf("resolveDriver(%q) error = %q, want it to name the driver", name, err)
+			t.Errorf("resolveServer(%q) error = %q, want it to name the driver", name, err)
 		}
 		if strings.Contains(err.Error(), "not implemented yet") {
-			t.Errorf("resolveDriver(%q) should not use the not-implemented wording: %q", name, err)
+			t.Errorf("resolveServer(%q) should not use the not-implemented wording: %q", name, err)
 		}
 	})
 }

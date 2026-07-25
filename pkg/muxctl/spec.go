@@ -12,17 +12,48 @@ import (
 // MuxSpec is a driver-agnostic set of switchable layouts. Leaves contain
 // resolved argv; higher layers translate their own user-facing specs.
 type MuxSpec struct {
-	// Driver names the backend. Empty lets the caller autodetect it.
-	Driver string `yaml:"driver,omitempty"`
-
-	// DriverOpt is passed to the driver.
-	DriverOpt map[string]string `yaml:"driver_opt,omitempty"`
+	// Driver selects and configures the backend multiplexer server.
+	Driver DriverSpec `yaml:"driver,omitempty"`
 
 	// Layouts must have unique names.
 	Layouts []Layout `yaml:"layouts"`
 
 	// Unknown captures unrecognized top-level keys for caller warnings.
 	Unknown map[string]any `yaml:",inline"`
+}
+
+// DriverSpec is the YAML-facing description of which multiplexer server to bind
+// to. Name selects the driver via [LookupDriver]; the remaining fields map onto
+// a [ServerConfig] through [DriverSpec.ServerConfig].
+type DriverSpec struct {
+	// Name is the registered driver name. Empty lets the caller autodetect it.
+	Name string `yaml:"name,omitempty"`
+
+	// Path is the multiplexer executable. Empty selects the driver default.
+	Path string `yaml:"path,omitempty"`
+
+	// Socket selects the server instance: a bare name or a socket file path,
+	// resolved driver-side (see [ServerConfig.Socket]). Empty means the default
+	// server.
+	Socket string `yaml:"socket,omitempty"`
+
+	// Opts carries driver-specific keys only.
+	Opts map[string]string `yaml:"opts,omitempty"`
+
+	// Unknown captures unrecognized keys at the driver level; see
+	// [MuxSpec.Unknown].
+	Unknown map[string]any `yaml:",inline"`
+}
+
+// ServerConfig maps the YAML-facing spec onto the [ServerConfig] a driver
+// consumes: Path→Executable, Socket→Socket, Opts→DriverOpt. Name is omitted —
+// it selects the driver, not the server the chosen driver binds to.
+func (d DriverSpec) ServerConfig() ServerConfig {
+	return ServerConfig{
+		Executable: d.Path,
+		Socket:     d.Socket,
+		DriverOpt:  d.Opts,
+	}
 }
 
 // Layout is a named pane tree.

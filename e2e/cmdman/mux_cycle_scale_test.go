@@ -20,8 +20,8 @@ commands:
     args: [sleep, "300"]
     scale: 3
 mux:
-  driver: tmux
-  driver_opt:
+  driver:
+    name: tmux
     socket: %s
   layouts:
     - name: main
@@ -41,8 +41,8 @@ commands:
   worker:
     args: [sleep, "300"]
 mux:
-  driver: tmux
-  driver_opt:
+  driver:
+    name: tmux
     socket: %s
   layouts:
     - name: wide
@@ -283,7 +283,8 @@ commands:
     args: [sleep, "300"]
     scale: 3
 mux:
-  driver: tmux
+  driver:
+    name: tmux
   layouts:
     - name: main
       root:
@@ -444,7 +445,8 @@ commands:
     args: [sleep, "300"]
     scale: 2
 mux:
-  driver: tmux
+  driver:
+    name: tmux
   layouts:
     - name: main
       root:

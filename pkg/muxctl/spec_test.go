@@ -102,12 +102,32 @@ func TestSizeUnmarshalYaml_NonScalar(t *testing.T) {
 	assert.Assert(t, err != nil, "expected error decoding sequence into Size")
 }
 
+func TestDriverSpec_ServerConfig(t *testing.T) {
+	t.Parallel()
+
+	// Name selects the driver, not the server, so ServerConfig drops it;
+	// Path→Executable, Socket→Socket, Opts→DriverOpt carry across.
+	spec := muxctl.DriverSpec{
+		Name:   "tmux",
+		Path:   "/usr/bin/tmux",
+		Socket: "cmdman",
+		Opts:   map[string]string{"aaa": "bbb"},
+	}
+	want := muxctl.ServerConfig{
+		Executable: "/usr/bin/tmux",
+		Socket:     "cmdman",
+		DriverOpt:  map[string]string{"aaa": "bbb"},
+	}
+	assert.DeepEqual(t, spec.ServerConfig(), want)
+}
+
 func TestDecode_Valid(t *testing.T) {
 	t.Parallel()
 
 	const doc = `
-driver: tmux
-driver_opt:
+driver:
+  name: tmux
+  path: /usr/bin/tmux
   socket: cmdman
 layouts:
   - name: services
@@ -133,8 +153,11 @@ layouts:
       cmd: [./api]
 `
 	want := muxctl.MuxSpec{
-		Driver:    "tmux",
-		DriverOpt: map[string]string{"socket": "cmdman"},
+		Driver: muxctl.DriverSpec{
+			Name:   "tmux",
+			Path:   "/usr/bin/tmux",
+			Socket: "cmdman",
+		},
 		Layouts: []muxctl.Layout{
 			{
 				Name: "services",
@@ -192,13 +215,31 @@ func TestDecode_UnknownTopLevelKey(t *testing.T) {
 	t.Parallel()
 
 	const doc = `
-driver: tmux
+driver:
+  name: tmux
 foo: bar
 layouts: []
 `
 	got, err := muxctl.Decode(strings.NewReader(doc))
 	assert.NilError(t, err)
 	assert.Equal(t, got.Unknown["foo"], any("bar"))
+}
+
+// TestDecode_UnknownDriverKey asserts that unknown keys inside the nested
+// driver object are CAPTURED into DriverSpec.Unknown, the same inline catch-all
+// convention every other decoded mapping level follows.
+func TestDecode_UnknownDriverKey(t *testing.T) {
+	t.Parallel()
+
+	const doc = `
+driver:
+  name: tmux
+  bogus: x
+layouts: []
+`
+	got, err := muxctl.Decode(strings.NewReader(doc))
+	assert.NilError(t, err)
+	assert.Equal(t, got.Driver.Unknown["bogus"], any("x"))
 }
 
 // TestDecode_UnknownPaneKey asserts that unknown keys at the pane level are

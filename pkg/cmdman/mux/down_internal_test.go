@@ -68,7 +68,9 @@ func TestIdentityDefaulting_Run(t *testing.T) {
 			sessionName := resolveSessionName(
 				tt.sessionName,
 				tt.env,
-				func() (string, error) { return "", errors.New("no tmux query in unit test") },
+				func() (string, bool, error) {
+					return "", false, errors.New("no tmux query in unit test")
+				},
 			)
 			windowName := tt.windowName
 			if windowName == "" {
@@ -116,7 +118,7 @@ func TestIdentityDefaulting_Down(t *testing.T) {
 	})
 
 	t.Run("no session, no window → both fall back to cmdman", func(t *testing.T) {
-		noop := func() (string, error) { return "", errors.New("no tmux") }
+		noop := func() (string, bool, error) { return "", false, errors.New("no tmux") }
 		runSession := resolveSessionName("", noTmux, noop)
 		runWindow := runSession // no WindowName override
 		runIdentity := runWindow

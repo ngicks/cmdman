@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/ngicks/cmdman/pkg/muxctl"
-	tmuxctl "github.com/ngicks/cmdman/pkg/muxctl/tmux"
 )
 
 // windowOption returns the window-scoped value of a tmux option (via -v),
@@ -38,8 +37,7 @@ func TestOpen_ReturnsFalseWhenNoWindow(t *testing.T) {
 	// A session exists, but no window named "cmdman".
 	run(t, socket, "new-session", "-d", "-s", "cmdman-test", "-n", "work")
 
-	sess, ok, err := tmuxctl.Open(context.Background(), muxctl.Config{
-		DriverOpt:   socketOpt(socket),
+	sess, ok, err := newServer(t, socket).Open(context.Background(), muxctl.Config{
 		SessionName: "cmdman-test",
 		WindowName:  "cmdman",
 	})
@@ -57,8 +55,7 @@ func TestOpen_FindsNamedWindow(t *testing.T) {
 	requireTmux(t)
 	sess, socket := newSession(t, "cmdman")
 
-	got, ok, err := tmuxctl.Open(context.Background(), muxctl.Config{
-		DriverOpt:   socketOpt(socket),
+	got, ok, err := newServer(t, socket).Open(context.Background(), muxctl.Config{
 		SessionName: "cmdman-test",
 		WindowName:  "cmdman",
 	})
@@ -83,8 +80,8 @@ func TestOpen_FindsOwnedCurrentWindow(t *testing.T) {
 	socket := uniqueSocket(t)
 	t.Cleanup(func() { killServer(t, socket) })
 
-	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
-		DriverOpt:        socketOpt(socket),
+	srv := newServer(t, socket)
+	sess, err := srv.New(context.Background(), muxctl.Config{
 		SessionName:      "main",
 		WindowName:       "work",
 		OwnedIdentity:    "find-owned-test",
@@ -101,8 +98,7 @@ func TestOpen_FindsOwnedCurrentWindow(t *testing.T) {
 	// Make the owned dashboard the session's current window.
 	run(t, socket, "select-window", "-t", sess.WindowID())
 
-	got, ok, err := tmuxctl.Open(context.Background(), muxctl.Config{
-		DriverOpt:          socketOpt(socket),
+	got, ok, err := srv.Open(context.Background(), muxctl.Config{
 		SessionName:        "main",
 		WindowName:         "cmdman", // deliberately NOT "work"
 		ReuseCurrentWindow: true,
@@ -130,8 +126,7 @@ func TestOpen_RejectsUnmarkedSinglePaneCurrent(t *testing.T) {
 	// A plain single-pane window — the kind New's ReuseCurrentWindow accepts.
 	run(t, socket, "new-session", "-d", "-s", "main", "-n", "work")
 
-	_, ok, err := tmuxctl.Open(context.Background(), muxctl.Config{
-		DriverOpt:          socketOpt(socket),
+	_, ok, err := newServer(t, socket).Open(context.Background(), muxctl.Config{
 		SessionName:        "main",
 		WindowName:         "cmdman",
 		ReuseCurrentWindow: true,

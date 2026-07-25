@@ -54,13 +54,16 @@ func TestWriteScalePosition_MergeAndDelete(t *testing.T) {
 	ctx := context.Background()
 	// The tmux driver is used directly here (test files are exempt from the
 	// mux → muxctl-only invariant); it also links the driver's init so the
-	// window-state KV is reachable without a blank import elsewhere.
-	var driver muxctl.Driver = tmux.Driver{}
-	opts := muxctl.ListOptions{DriverOpt: map[string]string{"socket": socket}}
+	// window-state KV is reachable without a blank import elsewhere. Connect is a
+	// pure binding, so no real tmux server is required to obtain the Server.
+	server, err := tmux.Driver{}.Connect(ctx, muxctl.ServerConfig{Socket: socket})
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
 
 	// read decodes the stored raw state the way the mux consumers do.
 	read := func() map[string]int {
-		raw, err := driver.ReadWindowState(ctx, opts, wid, muxctl.StateKeyScale)
+		raw, err := server.ReadWindowState(ctx, wid, muxctl.StateKeyScale)
 		if err != nil {
 			t.Fatalf("ReadWindowState: %v", err)
 		}
@@ -68,10 +71,10 @@ func TestWriteScalePosition_MergeAndDelete(t *testing.T) {
 	}
 
 	// Write web=2, then worker=1: the second write must not clobber the first.
-	if err := writeScalePosition(ctx, driver, opts, wid, "web", 2); err != nil {
+	if err := writeScalePosition(ctx, server, wid, "web", 2); err != nil {
 		t.Fatalf("writeScalePosition web=2: %v", err)
 	}
-	if err := writeScalePosition(ctx, driver, opts, wid, "worker", 1); err != nil {
+	if err := writeScalePosition(ctx, server, wid, "worker", 1); err != nil {
 		t.Fatalf("writeScalePosition worker=1: %v", err)
 	}
 	got := read()
@@ -83,7 +86,7 @@ func TestWriteScalePosition_MergeAndDelete(t *testing.T) {
 	}
 
 	// Delete worker via pos=0: web must survive the removal.
-	if err := writeScalePosition(ctx, driver, opts, wid, "worker", 0); err != nil {
+	if err := writeScalePosition(ctx, server, wid, "worker", 0); err != nil {
 		t.Fatalf("writeScalePosition worker=0: %v", err)
 	}
 	got = read()

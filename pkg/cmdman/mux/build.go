@@ -71,9 +71,8 @@ func Build(ctx context.Context, opts BuildOptions) (muxctl.MuxSpec, error) {
 	}
 
 	out := muxctl.MuxSpec{
-		Driver:    opts.Spec.Driver,
-		DriverOpt: opts.Spec.DriverOpt,
-		Layouts:   make([]muxctl.Layout, 0, len(opts.Spec.Layouts)),
+		Driver:  opts.Spec.Driver,
+		Layouts: make([]muxctl.Layout, 0, len(opts.Spec.Layouts)),
 	}
 	for i, l := range opts.Spec.Layouts {
 		layout, err := buildLayout(

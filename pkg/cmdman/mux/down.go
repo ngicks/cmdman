@@ -12,15 +12,14 @@ import (
 
 // DownOptions configures [Down].
 type DownOptions struct {
-	// Driver selects the multiplexer driver. Empty autodetects from Env the
-	// same way [Run] does ($TMUX > $ZELLIJ > tmux).
-	Driver string
-	// DriverOpt carries driver-specific options; the tmux driver honors "path"
-	// and "socket". A dashboard built on a non-default socket can only be found
-	// when the same socket is supplied here.
-	DriverOpt map[string]string
+	// Driver selects and configures the multiplexer server. An empty Driver.Name
+	// autodetects from Env the same way [Run] does ($TMUX > $ZELLIJ > tmux);
+	// Path/Socket/Opts feed [muxctl.Driver.Connect] to bind the server. A
+	// dashboard built on a non-default socket can only be found when the same
+	// Socket is supplied here.
+	Driver muxctl.DriverSpec
 	// SessionName, when non-empty, narrows the scan to that session only.
-	// It is a pure filter passed to [muxctl.Driver.ListWindows]; it does NOT
+	// It is a pure filter passed to [muxctl.Server.ListWindows]; it does NOT
 	// participate in identity derivation (only the identity defaulting path
 	// uses the resolved session name). An explicit --session is therefore
 	// optional for teardown: omitting it restores every matching dashboard
@@ -30,7 +29,7 @@ type DownOptions struct {
 	// (standalone-mux default). It is NOT used as a session-filter fallback.
 	// Empty defaults to the resolved session name, exactly as [Run] does.
 	WindowName string
-	// Identity is the opaque ownership string passed to [muxctl.Driver.ListWindows]
+	// Identity is the opaque ownership string passed to [muxctl.Server.ListWindows]
 	// as the filter. When empty, it is derived the same way [Run] defaults it:
 	// resolveSessionName → windowName default → identity = windowName. This
 	// derivation is the documented standalone-mux limitation (a dashboard built
@@ -52,7 +51,7 @@ type DownOptions struct {
 // window to a single shell pane, and unsets the tmux ownership option. The
 // supervised commands keep running — only the disposable viewers are torn down.
 //
-// Down enumerates windows via [muxctl.Driver.ListWindows], which requires no
+// Down enumerates windows via [muxctl.Server.ListWindows], which requires no
 // $TMUX context and works from any pane, from run-shell, or from outside
 // tmux entirely. This is the key improvement over the old Detach: Detach
 // required the caller to be attached to the same session to find the window;
@@ -79,7 +78,7 @@ func Down(ctx context.Context, opts DownOptions) error {
 		stdout = os.Stdout
 	}
 
-	driver, err := resolveDriver(opts.Driver, env)
+	server, err := resolveServer(ctx, opts.Driver, env)
 	if err != nil {
 		return err
 	}
@@ -90,11 +89,10 @@ func Down(ctx context.Context, opts DownOptions) error {
 	// supply Identity explicitly, bypassing this path entirely.
 	identity := opts.Identity
 	if identity == "" {
-		path, socket := opts.DriverOpt["path"], opts.DriverOpt["socket"]
 		sessionName := resolveSessionName(
 			opts.SessionName,
 			env,
-			func() (string, error) { return currentTmuxSession(ctx, path, socket) },
+			func() (string, bool, error) { return server.CurrentSessionName(ctx) },
 		)
 		identity = deriveIdentity("", opts.WindowName, sessionName)
 	}
@@ -104,10 +102,9 @@ func Down(ctx context.Context, opts DownOptions) error {
 	// resolveSessionName for the filter: that context-dependence (reading
 	// $TMUX / running display-message) is the root cause this plan fixes.
 	// Only the identity *derivation* above may use resolveSessionName.
-	rows, err := driver.ListWindows(ctx, muxctl.ListOptions{
-		DriverOpt: opts.DriverOpt,
-		Session:   opts.SessionName,
-		Identity:  identity,
+	rows, err := server.ListWindows(ctx, muxctl.ListOptions{
+		Session:  opts.SessionName,
+		Identity: identity,
 	})
 	if err != nil {
 		return fmt.Errorf("mux: enumerate owned windows: %w", err)
@@ -133,8 +130,7 @@ func Down(ctx context.Context, opts DownOptions) error {
 
 	var errs []error
 	for _, row := range rows {
-		sess, ok, openErr := driver.Open(ctx, muxctl.Config{
-			DriverOpt:        opts.DriverOpt,
+		sess, ok, openErr := server.Open(ctx, muxctl.Config{
 			WindowID:         row.WindowID,
 			ViewerDetachKeys: viewerDetachKeys,
 		})

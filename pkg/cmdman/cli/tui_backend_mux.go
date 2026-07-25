@@ -70,9 +70,8 @@ func (b *serviceBackend) ListLayouts(
 	// listing failure is not fatal here — the layouts list itself is still valid,
 	// and -1 already encodes "current layout unknown".
 	windows, listErr := mux.List(ctx, mux.ListOptions{
-		Driver:    spec.Driver,
-		DriverOpt: spec.DriverOpt,
-		Identity:  selection.ProjectIdentity(),
+		Driver:   spec.Driver,
+		Identity: selection.ProjectIdentity(),
 	})
 	if listErr == nil && len(windows) > 0 {
 		info.Current = windows[0].Marker

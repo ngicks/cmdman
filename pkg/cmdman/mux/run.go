@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -73,7 +72,7 @@ var viewerDetachKeys = []string{"C-p", "C-q"}
 // the window detached and prints an attach hint
 // (`tmux attach -t <session>`) to opts.Stdout.
 //
-// v1 supports the tmux driver only; spec.Driver == "zellij" or any future
+// v1 supports the tmux driver only; spec.Driver.Name == "zellij" or any future
 // driver returns a "not implemented" error. Autodetect may still select
 // "zellij" from $ZELLIJ — the error message points the user at the open
 // driver work.
@@ -91,17 +90,16 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 		stdout = os.Stdout
 	}
 
-	driver, err := resolveDriver(spec.Driver, env)
+	server, err := resolveServer(ctx, spec.Driver, env)
 	if err != nil {
 		return err
 	}
 
-	path, socket := spec.DriverOpt["path"], spec.DriverOpt["socket"]
 	explicitSession := opts.SessionName != ""
 	sessionName := resolveSessionName(
 		opts.SessionName,
 		env,
-		func() (string, error) { return currentTmuxSession(ctx, path, socket) },
+		func() (string, bool, error) { return server.CurrentSessionName(ctx) },
 	)
 	windowName := opts.WindowName
 	if windowName == "" {
@@ -131,8 +129,7 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 		explicitIdx = idx
 	}
 
-	sess, err := driver.New(ctx, muxctl.Config{
-		DriverOpt:          spec.DriverOpt,
+	sess, err := server.New(ctx, muxctl.Config{
 		SessionName:        sessionName,
 		WindowName:         windowName,
 		OwnedIdentity:      identity,
@@ -164,21 +161,21 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 	return nil
 }
 
-// resolveSessionName determines the tmux session name to target.
+// resolveSessionName determines the session name to target.
 // When override is non-empty it is returned verbatim.
-// When inside tmux ($TMUX is set) queryCurrent is called; on success its
-// result is returned. On failure or when not inside tmux, falls back to
-// "cmdman".
+// When inside tmux ($TMUX is set) queryCurrent is called; its result is
+// returned only when it reports ok with a nil error. When not attached, on
+// failure, or when not inside tmux, falls back to "cmdman".
 func resolveSessionName(
 	override string,
 	env []string,
-	queryCurrent func() (string, error),
+	queryCurrent func() (string, bool, error),
 ) string {
 	if override != "" {
 		return override
 	}
 	if envOf(env, "TMUX") != "" {
-		if name, err := queryCurrent(); err == nil {
+		if name, ok, err := queryCurrent(); ok && err == nil {
 			return name
 		}
 	}
@@ -198,30 +195,6 @@ func deriveIdentity(identity, windowName, sessionName string) string {
 	default:
 		return sessionName
 	}
-}
-
-// currentTmuxSession queries the name of the currently-active tmux session by
-// running `tmux display-message -p '#{session_name}'`. tmuxPath is the tmux
-// binary path (empty → "tmux"). socket, when non-empty, is passed as -L
-// <socket> before the subcommand (mirroring the tmux driver's DriverOpt
-// "socket").
-func currentTmuxSession(ctx context.Context, tmuxPath, socket string) (string, error) {
-	bin := tmuxPath
-	if bin == "" {
-		bin = "tmux"
-	}
-	args := []string{}
-	if socket != "" {
-		args = append(args, "-L", socket)
-	}
-	args = append(args, "display-message", "-p", "#{session_name}")
-	var buf strings.Builder
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Stdout = &buf
-	if err := cmd.Run(); err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(buf.String()), nil
 }
 
 // resolveLayoutIndex resolves a layout selector to an index into layouts. A
@@ -254,8 +227,8 @@ func layoutNames(layouts []muxctl.Layout) []string {
 	return names
 }
 
-// resolveDriverName picks the driver name from spec.Driver / autodetect. Empty
-// declared triggers autodetect: $TMUX > $ZELLIJ > fallback "tmux".
+// resolveDriverName picks the driver name from the declared name (spec.Driver.Name)
+// or autodetect. Empty declared triggers autodetect: $TMUX > $ZELLIJ > fallback "tmux".
 func resolveDriverName(declared string, env []string) string {
 	if declared != "" {
 		return declared
@@ -269,14 +242,20 @@ func resolveDriverName(declared string, env []string) string {
 	return "tmux"
 }
 
-// resolveDriver resolves the driver name (see [resolveDriverName]) and looks up
-// the registered [muxctl.Driver]. The known-but-unimplemented names
-// "zellij"/"wezterm" keep the friendly "not implemented yet" wording; any other
-// unregistered name surfaces [muxctl.LookupDriver]'s naming error (the usual
-// cause is a missing blank import of the driver package at the composition
-// root — cmd/cmdman/main.go).
-func resolveDriver(declared string, env []string) (muxctl.Driver, error) {
-	name := resolveDriverName(declared, env)
+// resolveServer resolves the driver name from spec.Name (see [resolveDriverName]),
+// looks up the registered [muxctl.Driver], and [muxctl.Driver.Connect]s to the
+// [muxctl.Server] the rest of spec describes (Path/Socket/Opts →
+// [muxctl.ServerConfig] via [muxctl.DriverSpec.ServerConfig]). The
+// known-but-unimplemented names "zellij"/"wezterm" keep the friendly "not
+// implemented yet" wording; any other unregistered name surfaces
+// [muxctl.LookupDriver]'s naming error (the usual cause is a missing blank import
+// of the driver package at the composition root — cmd/cmdman/main.go).
+func resolveServer(
+	ctx context.Context,
+	spec muxctl.DriverSpec,
+	env []string,
+) (muxctl.Server, error) {
+	name := resolveDriverName(spec.Name, env)
 	driver, err := muxctl.LookupDriver(name)
 	if err != nil {
 		switch name {
@@ -287,7 +266,7 @@ func resolveDriver(declared string, env []string) (muxctl.Driver, error) {
 		}
 		return nil, err
 	}
-	return driver, nil
+	return driver.Connect(ctx, spec.ServerConfig())
 }
 
 // envOf returns the value of key in env, or "" when absent. env is a slice of

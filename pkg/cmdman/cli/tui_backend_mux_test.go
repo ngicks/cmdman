@@ -14,7 +14,8 @@ commands:
   db:
     args: [echo, db]
 mux:
-  driver: tmux
+  driver:
+    name: tmux
   layouts:
     - name: dev
       root: web

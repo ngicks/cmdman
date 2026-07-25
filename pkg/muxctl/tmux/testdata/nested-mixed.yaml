@@ -1,4 +1,5 @@
-driver: tmux
+driver:
+  name: tmux
 layouts:
   - name: services
     root:

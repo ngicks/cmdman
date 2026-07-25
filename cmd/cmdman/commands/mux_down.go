@@ -18,8 +18,8 @@ The in-pane viewers are detached, the window collapses to a single clean pane,
 and the tmux options cmdman set are cleared. The supervised commands keep
 running — only the disposable viewers are torn down.
 
-A layout file path is optional: it is only read to extract the driver and
-driver_opt (e.g. a custom socket). With no path (or the stdin default "-"),
+A layout file path is optional: it is only read to extract the driver
+configuration (e.g. a custom socket). With no path (or the stdin default "-"),
 teardown uses the default driver with no custom options.
 
 Window discovery is server-wide and requires no $TMUX context; it works from
@@ -44,7 +44,7 @@ any pane, run-shell, or outside tmux. --session narrows the scan to one session.
 
 // runMuxDown tears the dashboard down instead of building it. The spec path is
 // optional: it is only read when an explicit path is given, to extract the
-// driver and driver_opt. With the stdin default ("-") teardown uses the default
+// driver configuration. With the stdin default ("-") teardown uses the default
 // driver rather than blocking on stdin.
 func runMuxDown(cmd *cobra.Command, args []string, session string) error {
 	path := "-"
@@ -52,14 +52,13 @@ func runMuxDown(cmd *cobra.Command, args []string, session string) error {
 		path = args[0]
 	}
 
-	driver, driverOpt, err := specDriverOpts(path)
+	driver, err := specDriver(path)
 	if err != nil {
 		return err
 	}
 
 	return mux.Down(cmd.Context(), mux.DownOptions{
 		Driver:      driver,
-		DriverOpt:   driverOpt,
 		SessionName: session,
 		Stdout:      cmd.OutOrStdout(),
 	})

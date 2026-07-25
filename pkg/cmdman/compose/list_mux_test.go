@@ -20,7 +20,8 @@ commands:
   a:
     args: [echo, a]
 mux:
-  driver: tmux
+  driver:
+    name: tmux
   layouts:
     - name: solo
       root: a

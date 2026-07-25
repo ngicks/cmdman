@@ -10,8 +10,8 @@ A standalone mux file is a YAML document with a top-level `mux:` key:
 
 ```yaml
 mux:
-  driver: tmux
-  driver_opt:
+  driver:
+    name: tmux
     socket: cmdman
   layouts:
     - name: main
@@ -32,22 +32,36 @@ Leaves name compose services instead of global cmdman IDs or names.
 
 ## Top-Level Fields
 
-- `driver`: multiplexer backend. `tmux` is the v1 driver.
-- `driver_opt`: driver-specific options.
+- `driver`: multiplexer server selection and configuration, an object; see
+  [Driver](#driver) below.
 - `layouts`: list of named layouts.
 
 Unknown fields are captured by the parser and may be reported as warnings by
 callers.
 
-## Tmux Driver Options
+## Driver
 
-For `driver: tmux`, `driver_opt` recognizes:
+`driver` is an object that selects and configures the multiplexer server:
 
-- `path`: tmux binary path. Defaults to `tmux`.
-- `socket`: tmux socket name passed as `tmux -L SOCKET`.
+- `name`: multiplexer backend. Empty autodetects (`$TMUX` selects tmux); `tmux`
+  is the v1 driver.
+- `path`: multiplexer executable. Empty uses the driver default (`tmux`).
+- `socket`: server instance selector. Empty means the default server; see the
+  tmux resolution below.
+- `opts`: driver-specific options. The tmux driver defines none today and
+  ignores this bag.
 
-An empty socket uses the current tmux server when invoked inside tmux and the
-default tmux socket otherwise.
+Unknown fields under `driver` are captured by the parser and may be reported as
+warnings by callers.
+
+For the tmux driver, `socket` is resolved by shape:
+
+- empty: the current tmux server when invoked inside tmux, and the default tmux
+  socket otherwise;
+- a bare name (no path separator): `tmux -L NAME`, a named socket in tmux's
+  default socket directory;
+- a value containing a path separator: `tmux -S PATH`, an explicit socket file
+  path.
 
 ## Layouts
 

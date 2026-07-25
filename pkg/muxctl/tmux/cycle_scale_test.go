@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/ngicks/cmdman/pkg/muxctl"
-	tmuxctl "github.com/ngicks/cmdman/pkg/muxctl/tmux"
 )
 
 // paneOption returns the pane-scoped value of a tmux user option, tolerating
@@ -126,10 +125,10 @@ func TestScaleState_ReadWrite(t *testing.T) {
 	run(t, socket, "new-session", "-d", "-s", "scale-test", "-n", "dash")
 	wid := run(t, socket, "list-windows", "-t", "scale-test", "-F", "#{window_id}")
 
-	opts := muxctl.ListOptions{DriverOpt: socketOpt(socket)}
+	srv := newServer(t, socket)
 
 	// Initially unset → empty string, no error.
-	raw, err := tmuxctl.ReadWindowState(context.Background(), opts, wid, "scale")
+	raw, err := srv.ReadWindowState(context.Background(), wid, "scale")
 	if err != nil {
 		t.Fatalf("ReadWindowState (empty): %v", err)
 	}
@@ -138,16 +137,15 @@ func TestScaleState_ReadWrite(t *testing.T) {
 	}
 
 	// Write "web=2".
-	if err := tmuxctl.WriteWindowState(
+	if err := srv.WriteWindowState(
 		context.Background(),
-		opts,
 		wid,
 		"scale",
 		"web=2",
 	); err != nil {
 		t.Fatalf("WriteWindowState web=2: %v", err)
 	}
-	raw, err = tmuxctl.ReadWindowState(context.Background(), opts, wid, "scale")
+	raw, err = srv.ReadWindowState(context.Background(), wid, "scale")
 	if err != nil {
 		t.Fatalf("ReadWindowState after web=2: %v", err)
 	}
@@ -156,12 +154,12 @@ func TestScaleState_ReadWrite(t *testing.T) {
 	}
 
 	// Overwrite with a two-command encoding.
-	if err := tmuxctl.WriteWindowState(
-		context.Background(), opts, wid, "scale", "web=2 worker=1",
+	if err := srv.WriteWindowState(
+		context.Background(), wid, "scale", "web=2 worker=1",
 	); err != nil {
 		t.Fatalf("WriteWindowState web=2 worker=1: %v", err)
 	}
-	raw, err = tmuxctl.ReadWindowState(context.Background(), opts, wid, "scale")
+	raw, err = srv.ReadWindowState(context.Background(), wid, "scale")
 	if err != nil {
 		t.Fatalf("ReadWindowState after two-command write: %v", err)
 	}
@@ -170,10 +168,10 @@ func TestScaleState_ReadWrite(t *testing.T) {
 	}
 
 	// Empty write unsets the option entirely.
-	if err := tmuxctl.WriteWindowState(context.Background(), opts, wid, "scale", ""); err != nil {
+	if err := srv.WriteWindowState(context.Background(), wid, "scale", ""); err != nil {
 		t.Fatalf("WriteWindowState (empty): %v", err)
 	}
-	raw, err = tmuxctl.ReadWindowState(context.Background(), opts, wid, "scale")
+	raw, err = srv.ReadWindowState(context.Background(), wid, "scale")
 	if err != nil {
 		t.Fatalf("ReadWindowState after empty write: %v", err)
 	}
@@ -190,8 +188,8 @@ func TestDetach_ClearsScaleOption(t *testing.T) {
 	t.Cleanup(func() { killServer(t, socket) })
 
 	const identity = "detach-scale-test"
-	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
-		DriverOpt:     socketOpt(socket),
+	srv := newServer(t, socket)
+	sess, err := srv.New(context.Background(), muxctl.Config{
 		SessionName:   "detach-test",
 		WindowName:    "cmdman",
 		OwnedIdentity: identity,
@@ -200,11 +198,9 @@ func TestDetach_ClearsScaleOption(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	opts := muxctl.ListOptions{DriverOpt: socketOpt(socket)}
-
 	// Write a scale position so the option exists.
-	if err := tmuxctl.WriteWindowState(
-		context.Background(), opts, sess.WindowID(), "scale", "web=3",
+	if err := srv.WriteWindowState(
+		context.Background(), sess.WindowID(), "scale", "web=3",
 	); err != nil {
 		t.Fatalf("WriteWindowState: %v", err)
 	}
@@ -230,6 +226,7 @@ func TestDetach_ClearsScaleOption(t *testing.T) {
 func TestFindPane_AndRespawnLeaf(t *testing.T) {
 	requireTmux(t)
 	sess, socket := newSession(t, "cmdman")
+	srv := newServer(t, socket)
 
 	ready := tempPath(t, "ready")
 	replaced := tempPath(t, "replaced")
@@ -255,9 +252,8 @@ func TestFindPane_AndRespawnLeaf(t *testing.T) {
 	}
 
 	// FindPane must locate the pane by cycle key.
-	opts := muxctl.ListOptions{DriverOpt: socketOpt(socket)}
-	foundID, ok, err := tmuxctl.FindPane(
-		context.Background(), opts, sess.WindowID(), "web",
+	foundID, ok, err := srv.FindPane(
+		context.Background(), sess.WindowID(), "web",
 	)
 	if err != nil {
 		t.Fatalf("FindPane: %v", err)
@@ -300,8 +296,8 @@ func TestListWindows_ReturnsScaleState(t *testing.T) {
 	t.Cleanup(func() { killServer(t, socket) })
 
 	const identity = "scale-list-test"
-	sess, err := tmuxctl.New(context.Background(), muxctl.Config{
-		DriverOpt:     socketOpt(socket),
+	srv := newServer(t, socket)
+	sess, err := srv.New(context.Background(), muxctl.Config{
 		SessionName:   "scale-sess",
 		WindowName:    "dash",
 		OwnedIdentity: identity,
@@ -310,11 +306,8 @@ func TestListWindows_ReturnsScaleState(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	opts := muxctl.ListOptions{DriverOpt: socketOpt(socket)}
-
 	// Initially no scale positions.
-	rows, err := tmuxctl.ListWindows(context.Background(), muxctl.ListOptions{
-		DriverOpt: socketOpt(socket),
+	rows, err := srv.ListWindows(context.Background(), muxctl.ListOptions{
 		Identity:  identity,
 		StateKeys: []muxctl.StateKey{muxctl.StateKeyScale},
 	})
@@ -329,14 +322,13 @@ func TestListWindows_ReturnsScaleState(t *testing.T) {
 	}
 
 	// Write "web=2".
-	if err := tmuxctl.WriteWindowState(
-		context.Background(), opts, sess.WindowID(), "scale", "web=2",
+	if err := srv.WriteWindowState(
+		context.Background(), sess.WindowID(), "scale", "web=2",
 	); err != nil {
 		t.Fatalf("WriteWindowState: %v", err)
 	}
 
-	rows, err = tmuxctl.ListWindows(context.Background(), muxctl.ListOptions{
-		DriverOpt: socketOpt(socket),
+	rows, err = srv.ListWindows(context.Background(), muxctl.ListOptions{
 		Identity:  identity,
 		StateKeys: []muxctl.StateKey{muxctl.StateKeyScale},
 	})
@@ -364,8 +356,8 @@ func TestListWindows_MultipleStateKeys(t *testing.T) {
 	const identA = "multi-state-a"
 	const identB = "multi-state-b"
 
-	sessA, err := tmuxctl.New(context.Background(), muxctl.Config{
-		DriverOpt:     socketOpt(socket),
+	srv := newServer(t, socket)
+	sessA, err := srv.New(context.Background(), muxctl.Config{
 		SessionName:   "session-a",
 		WindowName:    "dash-a",
 		OwnedIdentity: identA,
@@ -373,8 +365,7 @@ func TestListWindows_MultipleStateKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New session-a: %v", err)
 	}
-	sessB, err := tmuxctl.New(context.Background(), muxctl.Config{
-		DriverOpt:     socketOpt(socket),
+	sessB, err := srv.New(context.Background(), muxctl.Config{
 		SessionName:   "session-b",
 		WindowName:    "dash-b",
 		OwnedIdentity: identB,
@@ -383,30 +374,27 @@ func TestListWindows_MultipleStateKeys(t *testing.T) {
 		t.Fatalf("New session-b: %v", err)
 	}
 
-	opts := muxctl.ListOptions{DriverOpt: socketOpt(socket)}
-
 	// Window A: both "scale" and "layout" set.
-	if err := tmuxctl.WriteWindowState(
-		context.Background(), opts, sessA.WindowID(), "scale", "web=2",
+	if err := srv.WriteWindowState(
+		context.Background(), sessA.WindowID(), "scale", "web=2",
 	); err != nil {
 		t.Fatalf("WriteWindowState A scale: %v", err)
 	}
-	if err := tmuxctl.WriteWindowState(
-		context.Background(), opts, sessA.WindowID(), "layout", "alpha",
+	if err := srv.WriteWindowState(
+		context.Background(), sessA.WindowID(), "layout", "alpha",
 	); err != nil {
 		t.Fatalf("WriteWindowState A layout: %v", err)
 	}
 	// Window B: only "layout" set — "scale" stays absent, so its interior field
 	// in the -F output is empty and must be preserved (not shifted).
-	if err := tmuxctl.WriteWindowState(
-		context.Background(), opts, sessB.WindowID(), "layout", "beta",
+	if err := srv.WriteWindowState(
+		context.Background(), sessB.WindowID(), "layout", "beta",
 	); err != nil {
 		t.Fatalf("WriteWindowState B layout: %v", err)
 	}
 
 	// Request three keys at once; "baz" is unset on every window.
-	rows, err := tmuxctl.ListWindows(context.Background(), muxctl.ListOptions{
-		DriverOpt: socketOpt(socket),
+	rows, err := srv.ListWindows(context.Background(), muxctl.ListOptions{
 		StateKeys: []muxctl.StateKey{muxctl.StateKeyScale, "layout", "baz"},
 	})
 	if err != nil {

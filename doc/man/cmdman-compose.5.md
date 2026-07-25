@@ -38,7 +38,8 @@ commands:
       db:
         condition: started
 mux:
-  driver: tmux
+  driver:
+    name: tmux
   layouts:
     - name: main
       root:

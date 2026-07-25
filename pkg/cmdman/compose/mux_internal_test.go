@@ -12,6 +12,7 @@ import (
 	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/mux"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/muxctl"
 
 	// Link the tmux muxctl driver so mux.List/MuxLs can resolve "tmux" via
 	// muxctl.LookupDriver in this test binary (the real binary links it from
@@ -93,8 +94,7 @@ func TestServiceMuxLs_NilServiceDegrades(t *testing.T) {
 			Project: "proj",
 			WorkDir: "/work",
 			Mux: &mux.Spec{
-				Driver:    "tmux",
-				DriverOpt: map[string]string{"socket": socket},
+				Driver: muxctl.DriverSpec{Name: "tmux", Socket: socket},
 				Layouts: []mux.Layout{
 					{Name: "solo", Root: mux.PaneSpec{Command: "web"}},
 				},

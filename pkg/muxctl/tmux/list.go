@@ -10,7 +10,7 @@ import (
 // ListWindows enumerates tmux windows that carry the @cmdman_window
 // ownership stamp, server-wide (or restricted to one session via
 // opts.Session), and optionally filtered to an exact identity value. It
-// implements [muxctl.Driver.ListWindows] for tmux.
+// implements [muxctl.Server.ListWindows] for tmux.
 //
 // When no tmux server is running on the target socket, list-windows exits
 // non-zero with a "no server" message; this is treated as zero results rather
@@ -22,11 +22,11 @@ import (
 // inline per-window state values for the keys named in opts.StateKeys (each key
 // mapped to the window option @cmdman_<key>, fetched in the same list-windows
 // round-trip). A requested key whose option is unset maps to "".
-func ListWindows(
+func (srv *Server) ListWindows(
 	ctx context.Context,
 	opts muxctl.ListOptions,
 ) ([]muxctl.Window, error) {
-	e := newExecutorFor(opts.DriverOpt)
+	e := srv.exec
 
 	// Build the list-windows invocation. -a scans all sessions; -t <session>
 	// restricts to one. The format delivers all per-window fields we need in

@@ -14,8 +14,8 @@ commands:
 # compose mux resolves them to commands at run time. The compose loader decodes
 # this section eagerly into ComposeSpec.Mux (*mux.Spec).
 mux:
-  driver: tmux
-  driver_opt:
+  driver:
+    name: tmux
     socket: cmdman
   layouts:
     - name: services

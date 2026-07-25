@@ -104,12 +104,11 @@ func (s *Session) stampLeaf(
 // matching pane id. Every runtime pane corresponds to a spec leaf (containers
 // are spec-only), so unstamped placeholder panes simply never match. ok is
 // false when no pane carries the key.
-func FindPane(
+func (srv *Server) FindPane(
 	ctx context.Context,
-	opts muxctl.ListOptions,
 	windowID, key string,
 ) (paneID string, ok bool, err error) {
-	e := newExecutorFor(opts.DriverOpt)
+	e := srv.exec
 	out, runErr := e.run(
 		ctx, "list-panes", "-t", windowID,
 		"-F", "#{pane_id}\t#{"+leafOption+"}",
