@@ -1,11 +1,11 @@
 lockfile_version: '1'
-generated_at: '2026-07-23T00:34:48.214603+00:00'
+generated_at: '2026-07-25T06:23:44.764790+00:00'
 apm_version: 0.26.0
 dependencies:
 - repo_url: ngicks/agents-package
   name: cc-workers
   host: github.com
-  resolved_commit: 62ea5d252495d7fa3d3a549272365a76384f2657
+  resolved_commit: 7bb89a8b7ee460f76823af5da97d7dbd2eab8b48
   version: 0.0.1
   virtual_path: apm-package/cc-workers
   is_virtual: true
@@ -67,7 +67,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: go-vet-ngcheckers
   host: github.com
-  resolved_commit: 62ea5d252495d7fa3d3a549272365a76384f2657
+  resolved_commit: 7bb89a8b7ee460f76823af5da97d7dbd2eab8b48
   version: 1.0.0
   virtual_path: hooks/go-vet-ngcheckers
   is_virtual: true
@@ -76,7 +76,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: golangci-lint-fmt-after-edit
   host: github.com
-  resolved_commit: 62ea5d252495d7fa3d3a549272365a76384f2657
+  resolved_commit: 7bb89a8b7ee460f76823af5da97d7dbd2eab8b48
   version: 1.0.0
   virtual_path: hooks/golangci-lint-fmt-after-edit
   is_virtual: true
@@ -85,7 +85,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: golangci-lint-run-after-edit
   host: github.com
-  resolved_commit: 62ea5d252495d7fa3d3a549272365a76384f2657
+  resolved_commit: 7bb89a8b7ee460f76823af5da97d7dbd2eab8b48
   version: 1.0.0
   virtual_path: hooks/golangci-lint-run-after-edit
   is_virtual: true
@@ -94,7 +94,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: agents-package-base-env
   host: github.com
-  resolved_commit: 62ea5d252495d7fa3d3a549272365a76384f2657
+  resolved_commit: 7bb89a8b7ee460f76823af5da97d7dbd2eab8b48
   version: 1.0.0
   virtual_path: instructions/base-env.instructions.md
   is_virtual: true
@@ -106,11 +106,10 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: agents-package-base-preference
   host: github.com
-  resolved_commit: 62ea5d252495d7fa3d3a549272365a76384f2657
+  resolved_commit: 7bb89a8b7ee460f76823af5da97d7dbd2eab8b48
   version: 1.0.0
   virtual_path: instructions/base-preference.instructions.md
   is_virtual: true
-  package_type: apm_package
   deployed_files:
   - .claude/rules/base-preference.md
   deployed_file_hashes:
@@ -119,7 +118,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: agents-package-go-basics
   host: github.com
-  resolved_commit: 62ea5d252495d7fa3d3a549272365a76384f2657
+  resolved_commit: 7bb89a8b7ee460f76823af5da97d7dbd2eab8b48
   version: 1.0.0
   virtual_path: instructions/go/go-basics.instructions.md
   is_virtual: true
@@ -131,7 +130,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: agents-package-go-design-preference
   host: github.com
-  resolved_commit: 62ea5d252495d7fa3d3a549272365a76384f2657
+  resolved_commit: 7bb89a8b7ee460f76823af5da97d7dbd2eab8b48
   version: 1.0.0
   virtual_path: instructions/go/go-design-preference.instructions.md
   is_virtual: true
@@ -143,7 +142,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: go-check-outdated-patterns
   host: github.com
-  resolved_commit: 62ea5d252495d7fa3d3a549272365a76384f2657
+  resolved_commit: 7bb89a8b7ee460f76823af5da97d7dbd2eab8b48
   version: unknown
   virtual_path: skills/go-check-outdated-patterns
   is_virtual: true
@@ -160,7 +159,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: go-edit-cobra
   host: github.com
-  resolved_commit: 62ea5d252495d7fa3d3a549272365a76384f2657
+  resolved_commit: 7bb89a8b7ee460f76823af5da97d7dbd2eab8b48
   version: unknown
   virtual_path: skills/go-edit-cobra
   is_virtual: true
@@ -245,7 +244,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: go-review-checklist
   host: github.com
-  resolved_commit: 62ea5d252495d7fa3d3a549272365a76384f2657
+  resolved_commit: 7bb89a8b7ee460f76823af5da97d7dbd2eab8b48
   version: unknown
   virtual_path: skills/go-review-checklist
   is_virtual: true
@@ -262,7 +261,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: ngplan
   host: github.com
-  resolved_commit: 62ea5d252495d7fa3d3a549272365a76384f2657
+  resolved_commit: 7bb89a8b7ee460f76823af5da97d7dbd2eab8b48
   version: unknown
   virtual_path: skills/ngplan
   is_virtual: true
@@ -366,7 +365,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:8ee4db368cc493bc823e8808e5059e441f3ee8c3af0096f0ad0e99be15bec357
+  content_hash: sha256:9e8b2088e3742b5ca36453021fda3abb859b65967cd625053da39d267f0f08ac
 - kind: project-relative
   target: claude
   value: .claude/rules/go-basics.md
@@ -1096,6 +1095,6 @@ local_deployed_files:
 - .claude/skills/go-cmdman-review-checklist/SKILL.md
 local_deployed_file_hashes:
   .agents/skills/go-cmdman-review-checklist/SKILL.md: sha256:590163e9633d35d1b2811d2151f1fc35ec0b7b99cbf8a2ae23aa2fd24e45fd11
-  .claude/rules/base.local.md: sha256:8ee4db368cc493bc823e8808e5059e441f3ee8c3af0096f0ad0e99be15bec357
+  .claude/rules/base.local.md: sha256:9e8b2088e3742b5ca36453021fda3abb859b65967cd625053da39d267f0f08ac
   .claude/rules/project-overview.local.md: sha256:b5fa82d3e043de316076c54749f3326f7e3e3445529d3b55436a7e1dd08fc735
   .claude/skills/go-cmdman-review-checklist/SKILL.md: sha256:590163e9633d35d1b2811d2151f1fc35ec0b7b99cbf8a2ae23aa2fd24e45fd11
