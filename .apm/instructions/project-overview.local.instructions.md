@@ -7,8 +7,7 @@ applyTo: "*"
 
 > Companion to `base.local.instructions.md`. That file has the short pitch and the
 > tooling rules; this file is the distilled architecture + code map. Where the two
-> disagree, trust this one — the structure tree in `base` predates the `mux`/`muxctl`
-> split and the (now implemented) TUI.
+> disagree, trust this one — `base` keeps only a coarse structure tree.
 
 ## What it is
 
@@ -17,10 +16,13 @@ _"podman without pods, the tmux without terminals."_ It starts blocking commands
 background, persists their config/state, and lets you control them over CLI and a TUI.
 
 - Module: `github.com/ngicks/cmdman` · Go `1.26.0`
-- Single binary: `cmd/cmdman` → `cmdman`
-- Version constant: `pkg/cmdman/version.go` (currently `v0.0.10-devel`), bumped by `internal/cmd/release`.
-- Note: README says the TUI is "not implemented" — that is **stale**. The bubbletea TUI in
-  `pkg/cmdman/tui` is functional end-to-end.
+- Single binary: `cmd/cmdman` → `bin/cmdman` (a bare `cmdman` output would collide with the
+  top-level source dir of the same name; `/bin` is gitignored).
+- Version constant: `internal/libver/libver.go` (currently `v0.0.17-devel`), bumped by the
+  **external** release tool
+  `go run github.com/ngicks/go-common/tools/bump-libver@latest <release-version>`, which rewrites
+  the constant, commits, tags, then bumps to the next `-devel`.
+- The bubbletea TUI in `cmdman/tui` is functional end-to-end.
 
 ## Runtime architecture — the mental model
 
@@ -28,18 +30,24 @@ There is **no central daemon**. Every supervised command gets its **own monitor 
 Two process roles per command:
 
 1. **Service / CLI** (short-lived): the `cmdman <verb>` invocation you type. Stateless across
-   calls — everything it needs is on disk (SQLite + per-command dirs). Code: `pkg/cmdman`,
-   the `Service` type in `cmdman.go`.
-2. **Monitor** (long-lived, detached): supervises one child command. Code: `Monitor` in `mon*.go`.
+   calls — everything it needs is on disk (SQLite + per-command dirs). Code: `cmdman`,
+   the `Service` type in `cmdman/cmdman.go`.
+2. **Monitor** (long-lived, detached): supervises one child command. Code: `Monitor` in the
+   `cmdman/monitor` package (`mon*.go`).
 
-**Spawn path** (`Service.Start` → `mon_spawn.go`):
+**Spawn path** (`Service.Start` → `monitor/mon_spawn.go`, `monitor/mon_spawn_posix.go`):
 
-- Re-execs the _same binary_ with the hidden `__monitor --id <id>` subcommand.
-- `detachProcess` (`detach_posix.go`) sets `Setsid=true` and redirects stdio → `/dev/null`;
-  CLI calls `cmd.Process.Release()` to orphan it, then polls the SQLite store (every 50 ms)
-  for the state to flip `starting` → `running`.
+- `SpawnMonitor` re-execs the _same binary_ with the hidden `__monitor --id <id>` subcommand,
+  forwarding `--data-dir` / `--runtime-dir` (and `--config` when set) so the child resolves the
+  same store and the same file-only settings, then **waits** for that process.
+- That first process is only the intermediate of a **double-fork**: `DaemonizeMonitor` does
+  `setsid`, re-execs itself as the real daemon with stdio → `/dev/null` and the
+  `__CMDMAN_INTERNAL_MONITOR_DAEMON` marker set, releases it (reparented to init), and exits;
+  reaping the intermediate avoids a zombie and surfaces daemonization errors.
+- The CLI then polls the SQLite store (`WaitForState`, every 50 ms) for the state to flip
+  `starting` → `running`.
 
-**Monitor lifecycle** (`mon_run.go`, `mon.go`):
+**Monitor lifecycle** (`monitor/mon_run.go`, `monitor/mon.go`):
 
 - `RunMonitor` opens the store, takes an exclusive `flock` on a PID file (dedupe guard),
   writes its PID + socket path into the state JSON, listens on a Unix socket, serves gRPC.
@@ -51,16 +59,18 @@ Two process roles per command:
 - Shutdown: SIGTERM → ctx cancel → signal child's process group → `grpcServer.GracefulStop()`
   → `wg.Wait()`.
 
-**Stale cleanup** (`mon_clean.go`): `Service.List` flips DB entries whose monitor PID is dead
-(`kill -0`) to `failed`.
+**Stale cleanup** (`monitor/mon_clean.go`): `Service.List` flips DB entries whose monitor PID is
+dead (`kill -0`) to `failed`.
 
-`run` = `create` + `start` (+ optional `--attach`). The hidden `__child` subcommand
-(`stdiopipe`) is the popup/TUI stdio relay.
+`run` = `create` + `start` (+ optional `--attach`). The hidden `cmdman tui __child` subcommand is
+the TUI's popup child: the parent opens a multiplexer popup running it and the two talk over an
+IPC socket. Cancellable stdio for `attach` / `logs` / `events` comes from the external
+`github.com/ngicks/go-common/iopipe`.
 
 ## IPC — gRPC over a per-command Unix socket
 
-- Proto: `pkg/api/schema/proto/cmdman/v1/cmdman.proto` → generated into
-  `pkg/api/gen/proto/go/...` via **`buf generate`** (config in `pkg/api/buf.gen.yaml`).
+- Proto: `api/schema/proto/cmdman/v1/cmdman.proto` (proto package `cmdman.v1`) → generated into
+  `api/gen/proto/go/...` via **`buf generate`** (config in `api/buf.gen.yaml`).
 - Socket: `<runtime-dir>/cmd/<id>/monitor.sock`; path is stored in `model.CommandState.SocketPath`
   so any CLI process discovers it without a registry. Transport uses `insecure` creds (local socket).
 - Service `CommandMonitorService`:
@@ -71,45 +81,52 @@ Two process roles per command:
 ## Persistence — SQLite
 
 - Driver: `modernc.org/sqlite` (pure-Go, **CGO-free**). WAL mode, busy-timeout, `foreign_keys=ON`.
-- Schema (`store/schema.go`, version **2**): `DBConfig`, `CommandConfig`(id, name, createdAt, JSON),
+- Schema (`store/schema.go`): `DBConfig`, `CommandConfig`(id, name, createdAt, JSON),
   `CommandState`(state, exitCode, JSON), `CommandExitCode`(append-only history).
 - Domain blobs are `model.CommandConfig` / `model.CommandState` marshaled to the `JSON` columns.
-- Migrations: explicit per-version funcs in `store/internal/migrations`, each in its own `Tx`;
-  user runs `cmdman migrate` when the on-disk schema is outdated.
+- Migrations: embedded `NNNN_description.sql` files in `store/migration`, replayed as the whole
+  chain for a fresh DB; the schema version is derived from the highest file
+  (`migration.MaxVersion()`), so a schema change means adding a file. The user runs
+  `cmdman migrate` when the on-disk schema is outdated.
 - `ResolveID` accepts exact name → exact id → unambiguous id-prefix.
 
 ## Package map (current/accurate)
 
 ```
 cmd/cmdman/                Entry point. Thin cobra wiring ONLY (see conventions).
-  main.go                  signal.NotifyContext + commands.Execute
+  main.go                  cmdsignals.NotifyContext + commands.Execute
   commands/                one file per subcommand; root.go composes them
-  internal/{cmdsignals,stdiopipe}
 internal/
-  cmd/release              release/version-bump helper
+  cmdsignals               ExitSignals + thin wrapper over go-common/atomicsignal
+  libver                   Version constant, rewritten by the external release tool
   loggerfactory            slog logger construction from env/flags
+  templateutil             shared text/template helpers: FuncMap/FuncDocs/FuncHelp
   versioninfo              build version info
-pkg/api/                   gRPC/proto IPC contract (schema/ + buf-generated gen/)
-pkg/cmdman/                Core "usecase" package — the Service + Monitor
+api/                       gRPC/proto IPC contract (schema/ + buf-generated gen/)
+cmdman/                    Core "usecase" package — the Service
   cmdman_*.go              one file per Service verb (start/stop/restart/...)
-  mon*.go                  Monitor: spawn, run loop, gRPC server, cleanup
-  {detach,prep_process}_posix.go   process detach / pgid (build-tagged posix)
-  config*.go               CmdmanConfig: paths, defaults, XDG, watcher kind
-  broadcaster.go ringbuffer.go attach_session.go env.go
+  config.go                CmdmanConfig = config.Config type alias
+  attach_session.go
   cli/                     CLI PRESENTATION layer (tables, progress, attach, templates, tui launch)
   compose/                 docker-compose-like: spec, DAG (graph.go), plan, reconcile engine
+  config/                  canonical config: Config, PartialConfig, Apply, Load, paths, XDG, env
   eventlog/                append-only JSONL event log; inotify(linux)/poll watcher
+  frame/                   frame defs: dock components (switcher, status bar, command) around
+                           the screen edges; ordered carve of the remaining rectangle
   logdriver/               structured log Writer/Reader; k8sfile/ = podman k8s-file format
   model/                   domain types: CommandConfig, CommandState, EventType, RestartPolicy
-  store/                   SQLite config/state/exit-history store + migrations
+  monitor/                 Monitor: mon*.go = spawn/double-fork, run loop, gRPC server, cleanup;
+                           broadcaster.go ringbuffer.go hooks.go; *_posix.go = detach / pgid
+  mux/                     cmdman's YAML layer: resolves command names → muxctl spec → Run
+  store/                   SQLite config/state/exit-history store + migration/ chain
   tui/                     bubbletea Model/Update/View dashboard (functional)
   internal/flock           advisory file locks (posix flock; no-op error elsewhere)
 pkg/muxctl/                driver-agnostic terminal-multiplexer spec + Session/Pane interface
   tmux/                    concrete tmux driver (only driver implemented)
-pkg/cmdman/mux/            cmdman's YAML layer: resolves command names → muxctl spec → Run
 pkg/hrstr/                 human-readable string/signal parsing
 pkg/stdcopy/               demux cmdman's framed log stream into io.Writer (docker-style)
 e2e/cmdman/                black-box tests: TestMain builds the binary, drives it as a subprocess
+doc/man/                   man pages, written as markdown
 doc/plan/                  old plan files — DO NOT read (per base instructions)
 ```
 
@@ -119,17 +136,21 @@ closing/rebuilding a session must never stop a supervised process. Driver autode
 
 ## CLI surface
 
-Top-level: `attach create events inspect logs ls migrate mux restart rm run send-keys signal
-start stop tui version wait compose` (+ hidden `__monitor`, `__child`).
-`compose` subcommands mirror the verbs plus `up down config ps`. Most listing/inspect commands
-support `--format` Go templates via the shared `cli/template.go` `templateFuncMap`.
+Top-level: `attach config create events inspect logs ls migrate mux restart rm run send-keys
+signal start status stop tui version wait compose` (+ hidden `__monitor`, and `tui __child`).
+Root carries the persistent flags `--config`, `--data-dir`, `--runtime-dir`.
+`config` prints the resolved configuration (indented JSON, or `--format` template).
+`status` has `get` / `set` / `delete` subcommands.
+`compose` subcommands mirror the verbs plus `up down config ps scale mux`. Most listing/inspect
+commands support `--format` Go templates: the generic helpers live in `internal/templateutil`
+(`FuncMap`), and `cli/template.go` copies that map and adds its own entries on top.
 
 ## Conventions / codex
 
 **Layering (enforced by `go-design-preference`):**
 
 - `./cmd` parses flags/args and calls a service — **no business logic, no presentation**.
-- Presentation (tables, color, progress, tty detection, prompts) lives in `pkg/cmdman/cli`.
+- Presentation (tables, color, progress, tty detection, prompts) lives in `cmdman/cli`.
 - Services are programmatic-caller-first; the CLI is a wrapper. Services never import `./cmd`.
 - `main`/`Run` return errors; never `os.Exit` from business code (only `main.go` exits).
 
@@ -144,8 +165,20 @@ support `--format` Go templates via the shared `cli/template.go` `templateFuncMa
 - Small interfaces defined at the consumer (`compose.cmdmanSvc`, `cli.AttachSession`,
   `tui.Backend`), not at the implementer.
 - Generics for fan-out (`broadcaster[T]`); non-blocking send drops slow consumers.
-- DI over package globals; config flows in (flag → env → file → built-in precedence in
-  `config.go` `WithDefaults`).
+- DI over package globals; config flows in. `cmdman/config` owns the canonical model:
+  `Config` (aliased as `cmdman.CmdmanConfig`) is the materialized value type; `PartialConfig` is
+  its sparse mirror (nil = absent) and the single decode target for both the config file and the
+  environment; `PartialConfig.Apply` is the one merge primitive. `config.Load(flagPath)` layers
+  **defaults < config file < environment**, and the `./cmd` wiring applies explicitly-set root
+  flags on top via `Flags().Changed` (so an unset flag never clobbers a lower layer).
+  - Config file: JSON with **snake_case** keys — `data_dir`, `runtime_dir`, `default_working_dir`,
+    `default_scrollback_bytes`, `default_log_driver`, `event_watcher_kind`, `default_hooks`.
+    Resolution: `--config` → `$CMDMAN_CONF` → `<user config dir>/cmdman/config.json`.
+  - Env layer (caarlos0/env, `CMDMAN_` prefix): only `CMDMAN_DATA_DIR` / `CMDMAN_RUNTIME_DIR`;
+    every other field is file-only.
+  - `Config.ConfigPath` carries the `--config` value as provenance so a process that re-execs the
+    binary (the monitor, the TUI popup child) can forward `--config` — a child inherits the
+    environment but not the flags.
 
 **Logging (project-specific — see `go-cmdman-review-checklist`):**
 
@@ -158,7 +191,8 @@ support `--format` Go templates via the shared `cli/template.go` `templateFuncMa
 **Cross-platform build tags:**
 
 - `//go:build !plan9 && !windows && !wasm` → `*_posix.go` (setsid/setpgid/pty, flock).
-- `//go:build linux` / `!linux` → inotify vs poll event watcher (`config_{linux,other}.go`).
+- `//go:build linux` / `!linux` → inotify vs poll event watcher
+  (`cmdman/config/config_{linux,other}.go`).
 - `unix` / `windows` / `plan9` variants for file identity (`eventlog/file_ident_*.go`).
 
 **YAML / compose decoding:** uses `go.yaml.in/yaml/v4`. Capture unknown keys with an inline
@@ -172,7 +206,8 @@ order per op file: `<Op>Option` → `<Op>Result` → `<Verb>Outcome` → methods
 
 ## Build / test / lint / codegen
 
-- Build: `go build -o cmdman ./cmd/cmdman`
+- Build: `go build -o bin/cmdman ./cmd/cmdman` (never `-o cmdman`: that collides with the
+  top-level `cmdman/` source dir).
 - Unit tests live beside code (`_test.go`, often external `_test` package). Run: `go test ./...`
 - E2E (`e2e/cmdman`): `TestMain` builds the binary into a temp dir and drives it as a subprocess.
   Add e2e coverage whenever existing tests don't cover a new case.
@@ -180,9 +215,13 @@ order per op file: `<Op>Option` → `<Op>Result` → `<Verb>Outcome` → methods
   (gopls-mirrored analyses), modernize, gocritic, `lll` line-length **100**, `goimports`+`golines`.
   PostToolUse hooks auto-run `golangci-lint fmt` + `golangci-lint run` after every Edit/Write
   (`.claude/settings.json`).
-- Proto regen: `buf generate` from `pkg/api` (needs `protoc-gen-go`, `protoc-gen-go-grpc`).
-- sqlc regen: `go generate ./pkg/cmdman/store` (or `go tool sqlc generate` from that dir) — `schema/schema.sql` is sqlc's parser input, kept in sync with `migration/` by `TestSchemaSQLMatchesMigrationChain`; don't hand-edit `gen/query/`.
-- APM primitives: `apm.yml` / `apm.lock.yaml`; `AGENTS.md` is generated (`apm compile`) — don't hand-edit.
+- Proto regen: `buf generate` from `api` (needs `protoc-gen-go`, `protoc-gen-go-grpc`).
+- sqlc regen: `go generate ./cmdman/store` (or `go tool sqlc generate` from that dir) — `schema/schema.sql` is sqlc's parser input, kept in sync with `migration/` by `TestSchemaSQLMatchesMigrationChain`; don't hand-edit `gen/query/`.
+- Release: `go run github.com/ngicks/go-common/tools/bump-libver@latest <release-version>` — an
+  external tool; there is no in-repo release command.
+- APM primitives: `apm.yml` / `apm.lock.yaml`; `AGENTS.md` and `.claude/rules/*.local.md` are
+  generated (`apm compile`) from `.apm/instructions/*.instructions.md` — edit the sources, then
+  recompile; don't hand-edit the outputs.
 
 ## Skills to invoke when editing
 

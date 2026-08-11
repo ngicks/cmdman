@@ -5,7 +5,7 @@ description: "Use your change if you have edited Go code in the project."
 
 # cmdman Review Checklist
 
-Project-specific review checklist for cmdman. Apply it **in addition to** `go-review-checklist` and `go-check-outdated-patterns` (those cover generic Go idioms and personal preferences). The items below encode conventions specific to this repo, mostly the `pkg/cmdman/compose` service layer.
+Project-specific review checklist for cmdman. Apply it **in addition to** `go-review-checklist` and `go-check-outdated-patterns` (those cover generic Go idioms and personal preferences). The items below encode conventions specific to this repo, mostly the `cmdman/compose` service layer.
 
 ## Logging
 

@@ -5,7 +5,7 @@ applyTo: "*"
 
 ### General
 
-A simple shell command daemonizor written in Go which runs blocking commands in background and let you control them through CLI and TUI(not implemented).
+A simple shell command daemonizor written in Go which runs blocking commands in background and let you control them through CLI and TUI.
 
 ### Tech stack
 
@@ -17,33 +17,39 @@ A simple shell command daemonizor written in Go which runs blocking commands in 
 
 ```
 .
-├── cmd                Entry point. cobra subcommand structure.
-│   └── cmdman
+├── api                 IPC / RPC definition
+│   ├── gen             generated code by `buf generate`
+│   └── schema          `buf generate` target
+├── cmd                 Entry point. cobra subcommand structure.
+│   └── cmdman
+├── cmdman              cmdman usecase code
+│   ├── cli             cli presentation layer
+│   ├── compose         compose functionality
+│   ├── config          configuration model, layering and loading
+│   ├── eventlog        event log functionality
+│   ├── frame           frame definitions: components docked to screen edges
+│   ├── internal
+│   ├── logdriver       log reader / writer
+│   ├── model           domain models
+│   ├── monitor         per-command monitor process
+│   ├── mux             cmdman's YAML layer on top of pkg/muxctl
+│   ├── store           SQLite config / state store
+│   └── tui             bubbletea TUI
 ├── doc
-│   ├── man            internal helper entry points
-│   └── plan           old plan files. You may not read this
+│   ├── man             man pages written in markdown
+│   └── plan            old plan files. You may not read this
 ├── e2e
-│   └── cmdman
+│   └── cmdman
 ├── internal
-│   ├── cmd            internal helper entry points
-│   │   └── release    release helper
-│   ├── loggerfactory  internal helper
-│   └── versioninfo
+│   ├── cmdsignals      signals that cancel top-level CLI execution
+│   ├── libver          release-controlled version constant
+│   ├── loggerfactory   internal helper
+│   ├── templateutil    text/template helpers shared by --format renderers
+│   └── versioninfo
 └── pkg
-    ├── api            IPC / RPC definition
-    │   ├── gen        generated code by `buf generate`
-    │   └── schema     `buf generate` target
-    ├── cmdman         cmdman usecase code
-    │   ├── cli        cli wiring
-    │   ├── compose    compose functionality
-    │   ├── eventlog   log functionality
-    │   ├── internal
-    │   ├── logdriver  log reader / writer
-    │   ├── model      domain models
-    │   └── store      SQLite config / state store
-    ├── hrstr          human readable string parser / maybe writer
-    ├── mux            terminal multiplexer driver
-    └── stdcopy        copy cmdman logs to io.Writer
+    ├── hrstr           human readable string parser / maybe writer
+    ├── muxctl          terminal multiplexer driver
+    └── stdcopy         copy cmdman logs to io.Writer
 ```
 
 ### Implementing functionality
