@@ -9,7 +9,6 @@ import (
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 	"github.com/ngicks/cmdman/cmdman/model"
-	"github.com/ngicks/cmdman/internal/stdiopipe"
 	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
@@ -108,8 +107,11 @@ func runComposeEvents(
 		return nil
 	}
 
-	stdout := stdiopipe.Stdout(cmd.Context())
-	defer stdout.Close()
+	stdout, stopStdout, err := stdoutPipe(cmd.Context())
+	if err != nil {
+		return err
+	}
+	defer stopStdout()
 
 	renderErr := cli.RenderEvents(stdout, sub.Records(), format)
 	closeErr := sub.Close()

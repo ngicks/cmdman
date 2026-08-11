@@ -15,6 +15,7 @@ require (
 	github.com/muesli/cancelreader v0.2.2
 	github.com/ngicks/go-common/atomicsignal v0.0.2
 	github.com/ngicks/go-common/contextkey v0.2.0
+	github.com/ngicks/go-common/iopipe v0.0.1
 	github.com/ngicks/go-iterator-helper v0.0.23
 	github.com/spf13/cobra v1.10.2
 	go.yaml.in/yaml/v4 v4.0.0-rc.4

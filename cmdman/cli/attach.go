@@ -78,7 +78,7 @@ const DefaultDetachKeys = "ctrl-p,ctrl-q"
 // streams.
 //
 // StdinPipe and StdoutPipe carry the byte streams. Typically they are
-// cancellable io.Pipe wrappers (see internal/stdiopipe) around
+// cancellable pipes (github.com/ngicks/go-common/iopipe) in front of
 // Stdin/Stdout so the attach loop can unblock pending Read/Write calls
 // by closing them.
 type AttachOptions struct {

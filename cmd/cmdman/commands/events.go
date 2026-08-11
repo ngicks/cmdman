@@ -9,7 +9,6 @@ import (
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/model"
-	"github.com/ngicks/cmdman/internal/stdiopipe"
 	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
@@ -104,8 +103,11 @@ func runEvents(
 		return err
 	}
 
-	stdout := stdiopipe.Stdout(cmd.Context())
-	defer stdout.Close()
+	stdout, stopStdout, err := stdoutPipe(cmd.Context())
+	if err != nil {
+		return err
+	}
+	defer stopStdout()
 
 	// Render until the records channel is closed (which happens when the
 	// underlying Reader.Run / Watcher.Run goroutines exit), then surface

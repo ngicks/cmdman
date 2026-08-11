@@ -108,7 +108,7 @@ func (s *scriptedSession) Close() error {
 }
 
 // pipeWriteCloser drains an io.Pipe into a mutex-guarded buffer, mirroring the
-// real stdiopipe.Stdout: Write goes through the pipe, and Close() actually
+// real stdout pipe: Write goes through the pipe, and Close() actually
 // closes the pipe (so writes after Close fail and the drain goroutine exits).
 // A plain bytes.Buffer with a no-op Close would mask the reattach bug because
 // its writes never fail.

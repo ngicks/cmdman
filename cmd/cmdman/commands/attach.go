@@ -9,7 +9,6 @@ import (
 
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
-	"github.com/ngicks/cmdman/internal/stdiopipe"
 )
 
 type attachFlags struct {
@@ -63,6 +62,17 @@ func runAttach(
 	// forward to the remote command, then restore it on detach.
 	pauseSignals, resumeSignals := attachSignalHooks(cmd.Context())
 
+	stdin, stopStdin, err := stdinPipe(attachCtx)
+	if err != nil {
+		return err
+	}
+	defer stopStdin()
+	stdout, stopStdout, err := stdoutPipe(attachCtx)
+	if err != nil {
+		return err
+	}
+	defer stopStdout()
+
 	opts := cli.AttachOptions{
 		NoStdin:       flags.NoStdin,
 		SigProxy:      flags.SigProxy,
@@ -71,8 +81,8 @@ func runAttach(
 		ResumeSignals: resumeSignals,
 		Stdin:         os.Stdin,
 		Stdout:        os.Stdout,
-		StdinPipe:     stdiopipe.Stdin(attachCtx),
-		StdoutPipe:    stdiopipe.Stdout(attachCtx),
+		StdinPipe:     stdin,
+		StdoutPipe:    stdout,
 	}
 
 	if flags.AutoExit {

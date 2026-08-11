@@ -8,7 +8,6 @@ import (
 
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
-	"github.com/ngicks/cmdman/internal/stdiopipe"
 	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
@@ -107,10 +106,16 @@ func runLogs(
 	}
 	defer r.Close()
 
-	stdout := stdiopipe.Stdout(cmd.Context())
-	defer stdout.Close()
-	stderr := stdiopipe.Stderr(cmd.Context())
-	defer stderr.Close()
+	stdout, stopStdout, err := stdoutPipe(cmd.Context())
+	if err != nil {
+		return err
+	}
+	defer stopStdout()
+	stderr, stopStderr, err := stderrPipe(cmd.Context())
+	if err != nil {
+		return err
+	}
+	defer stopStderr()
 
 	return cli.RenderLogs(stdout, stderr, r.Records())
 }
