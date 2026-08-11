@@ -73,6 +73,7 @@ It simply starts a monitor process and the monitor damonizes itself and starts s
 	flags.StringVar(&rf.runtimeDir, "runtime-dir", "", "Cmdman runtime directory")
 
 	versionCmd(cmd)
+	configCmd(cmd, &rf)
 
 	attachCmd(cmd, &rf)
 	createCmd(cmd, &rf)

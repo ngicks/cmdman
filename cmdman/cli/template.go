@@ -1,11 +1,9 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -15,6 +13,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/ngicks/cmdman/cmdman/model"
+	"github.com/ngicks/cmdman/internal/templateutil"
 )
 
 const (
@@ -35,39 +34,29 @@ type tableMeta struct {
 	Win int            `json:"-"`
 }
 
-// templateFuncMap is shared by all --format templates. Width helpers use
-// terminal cell widths and preserve multi-byte runes.
-var templateFuncMap = template.FuncMap{
-	"json": func(v any) string {
-		b, err := json.Marshal(v)
-		if err != nil {
-			return fmt.Sprintf("ERR: %v", err)
-		}
-		return string(b)
-	},
-	"deref":    deref,
-	"command":  commandLine,
-	"title":    titleText,
-	"bell":     bellMark,
-	"shortID":  shortID,
-	"exitCode": exitCode,
-	"join": func(sep string, elems []string) string {
-		return strings.Join(elems, sep)
-	},
-	"width": runewidth.StringWidth,
-	"pad":   runewidth.FillRight,
-	"cell":  cell,
-	"trunc": func(s string, w int) string {
-		return runewidth.Truncate(s, w, "…")
-	},
-	"fit": fitColumn,
-}
+// templateFuncMap is shared by all --format templates: the generic helpers every
+// renderer in the binary exposes (templateutil — json, deref, join, and the
+// terminal-cell metrics width/pad/trunc) plus the ones below, which need a
+// cmdman model type or this package's column constants and so cannot be
+// generic. templateFuncList reads the merged map, so a helper added on either
+// side shows up in --format usage text without a second edit.
+var templateFuncMap = func() template.FuncMap {
+	m := templateutil.FuncMap()
+	m["command"] = commandLine
+	m["title"] = titleText
+	m["bell"] = bellMark
+	m["shortID"] = shortID
+	m["exitCode"] = exitCode
+	m["cell"] = cell
+	m["fit"] = fitColumn
+	return m
+}()
 
 // width is the display width of s in terminal cells.
-func width(s string) int { return runewidth.StringWidth(s) }
+func width(s string) int { return templateutil.Width(s) }
 
 // cell left-aligns s in a w-cell field and appends the inter-column gap.
-func cell(s string, w int) string { return runewidth.FillRight(s, w) + columnGap }
+func cell(s string, w int) string { return templateutil.Pad(s, w) + columnGap }
 
 // shortID abbreviates a command/container ID to idShortLen display cells.
 func shortID(id string) string { return runewidth.Truncate(id, idShortLen, "") }
@@ -86,7 +75,7 @@ func titleText(s string) string {
 	if s == "" {
 		return "-"
 	}
-	return runewidth.Truncate(s, titleMaxLen, "…")
+	return templateutil.Trunc(s, titleMaxLen)
 }
 
 // bellMark renders the bell column: a command nobody has looked at since it
@@ -114,23 +103,9 @@ func commandLine(cfg *model.CommandConfig) string {
 // not a terminal) leaves s untouched so redirected output keeps full values.
 func fitColumn(s string, win, used int) string {
 	if avail := win - used; win > 0 && avail > 0 {
-		return runewidth.Truncate(s, avail, "…")
+		return templateutil.Trunc(s, avail)
 	}
 	return s
-}
-
-func deref(v any) any {
-	if v == nil {
-		return nil
-	}
-	rv := reflect.ValueOf(v)
-	for rv.Kind() == reflect.Pointer {
-		if rv.IsNil() {
-			return nil
-		}
-		rv = rv.Elem()
-	}
-	return rv.Interface()
 }
 
 // terminalWidth returns the column count of the terminal backing out, or 0 when

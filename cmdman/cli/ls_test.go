@@ -133,9 +133,3 @@ func TestTitleText(t *testing.T) {
 	assert.Equal(t, width(got), titleMaxLen)
 	assert.Assert(t, strings.HasSuffix(got, "…"), "got %q", got)
 }
-
-func TestTemplateDeref(t *testing.T) {
-	v := new(42)
-	assert.Equal(t, deref(v), 42)
-	assert.Equal(t, deref(nil), nil)
-}
