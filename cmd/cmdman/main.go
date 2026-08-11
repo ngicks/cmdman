@@ -16,16 +16,15 @@ import (
 )
 
 func main() {
-	blockOn, ctx, cancel := cmdsignals.NotifyContext(context.Background())
+	n, ctx, cancel := cmdsignals.NotifyContext(context.Background())
 
-	// Run signal propagation alongside the command and always tear it down.
 	var wg sync.WaitGroup
-	wg.Go(blockOn)
+	wg.Go(n.Run)
 
 	err := commands.Execute(ctx)
 
-	// Match this context's error so an unrelated context.Canceled is not treated
-	// as a signal; inspect the cause before cleanup cancellation changes ctx.Err().
+	// Check before cancel(nil) below — that call would set ctx.Err() and
+	// manufacture a false positive.
 	if err != nil && errors.Is(err, ctx.Err()) {
 		if sigErr, ok := errors.AsType[*cmdsignals.SignalReceivedError](context.Cause(ctx)); ok {
 			err = sigErr
@@ -33,6 +32,7 @@ func main() {
 	}
 
 	cancel(nil)
+	n.Stop()
 	wg.Wait()
 
 	if err == nil {

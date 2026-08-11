@@ -8,6 +8,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/model"
+	"github.com/ngicks/cmdman/internal/cmdsignals"
 )
 
 func cmdmanService(rootCfg *cmdman.CmdmanConfig) (*cmdman.Service, error) {
@@ -46,6 +47,45 @@ func parseLogOpts(opts []string) (map[string]string, error) {
 		out[k] = v
 	}
 	return out, nil
+}
+
+// attachSignalHooks returns the [cli.AttachOptions] PauseSignals /
+// ResumeSignals hooks bound to the root Notifier stored in ctx.
+//
+// While attached, the root canceling handler is swapped for one that discards
+// the signals: cli.Attach's own os/signal registration — installed by install
+// and removed by remove — forwards them to the remote command instead. Both
+// hooks report false when ctx carries no Notifier, which makes cli.Attach fall
+// back to forwarding without touching the process-global handler.
+func attachSignalHooks(ctx context.Context) (
+	pause func(install func()) bool,
+	resume func(remove func()) bool,
+) {
+	var discard *cmdsignals.Handler
+	pause = func(install func()) bool {
+		n, ok := cmdsignals.CtxValueNotifier(ctx)
+		if !ok {
+			return false
+		}
+		discard = cmdsignals.NewHandler(1, nil, nil)
+		go discard.Run()
+		// Swap before install: a signal landing in the gap is dropped rather
+		// than cancelling the CLI.
+		n.Swap(discard)
+		install()
+		return true
+	}
+	resume = func(remove func()) bool {
+		n, ok := cmdsignals.CtxValueNotifier(ctx)
+		if !ok {
+			return false
+		}
+		n.Restore()
+		remove()
+		discard.Stop()
+		return true
+	}
+	return pause, resume
 }
 
 // stickyStateFor returns a cli.StickyHooks-shaped State closure that asks

@@ -10,7 +10,6 @@ import (
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
-	"github.com/ngicks/cmdman/internal/cmdsignals"
 	"github.com/ngicks/cmdman/internal/stdiopipe"
 )
 
@@ -72,22 +71,20 @@ func runComposeAttach(
 	attachCtx, cancelAttach := context.WithCancel(cmd.Context())
 	defer cancelAttach()
 
+	// Divert the root SIGINT/SIGTERM handler while attached so those signals
+	// forward to the remote command, then restore it on detach.
+	pauseSignals, resumeSignals := attachSignalHooks(cmd.Context())
+
 	opts := cli.AttachOptions{
-		NoStdin:    flags.NoStdin,
-		SigProxy:   flags.SigProxy,
-		DetachKeys: flags.DetachKeys,
-		// Pause the root SIGINT/SIGTERM handler while attached so those signals
-		// forward to the remote command, then restore it on detach.
-		PauseSignals: func(install func()) bool {
-			return cmdsignals.Pause(cmd.Context(), install)
-		},
-		ResumeSignals: func(remove func()) bool {
-			return cmdsignals.Resume(cmd.Context(), remove)
-		},
-		Stdin:      os.Stdin,
-		Stdout:     os.Stdout,
-		StdinPipe:  stdiopipe.Stdin(attachCtx),
-		StdoutPipe: stdiopipe.Stdout(attachCtx),
+		NoStdin:       flags.NoStdin,
+		SigProxy:      flags.SigProxy,
+		DetachKeys:    flags.DetachKeys,
+		PauseSignals:  pauseSignals,
+		ResumeSignals: resumeSignals,
+		Stdin:         os.Stdin,
+		Stdout:        os.Stdout,
+		StdinPipe:     stdiopipe.Stdin(attachCtx),
+		StdoutPipe:    stdiopipe.Stdout(attachCtx),
 	}
 
 	if flags.AutoExit {

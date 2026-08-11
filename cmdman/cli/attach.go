@@ -94,11 +94,11 @@ type AttachOptions struct {
 	// PauseSignals(install) — where install registers Attach's own forwarding
 	// handler — before forwarding begins, and ResumeSignals(remove) — where
 	// remove unregisters it — once forwarding stops. The command layer wires
-	// these to cmdsignals.Pause / cmdsignals.Resume bound to the root context,
-	// so SIGINT/SIGTERM reach the remote command during an attach and normal
-	// CLI cancellation is restored on detach. Pause's install / Resume's remove
-	// run atomically with the suspend / restore, leaving no window where the
-	// signals are unhandled.
+	// these to a swap of the root Notifier's canceling handler for a discarding
+	// one, so SIGINT/SIGTERM reach the remote command during an attach and
+	// normal CLI cancellation is restored on detach. The swap keeps the
+	// process-global os/signal registration in place throughout, leaving no
+	// window where the signals fall back to their default behavior.
 	//
 	// Both nil (the TUI and test callers) means Attach installs its forwarding
 	// handler directly and never touches the global handler.
@@ -163,11 +163,11 @@ func Attach(ctx context.Context, session AttachSession, opts AttachOptions) erro
 		// Suspend the binary's process-global SIGINT/SIGTERM handler for the
 		// duration of the attach so those signals are forwarded to the remote
 		// command instead of cancelling the CLI, then restore it on return.
-		// PauseSignals installs our forwarding handler atomically with the
-		// suspension (and ResumeSignals removes it on the way out). When the
-		// hooks are unset (TUI / tests) we forward directly and never touch the
-		// global handler. Pausing — rather than signal.Reset — leaves SIGPIPE
-		// and every other unrelated signal trapped as gRPC's runtime requires.
+		// PauseSignals installs our forwarding handler alongside the suspension
+		// (and ResumeSignals removes it on the way out). When the hooks are
+		// unset (TUI / tests) we forward directly and never touch the global
+		// handler. Suspending — rather than signal.Reset — leaves SIGPIPE and
+		// every other unrelated signal trapped as gRPC's runtime requires.
 		if opts.PauseSignals != nil && opts.ResumeSignals != nil && opts.PauseSignals(install) {
 			defer opts.ResumeSignals(remove)
 		} else {

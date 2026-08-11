@@ -12,6 +12,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/mattn/go-runewidth v0.0.23
 	github.com/muesli/cancelreader v0.2.2
+	github.com/ngicks/go-common/atomicsignal v0.0.2
 	github.com/ngicks/go-common/contextkey v0.2.0
 	github.com/ngicks/go-iterator-helper v0.0.23
 	github.com/spf13/cobra v1.10.2
