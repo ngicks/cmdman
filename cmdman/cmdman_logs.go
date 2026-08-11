@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
+	pb "github.com/ngicks/cmdman/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"github.com/ngicks/cmdman/cmdman/logdriver/k8sfile"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/store"
-	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 )
 
 // LogsRequest defines a log read operation.

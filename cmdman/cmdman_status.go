@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
+	cmdmanv1pb "github.com/ngicks/cmdman/api/gen/proto/go/cmdman/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"

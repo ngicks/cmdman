@@ -11,10 +11,10 @@ import (
 	"fmt"
 	"sync"
 
+	cmdmanv1pb "github.com/ngicks/cmdman/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/cmdman/eventlog"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/store"
-	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/go-common/contextkey"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

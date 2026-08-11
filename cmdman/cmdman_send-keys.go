@@ -8,7 +8,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
+	cmdmanv1pb "github.com/ngicks/cmdman/api/gen/proto/go/cmdman/v1"
 )
 
 // SendKeysRequest defines a send-keys operation against a running command PTY.

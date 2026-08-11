@@ -6,8 +6,8 @@ import (
 	"io"
 	"syscall"
 
+	pb "github.com/ngicks/cmdman/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/cmdman/logdriver"
-	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"

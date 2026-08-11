@@ -1379,8 +1379,8 @@ const file_cmdman_v1_cmdman_proto_rawDesc = "" +
 	"\x11WatchRuntimeState\x12#.cmdman.v1.WatchRuntimeStateRequest\x1a$.cmdman.v1.WatchRuntimeStateResponse0\x01\x12^\n" +
 	"\x11SetReportedStatus\x12#.cmdman.v1.SetReportedStatusRequest\x1a$.cmdman.v1.SetReportedStatusResponse\x12^\n" +
 	"\x11GetReportedStatus\x12#.cmdman.v1.GetReportedStatusRequest\x1a$.cmdman.v1.GetReportedStatusResponse\x12g\n" +
-	"\x14DeleteReportedStatus\x12&.cmdman.v1.DeleteReportedStatusRequest\x1a'.cmdman.v1.DeleteReportedStatusResponseB\xa3\x01\n" +
-	"\rcom.cmdman.v1B\vCmdmanProtoP\x01Z@github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1;cmdmanv1\xa2\x02\x03CXX\xaa\x02\tCmdman.V1\xca\x02\tCmdman\\V1\xe2\x02\x15Cmdman\\V1\\GPBMetadata\xea\x02\n" +
+	"\x14DeleteReportedStatus\x12&.cmdman.v1.DeleteReportedStatusRequest\x1a'.cmdman.v1.DeleteReportedStatusResponseB\x9f\x01\n" +
+	"\rcom.cmdman.v1B\vCmdmanProtoP\x01Z<github.com/ngicks/cmdman/api/gen/proto/go/cmdman/v1;cmdmanv1\xa2\x02\x03CXX\xaa\x02\tCmdman.V1\xca\x02\tCmdman\\V1\xe2\x02\x15Cmdman\\V1\\GPBMetadata\xea\x02\n" +
 	"Cmdman::V1b\x06proto3"
 
 var (

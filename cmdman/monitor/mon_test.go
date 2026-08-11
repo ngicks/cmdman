@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
+	pb "github.com/ngicks/cmdman/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/cmdman/config"
 	"github.com/ngicks/cmdman/cmdman/internal/flock"
 	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/store"
-	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/go-common/contextkey"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

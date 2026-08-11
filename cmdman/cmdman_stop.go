@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"time"
 
+	cmdmanv1pb "github.com/ngicks/cmdman/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/monitor"
 	"github.com/ngicks/cmdman/cmdman/store"
-	cmdmanv1pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 

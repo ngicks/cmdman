@@ -25,13 +25,13 @@ import (
 	"github.com/creack/pty"
 	"google.golang.org/grpc"
 
+	pb "github.com/ngicks/cmdman/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/cmdman/config"
 	"github.com/ngicks/cmdman/cmdman/eventlog"
 	"github.com/ngicks/cmdman/cmdman/internal/flock"
 	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"github.com/ngicks/cmdman/cmdman/model"
 	cmdstore "github.com/ngicks/cmdman/cmdman/store"
-	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 )
 
 // Monitor is the per-command monitor process.
