@@ -62,16 +62,8 @@ func runAttach(
 	// forward to the remote command, then restore it on detach.
 	pauseSignals, resumeSignals := attachSignalHooks(cmd.Context())
 
-	stdin, stopStdin, err := stdinPipe(attachCtx)
-	if err != nil {
-		return err
-	}
-	defer stopStdin()
-	stdout, stopStdout, err := stdoutPipe(attachCtx)
-	if err != nil {
-		return err
-	}
-	defer stopStdout()
+	stdin, stdout, stopStdio := attachStdio(attachCtx)
+	defer stopStdio()
 
 	opts := cli.AttachOptions{
 		NoStdin:       flags.NoStdin,

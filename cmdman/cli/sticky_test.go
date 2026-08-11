@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ngicks/go-common/iopipe"
 	"gotest.tools/v3/assert"
 
 	"github.com/ngicks/cmdman/cmdman/cli"
@@ -23,12 +24,14 @@ import (
 // only exists to fail a genuine hang instead of blocking the whole package.
 //
 // It is generous on purpose. These tests used to flake at the old 2s/3s values
-// because of a real startup race in stdinMux: it pumped and dropped the first
-// keystroke before a consumer was registered, so the read hung forever. That is
-// fixed in sticky.go (the pump now starts only once a consumer exists), making
-// the success path deterministic and fast. The wide margin keeps this guard
-// from firing on scheduler latency under a full parallel `go test ./...` run
-// while still catching a future hang regression before the package test timeout.
+// because of a real startup race in a hand-rolled stdin multiplexer sticky.go
+// once had: it pumped and dropped the first keystroke before a consumer was
+// registered, so the read hung forever. sticky.go now derives per-consumer
+// stdin pipes from an iopipe.Reader, which reads the source only while a
+// derived pipe is active and carries undelivered bytes over between pipes,
+// making the success path deterministic and fast. The wide margin keeps this
+// guard from firing on scheduler latency under a full parallel `go test ./...`
+// run while still catching a future hang regression before the package timeout.
 const stickyTestTimeout = 30 * time.Second
 
 // nonTTYStdio returns an (stdin, stdout) pair of *os.File handles that
@@ -45,13 +48,38 @@ func nonTTYStdio(t *testing.T) (stdin, stdout *os.File) {
 	return stdinR, stdoutW
 }
 
-// bufWriteCloser is an io.WriteCloser backed by a bytes.Buffer; Close is a
-// no-op. Useful as a non-cancelling StdoutPipe in tests.
-type bufWriteCloser struct {
-	*bytes.Buffer
+// attachPipes wires src and dst into running iopipe controllers for building
+// cli.AttachOptions; their forwarding goroutines stop at test cleanup.
+func attachPipes(t *testing.T, src io.Reader, dst io.Writer) (*iopipe.Reader, *iopipe.Writer) {
+	t.Helper()
+	r := iopipe.NewReader(src)
+	w := iopipe.NewWriter(dst)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go r.Run(ctx)
+	go w.Run(ctx)
+	return r, w
 }
 
-func (*bufWriteCloser) Close() error { return nil }
+// syncBuffer is a goroutine-safe bytes.Buffer used as the display sink behind
+// a stdout controller: the controller's forwarding goroutine writes it while
+// the test goroutine reads it back.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 // fakeAttachSession is a cli.AttachSession whose Recv immediately returns a
 // configured error, standing in for a monitor stream that breaks mid-attach.
@@ -107,66 +135,20 @@ func (s *scriptedSession) Close() error {
 	return nil
 }
 
-// pipeWriteCloser drains an io.Pipe into a mutex-guarded buffer, mirroring the
-// real stdout pipe: Write goes through the pipe, and Close() actually
-// closes the pipe (so writes after Close fail and the drain goroutine exits).
-// A plain bytes.Buffer with a no-op Close would mask the reattach bug because
-// its writes never fail.
-type pipeWriteCloser struct {
-	pw   *io.PipeWriter
-	mu   *sync.Mutex
-	buf  *bytes.Buffer
-	done chan struct{}
-}
-
-func newPipeWriteCloser() *pipeWriteCloser {
-	pr, pw := io.Pipe()
-	w := &pipeWriteCloser{
-		pw:   pw,
-		mu:   &sync.Mutex{},
-		buf:  &bytes.Buffer{},
-		done: make(chan struct{}),
-	}
-	go func() {
-		defer close(w.done)
-		b := make([]byte, 4096)
-		for {
-			n, err := pr.Read(b)
-			if n > 0 {
-				w.mu.Lock()
-				w.buf.Write(b[:n])
-				w.mu.Unlock()
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
-	return w
-}
-
-func (w *pipeWriteCloser) Write(p []byte) (int, error) { return w.pw.Write(p) }
-func (w *pipeWriteCloser) Close() error                { return w.pw.Close() }
-
-func (w *pipeWriteCloser) String() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.buf.String()
-}
-
 // TestAttachStickyReattachKeepsStdout verifies that output from attach
-// iterations AFTER the first still reaches the display sink. Attach closes the
-// StdoutPipe it is handed on every exit; AttachSticky reuses one display sink
-// across iterations, so it must shield that sink from Attach's close. The
-// regression it guards: the command restarts and re-attaches, but its output
-// is written into a pipe Attach already closed and silently dropped — the mux
-// pane shows nothing ("restart but no reattach").
+// iterations AFTER the first still reaches the display sink. Each Attach run
+// derives its own pipe from the shared stdout controller and closes only that
+// pipe on exit, so the sink must keep receiving across a close/derive cycle.
+// The regression it guards: the command restarts and re-attaches, but its
+// output is silently dropped — the mux pane shows nothing ("restart but no
+// reattach").
 func TestAttachStickyReattachKeepsStdout(t *testing.T) {
 	stdin, stdout := nonTTYStdio(t)
 	stdinPipeR, stdinPipeW := io.Pipe()
 	t.Cleanup(func() { _ = stdinPipeW.Close(); _ = stdinPipeR.Close() })
 
-	sink := newPipeWriteCloser()
+	sink := &syncBuffer{}
+	in, out := attachPipes(t, stdinPipeR, sink)
 
 	// State stays Running so the loop re-opens a session on each EOF without
 	// going through the wait prompt: the exact multi-iteration stdout reuse
@@ -196,8 +178,8 @@ func TestAttachStickyReattachKeepsStdout(t *testing.T) {
 	opts := cli.AttachOptions{
 		Stdin:      stdin,
 		Stdout:     stdout,
-		StdinPipe:  stdinPipeR,
-		StdoutPipe: sink,
+		StdinPipe:  in,
+		StdoutPipe: out,
 		DetachKeys: "ctrl-p,ctrl-q",
 	}
 
@@ -219,15 +201,56 @@ func TestAttachStickyReattachKeepsStdout(t *testing.T) {
 		t.Fatal("AttachSticky did not return after ctx cancel")
 	}
 
-	// Close the sink so its drain goroutine flushes and exits, then read it.
-	_ = sink.Close()
-	<-sink.done
-
 	got := sink.String()
 	assert.Assert(t, strings.Contains(got, "chunk-1;"),
 		"first-iteration output missing; got %q", got)
 	assert.Assert(t, strings.Contains(got, "chunk-2;"),
-		"reattach output dropped — Attach closed the shared StdoutPipe; got %q", got)
+		"reattach output dropped after re-derive of the stdout pipe; got %q", got)
+}
+
+// TestAttachStickyStdinEOFDetaches verifies that an exhausted stdin source
+// detaches the sticky loop instead of leaving it stuck at a wait prompt nobody
+// can answer. The hand-rolled multiplexer this loop used before iopipe never
+// surfaced source EOF to the prompt reader, so the loop hung until ctx cancel.
+func TestAttachStickyStdinEOFDetaches(t *testing.T) {
+	t.Parallel()
+
+	stdin, stdout := nonTTYStdio(t)
+	sink := &syncBuffer{}
+	in, out := attachPipes(t, bytes.NewReader(nil), sink) // stdin EOFs immediately
+
+	var stateCalls atomic.Int64
+	hooks := cli.StickyHooks{
+		State: func(context.Context) (cli.StickyState, error) {
+			if stateCalls.Add(1) == 1 {
+				return cli.StickyState{Running: true, Status: "running"}, nil
+			}
+			return cli.StickyState{Running: false, Status: "exited (code 0)"}, nil
+		},
+		OpenSession: func(context.Context) (cli.AttachSession, error) {
+			return newScriptedSession(false, []byte("out;")), nil
+		},
+		Restart: func(context.Context) error { return nil },
+	}
+	opts := cli.AttachOptions{
+		Stdin:      stdin,
+		Stdout:     stdout,
+		StdinPipe:  in,
+		StdoutPipe: out,
+		DetachKeys: "ctrl-p,ctrl-q",
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- cli.AttachSticky(t.Context(), hooks, opts) }()
+
+	select {
+	case err := <-done:
+		assert.NilError(t, err)
+	case <-time.After(stickyTestTimeout):
+		t.Fatal("AttachSticky hung on exhausted stdin")
+	}
+	assert.Assert(t, strings.Contains(sink.String(), "out;"),
+		"attach output before stdin EOF detach missing; got %q", sink.String())
 }
 
 // TestAttachStickyRecoverableAttachErrorDropsToPrompt verifies that a non-EOF
@@ -240,6 +263,7 @@ func TestAttachStickyRecoverableAttachErrorDropsToPrompt(t *testing.T) {
 	stdin, stdout := nonTTYStdio(t)
 	stdinPipeR, stdinPipeW := io.Pipe()
 	t.Cleanup(func() { _ = stdinPipeW.Close(); _ = stdinPipeR.Close() })
+	in, out := attachPipes(t, stdinPipeR, &syncBuffer{})
 
 	errBoom := errors.New("rpc error: transport is closing")
 	hooks := cli.StickyHooks{
@@ -254,8 +278,8 @@ func TestAttachStickyRecoverableAttachErrorDropsToPrompt(t *testing.T) {
 	opts := cli.AttachOptions{
 		Stdin:      stdin,
 		Stdout:     stdout,
-		StdinPipe:  stdinPipeR,
-		StdoutPipe: &bufWriteCloser{Buffer: &bytes.Buffer{}},
+		StdinPipe:  in,
+		StdoutPipe: out,
 		DetachKeys: "ctrl-p,ctrl-q",
 	}
 
@@ -283,6 +307,7 @@ func TestPromptStickyWaitR(t *testing.T) {
 	stdin, stdout := nonTTYStdio(t)
 	pr, pw := io.Pipe()
 	t.Cleanup(func() { _ = pw.Close() })
+	in, out := attachPipes(t, pr, &syncBuffer{})
 
 	resultCh := make(chan cli.PromptResult, 1)
 	errCh := make(chan error, 1)
@@ -294,8 +319,8 @@ func TestPromptStickyWaitR(t *testing.T) {
 				DetachKeys: "ctrl-p,ctrl-q",
 				Stdin:      stdin,
 				Stdout:     stdout,
-				StdinPipe:  pr,
-				StdoutPipe: &bufWriteCloser{Buffer: &bytes.Buffer{}},
+				StdinPipe:  in,
+				StdoutPipe: out,
 			},
 		)
 		if err != nil {
@@ -322,6 +347,7 @@ func TestPromptStickyWaitDetachKeys(t *testing.T) {
 	stdin, stdout := nonTTYStdio(t)
 	pr, pw := io.Pipe()
 	t.Cleanup(func() { _ = pw.Close() })
+	in, out := attachPipes(t, pr, &syncBuffer{})
 
 	resultCh := make(chan cli.PromptResult, 1)
 	errCh := make(chan error, 1)
@@ -333,8 +359,8 @@ func TestPromptStickyWaitDetachKeys(t *testing.T) {
 				DetachKeys: "ctrl-p,ctrl-q",
 				Stdin:      stdin,
 				Stdout:     stdout,
-				StdinPipe:  pr,
-				StdoutPipe: &bufWriteCloser{Buffer: &bytes.Buffer{}},
+				StdinPipe:  in,
+				StdoutPipe: out,
 			},
 		)
 		if err != nil {
@@ -365,6 +391,7 @@ func TestPromptStickyWaitContextCancel(t *testing.T) {
 		_ = pw.Close()
 		_ = pr.Close()
 	})
+	in, out := attachPipes(t, pr, &syncBuffer{})
 
 	ctx, cancel := context.WithCancel(t.Context())
 
@@ -378,8 +405,8 @@ func TestPromptStickyWaitContextCancel(t *testing.T) {
 				DetachKeys: "ctrl-p,ctrl-q",
 				Stdin:      stdin,
 				Stdout:     stdout,
-				StdinPipe:  pr,
-				StdoutPipe: &bufWriteCloser{Buffer: &bytes.Buffer{}},
+				StdinPipe:  in,
+				StdoutPipe: out,
 			},
 		)
 		if err != nil {

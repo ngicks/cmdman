@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/muesli/cancelreader"
+	"github.com/ngicks/go-common/iopipe"
 
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/compose"
@@ -265,16 +266,27 @@ func (b *serviceBackend) Attach(ctx context.Context, id string) (string, error) 
 	attachCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	stdinPipe, err := newCancelStdin()
+	// The stdin controller reads os.Stdin through a cancelable reader:
+	// canceling it on return stops reading os.Stdin entirely, leaving no
+	// goroutine racing the TUI's input reader after detach. The stdout
+	// controller writes os.Stdout directly and never closes it (the TUI
+	// keeps using it after attach returns).
+	cr, err := cancelreader.NewReader(os.Stdin)
 	if err != nil {
 		return "", err
 	}
+	defer cr.Cancel()
+
+	stdinPipe := iopipe.NewReader(cr)
+	stdoutPipe := iopipe.NewWriter(os.Stdout)
+	go stdinPipe.Run(attachCtx)
+	go stdoutPipe.Run(attachCtx)
 
 	opts := AttachOptions{
 		Stdin:      os.Stdin,
 		Stdout:     os.Stdout,
 		StdinPipe:  stdinPipe,
-		StdoutPipe: nopWriteCloser{os.Stdout},
+		StdoutPipe: stdoutPipe,
 		DetachKeys: DefaultDetachKeys,
 	}
 	err = Attach(attachCtx, session, opts)
@@ -287,34 +299,6 @@ func (b *serviceBackend) Attach(ctx context.Context, id string) (string, error) 
 		return "", err
 	}
 }
-
-// newCancelStdin wraps os.Stdin in a cancelable reader so that Attach's
-// StdinPipe.Close() stops reading os.Stdin entirely, leaving no goroutine
-// racing the TUI's input reader after detach.
-func newCancelStdin() (io.ReadCloser, error) {
-	cr, err := cancelreader.NewReader(os.Stdin)
-	if err != nil {
-		return nil, err
-	}
-	return &cancelStdin{cr: cr}, nil
-}
-
-type cancelStdin struct {
-	cr cancelreader.CancelReader
-}
-
-func (c *cancelStdin) Read(p []byte) (int, error) { return c.cr.Read(p) }
-func (c *cancelStdin) Close() error {
-	c.cr.Cancel()
-	return nil
-}
-
-// nopWriteCloser writes to the terminal directly; Close must not close
-// os.Stdout (the TUI keeps using it after attach returns).
-type nopWriteCloser struct{ w io.Writer }
-
-func (n nopWriteCloser) Write(p []byte) (int, error) { return n.w.Write(p) }
-func (n nopWriteCloser) Close() error                { return nil }
 
 func firstStopErr(res []cmdman.StopResult) error {
 	for _, r := range res {

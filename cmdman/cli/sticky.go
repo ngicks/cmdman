@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 )
 
 // StickyState is what [AttachSticky] reads between attach attempts to decide
@@ -55,15 +54,17 @@ const (
 // wrapper (i.e. the `--auto-exit` cobra flag).
 //
 // Lifecycle:
-//   - opts.StdinPipe is consumed by an internal multiplexer for the duration
-//     of AttachSticky. Per-iteration [Attach] calls receive sub-pipes; closing
-//     them is safe (and expected — Attach does it on exit).
-//   - opts.StdoutPipe is the shared display sink. Each iteration writes
-//     through a private pipe that drains into it, because Attach closes the
-//     StdoutPipe it is handed on exit; the shared sink itself is never closed
-//     by AttachSticky. The caller owns opts.StdoutPipe's lifecycle.
-//   - On return, AttachSticky stops the multiplexer pump but does NOT close
-//     opts.StdinPipe; the caller owns its lifecycle.
+//   - opts.StdinPipe and opts.StdoutPipe are shared across iterations: each
+//     [Attach] run and each wait prompt derives its own pipe and closes it on
+//     exit, while the underlying stdin source and display sink stay open
+//     throughout. Bytes pulled from the source but not yet delivered carry
+//     over to the next derived pipe, so a keystroke racing an iteration
+//     change is not lost.
+//   - When the stdin source reaches EOF, the current consumer sees EOF and
+//     any later wait prompt detaches: with no stdin left there is nobody to
+//     answer it.
+//   - AttachSticky never closes the source or the sink, and the caller owns
+//     the controllers' Run lifecycle.
 func AttachSticky(
 	ctx context.Context,
 	hooks StickyHooks,
@@ -76,9 +77,6 @@ func AttachSticky(
 		return errors.New("attach: AttachSticky requires all hooks set")
 	}
 
-	mux := newStdinMux(opts.StdinPipe)
-	defer mux.Stop()
-
 	for {
 		state, err := hooks.State(ctx)
 		if err != nil {
@@ -86,7 +84,7 @@ func AttachSticky(
 		}
 
 		if !state.Running {
-			done, err := waitAtPrompt(ctx, mux, hooks, opts, state.Status)
+			done, err := waitAtPrompt(ctx, hooks, opts, state.Status)
 			if err != nil {
 				return err
 			}
@@ -102,7 +100,7 @@ func AttachSticky(
 			// coming up after a restart). Surface it at the wait prompt rather
 			// than spinning, so the user can retry with 'r' or detach.
 			done, perr := waitAtPrompt(
-				ctx, mux, hooks, opts,
+				ctx, hooks, opts,
 				fmt.Sprintf("open attach session failed: %v", err),
 			)
 			if perr != nil {
@@ -114,34 +112,7 @@ func AttachSticky(
 			continue
 		}
 
-		iterOpts := opts
-		iterOpts.StdinPipe = mux.subPipe()
-
-		// Attach closes the StdoutPipe it is handed on exit — its documented
-		// single-use contract. AttachSticky reuses one opts.StdoutPipe across
-		// every iteration, so letting Attach close it would leave all post-
-		// first iterations writing display output into a dead pipe: the
-		// command restarts and re-attaches at the RPC layer, yet nothing
-		// reaches the terminal — the "restart but no reattach" the mux panes
-		// hit. Hand each iteration a private pipe that drains into the shared
-		// sink, and join the drain before looping so attach output stays
-		// ordered ahead of the next wait prompt (which writes opts.Stdout
-		// directly, bypassing this pipe).
-		stdoutR, stdoutW := io.Pipe()
-		drainDone := make(chan struct{})
-		go func() {
-			defer close(drainDone)
-			_, _ = io.Copy(opts.StdoutPipe, stdoutR)
-		}()
-		iterOpts.StdoutPipe = stdoutW
-
-		err = Attach(ctx, session, iterOpts)
-
-		// Attach already closed stdoutW; closing again is harmless and covers
-		// any early Attach return. The drain goroutine then sees EOF on
-		// stdoutR and exits, after flushing into the shared sink.
-		_ = stdoutW.Close()
-		<-drainDone
+		err = Attach(ctx, session, opts)
 
 		switch {
 		case errors.Is(err, ErrRemoteEOF):
@@ -159,7 +130,7 @@ func AttachSticky(
 			// pane. Surface it and drop to the wait prompt so the user can
 			// restart ('r') or detach.
 			done, perr := waitAtPrompt(
-				ctx, mux, hooks, opts,
+				ctx, hooks, opts,
 				fmt.Sprintf("attach error: %v", err),
 			)
 			if perr != nil {
@@ -182,12 +153,11 @@ func AttachSticky(
 // failure is reported and treated as "stay at the prompt" on the next pass.
 func waitAtPrompt(
 	ctx context.Context,
-	mux *stdinMux,
 	hooks StickyHooks,
 	opts AttachOptions,
 	status string,
 ) (done bool, err error) {
-	result, err := promptWait(ctx, mux, opts, status)
+	result, err := promptWait(ctx, opts, status)
 	if err != nil {
 		return false, err
 	}
@@ -205,8 +175,9 @@ func waitAtPrompt(
 
 // PromptStickyWait blocks reading stdin in raw mode for 'r' / 'R' (restart),
 // the configured detach-keys (detach), or ctx.Done() (detach with ctx.Err).
-// It is the single-shot building block exposed for tests; [AttachSticky]
-// drives it inside its loop.
+// It derives its stdin pipe from opts.StdinPipe (whose Run loop the caller
+// must have started) and closes it on return. It is the single-shot building
+// block exposed for tests; [AttachSticky] drives it inside its loop.
 func PromptStickyWait(
 	ctx context.Context,
 	statusLine string,
@@ -215,16 +186,13 @@ func PromptStickyWait(
 	if err := opts.validate(); err != nil {
 		return 0, err
 	}
-	mux := newStdinMux(opts.StdinPipe)
-	defer mux.Stop()
-	return promptWait(ctx, mux, opts, statusLine)
+	return promptWait(ctx, opts, statusLine)
 }
 
 // promptWait is the shared implementation used by [PromptStickyWait] and
 // [AttachSticky]. It owns the raw-mode lifecycle for the prompt only.
 func promptWait(
 	ctx context.Context,
-	mux *stdinMux,
 	opts AttachOptions,
 	statusLine string,
 ) (PromptResult, error) {
@@ -232,6 +200,20 @@ func promptWait(
 	if err != nil {
 		return 0, fmt.Errorf("invalid detach-keys: %w", err)
 	}
+
+	sub, _, err := opts.StdinPipe.Pipe(ctx)
+	switch {
+	case errors.Is(err, io.EOF):
+		// The stdin source is exhausted; nobody can answer the prompt, so
+		// skip printing it and detach.
+		return PromptDetach, nil
+	case err != nil:
+		if ctx.Err() != nil {
+			return PromptDetach, ctx.Err()
+		}
+		return 0, err
+	}
+	defer sub.Close()
 
 	restore := setupRawTerminal(false, opts.Stdin, opts.Stdout)
 	defer restore()
@@ -241,9 +223,6 @@ func promptWait(
 		"\r\n[%s] press 'r' to restart, %s to detach\r\n",
 		statusLine, opts.DetachKeys,
 	)
-
-	sub := mux.subPipe()
-	defer sub.Close()
 
 	rdr := newDetachKeyReader(sub, detachKeys)
 
@@ -283,110 +262,4 @@ func promptWait(
 		_ = sub.Close()
 		return PromptDetach, ctx.Err()
 	}
-}
-
-// stdinMux fans bytes from a single source reader out to a sequence of
-// sub-pipes. Each sub-pipe is given to one consumer (an [Attach] iteration
-// or a prompt). When a sub-pipe is closed, the mux moves on to the next.
-//
-// The pump goroutine starts on the first [stdinMux.subPipe] call, not at
-// construction. Starting it eagerly would let it read — and, finding no active
-// consumer yet, drop — source bytes that arrive in the window before the first
-// consumer registers, losing the user's first keystroke (and hanging callers
-// like [PromptStickyWait] that deliver exactly one). Once started it runs until
-// [stdinMux.Stop] or source EOF. Stop is best-effort — closing the source is
-// the only way to unblock a stdin Read, and the caller (typically
-// [AttachSticky]) keeps source ownership.
-type stdinMux struct {
-	source      io.Reader
-	mu          sync.Mutex
-	cur         io.WriteCloser
-	pumpStarted bool
-	stop        chan struct{}
-	done        chan struct{}
-}
-
-func newStdinMux(source io.Reader) *stdinMux {
-	// The pump is started lazily by the first subPipe call (see the type doc),
-	// so it never reads — and drops — a source byte before a consumer exists.
-	return &stdinMux{
-		source: source,
-		stop:   make(chan struct{}),
-		done:   make(chan struct{}),
-	}
-}
-
-func (m *stdinMux) pump() {
-	defer close(m.done)
-	buf := make([]byte, 32*1024)
-	for {
-		select {
-		case <-m.stop:
-			return
-		default:
-		}
-		n, err := m.source.Read(buf)
-		if n > 0 {
-			data := make([]byte, n)
-			copy(data, buf[:n])
-			m.deliver(data)
-		}
-		if err != nil {
-			return
-		}
-	}
-}
-
-// deliver writes data to the currently-active sub-pipe. If the write fails
-// (sub-pipe closed mid-write), cur is cleared so the next iteration waits
-// for a fresh sub-pipe via [subPipe].
-func (m *stdinMux) deliver(data []byte) {
-	m.mu.Lock()
-	w := m.cur
-	m.mu.Unlock()
-	if w == nil {
-		return // no active consumer; drop the byte
-	}
-	if _, err := w.Write(data); err != nil {
-		m.mu.Lock()
-		if m.cur == w {
-			m.cur = nil
-		}
-		m.mu.Unlock()
-	}
-}
-
-// subPipe installs a fresh io.Pipe as the active consumer and returns its
-// read end. The previous sub-pipe (if any) is closed.
-func (m *stdinMux) subPipe() io.ReadCloser {
-	pr, pw := io.Pipe()
-	m.mu.Lock()
-	prev := m.cur
-	m.cur = pw
-	startPump := !m.pumpStarted
-	m.pumpStarted = true
-	m.mu.Unlock()
-	if prev != nil {
-		_ = prev.Close()
-	}
-	// Start the pump only now that cur is set, so the first source byte reaches
-	// this consumer instead of being dropped by a not-yet-registered mux.
-	if startPump {
-		go m.pump()
-	}
-	return pr
-}
-
-// Stop signals the pump to stop on its next iteration. The source reader is
-// left open — only the caller may close it. Stop does not wait for the pump
-// to actually exit; it is safe to call even if the pump is blocked on a
-// source Read.
-func (m *stdinMux) Stop() {
-	close(m.stop)
-	m.mu.Lock()
-	if m.cur != nil {
-		_ = m.cur.Close()
-		m.cur = nil
-	}
-	m.mu.Unlock()
 }

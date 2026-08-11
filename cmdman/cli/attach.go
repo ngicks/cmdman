@@ -13,6 +13,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/ngicks/go-common/iopipe"
 	"golang.org/x/term"
 )
 
@@ -77,10 +78,12 @@ const DefaultDetachKeys = "ctrl-p,ctrl-q"
 // SIGWINCH ioctl). They are never read from or written to as byte
 // streams.
 //
-// StdinPipe and StdoutPipe carry the byte streams. Typically they are
-// cancellable pipes (github.com/ngicks/go-common/iopipe) in front of
-// Stdin/Stdout so the attach loop can unblock pending Read/Write calls
-// by closing them.
+// StdinPipe and StdoutPipe carry the byte streams: iopipe controllers
+// fronting the real stdin source and display sink. The caller constructs
+// them and starts their Run loops; Attach (and each [AttachSticky] wait
+// prompt) derives one pipe per run via Pipe and closes only that derived
+// pipe on exit, unblocking its pending Read/Write while the underlying
+// source and sink stay open for the next consumer.
 type AttachOptions struct {
 	NoStdin    bool
 	SigProxy   bool
@@ -107,8 +110,8 @@ type AttachOptions struct {
 
 	Stdin      *os.File
 	Stdout     *os.File
-	StdinPipe  io.ReadCloser
-	StdoutPipe io.WriteCloser
+	StdinPipe  *iopipe.Reader
+	StdoutPipe *iopipe.Writer
 }
 
 func (o AttachOptions) validate() error {
@@ -130,7 +133,11 @@ func (o AttachOptions) validate() error {
 //
 // All goroutines started by Attach are joined before it returns. Attach
 // triggers their termination by canceling its internal context, closing
-// the session, and closing StdinPipe / StdoutPipe.
+// the session, and closing the pipes it derived from StdinPipe /
+// StdoutPipe. The controllers themselves (and their sources) stay open.
+//
+// When the stdin source is already exhausted, Attach runs output-only, as
+// if the source had EOFed right after attaching.
 //
 // Returns ErrForceExit when the user pressed SIGINT/SIGTERM three times
 // in a row; the terminal has already been restored.
@@ -146,6 +153,25 @@ func Attach(ctx context.Context, session AttachSession, opts AttachOptions) erro
 
 	attachCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	stdoutPipe, _, err := opts.StdoutPipe.Pipe(attachCtx)
+	if err != nil {
+		return fmt.Errorf("attach: derive stdout pipe: %w", err)
+	}
+	defer func() { _ = stdoutPipe.Close() }()
+
+	var stdinPipe io.ReadCloser
+	if !opts.NoStdin {
+		stdinPipe, _, err = opts.StdinPipe.Pipe(attachCtx)
+		switch {
+		case errors.Is(err, io.EOF):
+			stdinPipe = nil
+		case err != nil:
+			return fmt.Errorf("attach: derive stdin pipe: %w", err)
+		default:
+			defer func() { _ = stdinPipe.Close() }()
+		}
+	}
 
 	restoreTerminal := setupRawTerminal(opts.NoStdin, opts.Stdin, opts.Stdout)
 	defer restoreTerminal()
@@ -182,11 +208,11 @@ func Attach(ctx context.Context, session AttachSession, opts AttachOptions) erro
 
 	errCh := make(chan error, 2)
 	wg.Go(func() {
-		pumpStreamToStdout(session, opts.StdoutPipe, errCh)
+		pumpStreamToStdout(session, stdoutPipe, errCh)
 	})
-	if !opts.NoStdin {
+	if stdinPipe != nil {
 		wg.Go(func() {
-			pumpStdinToStream(opts.StdinPipe, session, detachKeys, errCh)
+			pumpStdinToStream(stdinPipe, session, detachKeys, errCh)
 		})
 	}
 
@@ -209,10 +235,12 @@ func Attach(ctx context.Context, session AttachSession, opts AttachOptions) erro
 	}
 
 	// Trigger goroutine termination, then join them all before returning.
-	cancel()                    // signal handler exits via attachCtx.Done
-	_ = session.Close()         // pumpStreamToStdout: Recv errors out
-	_ = opts.StdinPipe.Close()  // pumpStdinToStream: Read returns io.EOF / closed-pipe
-	_ = opts.StdoutPipe.Close() // unblocks any pending Write in pumpStreamToStdout
+	cancel()            // signal handler exits via attachCtx.Done
+	_ = session.Close() // pumpStreamToStdout: Recv errors out
+	if stdinPipe != nil {
+		_ = stdinPipe.Close() // pumpStdinToStream: Read returns closed-pipe
+	}
+	_ = stdoutPipe.Close() // detaches from the sink; an in-flight Write settles first
 	wg.Wait()
 
 	_ = session.CloseSend()

@@ -10,31 +10,25 @@ import (
 
 // The stdio helpers below front os.Stdin / os.Stdout / os.Stderr with an
 // iopipe controller so a subcommand blocked in Read/Write unblocks when its
-// context is done. Each returns the derived pipe plus a stop func that closes
-// it and stops forwarding; the underlying file is never closed. The per-pipe
+// context is done. The underlying file is never closed, and the per-pipe
 // closeErr channel is dropped: the CLI has no use for the delivered-byte
 // report, and its buffer keeps iopipe from blocking on it.
 //
-// Callers own the returned pipe's lifetime and must call stop even when the
-// cli layer also closes the pipe - closing twice is a no-op.
+// attachStdio hands cli.Attach* the controllers themselves (the cli layer
+// derives one pipe per attach run / wait prompt); writerPipe and friends
+// return a single derived pipe for commands that stream into one consumer.
 
-// stdinPipe returns a cancellable read end of os.Stdin.
-//
-// A Read already blocked in os.Stdin cannot be interrupted, so the forwarding
-// goroutine can outlive stop; it is reclaimed when the process exits.
-func stdinPipe(ctx context.Context) (io.ReadCloser, func(), error) {
+// attachStdio returns iopipe controllers fronting os.Stdin and os.Stdout,
+// running, for cli.AttachOptions. The stop func stops forwarding; a Read
+// already blocked in os.Stdin cannot be interrupted, so the stdin forwarding
+// goroutine can outlive stop and is reclaimed when the process exits.
+func attachStdio(ctx context.Context) (stdin *iopipe.Reader, stdout *iopipe.Writer, stop func()) {
 	r := iopipe.NewReader(os.Stdin)
+	w := iopipe.NewWriter(os.Stdout)
 	runCtx, cancel := context.WithCancel(ctx)
-	rc, _, err := r.Pipe(runCtx)
-	if err != nil {
-		cancel()
-		return nil, nil, err
-	}
 	go r.Run(runCtx)
-	return rc, func() {
-		_ = rc.Close()
-		cancel()
-	}, nil
+	go w.Run(runCtx)
+	return r, w, cancel
 }
 
 // stdoutPipe returns a cancellable write end of os.Stdout.

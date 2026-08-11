@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ngicks/go-common/iopipe"
 	"gotest.tools/v3/assert"
 )
 
@@ -80,20 +81,25 @@ func TestAttach_DefaultDetachKeysInterceptedNotForwarded(t *testing.T) {
 		_ = stdoutW.Close()
 	})
 
-	session := newBlockingAttachSession()
-	opts := AttachOptions{
-		DetachKeys: DefaultDetachKeys,
-		Stdin:      stdinR,
-		Stdout:     stdoutW,
-		StdinPipe:  io.NopCloser(bytes.NewReader([]byte("hello\x10\x11"))),
-		StdoutPipe: nopWriteCloser{io.Discard},
-	}
-
 	// A bounded context makes the buggy case (detach not intercepted, so the
 	// stdin pump forwards everything and never signals) fail fast on the
 	// SendStdin assertion below instead of hanging until the test deadline.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	stdinPipe := iopipe.NewReader(bytes.NewReader([]byte("hello\x10\x11")))
+	stdoutPipe := iopipe.NewWriter(io.Discard)
+	go stdinPipe.Run(ctx)
+	go stdoutPipe.Run(ctx)
+
+	session := newBlockingAttachSession()
+	opts := AttachOptions{
+		DetachKeys: DefaultDetachKeys,
+		Stdin:      stdinR,
+		Stdout:     stdoutW,
+		StdinPipe:  stdinPipe,
+		StdoutPipe: stdoutPipe,
+	}
 
 	err = Attach(ctx, session, opts)
 	assert.NilError(t, err) // detach-keys are a graceful exit (nil), not ErrRemoteEOF.
