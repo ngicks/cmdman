@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -41,6 +42,36 @@ func TestNew_FindsExistingWindow(t *testing.T) {
 	if sess1.WindowID() != sess2.WindowID() {
 		t.Errorf("WindowID drifted on reuse: %s vs %s",
 			sess1.WindowID(), sess2.WindowID())
+	}
+}
+
+// TestNew_StartDirectory covers Config.StartDirectory, which exists for the
+// window a landing synthesizes for a project with no mux: section (D9): the
+// shell has to open where the project lives, not wherever the tmux server was
+// started. It applies to creation only — an existing window is never moved.
+func TestNew_StartDirectory(t *testing.T) {
+	requireTmux(t)
+	socket := uniqueSocket(t)
+	t.Cleanup(func() { killServer(t, socket) })
+
+	// t.TempDir() can sit behind a symlink (/tmp -> /private/tmp and the like)
+	// while tmux reports the resolved path, so the expectation is resolved too.
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+
+	sess, err := newServer(t, socket).New(context.Background(), muxctl.Config{
+		SessionName:    "cmdman-test",
+		WindowName:     "cmdman-app",
+		StartDirectory: dir,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	got := run(t, socket, "list-panes", "-t", sess.WindowID(), "-F", "#{pane_current_path}")
+	if got != dir {
+		t.Errorf("pane_current_path = %q, want %q", got, dir)
 	}
 }
 

@@ -20,8 +20,23 @@ service CommandMonitorService {
   // Stop the command and prevent restart policy from re-spawning it
   rpc Stop(StopRequest) returns (StopResponse);
 
-  // Return the monitor's current state, exit code, and command PID.
+  // Return the monitor's current state, exit code, command PID, and the
+  // runtime state of the current run.
   rpc Status(StatusRequest) returns (StatusResponse);
+
+  // Stream the runtime state: the current one first, then one message per
+  // change. Title changes are debounced monitor-side.
+  rpc WatchRuntimeState(WatchRuntimeStateRequest) returns (stream WatchRuntimeStateResponse);
+
+  // Set the status the command reports about itself, replacing any previous
+  // one. It lives only for the current run.
+  rpc SetReportedStatus(SetReportedStatusRequest) returns (SetReportedStatusResponse);
+
+  // Return the status the command last reported about itself.
+  rpc GetReportedStatus(GetReportedStatusRequest) returns (GetReportedStatusResponse);
+
+  // Clear the status the command reported about itself.
+  rpc DeleteReportedStatus(DeleteReportedStatusRequest) returns (DeleteReportedStatusResponse);
 }
 
 message AttachRequest {
@@ -96,4 +111,49 @@ message StatusResponse {
   string state = 1; // starting, running, exited, failed
   int32 exit_code = 2;
   int32 pid = 3;
+  RuntimeState runtime_state = 4;
 }
+
+// ReportedStatus is the vocabulary a command uses to report its own progress.
+enum ReportedStatus {
+  REPORTED_STATUS_UNSPECIFIED = 0; // nothing reported
+  REPORTED_STATUS_WORKING = 1;
+  REPORTED_STATUS_WAITING = 2;
+  REPORTED_STATUS_DONE = 3;
+}
+
+// RuntimeState is what the monitor knows about the current run beyond the
+// process state: what the command told about itself through its output (title,
+// bell) or through the status RPCs. It is per-run - a restart clears it - and
+// the same message is carried by both Status and WatchRuntimeState so one-shot
+// and streaming consumers never diverge.
+message RuntimeState {
+  string title = 1; // window title the command last set, "" if it set none
+  ReportedStatus status = 2;
+  string detail = 3; // free-form detail accompanying status
+  bool bell_unread = 4; // a bell rang and nobody has looked at the command since
+}
+
+message WatchRuntimeStateRequest {}
+
+message WatchRuntimeStateResponse {
+  RuntimeState state = 1;
+}
+
+message SetReportedStatusRequest {
+  ReportedStatus status = 1;
+  string detail = 2; // replaces the previous detail; empty clears it
+}
+
+message SetReportedStatusResponse {}
+
+message GetReportedStatusRequest {}
+
+message GetReportedStatusResponse {
+  ReportedStatus status = 1;
+  string detail = 2;
+}
+
+message DeleteReportedStatusRequest {}
+
+message DeleteReportedStatusResponse {}

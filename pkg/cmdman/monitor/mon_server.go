@@ -8,6 +8,8 @@ import (
 
 	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -66,8 +68,31 @@ func (m *Monitor) subscribeOutput(scrollback bool) monitorSubscription {
 }
 
 func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) error {
+	// Before anything that can fail: an attach clears the bell (D11), and the
+	// paired end must run even when the stream dies on its first Send.
+	s.monitor.runtimeState.attachBegin()
+	defer s.monitor.runtimeState.attachEnd()
+
 	sub := s.monitor.subscribeOutput(true)
 	defer sub.Unsub()
+
+	// Blocked sequences are removed here rather than at ingest, so the ring
+	// buffer, the log file, and the monitor's own capture keep what the command
+	// actually wrote (D40). The filter is per-stream because it carries parse
+	// state across chunks; the block set is sampled once, so an attach that
+	// outlives a restart keeps the hook config it opened with until it
+	// reattaches.
+	//
+	// The filter starts at ground, and so does the viewer it feeds: a sequence
+	// straddling the subscription point had its opening bytes written before
+	// this attach existed, so its tail is visible text to the viewer's own
+	// terminal with or without a filter in the way. The filter tracks that
+	// terminal rather than diverging from it, which is why starting at ground
+	// is right and not merely convenient. Nothing is missed between the two
+	// either: subscribeOutput takes outputMu, and logCommandOutput holds it
+	// while writing both the ring and the broadcaster, so the snapshot below
+	// and the first live record meet exactly - no gap, no overlap.
+	filter := newHookFilter(s.monitor.hooks.blocks())
 
 	// Report the current PTY size first so a viewer sizes its terminal emulator
 	// to the command's actual render dimensions before processing scrollback.
@@ -79,8 +104,8 @@ func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) err
 		}
 	}
 
-	if len(sub.Scrollback) > 0 {
-		if err := stream.Send(&pb.AttachResponse{Stdout: sub.Scrollback}); err != nil {
+	if scrollback := filter.filter(sub.Scrollback); len(scrollback) > 0 {
+		if err := stream.Send(&pb.AttachResponse{Stdout: scrollback}); err != nil {
 			return err
 		}
 	}
@@ -133,7 +158,11 @@ func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) err
 			if !ok {
 				return nil
 			}
-			data := line.Line
+			data := filter.filter(line.Line)
+			if len(data) == 0 {
+				// The whole chunk was a blocked sequence.
+				continue
+			}
 			if err := stream.Send(&pb.AttachResponse{Stdout: data}); err != nil {
 				return err
 			}
@@ -261,8 +290,99 @@ func (s *monitorServer) Stop(_ context.Context, req *pb.StopRequest) (*pb.StopRe
 func (s *monitorServer) Status(_ context.Context, _ *pb.StatusRequest) (*pb.StatusResponse, error) {
 	state, exitCode, pid := s.monitor.GetState()
 	return &pb.StatusResponse{
-		State:    string(state),
-		ExitCode: int32(exitCode),
-		Pid:      int32(pid),
+		State:        string(state),
+		ExitCode:     int32(exitCode),
+		Pid:          int32(pid),
+		RuntimeState: protoRuntimeState(s.monitor.runtimeState.snapshot().view()),
 	}, nil
+}
+
+func (s *monitorServer) WatchRuntimeState(
+	_ *pb.WatchRuntimeStateRequest,
+	stream pb.CommandMonitorService_WatchRuntimeStateServer,
+) error {
+	// End the stream once the monitor stops supervising, the way Attach and
+	// Subscribe do: a handler parked forever would block GracefulStop.
+	states, unsubState := s.monitor.subscribeStateChange()
+	defer unsubState()
+
+	return streamRuntimeState(
+		stream.Context(),
+		s.monitor.runtimeState,
+		states,
+		defaultTitleDebounce,
+		func(v runtimeView) error {
+			return stream.Send(&pb.WatchRuntimeStateResponse{State: protoRuntimeState(v)})
+		},
+	)
+}
+
+func (s *monitorServer) SetReportedStatus(
+	_ context.Context,
+	req *pb.SetReportedStatusRequest,
+) (*pb.SetReportedStatusResponse, error) {
+	reported, ok := reportedStatusFromProto(req.Status)
+	if !ok || reported == reportedStatusNone {
+		// Clearing is DeleteReportedStatus, so an unset status here is a bug in
+		// the caller, not a request to clear.
+		return nil, status.Errorf(codes.InvalidArgument, "unknown status %v", req.Status)
+	}
+	s.monitor.runtimeState.setReport(reported, req.Detail)
+	return &pb.SetReportedStatusResponse{}, nil
+}
+
+func (s *monitorServer) GetReportedStatus(
+	_ context.Context,
+	_ *pb.GetReportedStatusRequest,
+) (*pb.GetReportedStatusResponse, error) {
+	snap := s.monitor.runtimeState.snapshot()
+	return &pb.GetReportedStatusResponse{
+		Status: protoReportedStatus(snap.Status),
+		Detail: snap.Detail,
+	}, nil
+}
+
+func (s *monitorServer) DeleteReportedStatus(
+	_ context.Context,
+	_ *pb.DeleteReportedStatusRequest,
+) (*pb.DeleteReportedStatusResponse, error) {
+	s.monitor.runtimeState.clearReport()
+	return &pb.DeleteReportedStatusResponse{}, nil
+}
+
+func protoRuntimeState(v runtimeView) *pb.RuntimeState {
+	return &pb.RuntimeState{
+		Title:      v.Title,
+		Status:     protoReportedStatus(v.Status),
+		Detail:     v.Detail,
+		BellUnread: v.BellUnread,
+	}
+}
+
+func protoReportedStatus(s reportedStatus) pb.ReportedStatus {
+	switch s {
+	case reportedStatusWorking:
+		return pb.ReportedStatus_REPORTED_STATUS_WORKING
+	case reportedStatusWaiting:
+		return pb.ReportedStatus_REPORTED_STATUS_WAITING
+	case reportedStatusDone:
+		return pb.ReportedStatus_REPORTED_STATUS_DONE
+	default:
+		return pb.ReportedStatus_REPORTED_STATUS_UNSPECIFIED
+	}
+}
+
+func reportedStatusFromProto(s pb.ReportedStatus) (reportedStatus, bool) {
+	switch s {
+	case pb.ReportedStatus_REPORTED_STATUS_WORKING:
+		return reportedStatusWorking, true
+	case pb.ReportedStatus_REPORTED_STATUS_WAITING:
+		return reportedStatusWaiting, true
+	case pb.ReportedStatus_REPORTED_STATUS_DONE:
+		return reportedStatusDone, true
+	case pb.ReportedStatus_REPORTED_STATUS_UNSPECIFIED:
+		return reportedStatusNone, true
+	default:
+		return reportedStatusNone, false
+	}
 }

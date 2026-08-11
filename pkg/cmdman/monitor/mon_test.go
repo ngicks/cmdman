@@ -12,12 +12,15 @@ import (
 	"testing"
 	"time"
 
+	pb "github.com/ngicks/cmdman/pkg/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/pkg/cmdman/config"
 	"github.com/ngicks/cmdman/pkg/cmdman/internal/flock"
 	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"github.com/ngicks/go-common/contextkey"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"gotest.tools/v3/assert"
 )
 
@@ -232,6 +235,166 @@ func TestMonitorGracefulShutdown(t *testing.T) {
 	state, _, _, err := st.GetCommandState(id)
 	assert.NilError(t, err)
 	assert.Equal(t, state, model.EventTypeExited)
+}
+
+// A run whose config file disappears is a terminal path like any other: it must
+// close what clients park on. A stream left open would hold the GracefulStop
+// that the supervisor waits on, and the monitor would never exit.
+func TestMonitorShutsDownWhenConfigReadFails(t *testing.T) {
+	dir := t.TempDir()
+	appCfg := config.CmdmanConfig{
+		DataDir:            dir,
+		RuntimeDir:         dir,
+		DefaultWorkingDir:  dir,
+		DefaultEnvironment: testEnv(),
+	}
+	appCfg, err := appCfg.WithDefaults()
+	assert.NilError(t, err)
+	dbPath, err := appCfg.DBPath()
+	assert.NilError(t, err)
+
+	st, err := store.OpenStore(t.Context(), dbPath, true)
+	assert.NilError(t, err)
+	defer st.Close()
+
+	id := "test-monitor-5"
+	commandDir, err := appCfg.CommandDir(id)
+	assert.NilError(t, err)
+	cfg := &model.CommandConfig{
+		Argv: []string{"/bin/sh", "-c", "sleep 1"},
+		Dir:  dir,
+		Env:  testEnv(),
+		// The command must come back for the loop to re-read the config it no
+		// longer has.
+		RestartPolicy:   model.RestartPolicyAlways,
+		ScrollbackBytes: 4096,
+		LogDriver:       model.DefaultLogDriver,
+		CommandDir:      commandDir,
+	}
+
+	assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
+	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
+	assert.NilError(t, st.InsertCommandState(id, model.EventTypeCreated, &model.CommandState{}))
+
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	// Generous, so that what the test proves is the monitor shutting itself
+	// down rather than the context doing it for the monitor.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- RunMonitor(ctx, id, appCfg, logger) }()
+
+	waitUntil(t, 10*time.Second, func() bool {
+		state, _, _, err := st.GetCommandState(id)
+		return err == nil && state == model.EventTypeRunning
+	}, "monitor never reached running")
+
+	sockPath, err := appCfg.MonitorSocketPath(id)
+	assert.NilError(t, err)
+	conn, err := grpc.NewClient(
+		"unix://"+sockPath,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	assert.NilError(t, err)
+	defer conn.Close()
+
+	watch, err := pb.NewCommandMonitorServiceClient(conn).
+		WatchRuntimeState(ctx, &pb.WatchRuntimeStateRequest{})
+	assert.NilError(t, err)
+	// The unconditional first snapshot proves the handler is registered and
+	// parked - which is exactly what GracefulStop waits for.
+	_, err = watch.Recv()
+	assert.NilError(t, err)
+
+	assert.NilError(t, os.Remove(store.CommandConfigPath(commandDir)))
+
+	select {
+	case err := <-done:
+		assert.ErrorContains(t, err, "read config")
+	case <-time.After(20 * time.Second):
+		t.Fatal("monitor did not shut down after its config file disappeared")
+	}
+
+	state, _, _, err := st.GetCommandState(id)
+	assert.NilError(t, err)
+	assert.Equal(t, state, model.EventTypeFailed)
+}
+
+// D13: runtime state dies with the run, and it dies when the run does - not
+// when a later run gets far enough to reset it, which is never if that run's
+// setup fails.
+func TestMonitorRunEndClearsRuntimeState(t *testing.T) {
+	dir := t.TempDir()
+	appCfg := config.CmdmanConfig{
+		DataDir:            dir,
+		RuntimeDir:         dir,
+		DefaultWorkingDir:  dir,
+		DefaultEnvironment: testEnv(),
+	}
+	appCfg, err := appCfg.WithDefaults()
+	assert.NilError(t, err)
+	dbPath, err := appCfg.DBPath()
+	assert.NilError(t, err)
+
+	st, err := store.OpenStore(t.Context(), dbPath, true)
+	assert.NilError(t, err)
+	defer st.Close()
+
+	id := "test-monitor-6"
+	commandDir, err := appCfg.CommandDir(id)
+	assert.NilError(t, err)
+	cfg := &model.CommandConfig{
+		Argv:            []string{"/bin/sh", "-c", `printf '\033]2;from-run\007'; sleep 1`},
+		Dir:             dir,
+		Env:             testEnv(),
+		Tty:             true,
+		RestartPolicy:   model.RestartPolicyNo,
+		ScrollbackBytes: 4096,
+		LogDriver:       model.DefaultLogDriver,
+		CommandDir:      commandDir,
+	}
+
+	assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
+	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
+	assert.NilError(t, st.InsertCommandState(id, model.EventTypeCreated, &model.CommandState{}))
+
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	m, err := newMonitor(t.Context(), id, appCfg, logger)
+	assert.NilError(t, err)
+	defer m.Close()
+
+	changed, unsub := m.runtimeState.subscribeChange()
+	defer unsub()
+
+	// The run's error comes back to the test goroutine: a failed assertion calls
+	// FailNow, which only the test goroutine may do.
+	runErr := make(chan error, 1)
+	go func() {
+		_, err := m.runOnce(t.Context())
+		runErr <- err
+	}()
+
+	// Observing the title first keeps the assertion below from passing on a run
+	// that never latched anything.
+	waitUntil(t, 10*time.Second, func() bool {
+		return m.runtimeState.snapshot().Title == "from-run"
+	}, "the run never latched its title")
+	for woke(changed) {
+	}
+
+	select {
+	case err := <-runErr:
+		assert.NilError(t, err)
+	case <-time.After(20 * time.Second):
+		t.Fatal("the run never finished")
+	}
+
+	assert.Equal(t, m.runtimeState.snapshot().Title, "")
+	// The clearing wakes watchers, so a WatchRuntimeState stream sees the run's
+	// title go away instead of holding it until the next run.
+	assert.Assert(t, woke(changed))
 }
 
 func TestStaleEntryCleanup(t *testing.T) {

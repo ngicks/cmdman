@@ -61,6 +61,7 @@ func tuiCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	cmd.Flags().StringVar(&geom.Y, "popup-y", "",
 		"Popup Y position as an explicit percentage, e.g. 10% (requires --popup)")
 
+	tuiWidgetCmd(cmd, rootCfg)
 	tuiChildCmd(cmd, rootCfg)
 
 	parent.AddCommand(cmd)

@@ -12,21 +12,33 @@ func composeUpCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *compo
 	var (
 		flagRemoveOrphan bool
 		flagProgress     string
+		flagMux          bool
 	)
 
 	cmd := &cobra.Command{
-		Use:               "up [COMMAND...]",
-		Short:             "Create and start compose commands (detached)",
+		Use:   "up [COMMAND...]",
+		Short: "Create and start compose commands (detached)",
+		Long: `Create and start the compose project's commands, detached.
+
+With --mux, a successful up is followed by the multiplexer dashboard described
+by the compose file's "mux:" section, so one command both brings the project up
+and shows its layout. The dashboard opens at layout 0 instead of cycling, so
+re-running up --mux keeps the same layout; cycling stays with "compose mux up".
+A project with no "mux:" section is brought up as usual and the dashboard is
+skipped with a warning.`,
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeUp(cmd, rootCfg, cf, args, flagRemoveOrphan, flagProgress)
+			return runComposeUp(cmd, rootCfg, cf, args, flagRemoveOrphan, flagProgress, flagMux)
 		},
 	}
 
 	cmd.Flags().BoolVar(&flagRemoveOrphan, "remove-orphan", false,
 		"Remove stopped orphan commands (running orphans are skipped)")
 	cmd.Flags().StringVar(&flagProgress, "progress", "auto", cli.ProgressFlagUsage)
+	cmd.Flags().BoolVar(&flagMux, "mux", false,
+		`Open the compose file's "mux:" dashboard after a successful up`+
+			" (skipped with a warning when the file has no mux: section)")
 	_ = cmd.RegisterFlagCompletionFunc("progress", progressCompletions)
 
 	parent.AddCommand(cmd)
@@ -39,6 +51,7 @@ func runComposeUp(
 	commandNames []string,
 	removeOrphan bool,
 	progress string,
+	withMux bool,
 ) error {
 	spec, err := compose.LoadAndNormalize(cf.normalizeOpts())
 	if err != nil {
@@ -57,7 +70,8 @@ func runComposeUp(
 	}
 	defer prog.Close()
 
-	result, err := compose.NewService(svc, compose.WithReporter(prog)).Up(
+	composeSvc := compose.NewService(svc, compose.WithReporter(prog))
+	result, err := composeSvc.Up(
 		cmd.Context(), spec, compose.UpOption{
 			CreateOption: compose.CreateOption{
 				RemoveOrphan: removeOrphan,
@@ -70,6 +84,22 @@ func runComposeUp(
 	if err != nil {
 		return err
 	}
+	if err := cli.UpResultErr(result); err != nil {
+		return err
+	}
+	if !withMux {
+		return nil
+	}
 
-	return cli.UpResultErr(result)
+	// The tty progress renderer repaints its block in place with cursor-up
+	// sequences from a background ticker; finalize it before the mux tail writes
+	// to the same terminal. Close is idempotent, so the deferred one still runs.
+	_ = prog.Close()
+	return cli.ComposeUpMux(
+		cmd.Context(),
+		composeSvc,
+		&spec,
+		cmd.OutOrStdout(),
+		cmd.ErrOrStderr(),
+	)
 }

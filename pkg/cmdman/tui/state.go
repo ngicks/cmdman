@@ -81,6 +81,13 @@ type commandRow struct {
 	logDriver logdriver.LogDriver
 	tty       bool   // command runs under a pseudo-terminal (preview predicate)
 	pending   string // pending action label; empty when no action is in flight
+
+	// Runtime state as of the last load (see CommandInfo): what the command
+	// said about itself, as opposed to what the store knows about its process.
+	title  string
+	status string // working, waiting, done, or "" when nothing was reported
+	detail string
+	bell   bool
 }
 
 // projectGroup groups command rows under a compose project.
@@ -440,6 +447,25 @@ func displayLabel(state model.EventType, exitCode *int) string {
 	return string(state)
 }
 
+// liveReport reports whether a row's runtime state may speak for it. Only a
+// running command's does: a run that is over shows its exit state, never its
+// last report (D13), and a command with an action in flight is about to change
+// state anyway. Every renderer gates on this one predicate so no two surfaces
+// disagree about a dead command.
+func liveReport(c commandRow) bool {
+	return c.pending == "" && c.state == model.EventTypeRunning
+}
+
+// reportedText words what a command reported about itself: the status with its
+// detail in parentheses (D12). It is empty when the command reported nothing,
+// which includes every command with no live monitor.
+func reportedText(c commandRow) string {
+	if c.status == "" || c.detail == "" {
+		return c.status
+	}
+	return c.status + " (" + c.detail + ")"
+}
+
 // groupFromInfos builds project groups from flat command infos, grouping by
 // (workdir, project).
 func groupFromInfos(infos []CommandInfo) []projectGroup {
@@ -462,6 +488,10 @@ func groupFromInfos(infos []CommandInfo) []projectGroup {
 			exitCode:  ci.ExitCode,
 			logDriver: ci.LogDriver,
 			tty:       ci.Tty,
+			title:     ci.Title,
+			status:    ci.Status,
+			detail:    ci.Detail,
+			bell:      ci.BellUnread,
 		})
 	}
 	return groups

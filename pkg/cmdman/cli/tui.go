@@ -29,6 +29,27 @@ func RunTUI(ctx context.Context, svc *cmdman.Service, initialTab tui.Tab, workDi
 	})
 }
 
+// RunTUIWidget runs a single TUI widget standalone in the current terminal —
+// the `cmdman tui widget <name>` entry point, which is also what a frame def's
+// `component:` resolves to. workDir mirrors RunTUI's override.
+//
+// Every widget but the statusbar takes the alternate screen: the switcher owns a
+// whole pane and the launcher a whole popup window, and both want it clean —
+// while the statusbar is a single line and has no screen to swap.
+func RunTUIWidget(
+	ctx context.Context,
+	svc *cmdman.Service,
+	widget tui.Widget,
+	workDir string,
+) error {
+	return tui.Run(ctx, tui.Options{
+		Backend:   newServiceBackend(svc, workDir),
+		Version:   cmdman.Version,
+		AltScreen: widget != tui.WidgetStatusbar,
+		Widget:    widget,
+	})
+}
+
 // RunTUIChild runs the TUI inside a multiplexer popup, reporting startup and
 // final status to the launcher over the IPC endpoint at ipcPath. It is the
 // implementation of the hidden `cmdman tui __child` subcommand. workDir mirrors

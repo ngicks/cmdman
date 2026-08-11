@@ -27,7 +27,11 @@ type CommandConfig struct {
 	Labels  map[string]string `json:"labels,omitzero"`
 	// Annotations hold system metadata rather than user-defined labels.
 	Annotations map[string]string `json:"annotations,omitzero"`
-	CommandDir  string            `json:"command_dir"`
+	// Hooks configures what happens to the sequences the monitor captures from
+	// this command's output (D17/D40). It overrides the global defaults map;
+	// an event this set does not name falls back to it.
+	Hooks      HookSet `json:"hooks,omitzero"`
+	CommandDir string  `json:"command_dir"`
 }
 
 // Validate rejects incomplete command configs so runtime code can assume values are present.
@@ -85,6 +89,9 @@ func (c *CommandConfig) ValidateCreate() error {
 		if err := logdriver.ValidateOpt(string(c.LogDriver), k, v); err != nil {
 			return fmt.Errorf("command config: %w", err)
 		}
+	}
+	if err := c.Hooks.Validate(); err != nil {
+		return fmt.Errorf("command config: %w", err)
 	}
 	return nil
 }

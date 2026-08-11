@@ -14,6 +14,7 @@ import (
 	"gotest.tools/v3/assert/cmp"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/compose"
+	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 	"github.com/ngicks/go-common/contextkey"
@@ -272,6 +273,39 @@ func TestHashStability(t *testing.T) {
 	h2, err := compose.Hash(cmd)
 	assert.NilError(t, err)
 	assert.Equal(t, h1, h2)
+}
+
+// TestHashGoldenDigest pins the digest of a fully populated command. The hash
+// is the drift signal behind LabelConfigHash, so a change to it recreates every
+// compose command that carries the old value: this test is the tripwire that
+// makes such a change deliberate. Hooks are per-command base configuration
+// rather than a compose field (D17), so adding them must not move the digest.
+func TestHashGoldenDigest(t *testing.T) {
+	cmd := compose.Command{
+		Name:            "api",
+		Dir:             "/work",
+		Args:            []string{"go", "run", "./cmd/api"},
+		Env:             []string{"B=2", "A=1"},
+		ImportHostEnv:   true,
+		Labels:          map[string]string{"team": "core"},
+		RestartPolicy:   model.RestartPolicyOnFailure,
+		MaxRetries:      3,
+		StopSignal:      "SIGTERM",
+		Tty:             true,
+		ScrollbackBytes: 65536,
+		LogDriver:       logdriver.LogDriver("k8s-file"),
+		LogOpts:         map[string]string{"max-size": "1m"},
+		After:           []compose.AfterSpec{{Name: "db", Condition: compose.ConditionRunning}},
+		Scale:           2,
+		GeneratedName:   "aaaaaaaaaaaa-proj-api",
+	}
+	h, err := compose.Hash(cmd)
+	assert.NilError(t, err)
+	assert.Equal(
+		t,
+		h,
+		"sha256:36a784e638f94f3d8e21707f7193fe0bbd7810a38d3003ba62fa314eaefd9559",
+	)
 }
 
 func TestHashChangesOnFieldChange(t *testing.T) {

@@ -34,7 +34,7 @@ func TestCommandInfosIncludesStandalone(t *testing.T) {
 			ConfigJSON: &model.CommandConfig{Dir: "/work/tool"},
 		},
 	}
-	got := commandInfos(entries)
+	got := commandInfos(entries, nil)
 	if len(got) != 2 {
 		t.Fatalf("expected compose + standalone commands, got %d", len(got))
 	}

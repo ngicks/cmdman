@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] up [--remove-orphan] [--progress MODE] [COMMAND...]
+cmdman compose [selection flags] up [--remove-orphan] [--progress MODE] [--mux] [COMMAND...]
 ```
 
 ## Description
@@ -40,6 +40,13 @@ Uses the compose selection flags documented in
   Running orphans are skipped.
 - `--progress auto|tty|json|quiet`: progress output mode. `auto` chooses TTY
   output on terminals and JSON otherwise.
+- `--mux`: after a successful up, open the multiplexer dashboard described by
+  the compose file's `mux:` section, so one command both brings the project up
+  and shows its layout. The dashboard opens at layout 0 instead of cycling, so
+  re-running `up --mux` keeps the same layout; cycling stays with
+  [`cmdman compose mux up`](./cmdman-compose-mux.1.md). A project whose file has
+  no `mux:` section is brought up as usual and the dashboard is skipped with a
+  warning.
 
 ## Examples
 

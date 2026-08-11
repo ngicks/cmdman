@@ -62,6 +62,13 @@ type Monitor struct {
 	stateChangeBridge *broadcaster[monitorStateChange]
 	logWriter         logdriver.Writer
 	terminalState     *terminalPaneState
+	// runtimeState latches what a TTY command reports about itself (title,
+	// bell, notifications). It is per-run state, reset by runOnce, and is read
+	// without outputMu - see commandRuntimeState.
+	runtimeState *commandRuntimeState
+	// hooks runs the configured argv hooks for what runtimeState captures and
+	// answers which sequences must be kept from viewers (D17/D40).
+	hooks *hookDispatcher
 	// screen mirrors a TTY command's output in a server-side emulator so an
 	// attaching client gets a coherent current-screen snapshot instead of raw
 	// scrollback that may have rotated mid-sequence. nil for non-TTY commands.
@@ -119,6 +126,10 @@ func newMonitor(
 		logger.Warn("eventlog: resolve path", slog.String("error", err.Error()))
 	}
 
+	hooks := newHookDispatcher(logger)
+	runtimeState := newCommandRuntimeState()
+	runtimeState.setHookSink(hooks.dispatch)
+
 	return &Monitor{
 		ID:                id,
 		CommandDir:        commandDir,
@@ -128,6 +139,8 @@ func newMonitor(
 		outputBridge:      newBroadcaster[logdriver.LogLine](),
 		stateChangeBridge: newBroadcaster[monitorStateChange](),
 		terminalState:     newTerminalPaneState(),
+		runtimeState:      runtimeState,
+		hooks:             hooks,
 		store:             st,
 		cfg:               commandCfg,
 		evtLog:            evtLog,
@@ -295,6 +308,11 @@ func (m *Monitor) start(ctx context.Context) error {
 	// Handle SIGTERM for graceful shutdown.
 	sigCtx, sigStop := signal.NotifyContext(ctx, syscall.SIGTERM)
 	defer sigStop()
+
+	// Hooks live exactly as long as the supervision they report on: close
+	// signals a hook still running when the monitor goes away.
+	m.hooks.start(sigCtx)
+	defer m.hooks.close()
 
 	return m.runLoop(sigCtx)
 }

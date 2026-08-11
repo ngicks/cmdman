@@ -55,6 +55,16 @@ type fakeBackend struct {
 	composeUpErr    error            // error returned by ComposeUp (open failure)
 	composeUpStream *fakeComposeUpStream
 
+	launchLocs       []LaunchLocation // locations returned by ListLaunchTargets
+	launchErr        error            // error returned by ListLaunchTargets
+	startedProjects  []LaunchTarget   // targets passed to StartProject
+	startProjectErr  error            // error returned by StartProject
+	launchedProjects []LaunchTarget   // targets passed to LaunchProject
+	launchOutcome    LaunchOutcome    // outcome returned by LaunchProject
+	launchProjectErr error            // error returned by LaunchProject
+	forgotTargets    []LaunchTarget   // targets passed to ForgetLaunchTarget
+	forgetErr        error            // error returned by ForgetLaunchTarget
+
 	rawIDs     []string         // ids passed to RawView
 	rawChunks  [][]byte         // chunks pre-loaded into each RawView stream
 	rawErr     error            // error returned by RawView (open failure)
@@ -139,6 +149,28 @@ func (f *fakeBackend) ComposeUp(_ context.Context, projectName, _ string) (Compo
 	}
 	f.composeUpStream = s
 	return s, nil
+}
+
+func (f *fakeBackend) ListLaunchTargets(context.Context) ([]LaunchLocation, error) {
+	return f.launchLocs, f.launchErr
+}
+
+func (f *fakeBackend) StartProject(_ context.Context, t LaunchTarget) error {
+	f.startedProjects = append(f.startedProjects, t)
+	return f.startProjectErr
+}
+
+func (f *fakeBackend) LaunchProject(
+	_ context.Context,
+	t LaunchTarget,
+) (LaunchOutcome, error) {
+	f.launchedProjects = append(f.launchedProjects, t)
+	return f.launchOutcome, f.launchProjectErr
+}
+
+func (f *fakeBackend) ForgetLaunchTarget(_ context.Context, t LaunchTarget) error {
+	f.forgotTargets = append(f.forgotTargets, t)
+	return f.forgetErr
 }
 
 func (f *fakeBackend) RawView(_ context.Context, id string) (RawStream, error) {
@@ -1075,6 +1107,37 @@ func TestProjectHeaderShowsWorkdir(t *testing.T) {
 	out := stripANSI(m.renderCommandList("Commands", 60, 12))
 	if !strings.Contains(out, "/work/api") {
 		t.Fatalf("a compose project header should show the project workdir, got:\n%s", out)
+	}
+}
+
+// TestCommandsTabMarkerSlotIsFixedWidth pins the Commands tab to the same marker
+// slot the switcher and the statusbar use: 🔔 is two cells and ●/○ one, so the
+// project names have to start at the same column whichever marker their row
+// carries.
+func TestCommandsTabMarkerSlotIsFixedWidth(t *testing.T) {
+	m := seed()
+	groups := m.commands.groups
+	// One project with an unread bell, one without: the two marker widths.
+	groups[0].commands[0].bell = true
+	m.setGroups(groups)
+
+	out := stripANSI(m.renderCommandList("Commands", 70, 12))
+	nameColumn := func(name string) int {
+		for line := range strings.SplitSeq(out, "\n") {
+			if before, _, ok := strings.Cut(line, name); ok {
+				return cells.StringWidth(before)
+			}
+		}
+		t.Fatalf("no row names %q:\n%s", name, out)
+		return -1
+	}
+	belled, plain := nameColumn("local-dev"), nameColumn("api-stack")
+	if belled != plain {
+		t.Errorf("a belled project starts its name at column %d and a plain one at %d:\n%s",
+			belled, plain, out)
+	}
+	if !strings.Contains(out, glyphBell) {
+		t.Fatalf("the belled project should carry the bell; the test proves nothing:\n%s", out)
 	}
 }
 

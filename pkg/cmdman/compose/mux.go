@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/ngicks/cmdman/pkg/cmdman/mux"
+	"github.com/ngicks/cmdman/pkg/muxctl"
 )
 
 // MuxUpOption configures [Service.MuxUp].
@@ -18,6 +19,11 @@ type MuxUpOption struct {
 	// SessionName targets a specific multiplexer session. Empty lets the driver
 	// resolve the current (or default "cmdman") session.
 	SessionName string
+	// KeepCurrentWindow forbids repurposing the caller's current window (see
+	// [mux.RunOptions.KeepCurrentWindow]). The launcher sets it: a popup is
+	// summoned over whatever window the user is on, which is not an invitation
+	// to build a dashboard in it.
+	KeepCurrentWindow bool
 	// Stdout is where the attach hint is printed when running outside a
 	// multiplexer. Empty defaults to os.Stdout (see [mux.RunOptions.Stdout]).
 	Stdout io.Writer
@@ -67,11 +73,59 @@ func (s *Service) MuxUp(ctx context.Context, opts MuxUpOption) error {
 	}
 
 	return mux.Run(ctx, built, mux.RunOptions{
+		SessionName:       opts.SessionName,
+		WindowName:        selection.MuxWindowName(),
+		Identity:          selection.ProjectIdentity(),
+		Layout:            opts.Layout,
+		KeepCurrentWindow: opts.KeepCurrentWindow,
+		Stdout:            opts.Stdout,
+	})
+}
+
+// MuxLandOption configures [Service.MuxLand].
+type MuxLandOption struct {
+	// Selection is the resolved compose project. Unlike the other mux options it
+	// need not declare a "mux:" section: a project without one still gets a
+	// window to land in (D9).
+	Selection ProjectSelection
+	// SessionName targets a specific multiplexer session. Empty searches the
+	// whole server and creates in the caller's current session.
+	SessionName string
+}
+
+// MuxLand takes the caller to the project's window, creating a bare shell
+// window at the project's work directory when the project has none — the
+// mux-less project's landing (D9) and the "dashboard was torn down" case. It is
+// the focus half of the launcher's `S` (D4/D10): the bring-up is [Service.MuxUp]
+// (or, for a mux-less project, nothing at all).
+//
+// The driver comes from the project's mux section when it has one, so a
+// dashboard built on a dedicated socket is found on that socket; a project
+// without a section falls back to autodetection, which is the only thing it can
+// mean. Like [Service.MuxDown] it never touches the underlying cmdman service,
+// so it is safe on a Service built with NewService(nil).
+func (s *Service) MuxLand(ctx context.Context, opts MuxLandOption) (mux.LandResult, error) {
+	selection := opts.Selection
+
+	var driver muxctl.DriverSpec
+	if selection.Spec != nil && selection.Spec.Mux != nil {
+		driver = selection.Spec.Mux.Driver
+	}
+
+	// For an unnamed project (identity "") fall back to the window name, exactly
+	// as [Service.MuxLs] does: an empty identity filter matches every stamped
+	// window on the server, which would land on somebody else's project.
+	identity := selection.ProjectIdentity()
+	if identity == "" {
+		identity = selection.MuxWindowName()
+	}
+
+	return mux.Land(ctx, mux.LandOptions{
+		Driver:      driver,
 		SessionName: opts.SessionName,
 		WindowName:  selection.MuxWindowName(),
-		Identity:    selection.ProjectIdentity(),
-		Layout:      opts.Layout,
-		Stdout:      opts.Stdout,
+		Identity:    identity,
+		WorkDir:     selection.WorkDir,
 	})
 }
 

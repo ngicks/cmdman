@@ -29,12 +29,15 @@ type InspectOutput struct {
 	LiveStatus  *LiveStatusInfo    `json:",omitzero"`
 }
 
-// LiveStatusInfo is the live status from the monitor gRPC Status RPC.
+// LiveStatusInfo is the live status from the monitor gRPC Status RPC: the
+// process facts plus what the command said about itself during this run
+// (RuntimeState, nil when the monitor served none).
 // CLI-output type; see InspectOutput for why it carries no json name tags.
 type LiveStatusInfo struct {
-	State    string
-	ExitCode int32
-	PID      int32
+	State        string
+	ExitCode     int32
+	PID          int32
+	RuntimeState *RuntimeState `json:",omitzero"`
 }
 
 func (s *Service) Inspect(ctx context.Context, idOrName string) (*InspectOutput, error) {
@@ -83,9 +86,14 @@ func (s *Service) getLiveStatus(ctx context.Context, id string) *LiveStatusInfo 
 	if err != nil {
 		return nil
 	}
-	return &LiveStatusInfo{
+	live := &LiveStatusInfo{
 		State:    resp.State,
 		ExitCode: resp.ExitCode,
 		PID:      resp.Pid,
 	}
+	if resp.RuntimeState != nil {
+		rs := runtimeStateFromProto(resp.RuntimeState)
+		live.RuntimeState = &rs
+	}
+	return live
 }

@@ -375,8 +375,19 @@ func (m Model) renderCommandList(title string, width, height int) string {
 			if m.commands.folded(r.group) && m.commands.filter == "" {
 				glyph = ">"
 			}
-			plain = fmt.Sprintf("%s %s %s", glyph, projectMarker, g.name)
-			styled = plain
+			// The project's one attention marker (D14/D23), the same one the
+			// switcher and the statusbar show, between the fold arrow and the
+			// name: whichever surface the user is looking at says the same thing
+			// about the project.
+			mark := markerGlyph(g)
+			// The marker sits in the same fixed-width slot the switcher and the
+			// statusbar give it, measured off the glyph rather than assumed: 🔔 is
+			// two cells and ●/○ one, so a single space after it would move the name
+			// a column between rows.
+			gap := strings.Repeat(" ", max(markerSlot-glyphWidth(mark), 1))
+			plain = fmt.Sprintf("%s %s %s%s", glyph, projectMarker, mark, gap+g.name)
+			styled = fmt.Sprintf("%s %s %s%s", glyph, projectMarker,
+				markerStyle(g).Render(mark), gap+g.name)
 			if g.active {
 				plain += "   active"
 				styled += "   " + styleActive.Render("active")
@@ -411,6 +422,26 @@ func (m Model) renderCommandList(title string, width, height int) string {
 			plain = fmt.Sprintf("%s%s%s %-16s %s", indent, prefix, glyph, name, label)
 			styled = fmt.Sprintf("%s%s%s %-16s %s", indent, prefix,
 				statusStyle(c.state, c.pending).Render(glyph), name, label)
+			// What the command says about itself, after what the store knows
+			// about it: an unread bell (D23), the status it reported with its
+			// detail (D12), and the title it set — dimmed like the paths, since
+			// it is the command's own words, not the TUI's. Only a live run gets
+			// to speak: a run that is over shows its exit state and nothing it
+			// said before it ended (D13), the same rule the switcher rows follow.
+			if liveReport(c) {
+				if c.bell {
+					plain += "  " + glyphBell
+					styled += "  " + glyphBell
+				}
+				if reported := reportedText(c); reported != "" {
+					plain += "  " + reported
+					styled += "  " + reportedStatusStyle(c.status).Render(reported)
+				}
+				if c.title != "" {
+					plain += "  " + c.title
+					styled += "  " + stylePath.Render(c.title)
+				}
+			}
 			// Free-floating commands have no project header to carry the workdir, so
 			// show it on the row itself (dimmed).
 			if standalone && c.workdir != "" {

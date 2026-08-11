@@ -38,18 +38,20 @@ func (m Model) bgCtx() context.Context {
 	return context.Background()
 }
 
-func (m Model) loadCommandsCmd() tea.Cmd {
-	backend := m.backend
-	ctx := m.bgCtx()
+func (m Model) loadCommandsCmd() tea.Cmd { return listCommandsCmd(m.bgCtx(), m.backend) }
+
+func (m Model) loadProjectsCmd() tea.Cmd { return listProjectsCmd(m.bgCtx(), m.backend) }
+
+// listCommandsCmd and listProjectsCmd are package-level so the single-widget
+// model issues the very same loads as the full model.
+func listCommandsCmd(ctx context.Context, backend Backend) tea.Cmd {
 	return func() tea.Msg {
 		infos, err := backend.ListCommands(ctx)
 		return commandsLoadedMsg{infos: infos, err: err}
 	}
 }
 
-func (m Model) loadProjectsCmd() tea.Cmd {
-	backend := m.backend
-	ctx := m.bgCtx()
+func listProjectsCmd(ctx context.Context, backend Backend) tea.Cmd {
 	return func() tea.Msg {
 		infos, err := backend.ListProjects(ctx)
 		return projectsLoadedMsg{infos: infos, err: err}

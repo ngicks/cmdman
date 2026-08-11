@@ -45,6 +45,10 @@ type CmdmanConfig struct {
 	// values are "inotify" (linux only) and "poll". When empty, the
 	// default is "inotify" on linux and "poll" elsewhere.
 	EventWatcherKind eventlog.WatcherKind `json:"eventWatcherKind,omitzero"`
+	// DefaultHooks configures OSC/BEL hooks for every command that does not
+	// name the event itself in model.CommandConfig.Hooks (D17/D40). It is a
+	// config-file field only: there is no flag or environment variable for it.
+	DefaultHooks model.HookSet `json:"defaultHooks,omitzero"`
 }
 
 // WithDefaults fills empty fields using the configured precedence and
@@ -119,6 +123,10 @@ func (c CmdmanConfig) WithDefaults() (CmdmanConfig, error) {
 		c.EventWatcherKind = defaultEventWatcherKind()
 	}
 
+	if c.DefaultHooks == nil {
+		c.DefaultHooks = fileCfg.DefaultHooks
+	}
+
 	if err := c.Validate(); err != nil {
 		return CmdmanConfig{}, err
 	}
@@ -151,6 +159,9 @@ func (c CmdmanConfig) Validate() error {
 			"cmdman config: invalid event watcher kind %q",
 			c.EventWatcherKind,
 		)
+	}
+	if err := c.DefaultHooks.Validate(); err != nil {
+		return fmt.Errorf("cmdman config: default %w", err)
 	}
 	return nil
 }
@@ -253,6 +264,24 @@ func loadConfigFile() (CmdmanConfig, error) {
 // Returns "" (without an error) when no config path can be determined (e.g. no
 // $HOME) — there is simply nowhere to look.
 func ComposeConfigDir() (string, error) {
+	return configSubDir("compose")
+}
+
+// FrameConfigDir returns the directory that holds named frame definitions: the
+// "frame" subdirectory of the config directory, resolved exactly like
+// [ComposeConfigDir].
+//
+// Examples:
+//
+//	$CMDMAN_CONF=/etc/cmdman/config.json -> /etc/cmdman/frame
+//	default                              -> ${XDG_CONFIG_HOME:-$HOME/.config}/cmdman/frame
+//
+// Returns "" (without an error) when no config path can be determined.
+func FrameConfigDir() (string, error) {
+	return configSubDir("frame")
+}
+
+func configSubDir(name string) (string, error) {
 	path, err := configFilePath()
 	if err != nil {
 		return "", err
@@ -260,7 +289,7 @@ func ComposeConfigDir() (string, error) {
 	if path == "" {
 		return "", nil
 	}
-	return filepath.Join(filepath.Dir(path), "compose"), nil
+	return filepath.Join(filepath.Dir(path), name), nil
 }
 
 // configFilePath resolves the on-disk config file path, or returns an

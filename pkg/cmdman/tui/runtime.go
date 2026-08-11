@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -49,9 +50,11 @@ type reloadTickMsg struct {
 	gen int
 }
 
-func (m Model) subscribeEventsCmd() tea.Cmd {
-	backend := m.backend
-	ctx := m.bgCtx()
+func (m Model) subscribeEventsCmd() tea.Cmd { return subscribeCmd(m.bgCtx(), m.backend) }
+
+// subscribeCmd is package-level so the single-widget model subscribes to the
+// same lifecycle stream as the full model.
+func subscribeCmd(ctx context.Context, backend Backend) tea.Cmd {
 	return func() tea.Msg {
 		stream, err := backend.Events(ctx)
 		return eventsSubscribedMsg{stream: stream, err: err}

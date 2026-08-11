@@ -40,7 +40,11 @@ type CreateRequest struct {
 	ScrollbackBytes int
 	LogDriver       logdriver.LogDriver
 	LogOpts         map[string]string
-	Argv            []string
+	// Hooks configures what happens to the sequences the monitor captures from
+	// this command's output. An event it does not name falls back to the global
+	// defaults in CmdmanConfig.DefaultHooks (D17/D40).
+	Hooks model.HookSet
+	Argv  []string
 }
 
 // CreateResult is the result of creating a command record.
@@ -153,5 +157,6 @@ func (s *Service) buildCommandConfig(req CreateRequest) *model.CommandConfig {
 		LogOpts:         maps.Clone(req.LogOpts),
 		Labels:          maps.Clone(req.Labels),
 		Annotations:     annotations,
+		Hooks:           maps.Clone(req.Hooks),
 	}
 }

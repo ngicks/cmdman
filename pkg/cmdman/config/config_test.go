@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"gotest.tools/v3/assert"
 )
 
@@ -105,6 +106,64 @@ func TestWithDefaults_MalformedConfigFileFails(t *testing.T) {
 
 	_, err := CmdmanConfig{}.WithDefaults()
 	assert.ErrorContains(t, err, "parse config file")
+}
+
+func TestWithDefaults_DefaultHooksFromConfigFile(t *testing.T) {
+	home := configFileTestEnv(t)
+	confPath := filepath.Join(home, "cmdman-config.json")
+	t.Setenv(ENV_CMDMAN_CONF, confPath)
+
+	conf := []byte(`{
+  "defaultHooks": {
+    "bell": {"action": "block", "exec": ["notify-send", "bell"]},
+    "title": {"action": "passthrough"}
+  }
+}`)
+	assert.NilError(t, os.WriteFile(confPath, conf, 0o600))
+
+	cfg, err := CmdmanConfig{}.WithDefaults()
+	assert.NilError(t, err)
+	assert.DeepEqual(t, cfg.DefaultHooks, model.HookSet{
+		model.HookEventBell: {
+			Action: model.HookActionBlock,
+			Exec:   []string{"notify-send", "bell"},
+		},
+		model.HookEventTitle: {Action: model.HookActionPassthrough},
+	})
+}
+
+func TestWithDefaults_RejectsUnknownHookEvent(t *testing.T) {
+	home := configFileTestEnv(t)
+	confPath := filepath.Join(home, "cmdman-config.json")
+	t.Setenv(ENV_CMDMAN_CONF, confPath)
+
+	conf := []byte(`{"defaultHooks": {"bel": {"action": "block"}}}`)
+	assert.NilError(t, os.WriteFile(confPath, conf, 0o600))
+
+	_, err := CmdmanConfig{}.WithDefaults()
+	assert.ErrorContains(t, err, `unknown event "bel"`)
+}
+
+func TestWithHookEventEnv(t *testing.T) {
+	env := WithHookEventEnv(
+		[]string{
+			"PATH=/bin",
+			ENV_CMDMAN_CMD_ID + "=cmd-1",
+			// A command that exported its own hook variables must not be able
+			// to lie to the hook about what happened.
+			ENV_CMDMAN_HOOK_EVENT + "=bogus",
+			ENV_CMDMAN_HOOK_TITLE + "=bogus",
+			ENV_CMDMAN_HOOK_BODY + "=bogus",
+		},
+		HookEventEnv{Event: model.HookEventNotification, Title: "Agent", Body: "needs input"},
+	)
+	assert.DeepEqual(t, env, []string{
+		"PATH=/bin",
+		ENV_CMDMAN_CMD_ID + "=cmd-1",
+		ENV_CMDMAN_HOOK_EVENT + "=notification",
+		ENV_CMDMAN_HOOK_TITLE + "=Agent",
+		ENV_CMDMAN_HOOK_BODY + "=needs input",
+	})
 }
 
 func itoa(n int) string {

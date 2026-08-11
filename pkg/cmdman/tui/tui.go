@@ -35,6 +35,17 @@ type CommandInfo struct {
 	// pane uses it (with State) to decide between the vt terminal-view and the
 	// sanitized log fallback.
 	Tty bool
+
+	// Title, Status, Detail and BellUnread are the runtime state the command's
+	// monitor holds for the current run: the title it set, the status it
+	// reported (working/waiting/done, "" when it reported none) with its
+	// detail, and whether a bell is still unread. They are zero for a command
+	// with no live monitor, which reads as "nothing said so far" rather than as
+	// a claim about the command.
+	Title      string
+	Status     string
+	Detail     string
+	BellUnread bool
 }
 
 // ProjectInfo is the Compose-tab row data for a discovered compose project.
@@ -148,6 +159,26 @@ type Backend interface {
 	// finishes (its channel closes), at which point Err reports the
 	// operation-level error.
 	ComposeUp(ctx context.Context, projectName, composeFile string) (ComposeUpStream, error)
+
+	// ListLaunchTargets returns the launcher's merged list: compose history,
+	// the ListProjects merge, and the projects whose mux window is currently
+	// running, grouped by target directory and ordered by recency (D7). Git
+	// info is read per entry as the listing is built (D41).
+	ListLaunchTargets(ctx context.Context) ([]LaunchLocation, error)
+	// StartProject brings a project up in the background without moving focus —
+	// the launcher's `s` (D4). It returns when the bring-up reached its terminal
+	// phase, which is what stops the row's spinner.
+	StartProject(ctx context.Context, target LaunchTarget) error
+	// LaunchProject brings a project up and lands focus inside it — the
+	// launcher's `S` (D4/D10). It returns once the caller is (or can be) looking
+	// at the project's window; see LaunchOutcome for the two endings that are
+	// not simply "done": D9's mux-less warning and D8's attach handoff.
+	LaunchProject(ctx context.Context, target LaunchTarget) (LaunchOutcome, error)
+	// ForgetLaunchTarget removes a project's compose-history entry, the offer
+	// made when its compose file no longer resolves (D10/Q12). Forgetting a
+	// project that was never recorded is not an error: the same offer is made
+	// for a discovered project whose file has gone.
+	ForgetLaunchTarget(ctx context.Context, target LaunchTarget) error
 }
 
 // EventSignal is one lifecycle change cue. A non-nil Err is a local event-tail
@@ -250,17 +281,40 @@ type Options struct {
 	// InitialTab selects the tab shown on startup. The zero value is
 	// TabCommands, so leaving it unset keeps the default.
 	InitialTab Tab
+	// Widget restricts the run to a single widget view — no tab bar, no tab
+	// switching, the widget owns the whole pane. The zero value, WidgetNone,
+	// runs the full multi-tab TUI, so leaving it unset changes nothing.
+	Widget Widget
 }
 
 // Run starts the TUI program and blocks until it exits.
 func Run(ctx context.Context, opts Options) error {
-	m := New(opts)
-	m.ctx = ctx
 	// v2: the alternate screen is requested per-frame via View().AltScreen
 	// (see Model.View), not as a program option.
-	p := tea.NewProgram(m, tea.WithContext(ctx))
+	p := tea.NewProgram(newProgramModel(ctx, opts), tea.WithContext(ctx))
 	_, err := p.Run()
 	return err
+}
+
+// newProgramModel picks the model Run drives: the restricted single-widget
+// model when Options.Widget names one, the full multi-tab model otherwise. The
+// launcher is its own model rather than a third widget branch: its keys are
+// zoned (a bare letter types in the input and acts on a list), so it shares no
+// key handling with the docked widgets.
+func newProgramModel(ctx context.Context, opts Options) tea.Model {
+	if opts.Widget == WidgetLauncher {
+		l := newLauncher(opts)
+		l.ctx = ctx
+		return l
+	}
+	if opts.Widget != WidgetNone {
+		w := newWidget(opts)
+		w.ctx = ctx
+		return w
+	}
+	m := New(opts)
+	m.ctx = ctx
+	return m
 }
 
 // New constructs the root model.

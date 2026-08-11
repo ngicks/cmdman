@@ -28,6 +28,13 @@ type Commandstate struct {
 	Json     string
 }
 
+type Composehistory struct {
+	Workdir  string
+	Project  string
+	File     string
+	Lastused string
+}
+
 type Dbconfig struct {
 	ID            int64
 	Schemaversion int64

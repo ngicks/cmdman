@@ -80,8 +80,15 @@ const (
 {{- cell .Name .W.Name -}}
 {{- cell (printf "%v" .State) .W.State -}}
 {{- cell (exitCode .ExitCode) .W.Code -}}
+{{- cell (or .Status "-") .W.Status -}}
+{{- cell .Bell .W.Bell -}}
+{{- cell (or .Detail "-") .W.Detail -}}
+{{- cell (title .Title) .W.Title -}}
 {{- fit (join " " .Argv) .Win .W.Used -}}`
 )
+
+// Bell renders the bell column; see composeStatusRow.Bell.
+func (r composePsRow) Bell() string { return bellMark(r.BellUnread) }
 
 // RenderComposeProjects renders the compose ls output. format selects the
 // layout:
@@ -150,7 +157,9 @@ func RenderComposePs(out io.Writer, statuses []compose.CommandStatus, format str
 	if format == "" || format == "table" {
 		fmt.Fprintln(out, cell("COMMAND", w["Command"])+cell("ID", w["ID"])+
 			cell("NAME", w["Name"])+cell("STATE", w["State"])+
-			cell("EXIT CODE", w["Code"])+"ARGV")
+			cell("EXIT CODE", w["Code"])+cell("STATUS", w["Status"])+
+			cell("BELL", w["Bell"])+cell("DETAIL", w["Detail"])+
+			cell("TITLE", w["Title"])+"ARGV")
 		format = DefaultComposePsRowFormat
 	}
 	return renderTemplate(out, rows, format)
@@ -163,6 +172,10 @@ func measureComposePs(statuses []compose.CommandStatus) map[string]int {
 		"Name":    width("NAME"),
 		"State":   width("STATE"),
 		"Code":    width("EXIT CODE"),
+		"Status":  width("STATUS"),
+		"Detail":  width("DETAIL"),
+		"Bell":    width("BELL"),
+		"Title":   width("TITLE"),
 	}
 	for _, s := range statuses {
 		w["Command"] = max(w["Command"], width(s.Command))
@@ -170,8 +183,12 @@ func measureComposePs(statuses []compose.CommandStatus) map[string]int {
 		w["Name"] = max(w["Name"], width(s.Name))
 		w["State"] = max(w["State"], width(fmt.Sprintf("%v", s.State)))
 		w["Code"] = max(w["Code"], width(exitCode(s.ExitCode)))
+		w["Status"] = max(w["Status"], width(s.Status))
+		w["Detail"] = max(w["Detail"], width(s.Detail))
+		w["Title"] = max(w["Title"], width(titleText(s.Title)))
 	}
-	w["Used"] = w["Command"] + w["ID"] + w["Name"] + w["State"] + w["Code"] + 5*len(columnGap)
+	w["Used"] = w["Command"] + w["ID"] + w["Name"] + w["State"] + w["Code"] +
+		w["Status"] + w["Detail"] + w["Bell"] + w["Title"] + 9*len(columnGap)
 	return w
 }
 

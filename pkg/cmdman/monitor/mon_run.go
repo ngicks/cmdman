@@ -49,6 +49,17 @@ func RunMonitor(
 }
 
 func (m *Monitor) runLoop(ctx context.Context) (err error) {
+	// The supervisor calls GracefulStop once this returns, and that waits for
+	// every in-flight RPC. Attach, Subscribe and WatchRuntimeState all park on
+	// one of these two broadcasters, so an exit that left either open would
+	// hold shutdown open forever. Both Close calls are idempotent; the paths
+	// below still close outputBridge first, where closing it before the exit is
+	// announced lets a viewer drain the output the run ended with.
+	defer func() {
+		m.outputBridge.Close()
+		m.stateChangeBridge.Close()
+	}()
+
 	org := m.stateJSON.RestartCount
 	for ; ; m.stateJSON.RestartCount++ {
 		if m.stateJSON.RestartCount > org {
@@ -73,7 +84,9 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 		// Re-read config on each restart iteration.
 		cfg, err := cmdstore.ReadCommandConfig(m.CommandDir)
 		if err != nil {
-			return fmt.Errorf("read config: %w", err)
+			err = fmt.Errorf("read config: %w", err)
+			m.setFailed(err.Error())
+			return err
 		}
 		m.cfg = cfg
 
@@ -147,6 +160,15 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 		return -1, err
 	}
 
+	// Hook config is re-resolved per run, like the command config it comes
+	// from. Hooks get the command's own environment, so they inherit the
+	// CMDMAN_CMD_ID family without a second construction of it.
+	m.hooks.configure(
+		model.HookLayers{Command: m.cfg.Hooks, Global: m.Config.DefaultHooks},
+		m.cfg.Dir,
+		cmd.Env,
+	)
+
 	logWriter, err := m.openLogWriter(ctx)
 	if err != nil {
 		return -1, err
@@ -160,6 +182,9 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	m.outputMu.Lock()
 	m.logWriter = logWriter
 	m.terminalState.reset()
+	// The run that ended cleared its own runtime state; this repeats it for the
+	// first run, and is a no-op otherwise.
+	m.runtimeState.reset()
 	m.outputMu.Unlock()
 	defer func() {
 		m.outputMu.Lock()
@@ -191,6 +216,14 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 
 	waitFn()
 
+	// Runtime state dies with the run (D13). Clearing it here rather than only
+	// when the next run gets this far is what keeps a dead run's title, bell or
+	// reported status from being served over Status and WatchRuntimeState in
+	// between - or for good, when the next run's setup fails. reset signals its
+	// own change, so watchers see the cleared state. runtimeState carries its
+	// own lock and is read without outputMu, so this takes neither.
+	m.runtimeState.reset()
+
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return exitErr.ExitCode(), nil
@@ -215,7 +248,7 @@ func (m *Monitor) writeTty(cmd *exec.Cmd) (func(), error) {
 	// screen). Sized to the default PTY; Monitor.Resize keeps it in sync.
 	m.outputMu.Lock()
 	m.screen.close()
-	m.screen = newScreenTracker(int(defaultPtyCols), int(defaultPtyRows))
+	m.screen = newScreenTracker(int(defaultPtyCols), int(defaultPtyRows), m.runtimeState)
 	m.outputMu.Unlock()
 
 	var wg sync.WaitGroup

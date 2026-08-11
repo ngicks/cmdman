@@ -25,15 +25,22 @@ type ProjectSummary struct {
 	Failed      int
 }
 
-// CommandStatus describes one stored command in a compose project.
+// CommandStatus describes one stored command in a compose project, together
+// with the runtime state its monitor holds for the current run (the same
+// fields [CommandRuntimeState] carries; a command with no live monitor keeps
+// them zero).
 // CLI-output type; see ProjectSummary for why it carries no json name tags.
 type CommandStatus struct {
-	Command  string
-	ID       string
-	Name     string
-	State    model.EventType
-	ExitCode *int     `json:",omitzero"`
-	Argv     []string `json:",omitzero"`
+	Command    string
+	ID         string
+	Name       string
+	State      model.EventType
+	ExitCode   *int     `json:",omitzero"`
+	Argv       []string `json:",omitzero"`
+	Title      string   `json:",omitzero"`
+	Status     string   `json:",omitzero"`
+	Detail     string   `json:",omitzero"`
+	BellUnread bool
 }
 
 // ListProjects returns every compose project known to the cmdman store.
@@ -106,7 +113,10 @@ func (s *Service) ListProjects(ctx context.Context) ([]ProjectSummary, error) {
 	return summaries, nil
 }
 
-// Ps lists commands in the selected compose project.
+// Ps lists commands in the selected compose project, filling each one's
+// runtime columns from its monitor. The dial is the same bounded, failure-is-an-
+// empty-column fan-out `ls` uses (see [cmdman.Service.RuntimeStates]), so a
+// project whose monitors are gone still lists.
 func (s *Service) Ps(
 	ctx context.Context,
 	selection ProjectSelection,
@@ -127,18 +137,25 @@ func (s *Service) Ps(
 		entries = filterByCommandNames(entries, commandNames)
 	}
 
+	runtime := s.runtimeStates(ctx, entries)
+
 	statuses := make([]CommandStatus, 0, len(entries))
 	for _, entry := range entries {
 		if entry.ConfigJSON == nil {
 			continue
 		}
+		rs := runtime[entry.ID]
 		statuses = append(statuses, CommandStatus{
-			Command:  entry.ConfigJSON.Labels[LabelCommand],
-			ID:       entry.ID,
-			Name:     entry.Name,
-			State:    entry.State,
-			ExitCode: entry.ExitCode,
-			Argv:     slices.Clone(entry.ConfigJSON.Argv),
+			Command:    entry.ConfigJSON.Labels[LabelCommand],
+			ID:         entry.ID,
+			Name:       entry.Name,
+			State:      entry.State,
+			ExitCode:   entry.ExitCode,
+			Argv:       slices.Clone(entry.ConfigJSON.Argv),
+			Title:      rs.Title,
+			Status:     rs.Status,
+			Detail:     rs.Detail,
+			BellUnread: rs.BellUnread,
 		})
 	}
 	slices.SortFunc(statuses, func(a, b CommandStatus) int {

@@ -56,6 +56,10 @@ func (s *Service) startWithSpec(
 	if err != nil {
 		return nil, err
 	}
+	// A start never creates a history row, even holding a compose file: the file
+	// it was pointed at is not necessarily the one the running commands came
+	// from, so it must not overwrite what the last create recorded.
+	s.bumpRecency(ctx, spec.WorkDir, spec.Project)
 	return &StartResult{Starts: starts}, nil
 }
 
@@ -97,5 +101,8 @@ func (s *Service) startWithoutSpec(
 	if err != nil {
 		return nil, err
 	}
+	// A start bypasses Create, so it is the only bring-up path that has to bump
+	// recency itself.
+	s.bumpRecency(ctx, spec.WorkDir, spec.Project)
 	return &StartResult{Starts: starts}, nil
 }

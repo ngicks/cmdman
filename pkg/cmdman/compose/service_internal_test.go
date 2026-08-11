@@ -26,6 +26,8 @@ type testCmdmanSvc struct {
 	stop     func(context.Context, cmdman.StopRequest) ([]cmdman.StopResult, error)
 	create   func(context.Context, cmdman.CreateRequest) (*cmdman.CreateResult, error)
 	remove   func(context.Context, cmdman.RemoveRequest) ([]cmdman.RemoveResult, error)
+	history  func(context.Context, cmdman.ComposeHistoryRequest) error
+	runtime  func(context.Context, []store.CommandEntry) map[string]cmdman.RuntimeState
 	config   cmdman.CmdmanConfig
 }
 
@@ -91,6 +93,27 @@ func (s testCmdmanSvc) Stop(
 }
 
 func (s testCmdmanSvc) Signal(context.Context, string, int32) error {
+	return nil
+}
+
+func (s testCmdmanSvc) RecordComposeHistory(
+	ctx context.Context,
+	req cmdman.ComposeHistoryRequest,
+) error {
+	if s.history != nil {
+		return s.history(ctx, req)
+	}
+	return nil
+}
+
+func (s testCmdmanSvc) RuntimeStates(
+	ctx context.Context,
+	entries []store.CommandEntry,
+	_ cmdman.RuntimeStatesOption,
+) map[string]cmdman.RuntimeState {
+	if s.runtime != nil {
+		return s.runtime(ctx, entries)
+	}
 	return nil
 }
 

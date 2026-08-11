@@ -33,6 +33,20 @@ launch or supervise the process become `failed`.
 Restart policies are enforced by the detached monitor. Explicit `stop` requests
 do not trigger policy-based restart.
 
+## Reported Status
+
+Separate from the state model above, a command can report about itself: one of
+`working`, `waiting`, or `done`, plus an optional free-form detail. That is the
+command's own word, not cmdman's observation of it.
+
+cmdman puts `CMDMAN_CMD_ID` into the environment of every command it supervises,
+so a supervised command addresses itself by passing no argument at all; from
+outside, name the command by ID or name. Reads and writes reach the command's
+monitor over its per-command Unix socket, so the status is per-run state: it is
+cleared when the command restarts and gone once it exits. Writing requires a
+running monitor and fails without one; reading a command that has none reports
+nothing rather than failing.
+
 ## Storage And Runtime Directories
 
 `--data-dir` selects persistent state: command definitions, the state database,
@@ -62,7 +76,9 @@ Lifecycle: [create](./cmdman-create.1.md), [run](./cmdman-run.1.md),
 Interaction and observation: [attach](./cmdman-attach.1.md),
 [send-keys](./cmdman-send-keys.1.md), [logs](./cmdman-logs.1.md),
 [events](./cmdman-events.1.md), [inspect](./cmdman-inspect.1.md),
-[ls](./cmdman-ls.1.md), [mux](./cmdman-mux.1.md), [tui](./cmdman-tui.1.md).
+[ls](./cmdman-ls.1.md), [status](./cmdman-status.1.md) (subcommands: `set`,
+`get`, `delete`), [mux](./cmdman-mux.1.md) (subcommands: `up`, `down`, `ls`),
+[tui](./cmdman-tui.1.md) (subcommand group: `widget`).
 
 Project management: [compose](./cmdman-compose.1.md).
 

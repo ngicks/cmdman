@@ -1,7 +1,7 @@
 # Status
 
-**Current state: planning complete — all questions resolved, contracts
-finalized. Implementation not started.** (2026-08-10)
+**Current state: implemented through step 14 — every step except the
+muxctl-blocked step 15.** (2026-08-11)
 
 ## Question resolution
 
@@ -69,42 +69,65 @@ finalized. Implementation not started.** (2026-08-10)
 Process note: implementation tasks (including mock TUI changes) are
 delegated to opus-class subagents via the Agent tool per the user's
 instruction (2026-08-09).
-- [ ] Contracts section of PLAN.md finalized (table, state fields, proto,
-      CLI spellings, frame spec)
 
 ## Implementation checklist (mirrors PLAN.md steps)
 
 ### Phase 0 — one-shot CLI
 
-- [ ] 1. `compose up --mux`
+- [x] 1. `compose up --mux` (layout pinned to 0 for idempotency; no-mux
+      section warns + skips; focus switch does not exist in the mux
+      layer yet — see step 5)
 
 ### Phase 1 — history + launcher (A)
 
-- [ ] 2. `ComposeHistory` migration + queries + store wrapper
-- [ ] 3. History write on `up`
-- [ ] 4. Launcher view (merged list)
-- [ ] 5. Landing (focus switch, background variant, outside-tmux, mux-less)
-- [ ] 6. Stale-entry failure experience
+- [x] 2. `ComposeHistory` migration + queries + store wrapper
+- [x] 3. History write on `up` (upsert in `compose.Service.Create` —
+      which runs on every `up`, correcting D34's nuance; `Start` bumps
+      recency only)
+- [x] 4. Launcher view — `cmdman tui widget launcher` (two-pane/three-zone
+      D28 form; popup binding:
+      `bind-key -n M-Space display-popup -E -w 80% -h 60% 'cmdman tui widget launcher'`)
+- [x] 5. Landing — new `muxctl` `FocusWindow`/`AttachCommand` primitives,
+      `mux.Land`/`compose.MuxLand`; D8 attach-handoff outside tmux, D9
+      synthesized shell window (note: D9's warning is visible inside tmux
+      only)
+- [x] 6. Stale-entry failure experience (inline error, ctrl+d deletes the
+      history row)
 
 ### Phase 2 — runtime state (C)
 
-- [ ] 7. vt Bell/Title callbacks in the monitor
-- [ ] 8. Storage (CommandState + eventlog composite, pending Q17)
-- [ ] 9. OSC hook dispatch (D17, schema pending Q35)
-- [ ] 10. Report verb
-- [ ] 11. Surfacing in `ls`/`ps`/TUI/Inspect (incl. D20 bucket sort)
+- [x] 7. vt Bell/Title callbacks in the monitor (+ OSC 9/777 per D39)
+- [x] 8. Monitor-held state + stream (D32): extended `Status`,
+      `WatchRuntimeState` (debounced titles), status set/get/delete
+      RPCs, bounded dial helper
+- [x] 9. OSC hook dispatch (D17/D40; `block` filters the Attach path only —
+      `logs`/`Subscribe` keep the faithful byte record)
+- [x] 10. Report verb — `cmdman status set|get|delete` + get-only
+      `cmdman compose status` mirror
+- [x] 11. Surfacing — `ls`/`ps` STATUS/BELL/DETAIL/TITLE columns +
+      `--format` fields (1 s overall dial budget), Inspect, TUI rows,
+      switcher markers + D20 bucket sort (D22/D23 bell-replaces-dot
+      supersedes D14's literal ranking in the dot)
 
 ### Phase 3 — frame (B)
 
-- [ ] 12. Frame spec type + def discovery + carving mapping
-- [ ] 13. Widget entrypoint
-- [ ] 14. Scope/spawn muxctl sub-plan (separate plan directory)
-- [ ] 15. Frame verbs (show/hide/select/cycle) + switcher widget
+- [x] 12. Frame spec type + def discovery + carving mapping
+      (`pkg/cmdman/frame`)
+- [x] 13. Widget entrypoint (`cmdman tui widget switcher|statusbar`)
+- [x] 14. muxctl sub-plan scoped and drafted:
+      `doc/plan/2026-08-10-01-muxctl_first_class_frame/` (10 open
+      questions await user resolution)
+- [ ] 15. Frame verbs (show/hide/select/cycle) + switcher widget —
+      **blocked** on the muxctl sub-plan's outcome (D36)
 
 ## Next action
 
-Begin phase 0 (`compose up --mux`, PLAN.md step 1), delegated to
-opus-class implementer agents per the standing process note. The muxctl
-first-class-frame sub-plan (D36) is drafted when phase 3 approaches.
-Deferred item to plan later, with phase 3: keyboard strip-reach in
-tmux (D31).
+Resolve the 10 open questions in
+`doc/plan/2026-08-10-01-muxctl_first_class_frame/` with the user, then
+implement that sub-plan and step 15 on top of it. Deferred item to plan
+later, with phase 3: keyboard strip-reach in tmux (D31). Smaller
+follow-ups noted by implementers: `--hook` flag on `create`/`run` (the
+per-command hook layer is currently config-JSON-only), launch-failure →
+attention badge (D10's phase-2 consequence), Compose-tab project badges,
+launcher right-pane scan for arbitrary compose files, per-driver
+`runningIdentities` listing.

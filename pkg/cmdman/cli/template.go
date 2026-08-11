@@ -20,7 +20,12 @@ import (
 const (
 	commandMaxLen = 40
 	idShortLen    = 12
-	columnGap     = "   "
+	// titleMaxLen bounds the TITLE column. Titles are whatever the command
+	// chose to say — a shell puts its whole working directory in one — and this
+	// column is not the trailing one, so an unbounded title would push the
+	// command itself off the line.
+	titleMaxLen = 30
+	columnGap   = "   "
 )
 
 // tableMeta carries precomputed column widths and the terminal width. A zero
@@ -42,6 +47,8 @@ var templateFuncMap = template.FuncMap{
 	},
 	"deref":    deref,
 	"command":  commandLine,
+	"title":    titleText,
+	"bell":     bellMark,
 	"shortID":  shortID,
 	"exitCode": exitCode,
 	"join": func(sep string, elems []string) string {
@@ -71,6 +78,26 @@ func exitCode(code *int) string {
 		return "-"
 	}
 	return strconv.Itoa(*code)
+}
+
+// titleText renders the window title a command last set for a fixed-width
+// column, using "-" when it set none (or when no monitor answered for it).
+func titleText(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return runewidth.Truncate(s, titleMaxLen, "…")
+}
+
+// bellMark renders the bell column: a command nobody has looked at since it
+// rang is the only interesting case, so the quiet one gets the same "-" the
+// other tables use for "nothing here". A table stays a table - the 🔔 the TUI
+// shows belongs where a column width is not being measured in cells.
+func bellMark(unread bool) string {
+	if unread {
+		return "*"
+	}
+	return "-"
 }
 
 // commandLine renders a command's argv as a single space-joined, width-bounded

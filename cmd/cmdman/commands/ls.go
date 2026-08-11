@@ -61,5 +61,11 @@ func runLs(
 		return err
 	}
 
-	return cli.RenderEntries(cmd.OutOrStdout(), entries, quiet, format)
+	var runtime map[string]cmdman.RuntimeState
+	if !quiet {
+		// Quiet mode prints IDs only, so it never pays for the dial.
+		runtime = cli.RuntimeStates(cmd.Context(), svc, entries)
+	}
+
+	return cli.RenderEntries(cmd.OutOrStdout(), entries, runtime, quiet, format)
 }

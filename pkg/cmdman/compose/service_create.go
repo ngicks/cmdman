@@ -98,6 +98,10 @@ func (s *Service) Create(
 		actions = append(actions, outcome)
 	}
 
+	// Every entry path that brings a project into existence lands here (Up calls
+	// Create unconditionally), so this one site owns history-row creation.
+	s.recordProject(ctx, spec)
+
 	return &CreateResult{Actions: actions}, nil
 }
 

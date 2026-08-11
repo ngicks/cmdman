@@ -25,6 +25,12 @@ type Config struct {
 	// WindowID is empty; otherwise the server finds or creates WindowName.
 	ReuseCurrentWindow bool
 
+	// StartDirectory is the working directory the shell of a newly created
+	// session/window starts in. It applies to creation only: a window that
+	// already exists is never moved, so a caller may pass it unconditionally.
+	// Empty leaves the multiplexer's own default.
+	StartDirectory string
+
 	// ViewerDetachKeys gracefully detach old in-pane viewers before teardown.
 	// They must match the sequence the viewers honor; empty disables detaching.
 	ViewerDetachKeys []string
@@ -82,6 +88,23 @@ type Window struct {
 	// [ListOptions.StateKeys], keyed by those keys. A requested key whose
 	// value is unset maps to "". Nil when no StateKeys were requested.
 	State map[StateKey]string
+}
+
+// FocusOptions configures [Server.FocusWindow].
+type FocusOptions struct {
+	// SwitchClient permits moving a client to the focused window's session when
+	// the window lives elsewhere. A caller outside the multiplexer leaves it
+	// false: it has no client of its own, so switching would yank somebody
+	// else's terminal instead of landing its own.
+	SwitchClient bool
+
+	// ClientSession names the session the caller itself is sitting in; the
+	// driver moves that session's client. Empty falls back to the sole attached
+	// client and moves nobody when several are attached — multiplexers resolve
+	// "the current client" from the caller's terminal, and a cmdman process
+	// summoned in a tmux popup has none (measured on a scratch server: tmux
+	// picked a different client than the one showing the popup).
+	ClientSession string
 }
 
 // ServerConfig selects which multiplexer server a [Driver] binds to. Executable
@@ -168,6 +191,27 @@ type Server interface {
 	// unsets the key entirely, leaving no stale value behind. As with
 	// ReadWindowState the key and value are opaque to muxctl.
 	WriteWindowState(ctx context.Context, windowID string, key StateKey, value string) error
+
+	// FocusWindow puts windowID in front: it makes the window the current one
+	// inside its own session and, when opts.SwitchClient is set, moves the
+	// caller's client to that session. It is the landing primitive — "you are
+	// looking at this window now" — and mutates no window state: no layout, no
+	// ownership stamp, no per-window state slot.
+	//
+	// With no client to move (nothing attached, or none opts.ClientSession
+	// identifies) the window is still selected and the call succeeds: selecting
+	// is all focus can mean with nobody watching, and whether to hand the
+	// caller's own terminal over instead is the caller's decision (see
+	// [Server.AttachCommand]).
+	FocusWindow(ctx context.Context, windowID string, opts FocusOptions) error
+
+	// AttachCommand returns the argv that gives the calling terminal to
+	// sessionName on this server (tmux: `tmux [-L socket] attach-session -t
+	// =<name>`). It is what a caller outside the multiplexer runs after
+	// FocusWindow selected the window: with no client attached there is nothing
+	// to switch, so the terminal has to become one. It builds a command line and
+	// performs no I/O.
+	AttachCommand(sessionName string) []string
 
 	// CurrentSessionName reports the name of the multiplexer session the
 	// calling terminal is attached to ("inside the multiplexer"), with ok

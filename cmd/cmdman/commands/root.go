@@ -77,6 +77,7 @@ It simply starts a monitor process and the monitor damonizes itself and starts s
 	sendKeysCmd(cmd, &rootConfig)
 	signalCmd(cmd, &rootConfig)
 	startCmd(cmd, &rootConfig)
+	statusCmd(cmd, &rootConfig)
 	stopCmd(cmd, &rootConfig)
 	tuiCmd(cmd, &rootConfig)
 	waitCmd(cmd, &rootConfig)

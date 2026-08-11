@@ -14,8 +14,18 @@ cmdman compose [selection flags] ps [--format FORMAT] [COMMAND...]
 
 Lists stored commands matching the selected `(workdir, project)` labels,
 including exited and failed commands. Optional service names narrow the result.
-The output includes compose service name, cmdman ID and generated name, state,
-exit code, and argv.
+
+Columns: `COMMAND` (the compose service name), `ID`, `NAME`, `STATE`,
+`EXIT CODE`, `STATUS`, `BELL`, `DETAIL`, `TITLE`, `ARGV`.
+
+- `STATUS` and `DETAIL` are what the command last reported about itself through
+  [`cmdman status set`](./cmdman-status.1.md); `-` when it reported nothing.
+- `BELL` is `*` when the command rang a bell nobody has looked at since, `-`
+  otherwise.
+- `TITLE` is the window title the command last set, truncated to 30 cells; `-`
+  when it set none.
+- Those four are per-run state held by the monitor, so a command that is not
+  running shows `-` in all of them.
 
 This command reports stored reality; it does not create missing desired
 commands or remove orphans.

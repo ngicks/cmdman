@@ -9,6 +9,7 @@ import (
 	"github.com/mattn/go-runewidth"
 	"gotest.tools/v3/assert"
 
+	"github.com/ngicks/cmdman/pkg/cmdman"
 	"github.com/ngicks/cmdman/pkg/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/cmdman/store"
 )
@@ -25,8 +26,10 @@ func TestModelJSONHidesLayoutFields(t *testing.T) {
 		State:    model.EventTypeExited,
 		ExitCode: &ec,
 	}
+	rs := cmdman.RuntimeState{Status: "waiting", Detail: "needs input", BellUnread: true}
 	row := lsRow{
 		CommandEntry: entry,
+		RuntimeState: rs,
 		tableMeta:    tableMeta{W: map[string]int{"ID": 9}, Win: 80},
 	}
 
@@ -34,7 +37,12 @@ func TestModelJSONHidesLayoutFields(t *testing.T) {
 	err := renderTemplate(&got, []lsRow{row}, `{{json .}}`)
 	assert.NilError(t, err)
 
-	want, err := json.Marshal(entry)
+	// Both embedded inputs marshal flat, exactly as they do on their own; only
+	// the layout is hidden.
+	want, err := json.Marshal(struct {
+		store.CommandEntry
+		cmdman.RuntimeState
+	}{entry, rs})
 	assert.NilError(t, err)
 	assert.Equal(t, strings.TrimRight(got.String(), "\n"), string(want))
 	assert.Assert(t, !strings.Contains(got.String(), `"W"`), "W leaked: %s", got.String())
@@ -42,9 +50,17 @@ func TestModelJSONHidesLayoutFields(t *testing.T) {
 
 	// The embedded fields and the layout are both reachable from a template.
 	var promoted bytes.Buffer
-	err = renderTemplate(&promoted, []lsRow{row}, `{{.Name}} win={{.Win}} idw={{.W.ID}}`)
+	err = renderTemplate(
+		&promoted,
+		[]lsRow{row},
+		`{{.Name}} win={{.Win}} idw={{.W.ID}} status={{.Status}} bell={{bell .BellUnread}}`,
+	)
 	assert.NilError(t, err)
-	assert.Equal(t, strings.TrimRight(promoted.String(), "\n"), "svc win=80 idw=9")
+	assert.Equal(
+		t,
+		strings.TrimRight(promoted.String(), "\n"),
+		"svc win=80 idw=9 status=waiting bell=*",
+	)
 }
 
 // columnStarts returns the display-cell offset at which each column begins. A
@@ -87,6 +103,16 @@ func TestDefaultLsFormatAligns(t *testing.T) {
 			ExitCode:   new(137),
 			ConfigJSON: &model.CommandConfig{Argv: []string{"/bin/sh"}},
 		},
+	}, map[string]cmdman.RuntimeState{
+		// One row carries runtime state and the other none, so the runtime
+		// columns are measured against both a filled and an empty cell — the
+		// title double-width, like the name.
+		"a1b2c3d4e5f6aaaa": {
+			Title:      "日本語のタイトル",
+			Status:     "waiting",
+			Detail:     "needs input",
+			BellUnread: true,
+		},
 	}, false, "")
 	assert.NilError(t, err)
 
@@ -94,7 +120,7 @@ func TestDefaultLsFormatAligns(t *testing.T) {
 	assert.Equal(t, len(lines), 3, "output = %q", out.String())
 
 	want := columnStarts(lines[0]) // header offsets
-	assert.Assert(t, len(want) == 5, "header columns = %v", want)
+	assert.Assert(t, len(want) == 9, "header columns = %v", want)
 	for _, l := range lines[1:] {
 		assert.DeepEqual(t, columnStarts(l), want)
 	}

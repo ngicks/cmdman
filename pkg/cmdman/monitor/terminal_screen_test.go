@@ -18,7 +18,7 @@ func renderVia(cols, rows int, raw []byte) string {
 
 func TestScreenTrackerSnapshotReconstructsScrolledOutChrome(t *testing.T) {
 	const cols, rows = 80, 24
-	tr := newScreenTracker(cols, rows)
+	tr := newScreenTracker(cols, rows, newCommandRuntimeState())
 	t.Cleanup(tr.close)
 
 	// Paint chrome once, then push it out of the raw byte window.
@@ -60,7 +60,7 @@ func TestScreenTrackerSnapshotReconstructsScrolledOutChrome(t *testing.T) {
 
 func TestScreenTrackerSnapshotMatchesFullReplay(t *testing.T) {
 	const cols, rows = 40, 10
-	tr := newScreenTracker(cols, rows)
+	tr := newScreenTracker(cols, rows, newCommandRuntimeState())
 	t.Cleanup(tr.close)
 
 	var raw strings.Builder
@@ -82,7 +82,7 @@ func TestScreenTrackerSnapshotMatchesFullReplay(t *testing.T) {
 }
 
 func TestScreenTrackerFeedDoesNotDeadlockOnQuery(t *testing.T) {
-	tr := newScreenTracker(80, 24)
+	tr := newScreenTracker(80, 24, newCommandRuntimeState())
 	t.Cleanup(tr.close)
 
 	done := make(chan struct{})

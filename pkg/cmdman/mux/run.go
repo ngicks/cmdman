@@ -38,6 +38,13 @@ type RunOptions struct {
 	// its original name but is stamped with the identity, so find-by-identity
 	// works even after the window is renamed.
 	Identity string
+	// KeepCurrentWindow forbids the current-window takeover: the dashboard is
+	// always built in a window of its own, even when the caller's window would
+	// be safe to repurpose. Callers that are not the user's shell set it — a
+	// launcher summoned as a popup runs in whatever window the user happens to
+	// be looking at, and "start this project" must not repurpose that window
+	// (D4's background start explicitly stays put).
+	KeepCurrentWindow bool
 	// Layout selects a specific layout to apply instead of cycling. It accepts
 	// a layout name or a 0-based index (e.g. "2"). A name is matched first, so
 	// a layout literally named "2" wins over index 2. Empty (the default)
@@ -115,8 +122,9 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 	// With no explicit --session, take over the caller's current window when it
 	// is safe to repurpose (single-pane or already ours) instead of spawning a
 	// separate window. An explicit session means "target that session", so the
-	// current-window takeover is disabled.
-	reuseCurrent := !explicitSession && envOf(env, "TMUX") != ""
+	// current-window takeover is disabled — as does a caller that is not the
+	// user's own shell (see KeepCurrentWindow).
+	reuseCurrent := !explicitSession && !opts.KeepCurrentWindow && envOf(env, "TMUX") != ""
 
 	// Resolve an explicit layout selector up-front so a bad name/index fails
 	// before we touch the multiplexer. -1 means "cycle".

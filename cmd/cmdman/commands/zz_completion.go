@@ -251,3 +251,34 @@ var logDriverCompletions = cobra.FixedCompletions(
 	[]cobra.Completion{"k8s-file", "none"},
 	cobra.ShellCompDirectiveNoFileComp,
 )
+
+// completeReportedStatus completes the positional arguments of `status set`:
+// the status vocabulary first, then a running command to report about.
+func completeReportedStatus(rootCfg *cmdman.CmdmanConfig) cobra.CompletionFunc {
+	return func(
+		cmd *cobra.Command,
+		args []string,
+		toComplete string,
+	) ([]cobra.Completion, cobra.ShellCompDirective) {
+		switch len(args) {
+		case 0:
+			var out []cobra.Completion
+			for _, s := range []string{
+				cmdman.ReportedStatusWorking,
+				cmdman.ReportedStatusWaiting,
+				cmdman.ReportedStatusDone,
+			} {
+				if strings.HasPrefix(s, toComplete) {
+					out = append(out, s)
+				}
+			}
+			return out, cobra.ShellCompDirectiveNoFileComp
+		case 1:
+			// nil args, not the real ones: the status word already consumed is
+			// not a command name that should be filtered out of the candidates.
+			return completeCommandNames(rootCfg, runningStates...)(cmd, nil, toComplete)
+		default:
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+	}
+}

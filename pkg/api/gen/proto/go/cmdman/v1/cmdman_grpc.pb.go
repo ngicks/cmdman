@@ -19,30 +19,45 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	CommandMonitorService_Attach_FullMethodName     = "/cmdman.v1.CommandMonitorService/Attach"
-	CommandMonitorService_Subscribe_FullMethodName  = "/cmdman.v1.CommandMonitorService/Subscribe"
-	CommandMonitorService_WriteStdin_FullMethodName = "/cmdman.v1.CommandMonitorService/WriteStdin"
-	CommandMonitorService_Signal_FullMethodName     = "/cmdman.v1.CommandMonitorService/Signal"
-	CommandMonitorService_Stop_FullMethodName       = "/cmdman.v1.CommandMonitorService/Stop"
-	CommandMonitorService_Status_FullMethodName     = "/cmdman.v1.CommandMonitorService/Status"
+	CommandMonitorService_Attach_FullMethodName               = "/cmdman.v1.CommandMonitorService/Attach"
+	CommandMonitorService_Subscribe_FullMethodName            = "/cmdman.v1.CommandMonitorService/Subscribe"
+	CommandMonitorService_WriteStdin_FullMethodName           = "/cmdman.v1.CommandMonitorService/WriteStdin"
+	CommandMonitorService_Signal_FullMethodName               = "/cmdman.v1.CommandMonitorService/Signal"
+	CommandMonitorService_Stop_FullMethodName                 = "/cmdman.v1.CommandMonitorService/Stop"
+	CommandMonitorService_Status_FullMethodName               = "/cmdman.v1.CommandMonitorService/Status"
+	CommandMonitorService_WatchRuntimeState_FullMethodName    = "/cmdman.v1.CommandMonitorService/WatchRuntimeState"
+	CommandMonitorService_SetReportedStatus_FullMethodName    = "/cmdman.v1.CommandMonitorService/SetReportedStatus"
+	CommandMonitorService_GetReportedStatus_FullMethodName    = "/cmdman.v1.CommandMonitorService/GetReportedStatus"
+	CommandMonitorService_DeleteReportedStatus_FullMethodName = "/cmdman.v1.CommandMonitorService/DeleteReportedStatus"
 )
 
 // CommandMonitorServiceClient is the client API for CommandMonitorService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type CommandMonitorServiceClient interface {
-	// Bidirectional streaming — PTY I/O + control
+	// Exchange stdin and resize requests for command output and PTY size events.
 	Attach(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[AttachRequest, AttachResponse], error)
-	// Subscribe to live structured output records.
+	// Stream the current log offset followed by live structured output records.
 	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SubscribeResponse], error)
-	// Write raw stdin bytes to the command PTY
+	// Write the request's raw bytes to the command's standard input.
 	WriteStdin(ctx context.Context, in *WriteStdinRequest, opts ...grpc.CallOption) (*WriteStdinResponse, error)
-	// Send signal to the command process
+	// Send the request's OS signal number to the command process group.
 	Signal(ctx context.Context, in *SignalRequest, opts ...grpc.CallOption) (*SignalResponse, error)
 	// Stop the command and prevent restart policy from re-spawning it
 	Stop(ctx context.Context, in *StopRequest, opts ...grpc.CallOption) (*StopResponse, error)
-	// Query monitor status
+	// Return the monitor's current state, exit code, command PID, and the
+	// runtime state of the current run.
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
+	// Stream the runtime state: the current one first, then one message per
+	// change. Title changes are debounced monitor-side.
+	WatchRuntimeState(ctx context.Context, in *WatchRuntimeStateRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRuntimeStateResponse], error)
+	// Set the status the command reports about itself, replacing any previous
+	// one. It lives only for the current run.
+	SetReportedStatus(ctx context.Context, in *SetReportedStatusRequest, opts ...grpc.CallOption) (*SetReportedStatusResponse, error)
+	// Return the status the command last reported about itself.
+	GetReportedStatus(ctx context.Context, in *GetReportedStatusRequest, opts ...grpc.CallOption) (*GetReportedStatusResponse, error)
+	// Clear the status the command reported about itself.
+	DeleteReportedStatus(ctx context.Context, in *DeleteReportedStatusRequest, opts ...grpc.CallOption) (*DeleteReportedStatusResponse, error)
 }
 
 type commandMonitorServiceClient struct {
@@ -125,22 +140,82 @@ func (c *commandMonitorServiceClient) Status(ctx context.Context, in *StatusRequ
 	return out, nil
 }
 
+func (c *commandMonitorServiceClient) WatchRuntimeState(ctx context.Context, in *WatchRuntimeStateRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRuntimeStateResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &CommandMonitorService_ServiceDesc.Streams[2], CommandMonitorService_WatchRuntimeState_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchRuntimeStateRequest, WatchRuntimeStateResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type CommandMonitorService_WatchRuntimeStateClient = grpc.ServerStreamingClient[WatchRuntimeStateResponse]
+
+func (c *commandMonitorServiceClient) SetReportedStatus(ctx context.Context, in *SetReportedStatusRequest, opts ...grpc.CallOption) (*SetReportedStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetReportedStatusResponse)
+	err := c.cc.Invoke(ctx, CommandMonitorService_SetReportedStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *commandMonitorServiceClient) GetReportedStatus(ctx context.Context, in *GetReportedStatusRequest, opts ...grpc.CallOption) (*GetReportedStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetReportedStatusResponse)
+	err := c.cc.Invoke(ctx, CommandMonitorService_GetReportedStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *commandMonitorServiceClient) DeleteReportedStatus(ctx context.Context, in *DeleteReportedStatusRequest, opts ...grpc.CallOption) (*DeleteReportedStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteReportedStatusResponse)
+	err := c.cc.Invoke(ctx, CommandMonitorService_DeleteReportedStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CommandMonitorServiceServer is the server API for CommandMonitorService service.
 // All implementations must embed UnimplementedCommandMonitorServiceServer
 // for forward compatibility.
 type CommandMonitorServiceServer interface {
-	// Bidirectional streaming — PTY I/O + control
+	// Exchange stdin and resize requests for command output and PTY size events.
 	Attach(grpc.BidiStreamingServer[AttachRequest, AttachResponse]) error
-	// Subscribe to live structured output records.
+	// Stream the current log offset followed by live structured output records.
 	Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[SubscribeResponse]) error
-	// Write raw stdin bytes to the command PTY
+	// Write the request's raw bytes to the command's standard input.
 	WriteStdin(context.Context, *WriteStdinRequest) (*WriteStdinResponse, error)
-	// Send signal to the command process
+	// Send the request's OS signal number to the command process group.
 	Signal(context.Context, *SignalRequest) (*SignalResponse, error)
 	// Stop the command and prevent restart policy from re-spawning it
 	Stop(context.Context, *StopRequest) (*StopResponse, error)
-	// Query monitor status
+	// Return the monitor's current state, exit code, command PID, and the
+	// runtime state of the current run.
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
+	// Stream the runtime state: the current one first, then one message per
+	// change. Title changes are debounced monitor-side.
+	WatchRuntimeState(*WatchRuntimeStateRequest, grpc.ServerStreamingServer[WatchRuntimeStateResponse]) error
+	// Set the status the command reports about itself, replacing any previous
+	// one. It lives only for the current run.
+	SetReportedStatus(context.Context, *SetReportedStatusRequest) (*SetReportedStatusResponse, error)
+	// Return the status the command last reported about itself.
+	GetReportedStatus(context.Context, *GetReportedStatusRequest) (*GetReportedStatusResponse, error)
+	// Clear the status the command reported about itself.
+	DeleteReportedStatus(context.Context, *DeleteReportedStatusRequest) (*DeleteReportedStatusResponse, error)
 	mustEmbedUnimplementedCommandMonitorServiceServer()
 }
 
@@ -168,6 +243,18 @@ func (UnimplementedCommandMonitorServiceServer) Stop(context.Context, *StopReque
 }
 func (UnimplementedCommandMonitorServiceServer) Status(context.Context, *StatusRequest) (*StatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Status not implemented")
+}
+func (UnimplementedCommandMonitorServiceServer) WatchRuntimeState(*WatchRuntimeStateRequest, grpc.ServerStreamingServer[WatchRuntimeStateResponse]) error {
+	return status.Error(codes.Unimplemented, "method WatchRuntimeState not implemented")
+}
+func (UnimplementedCommandMonitorServiceServer) SetReportedStatus(context.Context, *SetReportedStatusRequest) (*SetReportedStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetReportedStatus not implemented")
+}
+func (UnimplementedCommandMonitorServiceServer) GetReportedStatus(context.Context, *GetReportedStatusRequest) (*GetReportedStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetReportedStatus not implemented")
+}
+func (UnimplementedCommandMonitorServiceServer) DeleteReportedStatus(context.Context, *DeleteReportedStatusRequest) (*DeleteReportedStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteReportedStatus not implemented")
 }
 func (UnimplementedCommandMonitorServiceServer) mustEmbedUnimplementedCommandMonitorServiceServer() {}
 func (UnimplementedCommandMonitorServiceServer) testEmbeddedByValue()                               {}
@@ -280,6 +367,71 @@ func _CommandMonitorService_Status_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CommandMonitorService_WatchRuntimeState_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchRuntimeStateRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(CommandMonitorServiceServer).WatchRuntimeState(m, &grpc.GenericServerStream[WatchRuntimeStateRequest, WatchRuntimeStateResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type CommandMonitorService_WatchRuntimeStateServer = grpc.ServerStreamingServer[WatchRuntimeStateResponse]
+
+func _CommandMonitorService_SetReportedStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetReportedStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CommandMonitorServiceServer).SetReportedStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CommandMonitorService_SetReportedStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CommandMonitorServiceServer).SetReportedStatus(ctx, req.(*SetReportedStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CommandMonitorService_GetReportedStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetReportedStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CommandMonitorServiceServer).GetReportedStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CommandMonitorService_GetReportedStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CommandMonitorServiceServer).GetReportedStatus(ctx, req.(*GetReportedStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CommandMonitorService_DeleteReportedStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteReportedStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CommandMonitorServiceServer).DeleteReportedStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CommandMonitorService_DeleteReportedStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CommandMonitorServiceServer).DeleteReportedStatus(ctx, req.(*DeleteReportedStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CommandMonitorService_ServiceDesc is the grpc.ServiceDesc for CommandMonitorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -303,6 +455,18 @@ var CommandMonitorService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Status",
 			Handler:    _CommandMonitorService_Status_Handler,
 		},
+		{
+			MethodName: "SetReportedStatus",
+			Handler:    _CommandMonitorService_SetReportedStatus_Handler,
+		},
+		{
+			MethodName: "GetReportedStatus",
+			Handler:    _CommandMonitorService_GetReportedStatus_Handler,
+		},
+		{
+			MethodName: "DeleteReportedStatus",
+			Handler:    _CommandMonitorService_DeleteReportedStatus_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -314,6 +478,11 @@ var CommandMonitorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Subscribe",
 			Handler:       _CommandMonitorService_Subscribe_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "WatchRuntimeState",
+			Handler:       _CommandMonitorService_WatchRuntimeState_Handler,
 			ServerStreams: true,
 		},
 	},

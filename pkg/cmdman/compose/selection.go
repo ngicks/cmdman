@@ -53,6 +53,18 @@ func (s ProjectSelection) MuxWindowName() string {
 	return "cmdman"
 }
 
+// SelectionFromSpec builds the selection of an already-loaded compose spec: the
+// project it declares, scoped to the work directory [Normalize] resolved. It is
+// the no-reload path for callers that already hold a spec (e.g. the mux tail of
+// `compose up --mux`).
+func SelectionFromSpec(spec *ComposeSpec) ProjectSelection {
+	return ProjectSelection{
+		Spec:    spec,
+		WorkDir: spec.WorkDir,
+		Project: spec.Project,
+	}
+}
+
 // ResolveMuxSelection resolves the compose project for the `compose mux`
 // subcommand (the CLI entry point). An explicit opts.File loads exactly that
 // project; without it the project is auto-selected from the composes associated
@@ -267,11 +279,7 @@ func specSelection(
 	if err != nil {
 		return ProjectSelection{}, err
 	}
-	return ProjectSelection{
-		Spec:    &spec,
-		WorkDir: spec.WorkDir,
-		Project: spec.Project,
-	}, nil
+	return SelectionFromSpec(&spec), nil
 }
 
 // workdirSelection builds a fileless selection scoped to a working directory:
@@ -345,11 +353,7 @@ func SelectMuxProject(opts NormalizeOpts) (ProjectSelection, error) {
 		spec := p.Spec
 		candidates = append(candidates, muxCandidate{
 			label: p.Name,
-			sel: ProjectSelection{
-				Spec:    &spec,
-				WorkDir: spec.WorkDir,
-				Project: spec.Project,
-			},
+			sel:   SelectionFromSpec(&spec),
 		})
 	}
 

@@ -10,6 +10,7 @@
 cmdman tui
 cmdman tui --popup[=tmux]
 cmdman tui --workdir DIR
+cmdman tui widget switcher|statusbar|launcher [--workdir DIR]
 ```
 
 ## Description
@@ -22,13 +23,52 @@ The TUI can also be launched in a multiplexer popup. Driver inference uses the
 current environment; v1 implements tmux only. The popup launcher and child
 communicate over an internal IPC endpoint.
 
+## Subcommands
+
+`cmdman tui` with no subcommand is unchanged: it opens the full dashboard
+described above.
+
+### widget
+
+Run one TUI widget on its own — a single view filling the terminal, with no tab
+bar and no tab switching. A frame definition referencing a built-in component
+resolves to exactly this invocation, so a widget is also debuggable by hand: run
+it in any terminal or pane. Each widget is its own subcommand.
+
+- `switcher`: every known compose project — running, exited, and never run —
+  each heading a group with its commands listed under it. `j`/`k` move the
+  selection, `q` quits.
+- `statusbar`: a single line — the working directory's compose project on the
+  left, the counts across every project next to it, and the cmdman version at
+  the right edge. Sized for a one-row pane; `q` quits.
+- `launcher`: quick-launch selector. The left pane lists target locations (the
+  directories you have brought projects up in, most recent first, plus
+  everything the filter reaches); the right pane lists the compose projects at
+  the location under the cursor, toggled on or off. Type to filter, tab
+  completes the path, enter steps input → locations → projects, esc walks back
+  and then dismisses. On a list, `s` starts the enabled projects and `S`
+  launches and lands in one; in the input every key is text, so ctrl+c is the
+  dismissal that always works.
+
+A widget fills its window, so popup framing belongs to the multiplexer:
+
+```sh
+bind-key -n M-Space display-popup -E -w 80% -h 60% 'cmdman tui widget launcher'
+```
+
 ## Options
+
+### tui
 
 - `--popup[=tmux|zellij]`: run the TUI in a multiplexer popup. A bare
   `--popup` infers the driver from the environment; v1 supports tmux.
 - `-w, --workdir DIR`: override the effective work directory used to discover
   the cwd-active compose project. Without it the process working directory is
   used.
+
+### widget
+
+- `-w, --workdir DIR`: as above. Every widget subcommand accepts it.
 
 ## See Also
 

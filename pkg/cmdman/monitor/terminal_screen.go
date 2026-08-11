@@ -20,11 +20,14 @@ type screenTracker struct {
 
 // newScreenTracker uses cols and rows as PTY dimensions. If either is
 // nonpositive, both reset to their defaults. It drains terminal-query responses.
-func newScreenTracker(cols, rows int) *screenTracker {
+// The emulator doubles as the capture point for the run's runtime state: st
+// registers its latch hooks on it and must not be nil.
+func newScreenTracker(cols, rows int, st *commandRuntimeState) *screenTracker {
 	if cols <= 0 || rows <= 0 {
 		cols, rows = int(defaultPtyCols), int(defaultPtyRows)
 	}
 	t := &screenTracker{term: vt.NewEmulator(cols, rows), healthy: true}
+	st.observe(t.term)
 	// Terminal-query replies use an unbuffered pipe and must be drained.
 	go func() { _, _ = io.Copy(io.Discard, t.term) }()
 	return t

@@ -80,10 +80,12 @@ func (srv *Server) New(ctx context.Context, cfg muxctl.Config) (muxctl.Session, 
 			}
 		}
 		if wid == "" {
-			if err := ensureSession(ctx, e, cfg.SessionName); err != nil {
+			if err := ensureSession(ctx, e, cfg.SessionName, cfg.StartDirectory); err != nil {
 				return nil, fmt.Errorf("tmux: ensure session %q: %w", cfg.SessionName, err)
 			}
-			found, err := findOrCreateWindow(ctx, e, cfg.SessionName, cfg.WindowName)
+			found, err := findOrCreateWindow(
+				ctx, e, cfg.SessionName, cfg.WindowName, cfg.StartDirectory,
+			)
 			if err != nil {
 				return nil, fmt.Errorf(
 					"tmux: find-or-create window %q in session %q: %w",
@@ -196,14 +198,19 @@ func (s *Session) Close(ctx context.Context) error {
 	return nil
 }
 
-// ensureSession creates the named session detached if it does not exist.
-// A "duplicate session" race (the session appeared between has-session and
-// new-session) is treated as success.
-func ensureSession(ctx context.Context, e *executor, name string) error {
+// ensureSession creates the named session detached if it does not exist,
+// starting its first shell in startDir when that is non-empty. A "duplicate
+// session" race (the session appeared between has-session and new-session) is
+// treated as success.
+func ensureSession(ctx context.Context, e *executor, name, startDir string) error {
 	if _, err := e.run(ctx, "has-session", "-t", "="+name); err == nil {
 		return nil
 	}
-	if _, err := e.run(ctx, "new-session", "-d", "-s", name); err != nil {
+	args := []string{"new-session", "-d", "-s", name}
+	if startDir != "" {
+		args = append(args, "-c", startDir)
+	}
+	if _, err := e.run(ctx, args...); err != nil {
 		if strings.Contains(err.Error(), "duplicate session") {
 			return nil
 		}
@@ -239,23 +246,27 @@ func findWindow(
 
 // findOrCreateWindow looks up a window by exact name within the session
 // and returns its @id. If no such window exists, one is created
-// (detached, with a default shell pane) and its @id is returned.
+// (detached, with a default shell pane started in startDir when that is
+// non-empty) and its @id is returned.
 func findOrCreateWindow(
 	ctx context.Context,
 	e *executor,
-	sessionName, windowName string,
+	sessionName, windowName, startDir string,
 ) (string, error) {
 	if id, ok, err := findWindow(ctx, e, sessionName, windowName); err != nil {
 		return "", err
 	} else if ok {
 		return id, nil
 	}
-	out, err := e.run(
-		ctx,
+	args := []string{
 		"new-window", "-d", "-t", sessionName,
 		"-n", windowName,
 		"-P", "-F", "#{window_id}",
-	)
+	}
+	if startDir != "" {
+		args = append(args, "-c", startDir)
+	}
+	out, err := e.run(ctx, args...)
 	if err != nil {
 		return "", err
 	}

@@ -19,20 +19,33 @@ import (
 // ListCommands lists every command. Compose-managed commands (carrying the
 // project and workdir labels) are grouped by project; standalone commands keep
 // an empty project and group under their working directory.
+//
+// Each entry's runtime state is dialed from its monitor as the listing is
+// built. This is the same one-shot fan-out `ls` does, repeated on the TUI's
+// refresh cadence: a live subscription to the monitors' WatchRuntimeState
+// stream is a later phase, and a poll per reload is what the model's
+// load-and-rebuild shape already supports.
 func (b *serviceBackend) ListCommands(ctx context.Context) ([]tui.CommandInfo, error) {
 	entries, err := b.svc.List(ctx, cmdman.ListRequest{AllStates: true})
 	if err != nil {
 		return nil, err
 	}
-	return commandInfos(entries), nil
+	// A refresh that stalls is worse than one showing last cycle's titles, so
+	// the whole fan-out is bounded, not only each dial inside it.
+	return commandInfos(entries, RuntimeStates(ctx, b.svc, entries)), nil
 }
 
-// commandInfos projects store entries to command rows. A compose-managed
-// command (carrying both the project and workdir labels) reports its compose
-// project name and the labelled workdir; a standalone command reports an empty
-// project and falls back to its configured working directory, so it still
-// appears in the TUI rather than being dropped.
-func commandInfos(entries []store.CommandEntry) []tui.CommandInfo {
+// commandInfos projects store entries to command rows, merging in the runtime
+// state keyed by command ID. A compose-managed command (carrying both the
+// project and workdir labels) reports its compose project name and the labelled
+// workdir; a standalone command reports an empty project and falls back to its
+// configured working directory, so it still appears in the TUI rather than
+// being dropped. A command whose monitor did not answer keeps the zero runtime
+// fields.
+func commandInfos(
+	entries []store.CommandEntry,
+	runtime map[string]cmdman.RuntimeState,
+) []tui.CommandInfo {
 	var out []tui.CommandInfo
 	for _, e := range entries {
 		var labels map[string]string
@@ -54,15 +67,20 @@ func commandInfos(entries []store.CommandEntry) []tui.CommandInfo {
 		if cmd := labels[compose.LabelCommand]; cmd != "" {
 			name = cmd
 		}
+		rs := runtime[e.ID]
 		out = append(out, tui.CommandInfo{
-			ID:        e.ID,
-			Name:      name,
-			Project:   project,
-			Workdir:   normalizePath(workdir),
-			State:     e.State,
-			ExitCode:  e.ExitCode,
-			LogDriver: driver,
-			Tty:       tty,
+			ID:         e.ID,
+			Name:       name,
+			Project:    project,
+			Workdir:    normalizePath(workdir),
+			State:      e.State,
+			ExitCode:   e.ExitCode,
+			LogDriver:  driver,
+			Tty:        tty,
+			Title:      rs.Title,
+			Status:     rs.Status,
+			Detail:     rs.Detail,
+			BellUnread: rs.BellUnread,
 		})
 	}
 	return out

@@ -15,6 +15,9 @@ const (
 	ENV_CMDMAN_CMD_DATA_DIR = config.ENV_CMDMAN_CMD_DATA_DIR
 	ENV_CMDMAN_CMD_ID       = config.ENV_CMDMAN_CMD_ID
 	ENV_CMDMAN_CONF         = config.ENV_CMDMAN_CONF
+	ENV_CMDMAN_HOOK_EVENT   = config.ENV_CMDMAN_HOOK_EVENT
+	ENV_CMDMAN_HOOK_TITLE   = config.ENV_CMDMAN_HOOK_TITLE
+	ENV_CMDMAN_HOOK_BODY    = config.ENV_CMDMAN_HOOK_BODY
 )
 
 // ComposeConfigDir is re-exported from pkg/cmdman/config; see

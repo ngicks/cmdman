@@ -27,6 +27,12 @@ type cmdmanSvc interface {
 	Events(ctx context.Context, req cmdman.EventsRequest) (*cmdman.EventsSubscription, error)
 	OpenAttachSession(ctx context.Context, idOrName string) (*cmdman.Session, error)
 	SendKeys(ctx context.Context, idOrName string, req cmdman.SendKeysRequest) error
+	RecordComposeHistory(ctx context.Context, req cmdman.ComposeHistoryRequest) error
+	RuntimeStates(
+		ctx context.Context,
+		entries []store.CommandEntry,
+		opt cmdman.RuntimeStatesOption,
+	) map[string]cmdman.RuntimeState
 }
 
 // Service wraps a cmdmanSvc with compose-specific reconciliation logic.
@@ -57,4 +63,18 @@ func NewService(svc *cmdman.Service, opts ...ServiceOption) *Service {
 		opt(s)
 	}
 	return s
+}
+
+// runtimeStates dials the given commands' monitors under the overall budget
+// every glance-style listing shares ([cmdman.RuntimeStatesBudget]). The dial
+// timeout underneath is per socket, so a project whose monitors are all gone
+// would otherwise spend it once per batch of workers — and `ps` completes a TAB
+// press.
+func (s *Service) runtimeStates(
+	ctx context.Context,
+	entries []store.CommandEntry,
+) map[string]cmdman.RuntimeState {
+	ctx, cancel := context.WithTimeout(ctx, cmdman.RuntimeStatesBudget)
+	defer cancel()
+	return s.svc.RuntimeStates(ctx, entries, cmdman.RuntimeStatesOption{})
 }
