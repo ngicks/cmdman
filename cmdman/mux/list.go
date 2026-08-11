@@ -61,10 +61,10 @@ type ListOptions struct {
 // "zellij"/"wezterm" to a "not implemented yet" error and any other
 // unregistered driver name to a lookup error, exactly as [Run] does), maps the
 // caller options to driver options, and re-exports the rows as mux-level
-// [OwnedWindow] values so upper layers (pkg/cmdman/cli presentation,
+// [OwnedWindow] values so upper layers (cmdman/cli presentation,
 // cmd/cmdman/commands) never import a driver-private type.
 //
-// No printing is performed here — presentation is [pkg/cmdman/cli]'s job
+// No printing is performed here — presentation is [cmdman/cli]'s job
 // (workstream 3).
 func List(ctx context.Context, opts ListOptions) ([]OwnedWindow, error) {
 	env := opts.Env

@@ -11,7 +11,7 @@ import (
 
 	// Register the k8s-file log driver (model.DefaultLogDriver) for tests that
 	// run the monitor loop directly via RunMonitor. In the cmdman binary the
-	// driver is registered transitively through pkg/cmdman; the monitor
+	// driver is registered transitively through cmdman; the monitor
 	// package's own test binary needs this blank import to make it available.
 	_ "github.com/ngicks/cmdman/cmdman/logdriver/k8sfile"
 )

@@ -114,7 +114,7 @@ func TestApplyLayout_StampsAndClearsLeafOption(t *testing.T) {
 // TestScaleState_ReadWrite tests the driver's window-state KV surface for the
 // "scale" key: WriteWindowState stores the space-joined "name=pos" wire format
 // verbatim, ReadWindowState hands it back, and an empty write unsets the option
-// (decoding and read-modify-write of that string are a pkg/cmdman/mux concern,
+// (decoding and read-modify-write of that string are a cmdman/mux concern,
 // not the driver's).
 func TestScaleState_ReadWrite(t *testing.T) {
 	requireTmux(t)

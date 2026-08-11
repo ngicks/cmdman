@@ -1,7 +1,7 @@
 // Package tui implements the interactive terminal UI for `cmdman tui`.
 //
 // The TUI is a multi-tab browser over compose-managed commands. It uses
-// bubbletea as the renderer. Unlike pkg/cmdman/cli/progress_tty.go (which
+// bubbletea as the renderer. Unlike cmdman/cli/progress_tty.go (which
 // deliberately avoids a full TUI framework because framework startup queries
 // the terminal for the whole binary and can corrupt the PTY of sibling
 // subcommands such as `compose attach`), the tui subcommand is its own

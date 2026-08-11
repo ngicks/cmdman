@@ -23,5 +23,5 @@
 //     [muxctl.Server.ListWindows] — server-wide, no $TMUX dependence,
 //     works from any pane or outside tmux entirely.
 //   - list.go   — [List] / [ListOptions] / [OwnedWindow]: enumerate stamped
-//     dashboard windows; presentation is pkg/cmdman/cli's job.
+//     dashboard windows; presentation is cmdman/cli's job.
 package mux

@@ -38,7 +38,7 @@ const scaleOption = userOptionPrefix + "scale"
 // windowID. The tmux driver backs each key with the window-level user option
 // stateOption(key) (e.g. key "scale" → @cmdman_scale). A missing or empty
 // option returns "" (no error). muxctl does not interpret the value; decoding
-// it is the caller's responsibility (see pkg/cmdman/mux, which owns the scale
+// it is the caller's responsibility (see cmdman/mux, which owns the scale
 // codec), keeping "scale" semantics out of the driver.
 func (srv *Server) ReadWindowState(
 	ctx context.Context,
@@ -60,7 +60,7 @@ func (srv *Server) ReadWindowState(
 // stateOption(key) on windowID. An empty value unsets the option entirely, so
 // a fully-cleared state leaves no stale value behind. muxctl treats the value
 // as opaque; the caller owns any encoding (the scale read-modify-write over the
-// decoded map lives in pkg/cmdman/mux, which owns the scale codec).
+// decoded map lives in cmdman/mux, which owns the scale codec).
 func (srv *Server) WriteWindowState(
 	ctx context.Context,
 	windowID string,

@@ -1,7 +1,7 @@
 // Package monitor implements the per-command monitor process: it supervises a
 // single child command, serves the command's gRPC control socket, and manages
 // scrollback, log fan-out, terminal emulation, and restart policy. The Service
-// in pkg/cmdman spawns one detached monitor per command.
+// in cmdman spawns one detached monitor per command.
 package monitor
 
 import (
