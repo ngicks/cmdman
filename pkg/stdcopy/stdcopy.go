@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
+	"github.com/ngicks/cmdman/cmdman/logdriver"
 )
 
 // Copy consumes records and writes each line's bytes to stdout or stderr

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/cmdman"
 )
 
 // Live smoke test for the bubbletea-v2 TUI: launch `cmdman tui` under a PTY,

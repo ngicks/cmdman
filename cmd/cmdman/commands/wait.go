@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/model"
+	"github.com/ngicks/cmdman/cmdman"
+	"github.com/ngicks/cmdman/cmdman/model"
 )
 
 func waitCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {

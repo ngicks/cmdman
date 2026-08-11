@@ -4,7 +4,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/ngicks/cmdman/pkg/cmdman/mux"
+	"github.com/ngicks/cmdman/cmdman/mux"
 	"github.com/ngicks/cmdman/pkg/muxctl"
 )
 

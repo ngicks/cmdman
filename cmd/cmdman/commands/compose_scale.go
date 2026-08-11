@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/cli"
-	"github.com/ngicks/cmdman/pkg/cmdman/compose"
+	"github.com/ngicks/cmdman/cmdman"
+	"github.com/ngicks/cmdman/cmdman/cli"
+	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
 func composeScaleCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {

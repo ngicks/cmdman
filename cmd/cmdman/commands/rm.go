@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/cmdman"
 )
 
 func rmCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {

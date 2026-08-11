@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/cmdman"
 )
 
 // TestEvents_ReplayHistorical runs a short-lived command and verifies that

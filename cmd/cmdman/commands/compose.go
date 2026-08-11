@@ -3,8 +3,8 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/compose"
+	"github.com/ngicks/cmdman/cmdman"
+	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
 type composeFlags struct {

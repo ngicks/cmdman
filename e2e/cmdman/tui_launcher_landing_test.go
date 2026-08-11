@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/cmdman"
+	"github.com/ngicks/cmdman/cmdman/store"
 )
 
 // The launcher's landing (PLAN.md phase 1 step 5, D4/D8/D9/D10): `S` brings the

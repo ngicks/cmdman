@@ -5,10 +5,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/compose"
-	"github.com/ngicks/cmdman/pkg/cmdman/model"
-	"github.com/ngicks/cmdman/pkg/cmdman/tui"
+	"github.com/ngicks/cmdman/cmdman"
+	"github.com/ngicks/cmdman/cmdman/compose"
+	"github.com/ngicks/cmdman/cmdman/model"
+	"github.com/ngicks/cmdman/cmdman/tui"
 )
 
 // runningStates are the states in which a command owns a live monitor / PTY and

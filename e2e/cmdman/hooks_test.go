@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/cmdman"
 )
 
 // writeHookConfig installs a cmdman config file carrying a defaultHooks map at

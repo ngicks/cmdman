@@ -4,8 +4,8 @@ import (
 	"github.com/ngicks/go-common/contextkey"
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/monitor"
+	"github.com/ngicks/cmdman/cmdman"
+	"github.com/ngicks/cmdman/cmdman/monitor"
 )
 
 func monitorCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {

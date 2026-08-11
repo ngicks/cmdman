@@ -6,7 +6,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/ngicks/cmdman/pkg/cmdman/logdriver"
+	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"gotest.tools/v3/assert"
 )
 

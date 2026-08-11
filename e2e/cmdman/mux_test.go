@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/cmdman"
 )
 
 // These e2e tests drive the real `cmdman mux` / `cmdman compose mux` binary

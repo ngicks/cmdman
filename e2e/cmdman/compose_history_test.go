@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/cmdman/store"
 )
 
 // composeHistoryRow reads the ComposeHistory row for a project straight out of

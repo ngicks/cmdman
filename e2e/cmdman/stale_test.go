@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ngicks/cmdman/pkg/cmdman/model"
-	"github.com/ngicks/cmdman/pkg/cmdman/store"
+	"github.com/ngicks/cmdman/cmdman/model"
+	"github.com/ngicks/cmdman/cmdman/store"
 )
 
 // TestStale_DetectedOnLs verifies that stale entries (where the monitor

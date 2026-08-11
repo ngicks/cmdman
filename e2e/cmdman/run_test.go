@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ngicks/cmdman/pkg/cmdman"
+	"github.com/ngicks/cmdman/cmdman"
 )
 
 func testContext(t *testing.T) context.Context {

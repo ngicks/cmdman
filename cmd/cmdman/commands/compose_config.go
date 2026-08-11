@@ -3,8 +3,8 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/pkg/cmdman/cli"
-	"github.com/ngicks/cmdman/pkg/cmdman/compose"
+	"github.com/ngicks/cmdman/cmdman/cli"
+	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
 func composeConfigCmd(parent *cobra.Command, cf *composeFlags) {

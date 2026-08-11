@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ngicks/cmdman/pkg/cmdman"
-	"github.com/ngicks/cmdman/pkg/cmdman/cli"
-	"github.com/ngicks/cmdman/pkg/cmdman/model"
+	"github.com/ngicks/cmdman/cmdman"
+	"github.com/ngicks/cmdman/cmdman/cli"
+	"github.com/ngicks/cmdman/cmdman/model"
 )
 
 func cmdmanService(rootCfg *cmdman.CmdmanConfig) (*cmdman.Service, error) {

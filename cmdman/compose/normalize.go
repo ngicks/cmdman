@@ -1,0 +1,606 @@
+package compose
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"maps"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"unicode"
+
+	"github.com/compose-spec/compose-go/v2/dotenv"
+	"github.com/compose-spec/compose-go/v2/template"
+	"github.com/ngicks/cmdman/cmdman/logdriver"
+	"github.com/ngicks/cmdman/cmdman/model"
+	"github.com/ngicks/cmdman/cmdman/mux"
+	"github.com/ngicks/cmdman/pkg/hrstr"
+	"github.com/ngicks/go-common/contextkey"
+)
+
+// ENV_CMDMAN_COMPOSE_SCALE_INDEX is injected into each replica's environment
+// with its own 1-based scale index, so a command can tell which replica it is.
+const ENV_CMDMAN_COMPOSE_SCALE_INDEX = "CMDMAN_COMPOSE_SCALE_INDEX"
+
+// ENV_CMDMAN_COMPOSE_SCALE is injected into each replica's environment with the
+// command's total replica count.
+const ENV_CMDMAN_COMPOSE_SCALE = "CMDMAN_COMPOSE_SCALE"
+
+// NormalizeOpts holds caller-supplied overrides for Normalize.
+type NormalizeOpts struct {
+	// File is an explicit compose file path. When empty, discovery is used.
+	File string
+	// ProjectName overrides the YAML top-level name:.
+	ProjectName string
+	// WorkDir overrides the YAML work_dir: and CWD fallback.
+	WorkDir string
+}
+
+// warnUnknownFields logs one warning per unrecognized YAML key in sorted order,
+// so stray or misspelled fields surface to the user without failing the load.
+// The logger comes from ctx (contextkey.ValueSlogLoggerDefault), falling back to slog.Default().
+func warnUnknownFields(ctx context.Context, unknown map[string]any, msg string, args ...any) {
+	logger := contextkey.ValueSlogLoggerDefault(ctx)
+	for _, key := range slices.Sorted(maps.Keys(unknown)) {
+		logger.WarnContext(ctx, msg, append(slices.Clone(args), "field", key)...)
+	}
+}
+
+// LoadAndNormalize discovers the compose file relative to the current working
+// directory and normalizes it using opts. It is the shared entry point for
+// operations that require a compose file (create, up).
+func LoadAndNormalize(opts NormalizeOpts) (ComposeSpec, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ComposeSpec{}, fmt.Errorf("get working directory: %w", err)
+	}
+	filePath, raw, err := DiscoverFile(cwd, opts)
+	if err != nil {
+		return ComposeSpec{}, err
+	}
+	return Normalize(context.Background(), filePath, raw, opts)
+}
+
+// Normalize resolves, validates, and normalizes a RawComposeSpec.
+// composeFilePath is the absolute path of the compose file; it is passed explicitly
+// because the caller (DiscoverFile) already resolved it.
+//
+// Env layering (resolved-decision 9):
+//  1. OS env (base, for interpolation context only — not stored in the slice).
+//  2. env_file entries in list order; each file's interpolation sees OS + prior env_files.
+//  3. env: entries in list order; interpolation sees OS + merged env_file results.
+//  4. args: interpolation sees the final per-command env (OS + env_file + env:).
+//
+// The stored Env slice contains only entries that were explicitly set by env_file or env:
+// (not raw OS env), so the hash is stable across OS environments.
+func Normalize(
+	ctx context.Context,
+	composeFilePath string,
+	raw RawComposeSpec,
+	opts NormalizeOpts,
+) (ComposeSpec, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ComposeSpec{}, fmt.Errorf("get working directory: %w", err)
+	}
+
+	if !filepath.IsAbs(composeFilePath) {
+		composeFilePath = filepath.Join(cwd, composeFilePath)
+	}
+	composeFilePath = filepath.Clean(composeFilePath)
+
+	// baseEnv is the OS environment plus compose path variables, used as the
+	// base for every interpolation in this spec (work_dir, dirs, env files,
+	// env:, args, log opts). The compose path variables are interpolation-only:
+	// they never land in a command's stored Env unless an author copies them
+	// through env:.
+	baseEnv := osEnvMap()
+	baseEnv[ENV_CMDMAN_COMPOSE_FILE] = composeFilePath
+	baseEnv[ENV_CMDMAN_COMPOSE_DIR] = filepath.Dir(composeFilePath)
+	baseLookup := buildLookup(baseEnv)
+
+	effectiveWorkDir := opts.WorkDir
+	if effectiveWorkDir == "" {
+		effectiveWorkDir = raw.WorkDir
+	}
+	if effectiveWorkDir == "" {
+		effectiveWorkDir = cwd
+	}
+	effectiveWorkDir, err = template.Substitute(effectiveWorkDir, baseLookup)
+	if err != nil {
+		return ComposeSpec{}, fmt.Errorf("work_dir interpolation: %w", err)
+	}
+	if !filepath.IsAbs(effectiveWorkDir) {
+		effectiveWorkDir = filepath.Join(cwd, effectiveWorkDir)
+	}
+	// Preserve symlinks because compose identity is based on the cleaned path.
+	effectiveWorkDir = filepath.Clean(effectiveWorkDir)
+
+	project := opts.ProjectName
+	if project == "" {
+		project = raw.Name
+	}
+	if project == "" {
+		return ComposeSpec{}, errors.New(
+			"project name is required: set name: in the compose file or pass --project-name",
+		)
+	}
+	if err := validateName("project", project); err != nil {
+		return ComposeSpec{}, err
+	}
+
+	warnUnknownFields(
+		ctx,
+		raw.Unknown,
+		"compose: ignoring unrecognized top-level field",
+		"project",
+		project,
+	)
+
+	wdHash := workdirHash(effectiveWorkDir)
+
+	cmdNames := make([]string, 0, len(raw.Commands))
+	for n := range raw.Commands {
+		cmdNames = append(cmdNames, n)
+	}
+	slices.Sort(cmdNames)
+
+	normalized := make([]Command, 0, len(raw.Commands))
+
+	for _, name := range cmdNames {
+		cmd := raw.Commands[name]
+		if err := validateName("command", name); err != nil {
+			return ComposeSpec{}, fmt.Errorf("command %q: %w", name, err)
+		}
+
+		warnUnknownFields(
+			ctx,
+			cmd.Unknown,
+			"compose: ignoring unrecognized command field",
+			"project",
+			project,
+			"command",
+			name,
+		)
+
+		dirVal, err := template.Substitute(cmd.Dir, baseLookup)
+		if err != nil {
+			return ComposeSpec{}, fmt.Errorf("command %q: dir interpolation: %w", name, err)
+		}
+		cmdDir := resolvePath(effectiveWorkDir, dirVal)
+
+		// commandEnv: KEY→VALUE for env_file + env: entries (not OS env).
+		// finalEnv: OS + env_file + env: (for args interpolation).
+		commandEnv, finalEnv, err := buildCommandEnv(effectiveWorkDir, cmd, baseEnv)
+		if err != nil {
+			return ComposeSpec{}, fmt.Errorf("command %q: %w", name, err)
+		}
+
+		finalLookup := buildLookup(finalEnv)
+
+		interpolatedArgs := make([]string, len(cmd.Args))
+		for i, arg := range cmd.Args {
+			v, interpErr := template.Substitute(arg, finalLookup)
+			if interpErr != nil {
+				return ComposeSpec{}, fmt.Errorf(
+					"command %q: args[%d] interpolation: %w",
+					name,
+					i,
+					interpErr,
+				)
+			}
+			interpolatedArgs[i] = v
+		}
+
+		if err := validateUserLabels(cmd.Labels); err != nil {
+			return ComposeSpec{}, fmt.Errorf("command %q: labels: %w", name, err)
+		}
+
+		resolvedLogOpts, err := resolveLogOptPaths(effectiveWorkDir, cmd.LogOpts, baseLookup)
+		if err != nil {
+			return ComposeSpec{}, fmt.Errorf("command %q: log_opts: %w", name, err)
+		}
+
+		afterList, err := normalizeAfter(name, cmd.After)
+		if err != nil {
+			return ComposeSpec{}, fmt.Errorf("command %q: after: %w", name, err)
+		}
+
+		scale := 1
+		if cmd.Scale != nil {
+			scale = *cmd.Scale
+			if scale < 1 {
+				return ComposeSpec{}, fmt.Errorf(
+					"command %q: scale must be >= 1, got %d", name, scale)
+			}
+		}
+
+		envSlice := mapToEnvSlice(commandEnv)
+		genName := GenerateName(wdHash, project, name)
+
+		importHostEnv := true
+		if cmd.ImportHostEnv != nil {
+			importHostEnv = *cmd.ImportHostEnv
+		}
+
+		var (
+			restartPolicy model.RestartPolicy
+			maxRetries    int
+		)
+		if cmd.RestartPolicy != "" {
+			restartPolicy, maxRetries, err = model.ParseRestartPolicy(cmd.RestartPolicy)
+			if err != nil {
+				return ComposeSpec{}, fmt.Errorf("command %q: %w", name, err)
+			}
+		}
+
+		nc := Command{
+			Name:            name,
+			Dir:             cmdDir,
+			Args:            interpolatedArgs,
+			Env:             envSlice,
+			ImportHostEnv:   importHostEnv,
+			Labels:          cmd.Labels,
+			RestartPolicy:   restartPolicy,
+			MaxRetries:      maxRetries,
+			StopSignal:      cmd.StopSignal,
+			Tty:             cmd.Tty,
+			ScrollbackBytes: cmd.ScrollbackBytes,
+			LogDriver:       logdriver.LogDriver(cmd.LogDriver),
+			LogOpts:         resolvedLogOpts,
+			After:           afterList,
+			Scale:           scale,
+			GeneratedName:   genName,
+		}
+		if err := validateRuntimeFields(nc); err != nil {
+			return ComposeSpec{}, fmt.Errorf("command %q: %w", name, err)
+		}
+		normalized = append(normalized, nc)
+	}
+
+	if err := ValidateDAG(normalized); err != nil {
+		return ComposeSpec{}, err
+	}
+
+	if raw.Mux != nil {
+		commandsByName := make(map[string]Command, len(normalized))
+		for _, c := range normalized {
+			commandsByName[c.Name] = c
+		}
+		if err := validateMux(raw.Mux, commandsByName); err != nil {
+			return ComposeSpec{}, err
+		}
+	}
+
+	return ComposeSpec{
+		ComposeFile: composeFilePath,
+		Project:     project,
+		WorkDir:     effectiveWorkDir,
+		Commands:    normalized,
+		Mux:         raw.Mux,
+	}, nil
+}
+
+// buildCommandEnv processes env_file and env: for a single command.
+// Returns:
+//   - commandEnv: only the keys set by env_file + env: (stored & hashed).
+//   - finalEnv: OS + commandEnv (used for args interpolation, not stored).
+func buildCommandEnv(
+	workDir string,
+	cmd RawCommand,
+	osEnv map[string]string,
+) (commandEnv, finalEnv map[string]string, err error) {
+	envFileAccum := make(map[string]string)
+
+	for i, ef := range cmd.EnvFile {
+		required := true
+		if ef.Required != nil {
+			required = *ef.Required
+		}
+		// env_file paths interpolate against OS env + compose path variables +
+		// prior env_file keys, so a project can point at a dot env file living
+		// next to its compose file.
+		interpPath, interpErr := template.Substitute(
+			ef.Path, buildLookupFromMaps(osEnv, envFileAccum))
+		if interpErr != nil {
+			return nil, nil, fmt.Errorf("env_file[%d] interpolation: %w", i, interpErr)
+		}
+		path := resolvePath(workDir, interpPath)
+
+		if !required {
+			if _, statErr := os.Stat(path); statErr != nil {
+				if os.IsNotExist(statErr) {
+					continue
+				}
+				return nil, nil, fmt.Errorf("env_file[%d] stat %s: %w", i, path, statErr)
+			}
+		}
+
+		f, openErr := os.Open(path)
+		if openErr != nil {
+			return nil, nil, fmt.Errorf("env_file[%d] open %s: %w", i, path, openErr)
+		}
+
+		// Each file's lookup sees OS env + previously accumulated env_file keys.
+		lookupForFile := buildLookupFromMaps(osEnv, envFileAccum)
+		fileVars, parseErr := dotenv.ParseWithLookup(f, lookupForFile)
+		f.Close()
+		if parseErr != nil {
+			return nil, nil, fmt.Errorf("env_file[%d] parse %s: %w", i, path, parseErr)
+		}
+		maps.Copy(envFileAccum, fileVars)
+	}
+
+	envFileMerged := make(map[string]string, len(osEnv)+len(envFileAccum))
+	maps.Copy(envFileMerged, osEnv)
+	maps.Copy(envFileMerged, envFileAccum)
+	envFileLookup := buildLookup(envFileMerged)
+
+	cmdEnv := make(map[string]string, len(envFileAccum))
+	maps.Copy(cmdEnv, envFileAccum)
+
+	for j, entry := range cmd.Env {
+		k, v, hasVal := strings.Cut(entry, "=")
+		if !hasVal {
+			if val, found := envFileMerged[k]; found {
+				cmdEnv[k] = val
+			}
+			continue
+		}
+		interpolated, interpErr := template.Substitute(v, envFileLookup)
+		if interpErr != nil {
+			return nil, nil, fmt.Errorf("env[%d] interpolation: %w", j, interpErr)
+		}
+		cmdEnv[k] = interpolated
+	}
+
+	fin := make(map[string]string, len(osEnv)+len(cmdEnv))
+	maps.Copy(fin, osEnv)
+	maps.Copy(fin, cmdEnv)
+
+	return cmdEnv, fin, nil
+}
+
+// osEnvMap converts os.Environ() into a map.
+func osEnvMap() map[string]string {
+	env := os.Environ()
+	m := make(map[string]string, len(env))
+	for _, entry := range env {
+		k, v, _ := strings.Cut(entry, "=")
+		m[k] = v
+	}
+	return m
+}
+
+// buildLookup creates a template.Mapping from a flat env map.
+func buildLookup(env map[string]string) template.Mapping {
+	return func(key string) (string, bool) {
+		v, ok := env[key]
+		return v, ok
+	}
+}
+
+// buildLookupFromMaps creates a template.Mapping that checks overlay first, then base.
+func buildLookupFromMaps(base, overlay map[string]string) func(string) (string, bool) {
+	return func(key string) (string, bool) {
+		if v, ok := overlay[key]; ok {
+			return v, true
+		}
+		if v, ok := base[key]; ok {
+			return v, true
+		}
+		return "", false
+	}
+}
+
+// mapToEnvSlice converts a map to sorted KEY=VALUE strings.
+func mapToEnvSlice(env map[string]string) []string {
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	out := make([]string, 0, len(env))
+	for _, k := range keys {
+		out = append(out, k+"="+env[k])
+	}
+	return out
+}
+
+// resolvePath resolves p relative to workDir. Absolute paths are cleaned (so
+// used as-is. Empty p returns workDir.
+func resolvePath(workDir, p string) string {
+	if p == "" {
+		return workDir
+	}
+	if filepath.IsAbs(p) {
+		return filepath.Clean(p)
+	}
+	return filepath.Join(workDir, p)
+}
+
+// resolveLogOptPaths interpolates and resolves the "path" key in log opts
+// against workDir. Non-path opts are passed through unchanged.
+func resolveLogOptPaths(
+	workDir string,
+	opts map[string]string,
+	lookup template.Mapping,
+) (map[string]string, error) {
+	if len(opts) == 0 {
+		return opts, nil
+	}
+	out := make(map[string]string, len(opts))
+	for k, v := range opts {
+		if k == "path" {
+			interp, err := template.Substitute(v, lookup)
+			if err != nil {
+				return nil, fmt.Errorf("path interpolation: %w", err)
+			}
+			out[k] = resolvePath(workDir, interp)
+		} else {
+			out[k] = v
+		}
+	}
+	return out, nil
+}
+
+// validateUserLabels rejects labels with the reserved cmdman.compose. prefix.
+func validateUserLabels(labels map[string]string) error {
+	for k := range labels {
+		if strings.HasPrefix(k, LabelPrefix) {
+			return fmt.Errorf("label key %q uses reserved prefix %q", k, LabelPrefix)
+		}
+	}
+	return nil
+}
+
+// validateName enforces the naming rules for project and command names.
+func validateName(kind, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("%s name must not be empty", kind)
+	}
+	if len(name) > 63 {
+		return fmt.Errorf("%s name %q exceeds maximum length of 63 characters", kind, name)
+	}
+	if name[0] == '.' || name[0] == '-' {
+		return fmt.Errorf("%s name %q must not start with '.' or '-'", kind, name)
+	}
+	for _, r := range name {
+		if unicode.IsSpace(r) {
+			return fmt.Errorf("%s name %q must not contain whitespace", kind, name)
+		}
+		if r == '/' || r == '\\' {
+			return fmt.Errorf("%s name %q must not contain path separators", kind, name)
+		}
+		if !isNameChar(r) {
+			return fmt.Errorf(
+				"%s name %q contains invalid character %q (allowed: [A-Za-z0-9._-])",
+				kind,
+				name,
+				r,
+			)
+		}
+	}
+	return nil
+}
+
+// validateMux checks every leaf in every layout of spec against commandsByName:
+//   - the leaf's command must name a key in commandsByName;
+//   - a pinned scale (Scale > 0) must not exceed the command's normalized Scale.
+//
+// Absent scale on a leaf (Scale == 0, the cycle-target case) is never an error.
+func validateMux(spec *mux.Spec, commandsByName map[string]Command) error {
+	for _, layout := range spec.Layouts {
+		if err := validateMuxPane(layout.Name, layout.Root, commandsByName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateMuxPane recursively validates a PaneSpec tree.
+// layoutName is used in error messages.
+func validateMuxPane(
+	layoutName string,
+	pane mux.PaneSpec,
+	commandsByName map[string]Command,
+) error {
+	if pane.IsLeaf() {
+		cmd, ok := commandsByName[pane.Command]
+		if !ok {
+			return fmt.Errorf(
+				"mux: layout %q: leaf %q: unknown command",
+				layoutName,
+				pane.Command,
+			)
+		}
+		if pane.Scale > 0 && pane.Scale > cmd.Scale {
+			return fmt.Errorf(
+				"mux: layout %q: leaf %q: scale %d exceeds commands.%s.scale %d",
+				layoutName,
+				pane.Command,
+				pane.Scale,
+				pane.Command,
+				cmd.Scale,
+			)
+		}
+		return nil
+	}
+	for _, child := range pane.Panes {
+		if err := validateMuxPane(layoutName, child, commandsByName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isNameChar(r rune) bool {
+	return (r >= 'A' && r <= 'Z') ||
+		(r >= 'a' && r <= 'z') ||
+		(r >= '0' && r <= '9') ||
+		r == '.' || r == '_' || r == '-'
+}
+
+// normalizeAfter converts the raw After map into a stable slice.
+// Name is filled from the map key; Condition defaults to "completed".
+func normalizeAfter(cmdName string, after map[string]AfterSpec) ([]AfterSpec, error) {
+	if len(after) == 0 {
+		return nil, nil
+	}
+	names := make([]string, 0, len(after))
+	for n := range after {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+
+	result := make([]AfterSpec, 0, len(after))
+	for _, n := range names {
+		if n == cmdName {
+			return nil, fmt.Errorf("command cannot depend on itself")
+		}
+		spec := after[n]
+		spec.Name = n
+		if spec.Condition == "" {
+			spec.Condition = ConditionCompleted
+		}
+		if err := spec.Validate(); err != nil {
+			return nil, err
+		}
+		result = append(result, spec)
+	}
+	return result, nil
+}
+
+// validateRuntimeFields rejects compose-author mistakes that would otherwise
+// only surface inside Service.Create. Fields left at their zero value are
+// passed through because the service applies CmdmanConfig defaults later;
+// only explicitly set values are checked here.
+func validateRuntimeFields(nc Command) error {
+	if len(nc.Args) == 0 {
+		return errors.New("args is empty")
+	}
+	if nc.RestartPolicy != "" && !model.IsRestartPolicy(string(nc.RestartPolicy)) {
+		return fmt.Errorf("invalid restart_policy %q", nc.RestartPolicy)
+	}
+	if nc.StopSignal != "" {
+		if _, _, err := hrstr.ParseSignal(nc.StopSignal); err != nil {
+			return fmt.Errorf("invalid stop_signal %q: %w", nc.StopSignal, err)
+		}
+	}
+	if nc.ScrollbackBytes < 0 {
+		return fmt.Errorf("scrollback_bytes must be non-negative: %d", nc.ScrollbackBytes)
+	}
+	if nc.LogDriver != "" && !model.IsLogDriver(string(nc.LogDriver)) {
+		return fmt.Errorf("invalid log_driver %q", nc.LogDriver)
+	}
+	if nc.LogDriver != "" {
+		for k, v := range nc.LogOpts {
+			if err := logdriver.ValidateOpt(string(nc.LogDriver), k, v); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

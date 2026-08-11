@@ -3,7 +3,7 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/pkg/cmdman/mux"
+	"github.com/ngicks/cmdman/cmdman/mux"
 )
 
 func muxDownCmd(parent *cobra.Command, parentSession *string) {

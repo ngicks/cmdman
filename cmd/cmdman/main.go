@@ -8,8 +8,8 @@ import (
 	"sync"
 
 	"github.com/ngicks/cmdman/cmd/cmdman/commands"
+	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/internal/cmdsignals"
-	"github.com/ngicks/cmdman/pkg/cmdman/cli"
 
 	// Register the tmux driver for muxctl lookup.
 	_ "github.com/ngicks/cmdman/pkg/muxctl/tmux"

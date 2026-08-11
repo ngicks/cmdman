@@ -3,7 +3,7 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/pkg/cmdman/cli"
+	"github.com/ngicks/cmdman/cmdman/cli"
 )
 
 // resolveComposeProgress parses the --progress flag value and constructs the

@@ -3,8 +3,8 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/internal/versioninfo"
-	"github.com/ngicks/cmdman/pkg/cmdman"
 )
 
 func versionCmd(parent *cobra.Command) {

@@ -13,8 +13,8 @@ import (
 	"github.com/ngicks/go-common/contextkey"
 	"github.com/spf13/cobra"
 
+	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/internal/loggerfactory"
-	"github.com/ngicks/cmdman/pkg/cmdman"
 )
 
 func Execute(ctx context.Context) error {
