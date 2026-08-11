@@ -14,6 +14,7 @@ import (
 
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/tui"
+	"github.com/ngicks/cmdman/internal/libver"
 )
 
 // RunTUI runs the interactive TUI directly in the current terminal, opening
@@ -22,7 +23,7 @@ import (
 func RunTUI(ctx context.Context, svc *cmdman.Service, initialTab tui.Tab, workDir string) error {
 	return tui.Run(ctx, tui.Options{
 		Backend:    newServiceBackend(svc, workDir),
-		Version:    cmdman.Version,
+		Version:    libver.Version,
 		AltScreen:  true,
 		PopupMode:  false,
 		InitialTab: initialTab,
@@ -44,7 +45,7 @@ func RunTUIWidget(
 ) error {
 	return tui.Run(ctx, tui.Options{
 		Backend:   newServiceBackend(svc, workDir),
-		Version:   cmdman.Version,
+		Version:   libver.Version,
 		AltScreen: widget != tui.WidgetStatusbar,
 		Widget:    widget,
 	})
@@ -76,7 +77,7 @@ func RunTUIChild(
 	send(ipcMessage{Kind: ipcStarted})
 	err := tui.Run(ctx, tui.Options{
 		Backend:    newServiceBackend(svc, workDir),
-		Version:    cmdman.Version,
+		Version:    libver.Version,
 		AltScreen:  true,
 		PopupMode:  true,
 		InitialTab: initialTab,

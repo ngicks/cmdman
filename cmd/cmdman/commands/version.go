@@ -3,7 +3,7 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
+	"github.com/ngicks/cmdman/internal/libver"
 	"github.com/ngicks/cmdman/internal/versioninfo"
 )
 
@@ -20,7 +20,7 @@ func versionCmd(parent *cobra.Command) {
 }
 
 func runVersion(cmd *cobra.Command, args []string) error {
-	info := versioninfo.ReadVersionInfo(cmdman.Version)
+	info := versioninfo.ReadVersionInfo(libver.Version)
 	cmd.Printf("version:     %s\n", info.Version)
 	if info.Commit != "" {
 		modified := ""
