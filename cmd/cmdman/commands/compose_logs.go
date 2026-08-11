@@ -7,12 +7,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
-func composeLogsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeLogsCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagFollow bool
 		flagSince  string
@@ -25,10 +24,10 @@ func composeLogsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *com
 		Use:               "logs [COMMAND...]",
 		Short:             "Fetch logs from compose commands",
 		Args:              cobra.ArbitraryArgs,
-		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
+		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeLogs(
-				cmd, rootCfg, cf, args,
+				cmd, rf, cf, args,
 				flagFollow, flagSince, flagUntil, flagHead, flagTail,
 			)
 		},
@@ -47,7 +46,7 @@ func composeLogsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *com
 
 func runComposeLogs(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
 	follow bool,
@@ -73,7 +72,7 @@ func runComposeLogs(
 		}
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

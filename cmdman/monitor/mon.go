@@ -39,7 +39,7 @@ type Monitor struct {
 	ID         string
 	CommandDir string
 	DBPath     string
-	Config     config.CmdmanConfig
+	Config     config.Config
 	Logger     *slog.Logger
 
 	cleanUp []func() error
@@ -91,7 +91,7 @@ type Monitor struct {
 func newMonitor(
 	ctx context.Context,
 	id string,
-	cfg config.CmdmanConfig,
+	cfg config.Config,
 	logger *slog.Logger,
 ) (*Monitor, error) {
 	commandDir, err := cfg.CommandDir(id)

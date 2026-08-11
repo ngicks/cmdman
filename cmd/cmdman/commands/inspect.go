@@ -3,11 +3,10 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 )
 
-func inspectCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func inspectCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
 		flagFormat string
 	)
@@ -16,9 +15,9 @@ func inspectCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		Use:               "inspect ID|NAME",
 		Short:             "Show merged command definition, runtime state, and exit history",
 		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: completeCommandNames(rootCfg),
+		ValidArgsFunction: completeCommandNames(rf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInspect(cmd, args, rootCfg, flagFormat)
+			return runInspect(cmd, args, rf, flagFormat)
 		},
 	}
 
@@ -30,10 +29,10 @@ func inspectCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 func runInspect(
 	cmd *cobra.Command,
 	args []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	format string,
 ) error {
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

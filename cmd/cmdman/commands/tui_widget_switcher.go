@@ -3,11 +3,10 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/tui"
 )
 
-func tuiWidgetSwitcherCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func tuiWidgetSwitcherCmd(parent *cobra.Command, rf *rootFlags) {
 	var flagWorkDir string
 
 	cmd := &cobra.Command{
@@ -21,7 +20,7 @@ selection, q quits.`,
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTuiWidget(cmd, args, rootCfg, tui.WidgetSwitcher, flagWorkDir)
+			return runTuiWidget(cmd, args, rf, tui.WidgetSwitcher, flagWorkDir)
 		},
 	}
 

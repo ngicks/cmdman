@@ -3,12 +3,11 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
-func composeStatusCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeStatusCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagFormat string
 	)
@@ -24,9 +23,9 @@ still unread. Commands that are not running have nothing to report.
 
 Writing a status is per command - see ` + "`cmdman status set`" + `.`,
 		Args:              cobra.ArbitraryArgs,
-		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
+		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeStatus(cmd, rootCfg, cf, args, flagFormat)
+			return runComposeStatus(cmd, rf, cf, args, flagFormat)
 		},
 	}
 
@@ -37,7 +36,7 @@ Writing a status is per command - see ` + "`cmdman status set`" + `.`,
 
 func runComposeStatus(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
 	format string,
@@ -47,7 +46,7 @@ func runComposeStatus(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

@@ -4,26 +4,24 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	"github.com/ngicks/cmdman/cmdman"
 )
 
-func migrateCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func migrateCmd(parent *cobra.Command, rf *rootFlags) {
 	cmd := &cobra.Command{
 		Use:               "migrate",
 		Short:             "Run database schema migrations",
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMigrate(cmd, args, rootCfg)
+			return runMigrate(cmd, args, rf)
 		},
 	}
 
 	parent.AddCommand(cmd)
 }
 
-func runMigrate(cmd *cobra.Command, _ []string, rootCfg *cmdman.CmdmanConfig) error {
-	svc, err := cmdmanService(rootCfg)
+func runMigrate(cmd *cobra.Command, _ []string, rf *rootFlags) error {
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 	"github.com/ngicks/cmdman/cmdman/model"
@@ -14,7 +13,7 @@ import (
 	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
-func composeEventsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeEventsCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagNoFollow bool
 		flagSince    string
@@ -27,10 +26,10 @@ func composeEventsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *c
 		Use:               "events [COMMAND...]",
 		Short:             "Stream events for compose commands",
 		Args:              cobra.ArbitraryArgs,
-		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
+		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeEvents(
-				cmd, rootCfg, cf, args,
+				cmd, rf, cf, args,
 				flagNoFollow, flagSince, flagUntil, flagTypes, flagFormat,
 			)
 		},
@@ -54,7 +53,7 @@ func composeEventsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *c
 
 func runComposeEvents(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
 	noFollow bool,
@@ -88,7 +87,7 @@ func runComposeEvents(
 		typeFilter = append(typeFilter, model.EventType(t))
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

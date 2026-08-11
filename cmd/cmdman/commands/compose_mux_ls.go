@@ -3,14 +3,13 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
 func composeMuxLsCmd(
 	parent *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	parentSession *string,
 ) {
@@ -38,7 +37,7 @@ has no entries the count renders as "?".`,
 			if !cmd.Flags().Changed("session") && parentSession != nil {
 				sess = *parentSession
 			}
-			return runComposeMuxLs(cmd, rootCfg, cf, sess, flagFormat)
+			return runComposeMuxLs(cmd, rf, cf, sess, flagFormat)
 		},
 	}
 	cmd.Flags().StringVarP(
@@ -52,7 +51,7 @@ has no entries the count renders as "?".`,
 
 func runComposeMuxLs(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	session, format string,
 ) error {
@@ -64,7 +63,7 @@ func runComposeMuxLs(
 	// The cmdman service is only needed for the best-effort live replica counts
 	// in the SCALE column; a service-build failure must not block window listing.
 	// On failure svc is nil, and NewService(nil) degrades the counts to "?".
-	svc, svcErr := cmdmanService(rootCfg)
+	svc, svcErr := cmdmanService(cmd, rf)
 	if svcErr == nil {
 		defer svc.Close()
 	}

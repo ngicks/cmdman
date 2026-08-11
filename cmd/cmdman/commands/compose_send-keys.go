@@ -5,12 +5,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
-func composeSendKeysCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeSendKeysCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagLiteral     bool
 		flagHex         bool
@@ -28,9 +27,9 @@ func composeSendKeysCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf 
 			"  cmdman compose send-keys api worker -- C-c Enter\n" +
 			"  cmdman compose send-keys -- Enter   # broadcast to every command",
 		Args:              cobra.ArbitraryArgs,
-		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
+		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeSendKeys(cmd, rootCfg, cf, args, flagLiteral, flagHex, flagRepeatCount)
+			return runComposeSendKeys(cmd, rf, cf, args, flagLiteral, flagHex, flagRepeatCount)
 		},
 	}
 
@@ -45,7 +44,7 @@ func composeSendKeysCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf 
 
 func runComposeSendKeys(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	args []string,
 	literal, hexMode bool,
@@ -67,7 +66,7 @@ func runComposeSendKeys(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

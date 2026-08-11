@@ -93,14 +93,7 @@ func TestEncodeSendKeys(t *testing.T) {
 
 func TestServiceSendKeys(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := CmdmanConfig{
-		DataDir:            dir,
-		RuntimeDir:         dir,
-		DefaultWorkingDir:  dir,
-		DefaultEnvironment: testEnv(),
-	}
-	appCfg, err := appCfg.WithDefaults()
-	assert.NilError(t, err)
+	appCfg := testConfig(t, dir)
 
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)

@@ -2,13 +2,13 @@ package cmdman
 
 import "github.com/ngicks/cmdman/cmdman/config"
 
-// CmdmanConfig is an alias for config.CmdmanConfig. The config type and its
-// helpers were hoisted into the leaf package pkg/cmdman/config so that both
-// pkg/cmdman and pkg/cmdman/monitor can depend on it without an import cycle;
-// this alias keeps the pkg/cmdman API surface unchanged for existing callers.
-type CmdmanConfig = config.CmdmanConfig
+// CmdmanConfig is an alias for config.Config. The config type and its helpers
+// were hoisted into the leaf package cmdman/config so that both cmdman and
+// cmdman/monitor can depend on it without an import cycle; this alias keeps the
+// cmdman API surface unchanged for existing callers.
+type CmdmanConfig = config.Config
 
-// Environment variable names, re-exported from pkg/cmdman/config.
+// Environment variable names, re-exported from cmdman/config.
 const (
 	ENV_CMDMAN_DATA_DIR     = config.ENV_CMDMAN_DATA_DIR
 	ENV_CMDMAN_RUNTIME_DIR  = config.ENV_CMDMAN_RUNTIME_DIR
@@ -20,6 +20,6 @@ const (
 	ENV_CMDMAN_HOOK_BODY    = config.ENV_CMDMAN_HOOK_BODY
 )
 
-// ComposeConfigDir is re-exported from pkg/cmdman/config; see
+// ComposeConfigDir is re-exported from cmdman/config; see
 // config.ComposeConfigDir.
 var ComposeConfigDir = config.ComposeConfigDir

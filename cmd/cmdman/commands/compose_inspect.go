@@ -3,12 +3,11 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
-func composeInspectCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeInspectCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagFormat string
 	)
@@ -17,9 +16,9 @@ func composeInspectCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *
 		Use:               "inspect [COMMAND...]",
 		Short:             "Show merged definition, state, and exit history for compose commands",
 		Args:              cobra.ArbitraryArgs,
-		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
+		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeInspect(cmd, rootCfg, cf, args, flagFormat)
+			return runComposeInspect(cmd, rf, cf, args, flagFormat)
 		},
 	}
 
@@ -30,7 +29,7 @@ func composeInspectCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *
 
 func runComposeInspect(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
 	format string,
@@ -40,7 +39,7 @@ func runComposeInspect(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

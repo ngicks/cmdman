@@ -3,12 +3,11 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
-func composePsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composePsCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagFormat string
 	)
@@ -17,9 +16,9 @@ func composePsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *compo
 		Use:               "ps [COMMAND...]",
 		Short:             "List commands in a compose project",
 		Args:              cobra.ArbitraryArgs,
-		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
+		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposePs(cmd, rootCfg, cf, args, flagFormat)
+			return runComposePs(cmd, rf, cf, args, flagFormat)
 		},
 	}
 
@@ -30,7 +29,7 @@ func composePsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *compo
 
 func runComposePs(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
 	format string,
@@ -40,7 +39,7 @@ func runComposePs(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

@@ -3,11 +3,10 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/tui"
 )
 
-func tuiWidgetStatusbarCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func tuiWidgetStatusbarCmd(parent *cobra.Command, rf *rootFlags) {
 	var flagWorkDir string
 
 	cmd := &cobra.Command{
@@ -21,7 +20,7 @@ edge. It is sized for a one-row pane; q quits.`,
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTuiWidget(cmd, args, rootCfg, tui.WidgetStatusbar, flagWorkDir)
+			return runTuiWidget(cmd, args, rf, tui.WidgetStatusbar, flagWorkDir)
 		},
 	}
 

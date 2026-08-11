@@ -2,11 +2,9 @@ package commands
 
 import (
 	"github.com/spf13/cobra"
-
-	"github.com/ngicks/cmdman/cmdman"
 )
 
-func muxCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func muxCmd(parent *cobra.Command, rf *rootFlags) {
 	var flagSession string
 
 	cmd := &cobra.Command{
@@ -29,7 +27,7 @@ be passed as: cmdman mux up <path>.`,
 		// The positional arg is a layout file path; the shell's default file
 		// completion is the right behavior, so ValidArgsFunction is left unset.
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMuxUp(cmd, rootCfg, args, flagSession)
+			return runMuxUp(cmd, rf, args, flagSession)
 		},
 	}
 	cmd.Flags().StringVarP(
@@ -37,7 +35,7 @@ be passed as: cmdman mux up <path>.`,
 		"Target tmux session (default: current session when inside tmux, else cmdman)",
 	)
 
-	muxUpCmd(cmd, rootCfg, &flagSession)
+	muxUpCmd(cmd, rf, &flagSession)
 	muxDownCmd(cmd, &flagSession)
 	muxLsCmd(cmd, &flagSession)
 

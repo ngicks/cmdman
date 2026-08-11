@@ -3,12 +3,11 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
-func composeUpCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeUpCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagRemoveOrphan bool
 		flagProgress     string
@@ -27,9 +26,9 @@ re-running up --mux keeps the same layout; cycling stays with "compose mux up".
 A project with no "mux:" section is brought up as usual and the dashboard is
 skipped with a warning.`,
 		Args:              cobra.ArbitraryArgs,
-		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
+		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeUp(cmd, rootCfg, cf, args, flagRemoveOrphan, flagProgress, flagMux)
+			return runComposeUp(cmd, rf, cf, args, flagRemoveOrphan, flagProgress, flagMux)
 		},
 	}
 
@@ -46,7 +45,7 @@ skipped with a warning.`,
 
 func runComposeUp(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
 	removeOrphan bool,
@@ -58,7 +57,7 @@ func runComposeUp(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

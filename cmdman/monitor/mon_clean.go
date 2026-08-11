@@ -16,7 +16,7 @@ import (
 )
 
 // CleanStaleEntries checks for stale monitors and marks them as failed.
-func CleanStaleEntries(ctx context.Context, st *cmdstore.Store, cfg config.CmdmanConfig) error {
+func CleanStaleEntries(ctx context.Context, st *cmdstore.Store, cfg config.Config) error {
 	entries, err := st.ListCommands(true, nil)
 	if err != nil {
 		return err
@@ -40,7 +40,7 @@ func CleanStaleEntries(ctx context.Context, st *cmdstore.Store, cfg config.Cmdma
 func cleanStaleEntry(
 	ctx context.Context,
 	st *cmdstore.Store,
-	cfg config.CmdmanConfig,
+	cfg config.Config,
 	id string,
 	state model.EventType,
 	stateJSON *model.CommandState,
@@ -74,7 +74,7 @@ func cleanStaleEntry(
 func MarkMonitorDied(
 	ctx context.Context,
 	st *cmdstore.Store,
-	cfg config.CmdmanConfig,
+	cfg config.Config,
 	id string,
 	stateJSON *model.CommandState,
 	configJSON *model.CommandConfig,
@@ -116,7 +116,7 @@ func isStaleCheckState(state model.EventType) bool {
 //
 // Unlike a PID + Signal(0) check, this is immune to PID reuse: a recycled PID
 // cannot resurrect a released advisory lock.
-func isStaleMonitor(cfg config.CmdmanConfig, id string) (bool, error) {
+func isStaleMonitor(cfg config.Config, id string) (bool, error) {
 	pidPath, err := cfg.MonitorPIDPath(id)
 	if err != nil {
 		return false, err

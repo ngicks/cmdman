@@ -3,12 +3,11 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
-func composeStartCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeStartCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagProgress string
 	)
@@ -17,9 +16,9 @@ func composeStartCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *co
 		Use:               "start [COMMAND...]",
 		Short:             "Start compose commands honoring after.Condition",
 		Args:              cobra.ArbitraryArgs,
-		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
+		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeStart(cmd, rootCfg, cf, args, flagProgress)
+			return runComposeStart(cmd, rf, cf, args, flagProgress)
 		},
 	}
 
@@ -31,7 +30,7 @@ func composeStartCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *co
 
 func runComposeStart(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
 	progress string,
@@ -41,7 +40,7 @@ func runComposeStart(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

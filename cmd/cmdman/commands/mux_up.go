@@ -6,11 +6,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/mux"
 )
 
-func muxUpCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, parentSession *string) {
+func muxUpCmd(parent *cobra.Command, rf *rootFlags, parentSession *string) {
 	var flagSession string
 
 	cmd := &cobra.Command{
@@ -33,7 +32,7 @@ inside tmux, otherwise a session named "cmdman".`,
 			if !cmd.Flags().Changed("session") && parentSession != nil {
 				sess = *parentSession
 			}
-			return runMuxUp(cmd, rootCfg, args, sess)
+			return runMuxUp(cmd, rf, args, sess)
 		},
 	}
 	cmd.Flags().StringVarP(
@@ -46,7 +45,7 @@ inside tmux, otherwise a session named "cmdman".`,
 
 func runMuxUp(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	args []string,
 	session string,
 ) error {
@@ -66,7 +65,7 @@ func runMuxUp(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

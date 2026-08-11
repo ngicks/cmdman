@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 	"github.com/ngicks/cmdman/cmdman/mux"
@@ -15,7 +14,7 @@ import (
 
 func composeMuxCycleScaleCmd(
 	parent *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	parentSession *string,
 ) {
@@ -51,7 +50,7 @@ argument to "compose mux up".`,
 			if !cmd.Flags().Changed("session") && parentSession != nil {
 				sess = *parentSession
 			}
-			return runComposeMuxCycleScale(cmd, rootCfg, cf, args[0], sess)
+			return runComposeMuxCycleScale(cmd, rf, cf, args[0], sess)
 		},
 	}
 	cmd.Flags().StringVarP(
@@ -67,7 +66,7 @@ argument to "compose mux up".`,
 // A nonempty session narrows the operation to that tmux session; empty is server-wide.
 func runComposeMuxCycleScale(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	arg, session string,
 ) error {
@@ -95,7 +94,7 @@ func runComposeMuxCycleScale(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

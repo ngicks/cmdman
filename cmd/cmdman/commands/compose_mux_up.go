@@ -3,13 +3,12 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
 func composeMuxUpCmd(
 	parent *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	parentSession *string,
 ) {
@@ -40,7 +39,7 @@ is an error (no synthesized default).`,
 			if !cmd.Flags().Changed("session") && parentSession != nil {
 				sess = *parentSession
 			}
-			return runComposeMuxUp(cmd, rootCfg, cf, args, sess)
+			return runComposeMuxUp(cmd, rf, cf, args, sess)
 		},
 	}
 	cmd.Flags().StringVarP(
@@ -53,7 +52,7 @@ is an error (no synthesized default).`,
 
 func runComposeMuxUp(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	args []string,
 	session string,
@@ -63,7 +62,7 @@ func runComposeMuxUp(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

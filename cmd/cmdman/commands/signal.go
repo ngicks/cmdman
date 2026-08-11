@@ -5,20 +5,19 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
-func signalCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func signalCmd(parent *cobra.Command, rf *rootFlags) {
 	var flagSignal string
 
 	cmd := &cobra.Command{
 		Use:               "signal -s SIGNAL ID|NAME [ID|NAME...]",
 		Short:             "Send a raw signal to a running command",
 		Args:              cobra.MinimumNArgs(1),
-		ValidArgsFunction: completeCommandNames(rootCfg, runningStates...),
+		ValidArgsFunction: completeCommandNames(rf, runningStates...),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSignal(cmd, args, rootCfg, flagSignal)
+			return runSignal(cmd, args, rf, flagSignal)
 		},
 	}
 
@@ -32,7 +31,7 @@ func signalCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 func runSignal(
 	cmd *cobra.Command,
 	args []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	sigName string,
 ) error {
 	sig, _, err := hrstr.ParseSignal(sigName)
@@ -40,7 +39,7 @@ func runSignal(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

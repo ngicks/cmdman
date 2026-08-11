@@ -16,12 +16,12 @@ import (
 	"github.com/ngicks/cmdman/cmdman"
 )
 
-// writeHookConfig installs a cmdman config file carrying a defaultHooks map at
+// writeHookConfig installs a cmdman config file carrying a default_hooks map at
 // the path the test env already points $CMDMAN_CONF at, so the monitor spawned
 // by a later `run` picks it up.
 func writeHookConfig(t *testing.T, env *testEnv, hooksJSON string) {
 	t.Helper()
-	conf := `{"defaultHooks": ` + hooksJSON + `}`
+	conf := `{"default_hooks": ` + hooksJSON + `}`
 	must(t, os.WriteFile(env.confPath, []byte(conf), 0o600))
 }
 

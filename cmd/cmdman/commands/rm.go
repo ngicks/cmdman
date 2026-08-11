@@ -8,7 +8,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman"
 )
 
-func rmCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func rmCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
 		flagLabel []string
 		flagForce bool
@@ -17,9 +17,9 @@ func rmCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	cmd := &cobra.Command{
 		Use:               "rm [flags] [ID|NAME...]",
 		Short:             "Remove a stopped command",
-		ValidArgsFunction: completeCommandNames(rootCfg),
+		ValidArgsFunction: completeCommandNames(rf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRm(cmd, args, rootCfg, flagLabel, flagForce)
+			return runRm(cmd, args, rf, flagLabel, flagForce)
 		},
 	}
 
@@ -33,7 +33,7 @@ func rmCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 func runRm(
 	cmd *cobra.Command,
 	args []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	labelSlice []string,
 	force bool,
 ) error {
@@ -42,7 +42,7 @@ func runRm(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

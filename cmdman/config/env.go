@@ -56,7 +56,7 @@ func WithHookEventEnv(env []string, ev HookEventEnv) []string {
 // WithCommandContextEnv strips any caller-supplied ENV_CMDMAN_* variables from
 // env and appends the ones describing the command's own context (data/runtime
 // dirs, per-command dir, and id).
-func WithCommandContextEnv(env []string, cfg CmdmanConfig, id, commandDir string) []string {
+func WithCommandContextEnv(env []string, cfg Config, id, commandDir string) []string {
 	prefixes := []string{
 		ENV_CMDMAN_DATA_DIR + "=",
 		ENV_CMDMAN_RUNTIME_DIR + "=",

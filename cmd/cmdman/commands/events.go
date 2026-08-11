@@ -13,7 +13,7 @@ import (
 	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
-func eventsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func eventsCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
 		flagNoFollow bool
 		flagSince    string
@@ -30,7 +30,7 @@ func eventsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runEvents(
-				cmd, args, rootCfg,
+				cmd, args, rf,
 				flagNoFollow, flagSince, flagUntil,
 				flagIDs, flagTypes, flagFormat,
 			)
@@ -59,7 +59,7 @@ func eventsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 func runEvents(
 	cmd *cobra.Command,
 	_ []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	noFollow bool,
 	sinceFlag string,
 	untilFlag string,
@@ -67,7 +67,7 @@ func runEvents(
 	types []string,
 	format string,
 ) error {
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

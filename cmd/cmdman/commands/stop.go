@@ -10,7 +10,7 @@ import (
 	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
-func stopCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func stopCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
 		flagSignal  string
 		flagTimeout int
@@ -20,9 +20,9 @@ func stopCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		Use:               "stop [flags] ID|NAME [ID|NAME...]",
 		Short:             "Gracefully stop a running command",
 		Args:              cobra.MinimumNArgs(1),
-		ValidArgsFunction: completeCommandNames(rootCfg, runningStates...),
+		ValidArgsFunction: completeCommandNames(rf, runningStates...),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStop(cmd, args, rootCfg, flagSignal, flagTimeout)
+			return runStop(cmd, args, rf, flagSignal, flagTimeout)
 		},
 	}
 
@@ -37,7 +37,7 @@ func stopCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 func runStop(
 	cmd *cobra.Command,
 	args []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	sigName string,
 	timeoutSeconds int,
 ) error {
@@ -47,7 +47,7 @@ func runStop(
 		}
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

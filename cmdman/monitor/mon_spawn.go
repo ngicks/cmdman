@@ -20,9 +20,12 @@ import (
 // newMonitorCmd builds an exec.Cmd that re-runs the current binary's hidden
 // __monitor command for id. extraEnv is appended to the inherited environment;
 // pass nil to inherit it unchanged.
-func newMonitorCmd(cfg config.CmdmanConfig, id string, extraEnv []string) (*exec.Cmd, error) {
-	commandCfg, err := cfg.WithDefaults()
-	if err != nil {
+//
+// cfg is the caller's already-resolved configuration; its dirs are passed to the
+// child as flags so the monitor supervises the same store no matter what the
+// child's own environment would have resolved to.
+func newMonitorCmd(cfg config.Config, id string, extraEnv []string) (*exec.Cmd, error) {
+	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	exe, err := os.Executable()
@@ -31,8 +34,8 @@ func newMonitorCmd(cfg config.CmdmanConfig, id string, extraEnv []string) (*exec
 	}
 
 	cmd := exec.Command(exe,
-		"--data-dir", commandCfg.DataDir,
-		"--runtime-dir", commandCfg.RuntimeDir,
+		"--data-dir", cfg.DataDir,
+		"--runtime-dir", cfg.RuntimeDir,
 		"__monitor",
 		"--id", id,
 	)

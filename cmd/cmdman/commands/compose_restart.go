@@ -3,19 +3,18 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
-func composeRestartCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeRestartCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	cmd := &cobra.Command{
 		Use:               "restart [COMMAND...]",
 		Short:             "Stop then start compose commands",
 		Args:              cobra.ArbitraryArgs,
-		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
+		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeRestart(cmd, rootCfg, cf, args)
+			return runComposeRestart(cmd, rf, cf, args)
 		},
 	}
 
@@ -24,7 +23,7 @@ func composeRestartCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *
 
 func runComposeRestart(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
 ) error {
@@ -33,7 +32,7 @@ func runComposeRestart(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

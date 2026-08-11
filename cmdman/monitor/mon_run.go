@@ -28,7 +28,7 @@ const (
 func RunMonitor(
 	ctx context.Context,
 	id string,
-	cfg config.CmdmanConfig,
+	cfg config.Config,
 	logger *slog.Logger,
 ) error {
 	m, err := newMonitor(ctx, id, cfg, logger)

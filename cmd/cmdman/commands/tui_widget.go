@@ -3,12 +3,11 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/tui"
 )
 
-func tuiWidgetCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func tuiWidgetCmd(parent *cobra.Command, rf *rootFlags) {
 	cmd := &cobra.Command{
 		Use:   "widget",
 		Short: "Run a single TUI widget standalone",
@@ -20,9 +19,9 @@ component resolves it to exactly this invocation, so a widget is also
 debuggable by hand: run it in any terminal or pane.`,
 	}
 
-	tuiWidgetSwitcherCmd(cmd, rootCfg)
-	tuiWidgetStatusbarCmd(cmd, rootCfg)
-	tuiWidgetLauncherCmd(cmd, rootCfg)
+	tuiWidgetSwitcherCmd(cmd, rf)
+	tuiWidgetStatusbarCmd(cmd, rf)
+	tuiWidgetLauncherCmd(cmd, rf)
 
 	parent.AddCommand(cmd)
 }
@@ -32,11 +31,11 @@ debuggable by hand: run it in any terminal or pane.`,
 func runTuiWidget(
 	cmd *cobra.Command,
 	_ []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	widget tui.Widget,
 	workDir string,
 ) error {
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

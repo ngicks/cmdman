@@ -3,12 +3,11 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
-func composeStopCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeStopCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagProgress string
 	)
@@ -17,9 +16,9 @@ func composeStopCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *com
 		Use:               "stop [COMMAND...]",
 		Short:             "Stop running compose commands",
 		Args:              cobra.ArbitraryArgs,
-		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
+		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeStop(cmd, rootCfg, cf, args, flagProgress)
+			return runComposeStop(cmd, rf, cf, args, flagProgress)
 		},
 	}
 
@@ -31,7 +30,7 @@ func composeStopCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *com
 
 func runComposeStop(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
 	progress string,
@@ -41,7 +40,7 @@ func runComposeStop(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

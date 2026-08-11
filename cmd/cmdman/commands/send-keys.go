@@ -6,7 +6,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman"
 )
 
-func sendKeysCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func sendKeysCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
 		flagLiteral     bool
 		flagHex         bool
@@ -27,10 +27,10 @@ func sendKeysCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 			if len(args) > 0 {
 				return nil, cobra.ShellCompDirectiveNoFileComp
 			}
-			return completeCommandNames(rootCfg, runningStates...)(cmd, args, toComplete)
+			return completeCommandNames(rf, runningStates...)(cmd, args, toComplete)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSendKeys(cmd, args, rootCfg, flagLiteral, flagHex, flagRepeatCount)
+			return runSendKeys(cmd, args, rf, flagLiteral, flagHex, flagRepeatCount)
 		},
 	}
 
@@ -46,11 +46,11 @@ func sendKeysCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 func runSendKeys(
 	cmd *cobra.Command,
 	args []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	literal, hexMode bool,
 	repeatCount int,
 ) error {
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

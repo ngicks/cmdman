@@ -13,7 +13,7 @@ import (
 	"github.com/ngicks/cmdman/internal/stdiopipe"
 )
 
-func composeAttachCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeAttachCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flags     attachFlags
 		flagScale int
@@ -23,9 +23,9 @@ func composeAttachCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *c
 		Use:               "attach [flags] SERVICE",
 		Short:             "Attach to a running compose command's PTY",
 		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
+		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeAttach(cmd, rootCfg, cf, args[0], flags, flagScale)
+			return runComposeAttach(cmd, rf, cf, args[0], flags, flagScale)
 		},
 	}
 
@@ -49,7 +49,7 @@ func composeAttachCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *c
 
 func runComposeAttach(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	serviceName string,
 	flags attachFlags,
@@ -60,7 +60,7 @@ func runComposeAttach(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

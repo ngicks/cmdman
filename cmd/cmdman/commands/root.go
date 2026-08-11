@@ -21,10 +21,20 @@ func Execute(ctx context.Context) error {
 	return rootCmd().ExecuteContext(ctx)
 }
 
+// rootFlags carries the root command's persistent, config-affecting flags. They
+// are bound to these fields instead of into a cmdman.CmdmanConfig so that a flag
+// default cannot clobber the config file or the environment; cmdmanService
+// overlays the explicitly-set ones onto the loaded config (see loadConfig).
+type rootFlags struct {
+	config     string
+	dataDir    string
+	runtimeDir string
+}
+
 func rootCmd() *cobra.Command {
 	var (
 		logConfig   *loggerfactory.Config
-		rootConfig  cmdman.CmdmanConfig
+		rf          rootFlags
 		flagVersion bool
 	)
 
@@ -57,32 +67,34 @@ It simply starts a monitor process and the monitor damonizes itself and starts s
 	cmd.Flags().BoolVar(&flagVersion, "version", false, "alias for the version subcommand")
 
 	flags := cmd.PersistentFlags()
-	flags.StringVar(&rootConfig.DataDir, "data-dir", "", "Cmdman data directory")
-	flags.StringVar(&rootConfig.RuntimeDir, "runtime-dir", "", "Cmdman runtime directory")
+	flags.StringVar(&rf.config, "config", "",
+		"Config file path; overrides $"+cmdman.ENV_CMDMAN_CONF+" and the default location")
+	flags.StringVar(&rf.dataDir, "data-dir", "", "Cmdman data directory")
+	flags.StringVar(&rf.runtimeDir, "runtime-dir", "", "Cmdman runtime directory")
 
 	versionCmd(cmd)
 
-	attachCmd(cmd, &rootConfig)
-	createCmd(cmd, &rootConfig)
-	eventsCmd(cmd, &rootConfig)
-	inspectCmd(cmd, &rootConfig)
-	logsCmd(cmd, &rootConfig)
-	lsCmd(cmd, &rootConfig)
-	migrateCmd(cmd, &rootConfig)
-	monitorCmd(cmd, &rootConfig)
-	muxCmd(cmd, &rootConfig)
-	restartCmd(cmd, &rootConfig)
-	rmCmd(cmd, &rootConfig)
-	runCmd(cmd, &rootConfig)
-	sendKeysCmd(cmd, &rootConfig)
-	signalCmd(cmd, &rootConfig)
-	startCmd(cmd, &rootConfig)
-	statusCmd(cmd, &rootConfig)
-	stopCmd(cmd, &rootConfig)
-	tuiCmd(cmd, &rootConfig)
-	waitCmd(cmd, &rootConfig)
+	attachCmd(cmd, &rf)
+	createCmd(cmd, &rf)
+	eventsCmd(cmd, &rf)
+	inspectCmd(cmd, &rf)
+	logsCmd(cmd, &rf)
+	lsCmd(cmd, &rf)
+	migrateCmd(cmd, &rf)
+	monitorCmd(cmd, &rf)
+	muxCmd(cmd, &rf)
+	restartCmd(cmd, &rf)
+	rmCmd(cmd, &rf)
+	runCmd(cmd, &rf)
+	sendKeysCmd(cmd, &rf)
+	signalCmd(cmd, &rf)
+	startCmd(cmd, &rf)
+	statusCmd(cmd, &rf)
+	stopCmd(cmd, &rf)
+	tuiCmd(cmd, &rf)
+	waitCmd(cmd, &rf)
 
-	composeCmd(cmd, &rootConfig)
+	composeCmd(cmd, &rf)
 
 	return cmd
 }

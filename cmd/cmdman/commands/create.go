@@ -72,7 +72,7 @@ func bindCreateFlags(cmd *cobra.Command, f *createFlags) {
 	_ = cmd.RegisterFlagCompletionFunc("log-driver", logDriverCompletions)
 }
 
-func createCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func createCmd(parent *cobra.Command, rf *rootFlags) {
 	var flags createFlags
 
 	cmd := &cobra.Command{
@@ -83,7 +83,7 @@ func createCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		// default file completion is the right behavior, so ValidArgsFunction
 		// is intentionally left unset.
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCreate(cmd, args, rootCfg, &flags)
+			return runCreate(cmd, args, rf, &flags)
 		},
 	}
 
@@ -95,10 +95,10 @@ func createCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 func runCreate(
 	cmd *cobra.Command,
 	args []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	flags *createFlags,
 ) error {
-	id, name, err := doCreate(cmd, args, rootCfg, flags)
+	id, name, err := doCreate(cmd, args, rf, flags)
 	if err != nil {
 		return err
 	}
@@ -115,10 +115,10 @@ func runCreate(
 func doCreate(
 	cmd *cobra.Command,
 	args []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	flags *createFlags,
 ) (id, name string, err error) {
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return "", "", err
 	}

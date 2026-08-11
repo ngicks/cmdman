@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/tui"
 )
@@ -18,7 +17,7 @@ type tuiPopupFlag struct {
 	value string
 }
 
-func tuiCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func tuiCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
 		popup       tuiPopupFlag
 		flagTab     string
@@ -32,7 +31,7 @@ func tuiCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTui(cmd, args, rootCfg, popup, flagTab, flagWorkDir, geom)
+			return runTui(cmd, args, rf, popup, flagTab, flagWorkDir, geom)
 		},
 	}
 
@@ -61,8 +60,8 @@ func tuiCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	cmd.Flags().StringVar(&geom.Y, "popup-y", "",
 		"Popup Y position as an explicit percentage, e.g. 10% (requires --popup)")
 
-	tuiWidgetCmd(cmd, rootCfg)
-	tuiChildCmd(cmd, rootCfg)
+	tuiWidgetCmd(cmd, rf)
+	tuiChildCmd(cmd, rf)
 
 	parent.AddCommand(cmd)
 }
@@ -70,7 +69,7 @@ func tuiCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 func runTui(
 	cmd *cobra.Command,
 	_ []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	popup tuiPopupFlag,
 	flagTab string,
 	flagWorkDir string,
@@ -90,11 +89,17 @@ func runTui(
 	}
 
 	if popup.set {
+		// The popup child re-execs cmdman, so it gets the dirs this process
+		// resolved rather than resolving them again from its own environment.
+		cfg, err := loadConfig(cmd, rf)
+		if err != nil {
+			return err
+		}
 		return cli.LaunchTUIPopup(
-			cmd.Context(), popup.value, rootCfg.DataDir, rootCfg.RuntimeDir, tab, flagWorkDir, geom)
+			cmd.Context(), popup.value, cfg.DataDir, cfg.RuntimeDir, tab, flagWorkDir, geom)
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}
@@ -106,7 +111,7 @@ func runTui(
 // tuiChildCmd registers the hidden `cmdman tui __child` subcommand that runs
 // the actual TUI inside a multiplexer popup and reports status to the launcher
 // over IPC. It is internal and excluded from help and completion.
-func tuiChildCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func tuiChildCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
 		flagIPC     string
 		flagTab     string
@@ -120,7 +125,7 @@ func tuiChildCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTuiChild(cmd, args, rootCfg, flagIPC, flagTab, flagWorkDir)
+			return runTuiChild(cmd, args, rf, flagIPC, flagTab, flagWorkDir)
 		},
 	}
 
@@ -136,7 +141,7 @@ func tuiChildCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 func runTuiChild(
 	cmd *cobra.Command,
 	_ []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	ipc, flagTab, flagWorkDir string,
 ) error {
 	tab, err := tui.ParseTab(flagTab)
@@ -144,7 +149,7 @@ func runTuiChild(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

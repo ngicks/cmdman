@@ -12,7 +12,7 @@ import (
 	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
-func logsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func logsCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
 		flagFollow     bool
 		flagSince      string
@@ -27,10 +27,10 @@ func logsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		Use:               "logs [flags] ID|NAME",
 		Short:             "Show command output from the on-disk log file",
 		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: completeCommandNames(rootCfg),
+		ValidArgsFunction: completeCommandNames(rf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runLogs(
-				cmd, args, rootCfg,
+				cmd, args, rf,
 				flagFollow, flagSince, flagUntil, flagHead, flagTail,
 				flagSticky, flagMetaPrefix,
 			)
@@ -68,7 +68,7 @@ func logsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 func runLogs(
 	cmd *cobra.Command,
 	args []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	follow bool,
 	sinceFlag string,
 	untilFlag string,
@@ -77,7 +77,7 @@ func runLogs(
 	sticky bool,
 	metaPrefix string,
 ) error {
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

@@ -9,7 +9,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/cli"
 )
 
-func statusSetCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func statusSetCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
 		flagDetail string
 	)
@@ -23,9 +23,9 @@ Without ID|NAME the command is taken from CMDMAN_CMD_ID, which cmdman sets in
 every command it supervises. The command must be running: the status lives in
 the monitor of the current run.`,
 		Args:              cobra.RangeArgs(1, 2),
-		ValidArgsFunction: completeReportedStatus(rootCfg),
+		ValidArgsFunction: completeReportedStatus(rf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStatusSet(cmd, args, rootCfg, flagDetail)
+			return runStatusSet(cmd, args, rf, flagDetail)
 		},
 	}
 
@@ -40,7 +40,7 @@ the monitor of the current run.`,
 func runStatusSet(
 	cmd *cobra.Command,
 	args []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	detail string,
 ) error {
 	target, err := cli.ResolveStatusTarget(args[1:], os.Getenv(cmdman.ENV_CMDMAN_CMD_ID))
@@ -48,7 +48,7 @@ func runStatusSet(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

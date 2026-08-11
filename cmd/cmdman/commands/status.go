@@ -2,11 +2,9 @@ package commands
 
 import (
 	"github.com/spf13/cobra"
-
-	"github.com/ngicks/cmdman/cmdman"
 )
 
-func statusCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func statusCmd(parent *cobra.Command, rf *rootFlags) {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Read and write the status a command reports about itself",
@@ -26,9 +24,9 @@ From outside, name the command instead:
   cmdman status get my-command`,
 	}
 
-	statusSetCmd(cmd, rootCfg)
-	statusGetCmd(cmd, rootCfg)
-	statusDeleteCmd(cmd, rootCfg)
+	statusSetCmd(cmd, rf)
+	statusGetCmd(cmd, rf)
+	statusDeleteCmd(cmd, rf)
 
 	parent.AddCommand(cmd)
 }

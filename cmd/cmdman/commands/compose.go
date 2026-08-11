@@ -3,7 +3,6 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
@@ -21,7 +20,7 @@ func (cf *composeFlags) normalizeOpts() compose.NormalizeOpts {
 	}
 }
 
-func composeCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func composeCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
 		flags composeFlags
 	)
@@ -49,25 +48,25 @@ func composeCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	pf.StringVarP(&flags.WorkDir, "workdir", "w", "", "Override the effective work directory")
 	_ = cmd.RegisterFlagCompletionFunc("file", completeComposeFile)
 
-	composeCreateCmd(cmd, rootCfg, &flags)
-	composeLsCmd(cmd, rootCfg)
+	composeCreateCmd(cmd, rf, &flags)
+	composeLsCmd(cmd, rf)
 	composeConfigCmd(cmd, &flags)
-	composePsCmd(cmd, rootCfg, &flags)
-	composeStatusCmd(cmd, rootCfg, &flags)
-	composeInspectCmd(cmd, rootCfg, &flags)
-	composeUpCmd(cmd, rootCfg, &flags)
-	composeScaleCmd(cmd, rootCfg, &flags)
-	composeStartCmd(cmd, rootCfg, &flags)
-	composeStopCmd(cmd, rootCfg, &flags)
-	composeRestartCmd(cmd, rootCfg, &flags)
-	composeDownCmd(cmd, rootCfg, &flags)
-	composeLogsCmd(cmd, rootCfg, &flags)
-	composeEventsCmd(cmd, rootCfg, &flags)
-	composeSignalCmd(cmd, rootCfg, &flags)
-	composeWaitCmd(cmd, rootCfg, &flags)
-	composeAttachCmd(cmd, rootCfg, &flags)
-	composeSendKeysCmd(cmd, rootCfg, &flags)
-	composeMuxCmd(cmd, rootCfg, &flags)
+	composePsCmd(cmd, rf, &flags)
+	composeStatusCmd(cmd, rf, &flags)
+	composeInspectCmd(cmd, rf, &flags)
+	composeUpCmd(cmd, rf, &flags)
+	composeScaleCmd(cmd, rf, &flags)
+	composeStartCmd(cmd, rf, &flags)
+	composeStopCmd(cmd, rf, &flags)
+	composeRestartCmd(cmd, rf, &flags)
+	composeDownCmd(cmd, rf, &flags)
+	composeLogsCmd(cmd, rf, &flags)
+	composeEventsCmd(cmd, rf, &flags)
+	composeSignalCmd(cmd, rf, &flags)
+	composeWaitCmd(cmd, rf, &flags)
+	composeAttachCmd(cmd, rf, &flags)
+	composeSendKeysCmd(cmd, rf, &flags)
+	composeMuxCmd(cmd, rf, &flags)
 
 	parent.AddCommand(cmd)
 }

@@ -21,14 +21,7 @@ func TestServiceLogsFollowNoDuplicatesAcrossStorageAndLive(t *testing.T) {
 	dir, err := os.MkdirTemp("", "cm-logs-*")
 	assert.NilError(t, err)
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	appCfg := CmdmanConfig{
-		DataDir:            dir,
-		RuntimeDir:         dir,
-		DefaultWorkingDir:  dir,
-		DefaultEnvironment: testEnv(),
-	}
-	appCfg, err = appCfg.WithDefaults()
-	assert.NilError(t, err)
+	appCfg := testConfig(t, dir)
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
 

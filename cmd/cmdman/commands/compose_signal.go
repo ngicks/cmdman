@@ -3,12 +3,11 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
-func composeSignalCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeSignalCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagSignal string
 	)
@@ -17,9 +16,9 @@ func composeSignalCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *c
 		Use:               "signal [COMMAND...]",
 		Short:             "Send a signal to compose commands",
 		Args:              cobra.ArbitraryArgs,
-		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
+		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeSignal(cmd, rootCfg, cf, args, flagSignal)
+			return runComposeSignal(cmd, rf, cf, args, flagSignal)
 		},
 	}
 
@@ -34,7 +33,7 @@ func composeSignalCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *c
 
 func runComposeSignal(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
 	signal string,
@@ -44,7 +43,7 @@ func runComposeSignal(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

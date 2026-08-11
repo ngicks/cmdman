@@ -13,7 +13,6 @@ import (
 	"time"
 
 	pb "github.com/ngicks/cmdman/api/gen/proto/go/cmdman/v1"
-	"github.com/ngicks/cmdman/cmdman/config"
 	"github.com/ngicks/cmdman/cmdman/internal/flock"
 	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"github.com/ngicks/cmdman/cmdman/model"
@@ -26,14 +25,7 @@ import (
 
 func TestMonitorRunAndExit(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := config.CmdmanConfig{
-		DataDir:            dir,
-		RuntimeDir:         dir,
-		DefaultWorkingDir:  dir,
-		DefaultEnvironment: testEnv(),
-	}
-	appCfg, err := appCfg.WithDefaults()
-	assert.NilError(t, err)
+	appCfg := testConfig(t, dir)
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
 
@@ -83,14 +75,7 @@ func TestMonitorRunAndExit(t *testing.T) {
 
 func TestMonitorNonZeroExit(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := config.CmdmanConfig{
-		DataDir:            dir,
-		RuntimeDir:         dir,
-		DefaultWorkingDir:  dir,
-		DefaultEnvironment: testEnv(),
-	}
-	appCfg, err := appCfg.WithDefaults()
-	assert.NilError(t, err)
+	appCfg := testConfig(t, dir)
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
 
@@ -132,14 +117,7 @@ func TestMonitorNonZeroExit(t *testing.T) {
 
 func TestMonitorAutoRemove(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := config.CmdmanConfig{
-		DataDir:            dir,
-		RuntimeDir:         dir,
-		DefaultWorkingDir:  dir,
-		DefaultEnvironment: testEnv(),
-	}
-	appCfg, err := appCfg.WithDefaults()
-	assert.NilError(t, err)
+	appCfg := testConfig(t, dir)
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
 
@@ -184,14 +162,7 @@ func TestMonitorAutoRemove(t *testing.T) {
 
 func TestMonitorGracefulShutdown(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := config.CmdmanConfig{
-		DataDir:            dir,
-		RuntimeDir:         dir,
-		DefaultWorkingDir:  dir,
-		DefaultEnvironment: testEnv(),
-	}
-	appCfg, err := appCfg.WithDefaults()
-	assert.NilError(t, err)
+	appCfg := testConfig(t, dir)
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
 
@@ -242,14 +213,7 @@ func TestMonitorGracefulShutdown(t *testing.T) {
 // that the supervisor waits on, and the monitor would never exit.
 func TestMonitorShutsDownWhenConfigReadFails(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := config.CmdmanConfig{
-		DataDir:            dir,
-		RuntimeDir:         dir,
-		DefaultWorkingDir:  dir,
-		DefaultEnvironment: testEnv(),
-	}
-	appCfg, err := appCfg.WithDefaults()
-	assert.NilError(t, err)
+	appCfg := testConfig(t, dir)
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
 
@@ -327,14 +291,7 @@ func TestMonitorShutsDownWhenConfigReadFails(t *testing.T) {
 // setup fails.
 func TestMonitorRunEndClearsRuntimeState(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := config.CmdmanConfig{
-		DataDir:            dir,
-		RuntimeDir:         dir,
-		DefaultWorkingDir:  dir,
-		DefaultEnvironment: testEnv(),
-	}
-	appCfg, err := appCfg.WithDefaults()
-	assert.NilError(t, err)
+	appCfg := testConfig(t, dir)
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
 
@@ -414,13 +371,7 @@ func TestStaleEntryCleanup(t *testing.T) {
 	stateJSON := &model.CommandState{MonitorPID: 99999999}
 	assert.NilError(t, st.InsertCommandState("stale-1", model.EventTypeRunning, stateJSON))
 
-	cfgForCleanup, err := (config.CmdmanConfig{
-		DataDir:            t.TempDir(),
-		RuntimeDir:         t.TempDir(),
-		DefaultWorkingDir:  "/tmp",
-		DefaultEnvironment: testEnv(),
-	}).WithDefaults()
-	assert.NilError(t, err)
+	cfgForCleanup := testConfig(t, t.TempDir())
 	assert.NilError(t, CleanStaleEntries(t.Context(), st, cfgForCleanup))
 
 	state, _, _, err := st.GetCommandState("stale-1")
@@ -429,13 +380,7 @@ func TestStaleEntryCleanup(t *testing.T) {
 }
 
 func TestIsStaleMonitor(t *testing.T) {
-	cfg, err := (config.CmdmanConfig{
-		DataDir:            t.TempDir(),
-		RuntimeDir:         t.TempDir(),
-		DefaultWorkingDir:  "/tmp",
-		DefaultEnvironment: testEnv(),
-	}).WithDefaults()
-	assert.NilError(t, err)
+	cfg := testConfig(t, t.TempDir())
 
 	const id = "probe-1"
 
@@ -483,13 +428,7 @@ func TestIsStaleMonitor(t *testing.T) {
 func TestCleanStaleEntrySkipsProbeError(t *testing.T) {
 	st := testStore(t)
 
-	cfg, err := (config.CmdmanConfig{
-		DataDir:            t.TempDir(),
-		RuntimeDir:         t.TempDir(),
-		DefaultWorkingDir:  "/tmp",
-		DefaultEnvironment: testEnv(),
-	}).WithDefaults()
-	assert.NilError(t, err)
+	cfg := testConfig(t, t.TempDir())
 
 	const id = "probe-skip"
 	cmdCfg := &model.CommandConfig{

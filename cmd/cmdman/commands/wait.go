@@ -11,7 +11,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/model"
 )
 
-func waitCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func waitCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
 		flagCondition string
 		flagInterval  time.Duration
@@ -22,9 +22,9 @@ func waitCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		Use:               "wait [flags] ID|NAME [ID|NAME...]",
 		Short:             "Block until one or more commands stop, then print exit codes",
 		Args:              cobra.MinimumNArgs(1),
-		ValidArgsFunction: completeCommandNames(rootCfg),
+		ValidArgsFunction: completeCommandNames(rf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWait(cmd, args, rootCfg, flagCondition, flagInterval, flagIgnore)
+			return runWait(cmd, args, rf, flagCondition, flagInterval, flagIgnore)
 		},
 	}
 
@@ -42,12 +42,12 @@ func waitCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 func runWait(
 	cmd *cobra.Command,
 	args []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	condition string,
 	interval time.Duration,
 	ignore bool,
 ) error {
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

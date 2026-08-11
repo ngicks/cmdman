@@ -7,12 +7,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
-func composeScaleCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeScaleCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var flagProgress string
 
 	cmd := &cobra.Command{
@@ -26,9 +25,9 @@ Each replica is a distinct cmdman command named "<command>-<index>" for index
 1..NUM. The scale is an ephemeral override of the compose file's scale:; a later
 "compose up" reverts to the file unless the file is edited.`,
 		Args:              cobra.MinimumNArgs(1),
-		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
+		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeScale(cmd, rootCfg, cf, args, flagProgress)
+			return runComposeScale(cmd, rf, cf, args, flagProgress)
 		},
 	}
 
@@ -40,7 +39,7 @@ Each replica is a distinct cmdman command named "<command>-<index>" for index
 
 func runComposeScale(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	args []string,
 	progress string,
@@ -58,7 +57,7 @@ func runComposeScale(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

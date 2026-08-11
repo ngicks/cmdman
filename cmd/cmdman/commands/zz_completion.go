@@ -21,7 +21,7 @@ var runningStates = []model.EventType{model.EventTypeStarting, model.EventTypeRu
 // positional arguments are filtered out so repeated targets are not
 // re-suggested.
 func completeCommandNames(
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	states ...model.EventType,
 ) cobra.CompletionFunc {
 	stateSet := make(map[model.EventType]struct{}, len(states))
@@ -34,7 +34,7 @@ func completeCommandNames(
 		args []string,
 		toComplete string,
 	) ([]cobra.Completion, cobra.ShellCompDirective) {
-		svc, err := cmdmanService(rootCfg)
+		svc, err := cmdmanService(cmd, rf)
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
@@ -78,7 +78,7 @@ func completeCommandNames(
 // compose spec when available, otherwise from the project's stored commands.
 // Already-supplied positional arguments are filtered out.
 func completeComposeCommands(
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 ) cobra.CompletionFunc {
 	return func(
@@ -92,7 +92,7 @@ func completeComposeCommands(
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
 
-		names := composeCommandNames(cmd, rootCfg, cf)
+		names := composeCommandNames(cmd, rf, cf)
 
 		seen := make(map[string]struct{}, len(args))
 		for _, a := range args {
@@ -118,7 +118,7 @@ func completeComposeCommands(
 // suggestions rather than failing.
 func composeCommandNames(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 ) []string {
 	selection, err := compose.LoadOrProject(cf.normalizeOpts())
@@ -134,7 +134,7 @@ func composeCommandNames(
 		return names
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return nil
 	}
@@ -254,7 +254,7 @@ var logDriverCompletions = cobra.FixedCompletions(
 
 // completeReportedStatus completes the positional arguments of `status set`:
 // the status vocabulary first, then a running command to report about.
-func completeReportedStatus(rootCfg *cmdman.CmdmanConfig) cobra.CompletionFunc {
+func completeReportedStatus(rf *rootFlags) cobra.CompletionFunc {
 	return func(
 		cmd *cobra.Command,
 		args []string,
@@ -276,7 +276,7 @@ func completeReportedStatus(rootCfg *cmdman.CmdmanConfig) cobra.CompletionFunc {
 		case 1:
 			// nil args, not the real ones: the status word already consumed is
 			// not a command name that should be filtered out of the candidates.
-			return completeCommandNames(rootCfg, runningStates...)(cmd, nil, toComplete)
+			return completeCommandNames(rf, runningStates...)(cmd, nil, toComplete)
 		default:
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}

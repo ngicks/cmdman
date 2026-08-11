@@ -3,12 +3,11 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
-func composeLsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func composeLsCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
 		flagFormat string
 	)
@@ -19,7 +18,7 @@ func composeLsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeLs(cmd, rootCfg, flagFormat)
+			return runComposeLs(cmd, rf, flagFormat)
 		},
 	}
 
@@ -30,10 +29,10 @@ func composeLsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 
 func runComposeLs(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	format string,
 ) error {
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

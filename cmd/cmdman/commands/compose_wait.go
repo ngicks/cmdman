@@ -5,13 +5,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 	"github.com/ngicks/cmdman/cmdman/model"
 )
 
-func composeWaitCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeWaitCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagCondition string
 		flagInterval  time.Duration
@@ -22,9 +21,9 @@ func composeWaitCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *com
 		Use:               "wait [COMMAND...]",
 		Short:             "Wait for compose commands to reach a condition",
 		Args:              cobra.ArbitraryArgs,
-		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
+		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeWait(cmd, rootCfg, cf, args, flagCondition, flagInterval, flagIgnore)
+			return runComposeWait(cmd, rf, cf, args, flagCondition, flagInterval, flagIgnore)
 		},
 	}
 
@@ -41,7 +40,7 @@ func composeWaitCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *com
 
 func runComposeWait(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
 	condition string,
@@ -53,7 +52,7 @@ func runComposeWait(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

@@ -2,11 +2,9 @@ package commands
 
 import (
 	"github.com/spf13/cobra"
-
-	"github.com/ngicks/cmdman/cmdman"
 )
 
-func composeMuxCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeMuxCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var flagSession string
 
 	cmd := &cobra.Command{
@@ -34,7 +32,7 @@ Subcommands: up, down, ls, cycle-scale. A layout literally named "up", "down",
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeComposeMuxLayout(cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeMuxUp(cmd, rootCfg, cf, args, flagSession)
+			return runComposeMuxUp(cmd, rf, cf, args, flagSession)
 		},
 	}
 	cmd.Flags().StringVarP(
@@ -42,10 +40,10 @@ Subcommands: up, down, ls, cycle-scale. A layout literally named "up", "down",
 		"Target tmux session (default: current session when inside tmux, else cmdman)",
 	)
 
-	composeMuxUpCmd(cmd, rootCfg, cf, &flagSession)
+	composeMuxUpCmd(cmd, rf, cf, &flagSession)
 	composeMuxDownCmd(cmd, cf, &flagSession)
-	composeMuxLsCmd(cmd, rootCfg, cf, &flagSession)
-	composeMuxCycleScaleCmd(cmd, rootCfg, cf, &flagSession)
+	composeMuxLsCmd(cmd, rf, cf, &flagSession)
+	composeMuxCycleScaleCmd(cmd, rf, cf, &flagSession)
 
 	parent.AddCommand(cmd)
 }

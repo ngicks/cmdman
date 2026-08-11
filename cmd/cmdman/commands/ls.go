@@ -7,7 +7,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/cli"
 )
 
-func lsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func lsCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
 		flagLabel  []string
 		flagAll    bool
@@ -21,7 +21,7 @@ func lsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runLs(cmd, args, rootCfg, flagLabel, flagAll, flagQuiet, flagFormat)
+			return runLs(cmd, args, rf, flagLabel, flagAll, flagQuiet, flagFormat)
 		},
 	}
 
@@ -37,7 +37,7 @@ func lsCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 func runLs(
 	cmd *cobra.Command,
 	_ []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	labelSlice []string,
 	allStates, quiet bool,
 	format string,
@@ -47,7 +47,7 @@ func runLs(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

@@ -4,11 +4,9 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	"github.com/ngicks/cmdman/cmdman"
 )
 
-func runCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func runCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
 		flags      createFlags
 		flagAttach bool
@@ -22,7 +20,7 @@ func runCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		// default file completion is the right behavior, so ValidArgsFunction
 		// is intentionally left unset.
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRun(cmd, args, rootCfg, &flags, flagAttach)
+			return runRun(cmd, args, rf, &flags, flagAttach)
 		},
 	}
 
@@ -35,16 +33,16 @@ func runCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 func runRun(
 	cmd *cobra.Command,
 	args []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	flags *createFlags,
 	attach bool,
 ) error {
-	id, name, err := doCreate(cmd, args, rootCfg, flags)
+	id, name, err := doCreate(cmd, args, rf, flags)
 	if err != nil {
 		return err
 	}
 
-	if err := doStart(cmd, id, rootCfg); err != nil {
+	if err := doStart(cmd, id, rf); err != nil {
 		return err
 	}
 
@@ -55,7 +53,7 @@ func runRun(
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), displayName)
 	} else {
-		svc, err := cmdmanService(rootCfg)
+		svc, err := cmdmanService(cmd, rf)
 		if err != nil {
 			return err
 		}
@@ -66,7 +64,7 @@ func runRun(
 			return err
 		}
 		if status.StateJSON.SocketPath != "" {
-			return runAttach(cmd, []string{id}, rootCfg, attachFlags{
+			return runAttach(cmd, []string{id}, rf, attachFlags{
 				DetachKeys: "ctrl-p,ctrl-q",
 				SigProxy:   true,
 			})

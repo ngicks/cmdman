@@ -35,7 +35,7 @@ const envMonitorDaemon = "__CMDMAN_INTERNAL_MONITOR_DAEMON"
 //
 // Detachment is owned by the monitor entry point, not this call site: this
 // function only starts the binary and reaps the intermediate.
-func SpawnMonitor(cfg config.CmdmanConfig, id string) error {
+func SpawnMonitor(cfg config.Config, id string) error {
 	cmd, err := newMonitorCmd(cfg, id, nil)
 	if err != nil {
 		return err
@@ -64,7 +64,7 @@ func SpawnMonitor(cfg config.CmdmanConfig, id string) error {
 func DaemonizeMonitor(
 	ctx context.Context,
 	id string,
-	cfg config.CmdmanConfig,
+	cfg config.Config,
 	logger *slog.Logger,
 ) error {
 	if os.Getenv(envMonitorDaemon) == "1" {
@@ -80,7 +80,7 @@ func DaemonizeMonitor(
 // because the intermediate returns right afterwards, the kernel reparents the
 // daemon to init, and because the daemon is not a session leader it can never
 // acquire a controlling terminal.
-func forkMonitorDaemon(cfg config.CmdmanConfig, id string) error {
+func forkMonitorDaemon(cfg config.Config, id string) error {
 	// Detach into a brand-new session, becoming the session leader with no
 	// controlling terminal. setsid(2) fails with EPERM if the caller is
 	// already a process-group leader; this intermediate never is, since it is

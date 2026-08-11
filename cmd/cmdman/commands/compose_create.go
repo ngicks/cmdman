@@ -3,12 +3,11 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
-func composeCreateCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *composeFlags) {
+func composeCreateCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagRemoveOrphan bool
 	)
@@ -17,9 +16,9 @@ func composeCreateCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *c
 		Use:               "create [COMMAND...]",
 		Short:             "Create compose commands without starting them",
 		Args:              cobra.ArbitraryArgs,
-		ValidArgsFunction: completeComposeCommands(rootCfg, cf),
+		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeCreate(cmd, rootCfg, cf, args, flagRemoveOrphan)
+			return runComposeCreate(cmd, rf, cf, args, flagRemoveOrphan)
 		},
 	}
 
@@ -31,7 +30,7 @@ func composeCreateCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig, cf *c
 
 func runComposeCreate(
 	cmd *cobra.Command,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
 	removeOrphan bool,
@@ -41,7 +40,7 @@ func runComposeCreate(
 		return err
 	}
 
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}

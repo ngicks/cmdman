@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ngicks/cmdman/cmdman/config"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/store"
 	"gotest.tools/v3/assert"
@@ -16,14 +15,7 @@ import (
 
 func TestRestartPolicyOnFailure(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := config.CmdmanConfig{
-		DataDir:            dir,
-		RuntimeDir:         dir,
-		DefaultWorkingDir:  dir,
-		DefaultEnvironment: testEnv(),
-	}
-	appCfg, err := appCfg.WithDefaults()
-	assert.NilError(t, err)
+	appCfg := testConfig(t, dir)
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
 
@@ -87,14 +79,7 @@ exit 0
 
 func TestRestartPolicyAlways(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := config.CmdmanConfig{
-		DataDir:            dir,
-		RuntimeDir:         dir,
-		DefaultWorkingDir:  dir,
-		DefaultEnvironment: testEnv(),
-	}
-	appCfg, err := appCfg.WithDefaults()
-	assert.NilError(t, err)
+	appCfg := testConfig(t, dir)
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
 
@@ -136,14 +121,7 @@ func TestRestartPolicyAlways(t *testing.T) {
 
 func TestRestartPolicyOnFailureMaxRetries(t *testing.T) {
 	dir := t.TempDir()
-	appCfg := config.CmdmanConfig{
-		DataDir:            dir,
-		RuntimeDir:         dir,
-		DefaultWorkingDir:  dir,
-		DefaultEnvironment: testEnv(),
-	}
-	appCfg, err := appCfg.WithDefaults()
-	assert.NilError(t, err)
+	appCfg := testConfig(t, dir)
 	dbPath, err := appCfg.DBPath()
 	assert.NilError(t, err)
 

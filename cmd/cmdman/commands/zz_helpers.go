@@ -5,14 +5,39 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
+	"github.com/ngicks/cmdman/cmdman/config"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/internal/cmdsignals"
 )
 
-func cmdmanService(rootCfg *cmdman.CmdmanConfig) (*cmdman.Service, error) {
-	cfg, err := rootCfg.WithDefaults()
+// loadConfig assembles the configuration for cmd: config.Load layers defaults <
+// config file < environment, then the explicitly-set root flags win on top.
+// cmd.Flags() sees the root's persistent flags, so Changed reports what the user
+// actually passed - an unset flag never overwrites a lower layer with its
+// zero-value default.
+func loadConfig(cmd *cobra.Command, rf *rootFlags) (cmdman.CmdmanConfig, error) {
+	cfg, err := config.Load(rf.config)
+	if err != nil {
+		return cmdman.CmdmanConfig{}, err
+	}
+	if cmd.Flags().Changed("data-dir") {
+		cfg.DataDir = rf.dataDir
+	}
+	if cmd.Flags().Changed("runtime-dir") {
+		cfg.RuntimeDir = rf.runtimeDir
+	}
+	if err := cfg.Validate(); err != nil {
+		return cmdman.CmdmanConfig{}, err
+	}
+	return cfg, nil
+}
+
+func cmdmanService(cmd *cobra.Command, rf *rootFlags) (*cmdman.Service, error) {
+	cfg, err := loadConfig(cmd, rf)
 	if err != nil {
 		return nil, err
 	}

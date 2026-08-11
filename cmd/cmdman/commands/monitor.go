@@ -4,11 +4,10 @@ import (
 	"github.com/ngicks/go-common/contextkey"
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/monitor"
 )
 
-func monitorCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func monitorCmd(parent *cobra.Command, rf *rootFlags) {
 	var flagID string
 
 	cmd := &cobra.Command{
@@ -18,7 +17,7 @@ func monitorCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMonitor(cmd, args, rootCfg, flagID)
+			return runMonitor(cmd, args, rf, flagID)
 		},
 	}
 
@@ -28,8 +27,8 @@ func monitorCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 	parent.AddCommand(cmd)
 }
 
-func runMonitor(cmd *cobra.Command, _ []string, rootCfg *cmdman.CmdmanConfig, id string) error {
-	cfg, err := rootCfg.WithDefaults()
+func runMonitor(cmd *cobra.Command, _ []string, rf *rootFlags, id string) error {
+	cfg, err := loadConfig(cmd, rf)
 	if err != nil {
 		return err
 	}

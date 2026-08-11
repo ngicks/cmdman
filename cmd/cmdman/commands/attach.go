@@ -19,16 +19,16 @@ type attachFlags struct {
 	AutoExit   bool
 }
 
-func attachCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
+func attachCmd(parent *cobra.Command, rf *rootFlags) {
 	var flags attachFlags
 
 	cmd := &cobra.Command{
 		Use:               "attach [flags] ID|NAME",
 		Short:             "Attach to a running command's PTY",
 		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: completeCommandNames(rootCfg, runningStates...),
+		ValidArgsFunction: completeCommandNames(rf, runningStates...),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAttach(cmd, args, rootCfg, flags)
+			return runAttach(cmd, args, rf, flags)
 		},
 	}
 
@@ -47,10 +47,10 @@ func attachCmd(parent *cobra.Command, rootCfg *cmdman.CmdmanConfig) {
 func runAttach(
 	cmd *cobra.Command,
 	args []string,
-	rootCfg *cmdman.CmdmanConfig,
+	rf *rootFlags,
 	flags attachFlags,
 ) error {
-	svc, err := cmdmanService(rootCfg)
+	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
 	}
