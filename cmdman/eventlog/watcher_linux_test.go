@@ -68,7 +68,10 @@ func TestInotifyWatcherFiresOnRotation(t *testing.T) {
 	wr.maxSize = 128
 
 	// Seed the file so inotify on the dir has something to track.
-	assert.NilError(t, wr.Append(model.Event{Time: time.Now().UTC(), Type: model.EventTypeCreated, ID: "x"}))
+	assert.NilError(
+		t,
+		wr.Append(model.Event{Time: time.Now().UTC(), Type: model.EventTypeCreated, ID: "x"}),
+	)
 
 	w, err := NewWatcher(WatcherKindInotify, path, 0)
 	assert.NilError(t, err)

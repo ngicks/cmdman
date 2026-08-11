@@ -24,7 +24,10 @@ func TestWriterAppend(t *testing.T) {
 
 	now := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
 	assert.NilError(t, w.Append(model.Event{Time: now, Type: model.EventTypeCreated, ID: "abc"}))
-	assert.NilError(t, w.Append(model.Event{Time: now.Add(time.Second), Type: model.EventTypeStarting, ID: "abc"}))
+	assert.NilError(
+		t,
+		w.Append(model.Event{Time: now.Add(time.Second), Type: model.EventTypeStarting, ID: "abc"}),
+	)
 
 	data, err := os.ReadFile(path)
 	assert.NilError(t, err)
@@ -60,7 +63,12 @@ func TestWriterRotation(t *testing.T) {
 	assert.Assert(t, len(archive) >= 1, "archive should have at least the marker")
 	var lastArchive model.Event
 	assert.NilError(t, json.Unmarshal(archive[len(archive)-1], &lastArchive))
-	assert.Equal(t, lastArchive.Type, model.EventTypeRotation, "archive must end with rotation marker")
+	assert.Equal(
+		t,
+		lastArchive.Type,
+		model.EventTypeRotation,
+		"archive must end with rotation marker",
+	)
 
 	// Active path must contain only post-rotation entries.
 	activeData, err := os.ReadFile(path)
@@ -85,14 +93,20 @@ func TestWriterRotationRemovesOldArchive(t *testing.T) {
 
 	// First rotation produces .1 with content A.
 	for range 10 {
-		assert.NilError(t, w.Append(model.Event{Time: time.Now().UTC(), Type: model.EventTypeRunning, ID: "A"}))
+		assert.NilError(
+			t,
+			w.Append(model.Event{Time: time.Now().UTC(), Type: model.EventTypeRunning, ID: "A"}),
+		)
 	}
 	firstArchive, err := os.ReadFile(path + ArchiveSuffix)
 	assert.NilError(t, err)
 
 	// Second rotation produces .1 with content B; old A must be gone.
 	for range 10 {
-		assert.NilError(t, w.Append(model.Event{Time: time.Now().UTC(), Type: model.EventTypeRunning, ID: "B"}))
+		assert.NilError(
+			t,
+			w.Append(model.Event{Time: time.Now().UTC(), Type: model.EventTypeRunning, ID: "B"}),
+		)
 	}
 	secondArchive, err := os.ReadFile(path + ArchiveSuffix)
 	assert.NilError(t, err)
