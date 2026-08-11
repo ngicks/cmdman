@@ -89,8 +89,12 @@ func TestAttach_DefaultDetachKeysInterceptedNotForwarded(t *testing.T) {
 
 	stdinPipe := iopipe.NewReader(bytes.NewReader([]byte("hello\x10\x11")))
 	stdoutPipe := iopipe.NewWriter(io.Discard)
-	go stdinPipe.Run(ctx)
-	go stdoutPipe.Run(ctx)
+	var wg sync.WaitGroup
+	// Cleanup, not defer: both Run calls return only once ctx is done, and the
+	// deferred cancel above runs before any cleanup.
+	t.Cleanup(wg.Wait)
+	wg.Go(func() { stdinPipe.Run(ctx) })
+	wg.Go(func() { stdoutPipe.Run(ctx) })
 
 	session := newBlockingAttachSession()
 	opts := AttachOptions{

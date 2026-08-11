@@ -263,6 +263,12 @@ func (b *serviceBackend) Attach(ctx context.Context, id string) (string, error) 
 		return "", err
 	}
 
+	// Registered before the cancels below so it runs after them: defers are
+	// LIFO, and the forwarding goroutines only exit once attachCtx is done and
+	// cancelreader has released a Read in flight on os.Stdin.
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
 	attachCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -279,8 +285,8 @@ func (b *serviceBackend) Attach(ctx context.Context, id string) (string, error) 
 
 	stdinPipe := iopipe.NewReader(cr)
 	stdoutPipe := iopipe.NewWriter(os.Stdout)
-	go stdinPipe.Run(attachCtx)
-	go stdoutPipe.Run(attachCtx)
+	wg.Go(func() { stdinPipe.Run(attachCtx) })
+	wg.Go(func() { stdoutPipe.Run(attachCtx) })
 
 	opts := AttachOptions{
 		Stdin:      os.Stdin,

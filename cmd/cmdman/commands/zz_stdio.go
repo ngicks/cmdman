@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/ngicks/go-common/iopipe"
 )
@@ -19,16 +20,21 @@ import (
 // return a single derived pipe for commands that stream into one consumer.
 
 // attachStdio returns iopipe controllers fronting os.Stdin and os.Stdout,
-// running, for cli.AttachOptions. The stop func stops forwarding; a Read
-// already blocked in os.Stdin cannot be interrupted, so the stdin forwarding
-// goroutine can outlive stop and is reclaimed when the process exits.
+// running, for cli.AttachOptions. The stop func stops forwarding and joins the
+// stdout goroutine; a Read already blocked in os.Stdin cannot be interrupted,
+// so the stdin forwarding goroutine is deliberately not joined — it can outlive
+// stop and is reclaimed when the process exits.
 func attachStdio(ctx context.Context) (stdin *iopipe.Reader, stdout *iopipe.Writer, stop func()) {
 	r := iopipe.NewReader(os.Stdin)
 	w := iopipe.NewWriter(os.Stdout)
 	runCtx, cancel := context.WithCancel(ctx)
+	var wg sync.WaitGroup
 	go r.Run(runCtx)
-	go w.Run(runCtx)
-	return r, w, cancel
+	wg.Go(func() { w.Run(runCtx) })
+	return r, w, func() {
+		cancel()
+		wg.Wait()
+	}
 }
 
 // stdoutPipe returns a cancellable write end of os.Stdout.
@@ -49,9 +55,11 @@ func writerPipe(ctx context.Context, dst io.Writer) (io.WriteCloser, func(), err
 		cancel()
 		return nil, nil, err
 	}
-	go w.Run(runCtx)
+	var wg sync.WaitGroup
+	wg.Go(func() { w.Run(runCtx) })
 	return wc, func() {
 		_ = wc.Close()
 		cancel()
+		wg.Wait()
 	}, nil
 }

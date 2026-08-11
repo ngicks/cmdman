@@ -49,15 +49,26 @@ func nonTTYStdio(t *testing.T) (stdin, stdout *os.File) {
 }
 
 // attachPipes wires src and dst into running iopipe controllers for building
-// cli.AttachOptions; their forwarding goroutines stop at test cleanup.
+// cli.AttachOptions; their forwarding goroutines are joined at test cleanup.
+//
+// Cleanup closes src when it is an io.Closer: ctx cancellation does not
+// interrupt a Read already in flight, so a blocking src (io.Pipe) would leave
+// the reader goroutine unjoinable.
 func attachPipes(t *testing.T, src io.Reader, dst io.Writer) (*iopipe.Reader, *iopipe.Writer) {
 	t.Helper()
 	r := iopipe.NewReader(src)
 	w := iopipe.NewWriter(dst)
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	go r.Run(ctx)
-	go w.Run(ctx)
+	var wg sync.WaitGroup
+	t.Cleanup(func() {
+		cancel()
+		if c, ok := src.(io.Closer); ok {
+			_ = c.Close()
+		}
+		wg.Wait()
+	})
+	wg.Go(func() { r.Run(ctx) })
+	wg.Go(func() { w.Run(ctx) })
 	return r, w
 }
 
