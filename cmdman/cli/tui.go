@@ -107,8 +107,10 @@ type PopupConfig struct {
 	// runtime targets as the launcher. Empty values are not forwarded.
 	DataDir    string
 	RuntimeDir string
-	// ConfPath is the $CMDMAN_CONF value forwarded to the popup. Empty is not
-	// forwarded.
+	// ConfPath is the config file path forwarded to the popup: as --config on
+	// the child argv, and as $CMDMAN_CONF for the config-directory lookups that
+	// only consult the environment (config.ComposeConfigDir, FrameConfigDir).
+	// Empty is not forwarded.
 	ConfPath string
 	// Tab is the --tab token (tui.TabKeys() value) forwarded to the popup child
 	// so it opens the same startup tab. Empty is not forwarded.
@@ -157,11 +159,14 @@ func (g PopupGeometry) Validate() error {
 }
 
 // LaunchTUIPopup gathers the launcher's process context (executable path,
-// working directory, config file) and starts the popup. It is the entry point
-// the cobra command calls; gathering process/env state here keeps ./cmd thin.
+// working directory) and starts the popup. It is the entry point the cobra
+// command calls; gathering process/env state here keeps ./cmd thin. The dirs
+// and confPath come from the caller's already-resolved configuration instead,
+// so the popup child is handed what this process runs with rather than
+// re-resolving it.
 func LaunchTUIPopup(
 	ctx context.Context,
-	driverValue, dataDir, runtimeDir string,
+	driverValue, dataDir, runtimeDir, confPath string,
 	initialTab tui.Tab,
 	workDir string,
 	geom PopupGeometry,
@@ -180,7 +185,7 @@ func LaunchTUIPopup(
 		Executable: exe,
 		DataDir:    dataDir,
 		RuntimeDir: runtimeDir,
-		ConfPath:   os.Getenv("CMDMAN_CONF"),
+		ConfPath:   confPath,
 		Tab:        tabToken(initialTab),
 		WorkDir:    workDir,
 		Width:      geom.Width,
@@ -272,6 +277,9 @@ func (cfg PopupConfig) childCommand(ipcPath string) []string {
 	}
 	if cfg.RuntimeDir != "" {
 		args = append(args, "--runtime-dir", cfg.RuntimeDir)
+	}
+	if cfg.ConfPath != "" {
+		args = append(args, "--config", cfg.ConfPath)
 	}
 	if cfg.Tab != "" {
 		args = append(args, "--tab", cfg.Tab)

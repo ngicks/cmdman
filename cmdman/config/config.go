@@ -71,6 +71,13 @@ type Config struct {
 	// name the event itself in model.CommandConfig.Hooks (D17/D40). It is a
 	// config-file field only: there is no flag or environment variable for it.
 	DefaultHooks model.HookSet `json:"default_hooks" yaml:"default_hooks"`
+	// ConfigPath is the --config value [Load] resolved this Config with; it is
+	// "" when the file came from $CMDMAN_CONF or the default location. It is
+	// provenance rather than a setting - no layer can set it, so it has no
+	// [PartialConfig] mirror and no serialized key - and it exists so a process
+	// that re-execs the binary (the monitor, the TUI popup) can forward
+	// --config: a child inherits the environment but not the flags.
+	ConfigPath string `json:"-" yaml:"-"`
 }
 
 // DefaultConfig is the lowest-precedence layer: the built-in defaults, with no
@@ -261,7 +268,7 @@ var envOptions = env.Options{Prefix: "CMDMAN_"}
 // Load assembles defaults < config file < environment through
 // [PartialConfig.Apply] and validates the result. The ./cmd layer applies
 // explicitly-set flags on top (flags win). flagPath is the --config value ("",
-// when the flag is unset).
+// when the flag is unset) and is kept on the result as [Config.ConfigPath].
 //
 // The env layer fills a PartialConfig with caarlos0/env: a field is set
 // (non-nil) only when its variable is present and non-empty, so absent ones
@@ -272,6 +279,8 @@ func Load(flagPath string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+
+	cfg.ConfigPath = flagPath
 
 	path, err := configPath(flagPath)
 	if err != nil {

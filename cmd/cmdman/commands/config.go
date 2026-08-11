@@ -29,7 +29,8 @@ The value passed to --format has this shape (Go field name, type, JSON key):
   ├─ .DefaultScrollbackBytes  int          # scrollback ring size       (default_scrollback_bytes)
   ├─ .DefaultLogDriver        LogDriver    # log driver for commands    (default_log_driver)
   ├─ .EventWatcherKind        WatcherKind  # inotify (linux) or poll    (event_watcher_kind)
-  └─ .DefaultHooks            HookSet      # OSC/BEL hooks by event     (default_hooks)
+  ├─ .DefaultHooks            HookSet      # OSC/BEL hooks by event     (default_hooks)
+  └─ .ConfigPath              string       # --config value, if given   (not serialized)
 
 LogDriver and WatcherKind are string types; HookSet is a map keyed by event name.
 

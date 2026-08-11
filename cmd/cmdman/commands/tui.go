@@ -89,14 +89,23 @@ func runTui(
 	}
 
 	if popup.set {
-		// The popup child re-execs cmdman, so it gets the dirs this process
-		// resolved rather than resolving them again from its own environment.
+		// The popup child re-execs cmdman, so it gets the dirs and the config
+		// file this process resolved rather than resolving them again from its
+		// own environment.
 		cfg, err := loadConfig(cmd, rf)
 		if err != nil {
 			return err
 		}
 		return cli.LaunchTUIPopup(
-			cmd.Context(), popup.value, cfg.DataDir, cfg.RuntimeDir, tab, flagWorkDir, geom)
+			cmd.Context(),
+			popup.value,
+			cfg.DataDir,
+			cfg.RuntimeDir,
+			cfg.ConfigPath,
+			tab,
+			flagWorkDir,
+			geom,
+		)
 	}
 
 	svc, err := cmdmanService(cmd, rf)

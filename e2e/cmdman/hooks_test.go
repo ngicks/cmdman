@@ -21,8 +21,47 @@ import (
 // by a later `run` picks it up.
 func writeHookConfig(t *testing.T, env *testEnv, hooksJSON string) {
 	t.Helper()
+	writeHookConfigAt(t, env.confPath, hooksJSON)
+}
+
+// writeHookConfigAt is writeHookConfig for a path the test names itself - the
+// only way to exercise the config file as something other than $CMDMAN_CONF.
+func writeHookConfigAt(t *testing.T, path, hooksJSON string) {
+	t.Helper()
 	conf := `{"default_hooks": ` + hooksJSON + `}`
-	must(t, os.WriteFile(env.confPath, []byte(conf), 0o600))
+	must(t, os.WriteFile(path, []byte(conf), 0o600))
+}
+
+// bellHookWriting returns a default_hooks map whose bell hook writes
+// "<event>|<command id>" to out, so a passing assertion means the monitor
+// loaded the config, filtered the bell, and ran the hook with its environment.
+func bellHookWriting(out string) string {
+	return `{
+  "bell": {
+    "exec": [
+      "/bin/sh", "-c",
+      "printf '%s|%s' \"$` + cmdman.ENV_CMDMAN_HOOK_EVENT + `\" \"$` +
+		cmdman.ENV_CMDMAN_CMD_ID + `\" > \"$0\"",
+      "` + out + `"
+    ]
+  }
+}`
+}
+
+// waitForHookOutput waits for the bell hook to write out and asserts it saw the
+// event and the command it belongs to.
+func waitForHookOutput(t *testing.T, out, id string) {
+	t.Helper()
+	waitUntil(t, defaultTimeout, func() bool {
+		_, err := os.Stat(out)
+		return err == nil
+	}, "bell hook never ran (expected it to write %q)", out)
+
+	data, err := os.ReadFile(out)
+	must(t, err)
+	if got, want := string(data), "bell|"+id; got != want {
+		t.Fatalf("hook environment: got %q, want %q", got, want)
+	}
 }
 
 // TestHooks_BellRunsConfiguredCommand rings a BEL from a supervised TTY command
@@ -34,31 +73,39 @@ func TestHooks_BellRunsConfiguredCommand(t *testing.T) {
 	env := newTestEnv(t)
 
 	out := filepath.Join(t.TempDir(), "bell-hook.out")
-	writeHookConfig(t, env, `{
-  "bell": {
-    "exec": [
-      "/bin/sh", "-c",
-      "printf '%s|%s' \"$`+cmdman.ENV_CMDMAN_HOOK_EVENT+`\" \"$`+
-		cmdman.ENV_CMDMAN_CMD_ID+`\" > \"$0\"",
-      "`+out+`"
-    ]
-  }
-}`)
+	writeHookConfig(t, env, bellHookWriting(out))
 
 	id := env.run(ctx, "run", "-t", "--", "/bin/sh", "-c", `printf '\a'; sleep 30`)
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
 	env.waitForState(ctx, id, "running", defaultTimeout)
 
-	waitUntil(t, defaultTimeout, func() bool {
-		_, err := os.Stat(out)
-		return err == nil
-	}, "bell hook never ran (expected it to write %q)", out)
+	waitForHookOutput(t, out, id)
+}
 
-	data, err := os.ReadFile(out)
-	must(t, err)
-	if got, want := string(data), "bell|"+id; got != want {
-		t.Fatalf("hook environment: got %q, want %q", got, want)
-	}
+// TestHooks_ConfigFlagReachesMonitor is the same assertion sourced from
+// --config instead of $CMDMAN_CONF. The hooks live in a file nothing in the
+// environment points at, so they can only reach the monitor if `run` forwards
+// its --config to the process it re-execs: a child inherits the environment,
+// which is what makes the sibling case above pass without any forwarding.
+func TestHooks_ConfigFlagReachesMonitor(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	dir := t.TempDir()
+	out := filepath.Join(dir, "bell-hook.out")
+	confPath := filepath.Join(dir, "config.json")
+	writeHookConfigAt(t, confPath, bellHookWriting(out))
+
+	id := env.run(ctx,
+		"--config", confPath,
+		"run", "-t", "--", "/bin/sh", "-c", `printf '\a'; sleep 30`)
+	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
+	// Deliberately without --config: only the spawning invocation needs it, and
+	// the state these poll for is written by the monitor.
+	env.waitForState(ctx, id, "running", defaultTimeout)
+
+	waitForHookOutput(t, out, id)
 }
 
 // bellMarker is printed right behind every bell the test command rings, so a

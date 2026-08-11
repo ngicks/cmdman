@@ -75,6 +75,22 @@ func TestChildCommandForwardsDirs(t *testing.T) {
 	}
 }
 
+// TestChildCommandForwardsConfig pins --config onto the child argv rather than
+// leaving it to the inherited environment: the popup child is started by the
+// tmux server, so PopupConfig.ConfPath as $CMDMAN_CONF alone may not reach it.
+func TestChildCommandForwardsConfig(t *testing.T) {
+	plain := PopupConfig{Executable: "/usr/bin/cmdman"}.childCommand("/tmp/ipc.sock")
+	if strings.Contains(strings.Join(plain, " "), "--config") {
+		t.Errorf("childCommand without ConfPath should not forward --config, got %v", plain)
+	}
+
+	withConf := PopupConfig{Executable: "/usr/bin/cmdman", ConfPath: "/etc/cmdman.json"}.
+		childCommand("/tmp/ipc.sock")
+	if !strings.Contains(strings.Join(withConf, " "), "--config /etc/cmdman.json") {
+		t.Errorf("childCommand should forward --config /etc/cmdman.json, got %v", withConf)
+	}
+}
+
 func TestChildCommandForwardsTab(t *testing.T) {
 	// No Tab set: the popup child argv must not carry a --tab flag.
 	plain := PopupConfig{Executable: "/usr/bin/cmdman"}.childCommand("/tmp/ipc.sock")

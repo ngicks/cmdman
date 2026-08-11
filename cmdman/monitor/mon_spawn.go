@@ -23,7 +23,10 @@ import (
 //
 // cfg is the caller's already-resolved configuration; its dirs are passed to the
 // child as flags so the monitor supervises the same store no matter what the
-// child's own environment would have resolved to.
+// child's own environment would have resolved to. cfg.ConfigPath is forwarded
+// the same way when set: the child inherits $CMDMAN_CONF but not --config, and
+// without it the file-only settings the monitor consumes (config.DefaultHooks)
+// would silently fall back to the default location.
 func newMonitorCmd(cfg config.Config, id string, extraEnv []string) (*exec.Cmd, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -33,12 +36,16 @@ func newMonitorCmd(cfg config.Config, id string, extraEnv []string) (*exec.Cmd, 
 		return nil, fmt.Errorf("resolve executable: %w", err)
 	}
 
-	cmd := exec.Command(exe,
+	args := []string{
 		"--data-dir", cfg.DataDir,
 		"--runtime-dir", cfg.RuntimeDir,
-		"__monitor",
-		"--id", id,
-	)
+	}
+	if cfg.ConfigPath != "" {
+		args = append(args, "--config", cfg.ConfigPath)
+	}
+	args = append(args, "__monitor", "--id", id)
+
+	cmd := exec.Command(exe, args...)
 	if extraEnv != nil {
 		cmd.Env = append(os.Environ(), extraEnv...)
 	}
