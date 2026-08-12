@@ -79,6 +79,7 @@ func TestRenderMuxWindowsScaleColumn(t *testing.T) {
 		WindowName:     "cmdman",
 		WindowID:       "@3",
 		Identity:       "aabb-myapp",
+		Frame:          "dev",
 		Marker:         1,
 		ScalePositions: map[string]int{"web": 2},
 	}}
@@ -96,12 +97,39 @@ func TestRenderMuxWindowsScaleColumn(t *testing.T) {
 
 	header := strings.Fields(lines[0])
 	assert.DeepEqual(t, header, []string{
-		"SESSION", "WINDOW", "ID", "IDENTITY", "LAYOUT", "SCALE",
+		"SESSION", "WINDOW", "ID", "IDENTITY", "FRAME", "LAYOUT", "SCALE",
 	})
 
 	// SCALE pairs contain internal spaces, so compare the leading fixed
 	// columns and the trailing SCALE pairs separately.
 	fields := strings.Fields(lines[1])
-	want := []string{"main", "cmdman", "@3", "aabb-myapp", "1", "web=2/3", "worker=1/2"}
+	want := []string{"main", "cmdman", "@3", "aabb-myapp", "dev", "1", "web=2/3", "worker=1/2"}
 	assert.DeepEqual(t, fields, want)
+}
+
+// TestRenderMuxWindowsFrameColumn pins the FRAME column on the window the
+// column exists for and on the one it does not: a frame shown around a window
+// is named, and an unframed window reads "-" rather than a blank cell that
+// would collapse into its neighbour under strings.Fields.
+func TestRenderMuxWindowsFrameColumn(t *testing.T) {
+	windows := []mux.OwnedWindow{
+		{SessionName: "main", WindowName: "cmdman", WindowID: "@3", Identity: "p", Marker: -1},
+		{SessionName: "main", WindowName: "chrome", WindowID: "@4", Frame: "dev", Marker: -1},
+	}
+
+	var out bytes.Buffer
+	err := RenderMuxWindows(&out, windows, nil, nil, "")
+	assert.NilError(t, err)
+
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	assert.Equal(t, len(lines), 3, "output = %q", out.String())
+
+	assert.DeepEqual(
+		t,
+		strings.Fields(lines[1]),
+		[]string{"main", "cmdman", "@3", "p", "-", "-", "-"},
+	)
+	// A frame-only window carries no identity, so its IDENTITY cell is blank
+	// and only the frame name distinguishes the row.
+	assert.DeepEqual(t, strings.Fields(lines[2]), []string{"main", "chrome", "@4", "dev", "-", "-"})
 }

@@ -171,11 +171,12 @@ func TestNew_DoesNotReuseMultiPaneCurrentWindow(t *testing.T) {
 }
 
 // TestNew_ReusesOwnedCurrentWindow verifies that a window we built before —
-// one that carries the @cmdman_window ownership stamp — is reused in place even
-// when it is multi-pane and its name does not match, so a re-run cycles the
-// layout in place. Ownership is now determined by the window-level option rather
-// than requiring every pane to carry a numeric marker; the test therefore builds
-// the session with a non-empty OwnedIdentity.
+// one that carries this caller's identity in the @cmdman_window ownership stamp
+// — is reused in place even when it is multi-pane and its name does not match,
+// so a re-run cycles the layout in place. Ownership is now determined by the
+// window-level option rather than requiring every pane to carry a numeric
+// marker; the test therefore builds the session with a non-empty OwnedIdentity
+// and re-runs with the same one, as a real second `mux up` does.
 func TestNew_ReusesOwnedCurrentWindow(t *testing.T) {
 	requireTmux(t)
 	socket := uniqueSocket(t)
@@ -205,6 +206,7 @@ func TestNew_ReusesOwnedCurrentWindow(t *testing.T) {
 	sess2, err := srv.New(context.Background(), muxctl.Config{
 		SessionName:        "cmdman-test",
 		WindowName:         "unrelated-name",
+		OwnedIdentity:      "my-project", // the same invocation re-run
 		ReuseCurrentWindow: true,
 	})
 	if err != nil {
@@ -212,6 +214,116 @@ func TestNew_ReusesOwnedCurrentWindow(t *testing.T) {
 	}
 	if sess2.WindowID() != ownedID {
 		t.Errorf("expected to reuse owned current window %s, got %s", ownedID, sess2.WindowID())
+	}
+}
+
+// TestNew_DeclinesForeignIdentityCurrentWindow is the takeover guard: a plain
+// `mux up` typed inside ANOTHER project's window must build its own window
+// instead of eating that one. The foreign window is framed, which is where the
+// old rule hurt most — it accepted any non-empty ownership stamp, and the apply
+// that followed would have rebuilt the region under a project that is still
+// running there.
+func TestNew_DeclinesForeignIdentityCurrentWindow(t *testing.T) {
+	requireTmux(t)
+	socket := uniqueSocket(t)
+	t.Cleanup(func() { killServer(t, socket) })
+	ctx := context.Background()
+
+	srv := newServer(t, socket)
+	foreign, err := srv.New(ctx, muxctl.Config{
+		SessionName:   "main",
+		WindowName:    "theirs",
+		OwnedIdentity: "other-project",
+	})
+	if err != nil {
+		t.Fatalf("New (foreign): %v", err)
+	}
+	if _, err := foreign.ApplyLayout(ctx, loadLayout(t, "horizontal-two.yaml", ""), 0); err != nil {
+		t.Fatalf("ApplyLayout (foreign): %v", err)
+	}
+	frameID := dockFramePane(t, socket, foreign.WindowID())
+	before := listPaneIDs(t, socket, foreign.WindowID())
+	// Make their window the one the takeover check resolves as "current".
+	run(t, socket, "select-window", "-t", foreign.WindowID())
+
+	mine, err := srv.New(ctx, muxctl.Config{
+		SessionName:        "main",
+		WindowName:         "cmdman",
+		OwnedIdentity:      "my-project",
+		ReuseCurrentWindow: true,
+	})
+	if err != nil {
+		t.Fatalf("New (mine): %v", err)
+	}
+	if mine.WindowID() == foreign.WindowID() {
+		t.Fatalf("took over window %s owned by another identity", foreign.WindowID())
+	}
+	if _, err := mine.ApplyLayout(ctx, loadLayout(t, "single-leaf.yaml", ""), 0); err != nil {
+		t.Fatalf("ApplyLayout (mine): %v", err)
+	}
+
+	if got := listPaneIDs(t, socket, foreign.WindowID()); !slices.Equal(got, before) {
+		t.Errorf("their panes = %v, want %v unchanged", got, before)
+	}
+	if got := paneFormat(t, socket, frameID, "#{@cmdman_frame}"); got == "" {
+		t.Errorf("their frame pane %s lost its stamp", frameID)
+	}
+	if got := windowOption(
+		t,
+		socket,
+		foreign.WindowID(),
+		"@cmdman_window",
+	); got != "other-project" {
+		t.Errorf("their ownership stamp = %q, want other-project", got)
+	}
+	if names := listWindowNames(t, socket, "main"); !slices.Contains(names, "cmdman") {
+		t.Errorf("expected a separate cmdman window; have %v", names)
+	}
+}
+
+// TestNew_ReusesFrameOnlyCurrentWindow covers show-before-launch: a window that
+// holds a frame and no project is chrome waiting for one, so a project started
+// from inside it lands in the region the frame leaves over rather than opening
+// somewhere else. Neither of the unowned rules would accept such a window — it
+// is multi-pane and named nothing like ours — so this is its own branch.
+func TestNew_ReusesFrameOnlyCurrentWindow(t *testing.T) {
+	requireTmux(t)
+	socket := uniqueSocket(t)
+	t.Cleanup(func() { killServer(t, socket) })
+	ctx := context.Background()
+
+	run(t, socket, "new-session", "-d", "-s", "main", "-n", "work")
+	curID := run(t, socket, "display-message", "-t", "main:work", "-p", "#{window_id}")
+	frameID := dockFramePane(t, socket, curID)
+	run(t, socket, "set-option", "-w", "-t", curID, "@cmdman_frame_def", "dev")
+
+	sess, err := newServer(t, socket).New(ctx, muxctl.Config{
+		SessionName:        "main",
+		WindowName:         "cmdman",
+		OwnedIdentity:      "my-project",
+		ReuseCurrentWindow: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if sess.WindowID() != curID {
+		t.Fatalf("expected to land in the framed window %s, got %s", curID, sess.WindowID())
+	}
+	if names := listWindowNames(t, socket, "main"); slices.Contains(names, "cmdman") {
+		t.Errorf("a separate cmdman window should not be created; have %v", names)
+	}
+
+	if _, err := sess.ApplyLayout(ctx, loadLayout(t, "horizontal-two.yaml", ""), 0); err != nil {
+		t.Fatalf("ApplyLayout: %v", err)
+	}
+	if ids := listPaneIDs(t, socket, curID); !slices.Contains(ids, frameID) {
+		t.Errorf("frame pane %s did not survive the project apply: %v", frameID, ids)
+	}
+	if got := windowOption(t, socket, curID, "@cmdman_window"); got != "my-project" {
+		t.Errorf("ownership stamp = %q, want my-project", got)
+	}
+	if got := windowOption(t, socket, curID, "@cmdman_frame_def"); got != "dev" {
+		t.Errorf("frame def = %q, want dev: the project must not clear it", got)
 	}
 }
 

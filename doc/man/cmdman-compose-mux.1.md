@@ -78,10 +78,12 @@ session defaults to `cmdman` and an attach command is printed.
 ### down
 
 Tear down the cmdman-owned dashboard windows matching this compose project.
-The in-pane viewers are detached, the window collapses to a single clean pane,
-and the tmux options cmdman set are cleared — including the stored replica
-positions (`@cmdman_scale`). The services and their monitors keep running —
-only the disposable viewers are torn down.
+The in-pane viewers are detached and the project's panes and state are
+removed — including the stored replica positions (`@cmdman_scale`). A frame
+standing on a window is left in place with its own state; on a window with
+no frame the window collapses to a single clean pane and every tmux option
+cmdman set is cleared. The services and their monitors keep running — only
+the disposable viewers are torn down.
 
 Window discovery is server-wide with no dependence on `$TMUX`: `down` works
 from any pane, from `run-shell`, or from outside tmux entirely. `--session`
@@ -118,8 +120,12 @@ the same server `compose mux down` queries.
 SCALE column. If the store is unavailable or a command has no live replicas,
 the count renders as `?`.
 
-Columns: `SESSION`, `WINDOW`, `ID`, `IDENTITY`, `LAYOUT`, `SCALE`.
+Columns: `SESSION`, `WINDOW`, `ID`, `IDENTITY`, `FRAME`, `LAYOUT`, `SCALE`.
 
+- The `FRAME` column shows the name of the frame def currently shown around the
+  window, or `-` when the window is unframed. The listing filters on the
+  project identity, so a window whose project was torn down under a standing
+  frame no longer appears here — use standalone `mux ls` to see it.
 - The `LAYOUT` column shows the last applied layout index; `-1` (no layout
   applied yet) is displayed as `-`.
 - The `SCALE` column shows per-window cycle-scale positions and live replica
@@ -200,10 +206,12 @@ Uses the compose selection flags documented in
   server-wide scan.
 - `--format FORMAT`: output format. `table` (default) or a Go
   `text/template` string applied per row. Template fields: `.SessionName`,
-  `.WindowName`, `.WindowID`, `.Identity`, `.Marker` (int; `-1` means no
+  `.WindowName`, `.WindowID`, `.Identity`, `.Frame` (string; the frame def
+  shown around the window, empty when unframed), `.Marker` (int; `-1` means no
   layout applied), `.Scale` (string; precomputed SCALE column value,
-  `cmd=pos/count` pairs or `"-"`). Extra template function: `muxMarker`
-  (renders `-1` as `"-"`). Standard template functions: `cell`, `command`,
+  `cmd=pos/count` pairs or `"-"`). Extra template functions: `muxMarker`
+  (renders `-1` as `"-"`), `muxFrame` (renders an unframed window as `"-"`).
+  Standard template functions: `cell`, `command`,
   `deref`, `exitCode`, `fit`, `join`, `json`, `pad`, `shortID`, `trunc`,
   `width`.
 

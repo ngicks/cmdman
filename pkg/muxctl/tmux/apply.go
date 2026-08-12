@@ -11,10 +11,18 @@ import (
 	"github.com/ngicks/cmdman/pkg/muxctl"
 )
 
-// ApplyLayout resets the controlled window and rebuilds root depth-first.
+// ApplyLayout resets the controlled window's project region and rebuilds root
+// depth-first inside it.
 // A nonnegative marker is an opaque layout index persisted on every realized
 // pane and read by [Session.StatWindow]; a negative marker skips recording and
 // clears stale values. Panes too small to realize are skipped and logged.
+//
+// Frame-stamped panes (frameOption) are not part of the project layout: they
+// survive the reset, the rebuild is anchored on the project region they leave
+// over, and they are never the pane left focused — [muxctl.PickFocus] chooses
+// among the layout's own leaves, and whatever the reset did to the active pane
+// is settled afterwards. A window carrying no frame panes is reset whole,
+// exactly as before.
 func (s *Session) ApplyLayout(
 	ctx context.Context,
 	root muxctl.PaneSpec,
@@ -23,7 +31,7 @@ func (s *Session) ApplyLayout(
 	restore := s.quiesceViewers(ctx)
 	defer restore()
 
-	anchorID, err := s.resetWindow(ctx)
+	anchorID, framed, err := s.resetWindow(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("tmux: reset window: %w", err)
 	}
@@ -54,7 +62,7 @@ func (s *Session) ApplyLayout(
 	// its settled pane size at startup, eliminating the respawn-before-resize
 	// race (see realizeLeafAt).
 	for _, rl := range st.leaves {
-		if err := s.stampLeaf(ctx, rl.paneID, rl.leaf, false, marker); err != nil {
+		if err := s.stampLeaf(ctx, rl.paneID, rl.leaf, false, marker, false); err != nil {
 			return nil, err
 		}
 	}
@@ -65,6 +73,19 @@ func (s *Session) ApplyLayout(
 			if _, err := s.exec.run(ctx, "select-pane", "-t", p.PaneId()); err != nil {
 				return nil, fmt.Errorf("tmux: select focus pane %q: %w", focusName, err)
 			}
+		}
+	}
+	// The focus the layout asks for is only as good as the panes it names: a
+	// focus leaf skipped for lack of room, or a layout naming none, selects
+	// nothing — and the reset above can have left the active pane on a frame
+	// pane (measured: tmux falls back to the last-active pane, frame or not,
+	// when the active one is killed). Settling it here is what makes "focus
+	// lands in the project region" hold for every layout, not just the ones
+	// that name a leaf. An unframed window has no such pane to land on and is
+	// left alone, so nothing changes for a caller without a frame.
+	if framed {
+		if err := s.focusMainRegion(ctx, anchorID); err != nil {
+			return nil, err
 		}
 	}
 
@@ -78,6 +99,9 @@ type applyState struct {
 	panes   map[string]muxctl.Pane
 	leaves  []realizedLeaf // leaves to respawn after geometry settles (see realizeLeafAt)
 	skipped []string
+	// frame builds a frame subtree rather than the project layout, so every
+	// pane split off here is stamped as a frame pane the moment it exists.
+	frame bool
 }
 
 // realizedLeaf is a leaf pane whose geometry is placed but whose viewer respawn
@@ -148,31 +172,59 @@ func (st *applyState) split(targetID string, dir muxctl.Direction, cells int) (s
 	if err != nil {
 		return "", fmt.Errorf("tmux: split-window %s on %s: %w", flag, targetID, err)
 	}
-	return strings.TrimSpace(out), nil
+	id := strings.TrimSpace(out)
+	if st.frame {
+		// A bar holding a subtree is subdivided here, and its children are frame
+		// panes too — stamped on creation for the same reason splitFullWindow
+		// stamps the bars themselves.
+		if err := st.s.stampFramePane(st.ctx, id); err != nil {
+			return "", err
+		}
+	}
+	return id, nil
 }
 
 func (st *applyState) recordSkipped(node muxctl.PaneSpec) {
 	st.skipped = muxctl.AppendLeafNames(st.skipped, node)
 }
 
-// resetWindow reduces the window to its first pane and returns that anchor.
-func (s *Session) resetWindow(ctx context.Context) (string, error) {
-	out, err := s.exec.run(
-		ctx, "list-panes", "-t", s.windowID, "-F", "#{pane_id}",
-	)
+// resetWindow reduces the window to its first project pane and returns that
+// anchor, plus whether the window carries a frame. Frame panes are spared, so
+// the anchor left over is the project region and the rebuild stays inside it;
+// on an unframed window every pane is a project pane and this is the
+// whole-window reset it has always been.
+//
+// A framed window with no project pane left — its viewers exited under a frame
+// that kept the window open — is not a dead end: the main region is spawned
+// back (see spawnMainRegion) and the rebuild proceeds inside it. That is the
+// same seam a frame shown before anything was launched sits on, and the reason
+// an apply can follow a show in either order.
+//
+// framed is what tells a caller whether it must settle the focus afterwards:
+// killing the active pane makes tmux fall back to the last-active one, which on
+// a framed window can be a frame pane. It is meaningful only alongside a nil
+// error; a failed reset reports false and leaves the window as it found it.
+func (s *Session) resetWindow(ctx context.Context) (anchorID string, framed bool, err error) {
+	panes, err := listPanesByRole(ctx, s.exec, s.windowID)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	ids := strings.Split(out, "\n")
-	if len(ids) == 0 || ids[0] == "" {
-		return "", fmt.Errorf("tmux: window %s has no panes", s.windowID)
+	if len(panes.project) == 0 {
+		if len(panes.frame) == 0 {
+			return "", false, fmt.Errorf("tmux: window %s has no panes", s.windowID)
+		}
+		anchorID, err := s.spawnMainRegion(ctx)
+		if err != nil {
+			return "", false, err
+		}
+		return anchorID, true, nil
 	}
-	for _, id := range ids[1:] {
+	for _, id := range panes.project[1:] {
 		if _, err := s.exec.run(ctx, "kill-pane", "-t", id); err != nil {
-			return "", fmt.Errorf("tmux: kill stale pane %s: %w", id, err)
+			return "", false, fmt.Errorf("tmux: kill stale pane %s: %w", id, err)
 		}
 	}
-	return ids[0], nil
+	return panes.project[0], len(panes.frame) > 0, nil
 }
 
 // respawnPane kills the prior pane process and executes argv directly, without
@@ -193,14 +245,34 @@ func (s *Session) paneSize(ctx context.Context, paneID string) (int, int, error)
 	if err != nil {
 		return 0, 0, err
 	}
+	return parseCellPair(out)
+}
+
+// windowSize returns the width and height (in cells) of the controlled window.
+// A frame divides the window rather than the pane it is anchored on, so its
+// arithmetic starts here instead of at paneSize.
+func (s *Session) windowSize(ctx context.Context) (int, int, error) {
+	out, err := s.exec.run(
+		ctx, "display-message", "-t", s.windowID, "-p",
+		"#{window_width}\t#{window_height}",
+	)
+	if err != nil {
+		return 0, 0, err
+	}
+	return parseCellPair(out)
+}
+
+// parseCellPair reads a tab-separated width/height pair as emitted by the
+// display-message formats above.
+func parseCellPair(out string) (int, int, error) {
 	parts := strings.SplitN(strings.TrimSpace(out), "\t", 2)
 	if len(parts) < 2 {
-		return 0, 0, fmt.Errorf("tmux: bad pane size output %q", out)
+		return 0, 0, fmt.Errorf("tmux: bad size output %q", out)
 	}
 	w, errW := strconv.Atoi(parts[0])
 	h, errH := strconv.Atoi(parts[1])
 	if errW != nil || errH != nil {
-		return 0, 0, fmt.Errorf("tmux: parse pane size %q", out)
+		return 0, 0, fmt.Errorf("tmux: parse size %q", out)
 	}
 	return w, h, nil
 }

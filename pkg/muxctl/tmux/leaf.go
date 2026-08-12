@@ -38,20 +38,27 @@ func (s *Session) quiesceSinglePane(ctx context.Context, paneID string) func() {
 	}
 }
 
-// stampLeaf sets the pane title, optionally the marker option, and the leaf
-// option on paneID, then respawns the pane with the leaf's Cmd. It is the
-// shared implementation used by both realizeLeafAt (full layout apply) and
+// stampLeaf sets the pane title, the role stamp, optionally the marker option,
+// and the leaf option on paneID, then respawns the pane with the leaf's Cmd. It
+// is the shared implementation used by realizeLeafAt (full layout apply) and
 // RespawnLeaf (targeted single-pane update for cycle-scale).
 //
 // When preserveMarker is true the markerOption is not touched (RespawnLeaf
 // advances the replica but preserves the current layout index). When false,
 // the marker int is written (>= 0) or cleared (< 0).
+//
+// frame stamps the pane as part of a shown frame instead of the project
+// layout; preserveMarker and marker are then irrelevant, since a frame pane
+// carries neither the layout marker nor a cycle key. This is the single write
+// path for frameOption, so the invariant is enforced here rather than in each
+// scan that reads those options.
 func (s *Session) stampLeaf(
 	ctx context.Context,
 	paneID string,
 	leaf muxctl.PaneSpec,
 	preserveMarker bool,
 	marker int,
+	frame bool,
 ) error {
 	// Set the pane title and marker option BEFORE respawning. respawn-pane -k
 	// SIGHUPs the existing in-pane process tree; when the process being
@@ -64,34 +71,48 @@ func (s *Session) stampLeaf(
 	); err != nil {
 		return fmt.Errorf("tmux: set pane title for %s: %w", paneID, err)
 	}
-	if !preserveMarker {
-		if marker >= 0 {
+	if frame {
+		if _, err := s.exec.run(
+			ctx, "set-option", "-p", "-t", paneID, frameOption, frameStamp,
+		); err != nil {
+			return fmt.Errorf("tmux: set frame option for %s: %w", paneID, err)
+		}
+		_, _ = s.exec.run(ctx, "set-option", "-p", "-u", "-t", paneID, markerOption)
+		_, _ = s.exec.run(ctx, "set-option", "-p", "-u", "-t", paneID, leafOption)
+	} else {
+		// Clear a stale frame stamp: a project pane keeping one would be spared
+		// by every later resetWindow, so panes would pile up on each apply.
+		_, _ = s.exec.run(ctx, "set-option", "-p", "-u", "-t", paneID, frameOption)
+
+		if !preserveMarker {
+			if marker >= 0 {
+				if _, err := s.exec.run(
+					ctx, "set-option", "-p", "-t", paneID,
+					markerOption, strconv.Itoa(marker),
+				); err != nil {
+					return fmt.Errorf("tmux: set marker option for %s: %w", paneID, err)
+				}
+			} else {
+				// Clear any stale marker so a marker-less apply leaves the pane in
+				// a clean state (best-effort: the option may not exist yet).
+				_, _ = s.exec.run(
+					ctx, "set-option", "-p", "-u", "-t", paneID, markerOption,
+				)
+			}
+		}
+		if leaf.CycleKey != "" {
 			if _, err := s.exec.run(
 				ctx, "set-option", "-p", "-t", paneID,
-				markerOption, strconv.Itoa(marker),
+				leafOption, leaf.CycleKey,
 			); err != nil {
-				return fmt.Errorf("tmux: set marker option for %s: %w", paneID, err)
+				return fmt.Errorf("tmux: set leaf option for %s: %w", paneID, err)
 			}
 		} else {
-			// Clear any stale marker so a marker-less apply leaves the pane in a
-			// clean state (best-effort: the option may not exist yet).
+			// Clear any stale leaf key from a previous apply that had CycleKey set.
 			_, _ = s.exec.run(
-				ctx, "set-option", "-p", "-u", "-t", paneID, markerOption,
+				ctx, "set-option", "-p", "-u", "-t", paneID, leafOption,
 			)
 		}
-	}
-	if leaf.CycleKey != "" {
-		if _, err := s.exec.run(
-			ctx, "set-option", "-p", "-t", paneID,
-			leafOption, leaf.CycleKey,
-		); err != nil {
-			return fmt.Errorf("tmux: set leaf option for %s: %w", paneID, err)
-		}
-	} else {
-		// Clear any stale leaf key from a previous apply that had CycleKey set.
-		_, _ = s.exec.run(
-			ctx, "set-option", "-p", "-u", "-t", paneID, leafOption,
-		)
 	}
 	if err := s.respawnPane(ctx, paneID, leaf.Cmd); err != nil {
 		return fmt.Errorf("tmux: respawn pane %s with %v: %w", paneID, leaf.Cmd, err)
@@ -144,5 +165,5 @@ func (s *Session) RespawnLeaf(
 	defer restore()
 
 	paneSpec := muxctl.PaneSpec{Leaf: leaf}
-	return s.stampLeaf(ctx, paneID, paneSpec, true, 0)
+	return s.stampLeaf(ctx, paneID, paneSpec, true, 0, false)
 }

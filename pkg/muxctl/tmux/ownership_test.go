@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ngicks/cmdman/cmdman/frame"
 	"github.com/ngicks/cmdman/pkg/muxctl"
 )
 
@@ -79,15 +80,14 @@ func TestNew_NoStampWhenIdentityEmpty(t *testing.T) {
 // the caller and handed in via WindowID.
 //
 // NOTE on ReuseCurrentWindow / display-message path: currentWindowToReuse calls
-// "tmux display-message" which resolves the CURRENT window of an ATTACHED
-// client. Without a real attached tmux client (which cannot be driven in a
-// headless test context), display-message returns an empty or error result and
-// currentWindowToReuse returns ok=false — causing New to fall back to
-// find-or-create. The stamping itself is not path-specific (it runs after wid
-// is resolved regardless of how wid was obtained), so the WindowID path below
-// is sufficient to verify that the stamp block in New is reachable and correct.
-// An integration test with a real attached client would be required to exercise
-// the display-message takeover path end-to-end.
+// "tmux display-message", which resolves the current window of the server's
+// current session — a select-window is enough to steer it, so the takeover
+// rules themselves are covered headlessly (see TestNew_ReusesOwnedCurrentWindow
+// and the takeover-guard cases beside it). What still needs a real attached
+// client is only tmux's client-dependent resolution when several clients sit in
+// different windows. The stamping below is not path-specific either (it runs
+// after wid is resolved, however it was obtained), so the WindowID path is what
+// this test keeps honest.
 func TestNew_StampsOwnerOption_WindowIDPath(t *testing.T) {
 	requireTmux(t)
 	socket := uniqueSocket(t)
@@ -368,6 +368,163 @@ func TestOwnership_SurvivesExtraUnmarkedPane(t *testing.T) {
 	// Ownership stamp cleared.
 	if got := windowOwnerOption(t, socket, sess.WindowID()); got != "" {
 		t.Errorf("@cmdman_window = %q after Detach, want empty", got)
+	}
+}
+
+// showFrameOn shows a one-entry frame named defName around whatever windowID's
+// session holds, through the session the caller already has.
+func showFrameOn(t *testing.T, sess muxctl.Session, defName string) {
+	t.Helper()
+	root := carveFrame(t, frame.Entry{
+		Edge:    frame.EdgeTop,
+		Size:    frame.Size{N: 3}.MuxSize(),
+		Command: sleepArgv,
+	})
+	if err := sess.ShowFrame(context.Background(), root, mainPaneName, defName); err != nil {
+		t.Fatalf("ShowFrame: %v", err)
+	}
+}
+
+// TestListWindows_ReportsBothIdentities pins identity coexistence: a framed
+// window answers for its project exactly as an unframed one does — the frame
+// never took the ownership slot — while the frame it holds rides along on the
+// same row. The second window is the case the enumeration gate has to widen
+// for: framed with no project (all a `mux down` under a frame leaves behind),
+// discoverable server-wide, and never an answer to another project's query.
+func TestListWindows_ReportsBothIdentities(t *testing.T) {
+	requireTmux(t)
+	socket := uniqueSocket(t)
+	t.Cleanup(func() { killServer(t, socket) })
+
+	const identity = "project-alpha"
+	ctx := context.Background()
+	srv := newServer(t, socket)
+
+	framed, err := srv.New(ctx, muxctl.Config{
+		SessionName:   "session-a",
+		WindowName:    "dash-a",
+		OwnedIdentity: identity,
+	})
+	if err != nil {
+		t.Fatalf("New session-a: %v", err)
+	}
+	showFrameOn(t, framed, "dev")
+
+	// No OwnedIdentity: the frame is the only thing this window carries.
+	frameOnly, err := srv.New(ctx, muxctl.Config{
+		SessionName: "session-b",
+		WindowName:  "dash-b",
+	})
+	if err != nil {
+		t.Fatalf("New session-b: %v", err)
+	}
+	showFrameOn(t, frameOnly, "ops")
+
+	all, err := srv.ListWindows(ctx, muxctl.ListOptions{})
+	if err != nil {
+		t.Fatalf("ListWindows (server-wide): %v", err)
+	}
+	byWindow := make(map[string]muxctl.Window, len(all))
+	for _, row := range all {
+		byWindow[row.WindowID] = row
+	}
+
+	row, ok := byWindow[framed.WindowID()]
+	if !ok {
+		t.Fatalf("framed window %s missing from the scan: %v", framed.WindowID(), all)
+	}
+	if row.Identity != identity {
+		t.Errorf("framed row Identity = %q, want %q", row.Identity, identity)
+	}
+	if row.Frame != "dev" {
+		t.Errorf("framed row Frame = %q, want dev", row.Frame)
+	}
+
+	row, ok = byWindow[frameOnly.WindowID()]
+	if !ok {
+		t.Fatalf("frame-only window %s missing from the scan: %v", frameOnly.WindowID(), all)
+	}
+	if row.Identity != "" {
+		t.Errorf("frame-only row Identity = %q, want empty", row.Identity)
+	}
+	if row.Frame != "ops" {
+		t.Errorf("frame-only row Frame = %q, want ops", row.Frame)
+	}
+
+	// ── the project's own query still finds its window, framed and all ────────
+
+	mine, err := srv.ListWindows(ctx, muxctl.ListOptions{Identity: identity})
+	if err != nil {
+		t.Fatalf("ListWindows (identity filter): %v", err)
+	}
+	if len(mine) != 1 || mine[0].WindowID != framed.WindowID() {
+		t.Fatalf("identity %q matched %v, want only the framed window %s",
+			identity, mine, framed.WindowID())
+	}
+	if mine[0].Frame != "dev" {
+		t.Errorf("filtered row Frame = %q, want dev", mine[0].Frame)
+	}
+
+	// ── and a frame name is never an answer for a project ─────────────────────
+
+	byFrameName, err := srv.ListWindows(ctx, muxctl.ListOptions{Identity: "ops"})
+	if err != nil {
+		t.Fatalf("ListWindows (frame name as identity): %v", err)
+	}
+	if len(byFrameName) != 0 {
+		t.Errorf("identity %q matched %v; the frame slot must not answer for a project",
+			"ops", byFrameName)
+	}
+}
+
+// TestListWindows_InlineStateSurvivesTheFrameField guards the row parsing: the
+// frame def became a base field ahead of the inline state values, so a state
+// key must still read back from its own column — on a framed window and on an
+// unframed one, where tmux drops the trailing empty field entirely.
+func TestListWindows_InlineStateSurvivesTheFrameField(t *testing.T) {
+	requireTmux(t)
+	socket := uniqueSocket(t)
+	t.Cleanup(func() { killServer(t, socket) })
+
+	ctx := context.Background()
+	srv := newServer(t, socket)
+	for _, tc := range []struct{ session, identity, frameDef, scale string }{
+		{"session-framed", "with-frame", "dev", "web=2"},
+		{"session-plain", "no-frame", "", "worker=3"},
+	} {
+		sess, err := srv.New(ctx, muxctl.Config{
+			SessionName:   tc.session,
+			WindowName:    "dash",
+			OwnedIdentity: tc.identity,
+		})
+		if err != nil {
+			t.Fatalf("New %s: %v", tc.session, err)
+		}
+		if tc.frameDef != "" {
+			showFrameOn(t, sess, tc.frameDef)
+		}
+		if err := srv.WriteWindowState(
+			ctx, sess.WindowID(), muxctl.StateKeyScale, tc.scale,
+		); err != nil {
+			t.Fatalf("WriteWindowState %s: %v", tc.session, err)
+		}
+
+		rows, err := srv.ListWindows(ctx, muxctl.ListOptions{
+			Identity:  tc.identity,
+			StateKeys: []muxctl.StateKey{muxctl.StateKeyScale},
+		})
+		if err != nil {
+			t.Fatalf("ListWindows %s: %v", tc.session, err)
+		}
+		if len(rows) != 1 {
+			t.Fatalf("%s: want 1 row, got %v", tc.session, rows)
+		}
+		if rows[0].Frame != tc.frameDef {
+			t.Errorf("%s: Frame = %q, want %q", tc.session, rows[0].Frame, tc.frameDef)
+		}
+		if got := rows[0].State[muxctl.StateKeyScale]; got != tc.scale {
+			t.Errorf("%s: scale state = %q, want %q", tc.session, got, tc.scale)
+		}
 	}
 }
 

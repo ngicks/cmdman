@@ -48,8 +48,14 @@ type DownOptions struct {
 // Down tears down every cmdman-owned dashboard matching opts.Identity
 // (server-wide, or limited to opts.SessionName when set). For each match it
 // opens the window by ID, sends the viewer detach sequence, collapses the
-// window to a single shell pane, and unsets the tmux ownership option. The
-// supervised commands keep running — only the disposable viewers are torn down.
+// dashboard's panes to a single default pane, and unsets the tmux ownership
+// option. The supervised commands keep running — only the disposable viewers
+// are torn down.
+//
+// A frame shown around the dashboard is not the project's to remove: the
+// window is left framed and projectless, ready for the next `mux up`. Removing
+// the frame is the frame verbs' own teardown, and whichever of the two goes
+// last hands the window back whole.
 //
 // Down enumerates windows via [muxctl.Server.ListWindows], which requires no
 // $TMUX context and works from any pane, from run-shell, or from outside

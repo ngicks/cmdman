@@ -85,6 +85,15 @@ main region by leaf name — the consumer passes a placeholder leaf to
 `frame.Spec.Carve` and hands its name to `ShowFrame` — reusing the
 existing leaf-name vocabulary instead of inventing a sentinel type.
 
+*Amendment (implementation, 2026-08-12).* The realized signature is
+`ShowFrame(ctx, root PaneSpec, mainName, defName string) error` — one
+parameter more than pinned. F2 requires `ShowFrame` itself to write the
+shown def's name into `@cmdman_frame_def`, and the three-arg form had
+nowhere to carry it; a side-channel write by the consumer would have
+split the atomic "show = panes + record" contract. Empty `mainName` or
+`defName` is an error (an empty def name would unset the state and leave
+a framed window claiming to be unframed).
+
 ### F2 — Frame identity lives in a `StateKey`-backed window option
 
 **Choice.** The shown frame def's name is stored in a window option
@@ -101,6 +110,17 @@ answer, and costs no extra round-trips in enumeration.
 
 **Rejected.** Pane-level stamps only (per-window scans; a frame with no
 panes has no record); a dedicated new mechanism (duplicates `StateKey`).
+
+*Amendment (implementation, 2026-08-12).* "Identity filtering can match
+either slot" is realized as the enumeration *gate* accepting either slot
+— a window carrying only a frame def still enumerates — while
+`ListOptions.Identity` keeps matching the ownership slot exactly. Both
+pinned queries stay answerable ("windows of project P" = the filter;
+"framed windows" = unfiltered scan + `Window.Frame`), and a destructive
+`Down --identity dev` can never match a window merely *framed* "dev". A
+literal either-slot `Identity` match was rejected in implementation: it
+would aim teardown at frame-named windows and still could not answer
+"framed windows" without knowing a def name up front.
 
 ### F3 — The project keeps `@cmdman_window`; the frame takes the second home
 

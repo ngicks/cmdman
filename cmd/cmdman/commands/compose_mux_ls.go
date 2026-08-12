@@ -28,7 +28,9 @@ func composeMuxLsCmd(
 Discovery is server-wide and requires no $TMUX context; it works from any
 pane, run-shell, or outside tmux. --session narrows the listing to one session.
 
-Columns: SESSION, WINDOW, ID, IDENTITY, LAYOUT (-1 displayed as "-"), SCALE.
+Columns: SESSION, WINDOW, ID, IDENTITY, FRAME, LAYOUT (-1 displayed as "-"),
+SCALE. The FRAME column names the frame def shown around the window ("-" when
+unframed).
 The SCALE column shows per-window cycle-target positions and live replica counts
 (e.g. "web=2/3"). Counts are resolved from the cmdman store; when the store
 has no entries the count renders as "?".`,

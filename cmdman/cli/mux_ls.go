@@ -28,7 +28,7 @@ type muxLsRow struct {
 }
 
 // DefaultMuxLsRowFormat renders one mux ls row: SESSION, WINDOW, ID, IDENTITY,
-// LAYOUT each laid out with "cell" against the widths the model already
+// FRAME, LAYOUT each laid out with "cell" against the widths the model already
 // measured; SCALE is the trailing column and runs through "fit" so it is
 // truncated to the terminal width remaining after the fixed columns. One column
 // per source line keeps the template readable; {{- -}} trims the joins to a
@@ -37,14 +37,26 @@ const DefaultMuxLsRowFormat = `{{- cell .SessionName .W.Session -}}
 {{- cell .WindowName .W.Window -}}
 {{- cell .WindowID .W.ID -}}
 {{- cell .Identity .W.Identity -}}
+{{- cell (muxFrame .Frame) .W.Frame -}}
 {{- cell (muxMarker .Marker) .W.Layout -}}
 {{- fit .Scale .Win .W.Used -}}`
 
-// muxTemplateFuncMap extends templateFuncMap with the muxMarker helper so that
-// both the built-in DefaultMuxLsRowFormat and any user-supplied --format can
-// call {{muxMarker .Marker}}.
+// muxFrameCell renders the FRAME column: the name of the frame shown around the
+// window, or "-" when it is unframed. It backs both the muxFrame template
+// helper and the column measurement, so what is printed and what is measured
+// cannot drift.
+func muxFrameCell(frame string) string {
+	if frame == "" {
+		return "-"
+	}
+	return frame
+}
+
+// muxTemplateFuncMap extends templateFuncMap with the muxMarker and muxFrame
+// helpers so that both the built-in DefaultMuxLsRowFormat and any user-supplied
+// --format can call {{muxMarker .Marker}} / {{muxFrame .Frame}}.
 var muxTemplateFuncMap = func() template.FuncMap {
-	m := make(template.FuncMap, len(templateFuncMap)+1)
+	m := make(template.FuncMap, len(templateFuncMap)+2)
 	maps.Copy(m, templateFuncMap)
 	m["muxMarker"] = func(marker int) string {
 		if marker < 0 {
@@ -52,12 +64,13 @@ var muxTemplateFuncMap = func() template.FuncMap {
 		}
 		return strconv.Itoa(marker)
 	}
+	m["muxFrame"] = muxFrameCell
 	return m
 }()
 
 // renderMuxTemplate applies format to each muxLsRow using muxTemplateFuncMap,
-// which extends the shared template helpers with muxMarker. Both the built-in
-// table and user --format strings can call {{muxMarker .Marker}}.
+// which extends the shared template helpers with muxMarker and muxFrame. Both
+// the built-in table and user --format strings can call them.
 func renderMuxTemplate(out io.Writer, rows []muxLsRow, format string) error {
 	tmpl, err := template.New("format").Funcs(muxTemplateFuncMap).Parse(format)
 	if err != nil {
@@ -123,8 +136,9 @@ func buildScaleColumn(
 //   - anything else: a Go text/template applied per row (same enriched muxLsRow
 //     model as the built-in table; no header is printed).
 //
-// The columns are SESSION, WINDOW, ID, IDENTITY, LAYOUT, SCALE.
-// A Marker of -1 is displayed as "-" (no layout applied yet).
+// The columns are SESSION, WINDOW, ID, IDENTITY, FRAME, LAYOUT, SCALE.
+// A Marker of -1 is displayed as "-" (no layout applied yet), and so is an
+// empty Frame (the window is unframed).
 //
 // replicaCounts maps command name to its live replica count. When nil, the
 // SCALE column shows positions without counts ("cmd=pos"). When the caller
@@ -166,6 +180,7 @@ func RenderMuxWindows(
 				cell("WINDOW", w["Window"])+
 				cell("ID", w["ID"])+
 				cell("IDENTITY", w["Identity"])+
+				cell("FRAME", w["Frame"])+
 				cell("LAYOUT", w["Layout"])+
 				"SCALE",
 		)
@@ -175,7 +190,7 @@ func RenderMuxWindows(
 }
 
 // measureMuxLs computes the longest display width of each column (header
-// included). The "Used" key records the total width the five fixed columns and
+// included). The "Used" key records the total width the six fixed columns and
 // their gaps consume before the trailing SCALE column.
 func measureMuxLs(windows []mux.OwnedWindow) map[string]int {
 	w := map[string]int{
@@ -183,6 +198,7 @@ func measureMuxLs(windows []mux.OwnedWindow) map[string]int {
 		"Window":   width("WINDOW"),
 		"ID":       width("ID"),
 		"Identity": width("IDENTITY"),
+		"Frame":    width("FRAME"),
 		"Layout":   width("LAYOUT"),
 	}
 	for _, win := range windows {
@@ -190,6 +206,7 @@ func measureMuxLs(windows []mux.OwnedWindow) map[string]int {
 		w["Window"] = max(w["Window"], width(win.WindowName))
 		w["ID"] = max(w["ID"], width(win.WindowID))
 		w["Identity"] = max(w["Identity"], width(win.Identity))
+		w["Frame"] = max(w["Frame"], width(muxFrameCell(win.Frame)))
 		// Marker is rendered through muxMarker: "-" or strconv.Itoa(marker).
 		var markerStr string
 		if win.Marker < 0 {
@@ -199,8 +216,8 @@ func measureMuxLs(windows []mux.OwnedWindow) map[string]int {
 		}
 		w["Layout"] = max(w["Layout"], width(markerStr))
 	}
-	w["Used"] = w["Session"] + w["Window"] + w["ID"] + w["Identity"] + w["Layout"] +
-		5*len(columnGap)
+	w["Used"] = w["Session"] + w["Window"] + w["ID"] + w["Identity"] + w["Frame"] +
+		w["Layout"] + 6*len(columnGap)
 	return w
 }
 
@@ -209,9 +226,11 @@ func MuxLsFormatUsage() string {
 	return `Output format: "table" (default) or a Go text/template string.
 Template fields:
   .SessionName (string), .WindowName (string), .WindowID (string),
-  .Identity (string), .Marker (int, -1 = no layout applied),
+  .Identity (string), .Frame (string, frame def shown, "" when unframed),
+  .Marker (int, -1 = no layout applied),
   .Scale (string, precomputed SCALE column: "cmd=pos/count" pairs or "-")
-Extra template function: muxMarker (renders Marker as "-" when -1)
+Extra template functions: muxMarker (renders Marker as "-" when -1),
+  muxFrame (renders Frame as "-" when unframed)
 Note: compose mux ls resolves replica counts; standalone mux ls shows pos only.
 Template functions: ` + templateFuncList()
 }

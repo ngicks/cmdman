@@ -60,6 +60,12 @@ func (srv *Server) CurrentSessionName(ctx context.Context) (name string, ok bool
 // or a window found-or-created by name (cfg.SessionName + cfg.WindowName).
 // It does not apply any layout — call [Session.ApplyLayout] to populate
 // the window.
+//
+// With cfg.ReuseCurrentWindow the caller's current window is taken over instead
+// when it is this caller's own (its @cmdman_window slot holds
+// cfg.OwnedIdentity), when it holds a frame but no project, or when it is
+// unowned and safe to repurpose — see [currentWindowToReuse]. Another project's
+// window is never taken over: its region would be rebuilt out from under it.
 func (srv *Server) New(ctx context.Context, cfg muxctl.Config) (muxctl.Session, error) {
 	e := srv.exec
 
@@ -75,7 +81,9 @@ func (srv *Server) New(ctx context.Context, cfg muxctl.Config) (muxctl.Session, 
 			return nil, errors.New("tmux: Config.WindowName is required when WindowID is empty")
 		}
 		if cfg.ReuseCurrentWindow {
-			if cur, ok := currentWindowToReuse(ctx, e, cfg.WindowName); ok {
+			if cur, ok := currentWindowToReuse(
+				ctx, e, cfg.WindowName, cfg.OwnedIdentity,
+			); ok {
 				wid = cur
 			}
 		}
@@ -132,11 +140,12 @@ func (srv *Server) New(ctx context.Context, cfg muxctl.Config) (muxctl.Session, 
 //
 //   - cfg.WindowID != "" targets that window directly.
 //   - otherwise, when cfg.ReuseCurrentWindow is set and the caller's current
-//     window carries the @cmdman_window option (i.e. it was stamped by a
-//     previous [New] call), that window is used. Unlike [New], an unowned
-//     current window is NEVER taken over: teardown must act only on a provably
-//     muxctl-owned window, never repurpose an arbitrary window the user happens
-//     to be sitting in.
+//     window carries cfg.OwnedIdentity in the @cmdman_window option (i.e. a
+//     previous [New] call stamped it for this same caller), that window is
+//     used. Unlike [New], nothing else is accepted — not an unowned window, not
+//     another project's, not a window holding only a frame: teardown must act
+//     only on a window that is provably the caller's, never repurpose one the
+//     user happens to be sitting in.
 //   - otherwise the window named cfg.WindowName in cfg.SessionName is looked up
 //     (find-only). A missing session or window yields ok=false rather than an
 //     error: from a teardown caller's view, "no session/window" simply means
@@ -150,7 +159,7 @@ func (srv *Server) Open(ctx context.Context, cfg muxctl.Config) (muxctl.Session,
 		wid = cfg.WindowID
 	default:
 		if cfg.ReuseCurrentWindow {
-			if cur, ok := currentWindowIfOwned(ctx, e); ok {
+			if cur, ok := currentWindowIfOwned(ctx, e, cfg.OwnedIdentity); ok {
 				wid = cur
 			}
 		}

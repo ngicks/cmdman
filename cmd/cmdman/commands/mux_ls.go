@@ -27,7 +27,10 @@ A layout file path is optional: when given it is read only to extract the
 driver configuration (for example a custom socket). With no path or the stdin
 default "-", listing uses the default driver with no custom options.
 
-Columns: SESSION, WINDOW, ID, IDENTITY, LAYOUT (-1 displayed as "-"), SCALE.
+Columns: SESSION, WINDOW, ID, IDENTITY, FRAME, LAYOUT (-1 displayed as "-"),
+SCALE. The FRAME column names the frame def shown around the window ("-" when
+unframed); a window can carry a frame with no project, and then IDENTITY is
+blank and FRAME is what names it.
 The SCALE column shows the replica positions stored on the window ("cmd=pos",
 "-" when none are stored). Standalone mux ls has no replica counter; use
 "compose mux ls" to see live counts ("cmd=pos/count").`,

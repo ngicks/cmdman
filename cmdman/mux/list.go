@@ -8,10 +8,10 @@ import (
 	"github.com/ngicks/cmdman/pkg/muxctl"
 )
 
-// OwnedWindow is a mux-layer row returned by [List]: it describes a single
-// cmdman-owned multiplexer window. The fields mirror [muxctl.Window] but
-// are defined here so future non-tmux drivers fit without exposing a
-// driver-private type to the rest of the stack.
+// OwnedWindow is a mux-layer row returned by [List]: one multiplexer window
+// carrying cmdman state — a project it holds, a frame shown around it, or both.
+// The fields mirror [muxctl.Window] but are defined here so future non-tmux
+// drivers fit without exposing a driver-private type to the rest of the stack.
 type OwnedWindow struct {
 	// SessionName is the multiplexer session the window belongs to.
 	SessionName string
@@ -26,6 +26,12 @@ type OwnedWindow struct {
 	// For compose mux this is <wdhash>-<escaped-project>; for standalone mux
 	// it defaults to the resolved window name.
 	Identity string
+	// Frame is the name of the frame def currently shown around this window,
+	// or "" when it is unframed. A window can carry a frame without holding a
+	// project (a frame shown before anything was launched, or a project torn
+	// down under a frame that stayed), which is why it is listed alongside
+	// Identity rather than derived from it.
+	Frame string
 	// Marker is the layout index last applied to this window (from
 	// [muxctl.Session.StatWindow]), or -1 when no layout has been applied or
 	// the panes carry inconsistent markers.
@@ -45,17 +51,20 @@ type ListOptions struct {
 	// when [Run] built the dashboard.
 	Driver muxctl.DriverSpec
 	// SessionName, when non-empty, restricts the listing to that session only.
-	// Empty returns all stamped windows on the server.
+	// Empty returns every window carrying cmdman state on the server.
 	SessionName string
 	// Identity, when non-empty, filters the results to windows whose ownership
-	// stamp equals this string exactly. Empty returns every stamped window.
+	// stamp equals this string exactly — so a framed window answers for its
+	// project as an unframed one does, and a window carrying only a frame
+	// answers for no project at all. Empty returns every window carrying
+	// cmdman state, whichever side holds it.
 	Identity string
 	// Env is the process env consulted for driver autodetection. Empty defaults
 	// to os.Environ().
 	Env []string
 }
 
-// List returns the cmdman-owned windows visible on the target multiplexer
+// List returns the windows carrying cmdman state on the target multiplexer
 // server. It is a thin layer over [muxctl.Server.ListWindows]: it resolves
 // the server via [resolveServer] (mapping the known-but-unimplemented
 // "zellij"/"wezterm" to a "not implemented yet" error and any other
@@ -97,6 +106,7 @@ func List(ctx context.Context, opts ListOptions) ([]OwnedWindow, error) {
 			WindowID:       r.WindowID,
 			WindowName:     r.WindowName,
 			Identity:       r.Identity,
+			Frame:          r.Frame,
 			Marker:         r.Marker,
 			ScalePositions: decodeScalePositions(r.State[muxctl.StateKeyScale]),
 		}

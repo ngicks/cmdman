@@ -21,14 +21,20 @@ import (
 //
 // Parse rules (see also doc on [muxctl.WindowStat]):
 //
-//   - PaneNames receives each pane's border title verbatim.
-//   - WindowStat.Marker is the marker shared by ALL panes that carry one; -1
-//     when no pane carries a marker, panes disagree, or the window has zero
-//     panes.
+//   - PaneNames receives each pane's border title verbatim, frame panes
+//     included: it reports what the window holds, not who owns it.
+//   - WindowStat.Marker is the marker shared by ALL project panes that carry
+//     one; -1 when no project pane carries a marker, they disagree, or the
+//     window has zero panes. Frame panes (frameOption) never vote: they are
+//     not part of the layout the marker indexes, so an unmarked — or stale —
+//     frame pane must not read as a project window mid-rebuild.
 func (s *Session) StatWindow(ctx context.Context, windowID string) (muxctl.WindowStat, error) {
+	// pane_id leads only to keep the line from starting with the separator:
+	// the executor trims its output, so an empty first field would be eaten
+	// and shift every later field on the first pane.
 	out, err := s.exec.run(
 		ctx, "list-panes", "-t", windowID,
-		"-F", "#{"+markerOption+"}\t#{pane_title}",
+		"-F", "#{pane_id}\t#{"+frameOption+"}\t#{"+markerOption+"}\t#{pane_title}",
 	)
 	if err != nil {
 		return muxctl.WindowStat{}, fmt.Errorf(
@@ -44,8 +50,14 @@ func (s *Session) StatWindow(ctx context.Context, windowID string) (muxctl.Windo
 	consistent := true
 	sawAnyMarker := false
 	for _, line := range lines {
-		markerStr, title, _ := strings.Cut(line, "\t")
+		_, rest, _ := strings.Cut(line, "\t")
+		frame, rest, _ := strings.Cut(rest, "\t")
+		markerStr, title, _ := strings.Cut(rest, "\t")
 		names = append(names, title)
+
+		if frame != "" {
+			continue
+		}
 
 		n, err := strconv.Atoi(markerStr)
 		if markerStr == "" || err != nil {

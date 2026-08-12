@@ -105,7 +105,9 @@ type Leaf struct {
 
 	// Focus, when true, requests this leaf as the initial focus for its
 	// layout. At most one focus per layout; the first leaf in document order
-	// is used otherwise.
+	// is used otherwise. It is honored for a layout applied by
+	// [Session.ApplyLayout] only: a leaf of a frame tree becomes a frame pane,
+	// and a frame pane is never a focus candidate.
 	Focus bool `yaml:"focus,omitempty"`
 
 	// CycleKey is the command name this leaf tracks for replica cycling

@@ -21,8 +21,15 @@ type Config struct {
 	// Empty disables stamping.
 	OwnedIdentity string
 
-	// ReuseCurrentWindow permits taking over a safe current window when
+	// ReuseCurrentWindow permits taking over the caller's current window when
 	// WindowID is empty; otherwise the server finds or creates WindowName.
+	//
+	// Only a window that is safe to take over is: one already stamped with this
+	// same OwnedIdentity (so a re-run cycles in place), one holding a frame but
+	// no project (chrome put up before any project — the project lands in the
+	// region the frame leaves over), or an unowned one whose repurposing
+	// clobbers nothing. A window owned by another identity is never taken over:
+	// applying a layout would rebuild its region out from under it.
 	ReuseCurrentWindow bool
 
 	// StartDirectory is the working directory the shell of a newly created
@@ -47,6 +54,11 @@ type StateKey string
 const (
 	// StateKeyScale holds the per-command cycle-scale replica positions.
 	StateKeyScale StateKey = "scale"
+
+	// StateKeyFrameDef holds the name of the frame currently shown around the
+	// window, as passed to [Session.ShowFrame]. A non-empty value means the
+	// window is framed; [Session.HideFrame] clears it.
+	StateKeyFrameDef StateKey = "frame_def"
 )
 
 // ListOptions controls window enumeration and state access.
@@ -54,7 +66,13 @@ type ListOptions struct {
 	// Session restricts scans to one session; empty scans the server.
 	Session string
 
-	// Identity filters ownership stamps exactly; empty returns all stamped windows.
+	// Identity filters ownership stamps exactly; empty returns every window
+	// carrying cmdman state, held by either side. It matches the ownership
+	// slot alone: a window shown
+	// a frame of the same name is not thereby a window of that project. So
+	// "the windows of project P" is this filter — framed or not, since a frame
+	// leaves the ownership stamp alone — and "the framed windows" is an
+	// unfiltered scan read through [Window.Frame].
 	Identity string
 
 	// StateKeys lists the per-window state slots [Server.ListWindows] fetches
@@ -64,8 +82,8 @@ type ListOptions struct {
 	StateKeys []StateKey
 }
 
-// Window is a row returned by [Server.ListWindows]: one window that carries a
-// cmdman ownership stamp.
+// Window is a row returned by [Server.ListWindows]: one window that carries
+// cmdman state — an ownership stamp, a shown frame, or both.
 type Window struct {
 	SessionName string
 
@@ -78,6 +96,15 @@ type Window struct {
 
 	// Identity is the opaque [Config.OwnedIdentity] stamp.
 	Identity string
+
+	// Frame is the name of the frame def shown around the window — the
+	// [StateKeyFrameDef] value [Session.ShowFrame] wrote — and "" when the
+	// window is unframed. It is the window's other identity: Identity says
+	// which project the window holds, Frame says which frame surrounds it, and
+	// a window carrying either one alone is still enumerated. The two are
+	// independent, so a framed window answers a query for its project exactly
+	// as an unframed one does.
+	Frame string
 
 	// Marker is the layout index last applied to the window (see
 	// [Session.StatWindow]), or -1 when no layout has been applied yet or the
@@ -157,19 +184,23 @@ type Server interface {
 
 	// Open locates an already-existing cmdman-owned window WITHOUT creating one
 	// and WITHOUT mutating window state. It NEVER creates a session or a
-	// window, never sets or clears any window option, and never takes over an
-	// unowned current window (unlike New, which may repurpose a safe current
-	// window). ok is false (with a nil error and nil Session) when no such
-	// window is found, so teardown callers can no-op instead of building a
-	// stray window.
+	// window, never sets or clears any window option, and never accepts a
+	// current window the caller does not own — neither an unowned one nor
+	// another identity's (unlike New, which may repurpose a current window that
+	// is safe to take over). ok is false (with a nil error and nil Session)
+	// when no such window is found, so teardown callers can no-op instead of
+	// building a stray window.
 	Open(ctx context.Context, cfg Config) (Session, bool, error)
 
-	// ListWindows enumerates windows carrying a cmdman ownership stamp,
-	// server-wide (or restricted to opts.Session), optionally filtered to an
-	// exact opts.Identity. The scan MUST NOT depend on an attached client or
-	// the current window. A missing server (or a named-but-absent session)
-	// yields zero rows, not an error. Each returned row's State is filled for
-	// the keys named in opts.StateKeys.
+	// ListWindows enumerates windows carrying cmdman state — an ownership
+	// stamp, a shown frame, or both — server-wide (or restricted to
+	// opts.Session), optionally filtered to an exact opts.Identity. Each row
+	// reports both identities ([Window.Identity], [Window.Frame]), so a window
+	// held by neither side alone is still discoverable by the side that holds
+	// it. The scan MUST NOT depend on an attached client or the current
+	// window. A missing server (or a named-but-absent session) yields zero
+	// rows, not an error. Each returned row's State is filled for the keys
+	// named in opts.StateKeys.
 	ListWindows(ctx context.Context, opts ListOptions) ([]Window, error)
 
 	// FindPane returns the id of the pane in windowID that tracks key — the

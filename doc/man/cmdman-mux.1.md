@@ -58,9 +58,11 @@ use `--session` explicitly in those contexts.
 ### down
 
 Tear down the owned dashboard window matching this spec's identity. The
-in-pane viewers are detached, the window collapses to a single clean pane,
-and the tmux options cmdman set are cleared. The supervised commands keep
-running — only the disposable viewers are torn down.
+in-pane viewers are detached and the project's panes and state are removed.
+A frame standing on the window is left in place with its own state; on a
+window with no frame the window collapses to a single clean pane and every
+tmux option cmdman set is cleared. The supervised commands keep running —
+only the disposable viewers are torn down.
 
 The spec path is optional: when given it is read only to extract the `driver`
 object (for example a custom socket). With no path or the stdin default
@@ -103,8 +105,12 @@ The spec path is optional: when given it is read only to extract the `driver`
 object (for example a custom socket). With no path or the stdin default
 `-`, listing uses the default driver with no custom options.
 
-Columns: `SESSION`, `WINDOW`, `ID`, `IDENTITY`, `LAYOUT`, `SCALE`.
+Columns: `SESSION`, `WINDOW`, `ID`, `IDENTITY`, `FRAME`, `LAYOUT`, `SCALE`.
 
+- The `FRAME` column shows the name of the frame def currently shown around the
+  window, or `-` when the window is unframed. A window can carry a frame with
+  no project (chrome put up before anything was launched, or left standing by
+  `mux down`), in which case `IDENTITY` is blank and `FRAME` is what names it.
 - The `LAYOUT` column shows the last applied layout index; `-1` (no layout
   applied yet) is displayed as `-`.
 - The `SCALE` column shows the replica positions stored on the window as
@@ -130,10 +136,12 @@ Columns: `SESSION`, `WINDOW`, `ID`, `IDENTITY`, `LAYOUT`, `SCALE`.
   server-wide scan.
 - `--format FORMAT`: output format. `table` (default) or a Go
   `text/template` string applied per row. Template fields: `.SessionName`,
-  `.WindowName`, `.WindowID`, `.Identity`, `.Marker` (int; `-1` means no
+  `.WindowName`, `.WindowID`, `.Identity`, `.Frame` (string; the frame def
+  shown around the window, empty when unframed), `.Marker` (int; `-1` means no
   layout applied), `.Scale` (string; precomputed SCALE column value, stored
-  `cmd=pos` pairs or `"-"`). Extra template function: `muxMarker`
-  (renders `-1` as `"-"`). Standard template functions: `cell`, `command`,
+  `cmd=pos` pairs or `"-"`). Extra template functions: `muxMarker`
+  (renders `-1` as `"-"`), `muxFrame` (renders an unframed window as `"-"`).
+  Standard template functions: `cell`, `command`,
   `deref`, `exitCode`, `fit`, `join`, `json`, `pad`, `shortID`, `trunc`,
   `width`.
 
