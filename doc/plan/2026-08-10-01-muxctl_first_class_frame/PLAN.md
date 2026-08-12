@@ -5,9 +5,9 @@ selected, and cycled around a project window without disturbing the
 project's panes — subtree-scoped apply, `@cmdman_frame` pane stamps,
 identity coexistence, and teardown that spares the other side.
 
-Status: **draft — scoped from the parent plan's step 14; open questions
-unresolved.** No implementation may begin until the Open questions below
-are resolved with the user; several of them change the API surface.
+Status: **finalized — all ten open questions resolved with the user on
+2026-08-12** ([DECISION.md](./DECISION.md) F1–F10). The contracts below are
+pinned; implementation may begin at step 1.
 
 **Provenance (in the parent plan's terms).** This is the plan
 [D1](../2026-07-26-01-quicklaunch_frame_monitor_state/DECISION.md) mandates
@@ -60,8 +60,9 @@ The tmux driver supports, observably:
   in `pkg/cmdman/frame` (`spec.go`, `discover.go`, `normalize.go`,
   `carve.go`).
 - Zellij / wezterm drivers. Window-level user options are tmux-specific and
-  already carry that caveat (`pkg/muxctl/tmux/scale_state.go:32-34`);
-  whether the *contract* is written driver-neutrally is Q9.
+  already carry that caveat (`pkg/muxctl/tmux/scale_state.go:32-34`); the
+  *contract* is stated driver-neutrally with a tmux-only implementation
+  (F9), as the ownership stamp already is.
 - Any change to what a frame def can express (D15/D16/D19/D30 are settled).
 
 ## Context — what the code does today
@@ -139,9 +140,12 @@ resetting the window. Today the only entry point resets:
 the anchor (`apply.go:158-176`). The build machinery below that line is
 already anchor-relative — `materialize(anchorID, root, w, h)`
 (`apply.go:90-121`) splits off the passed anchor — so the change is at the
-entry point, not in the carve. `RespawnLeaf` (`session.go:67-73`,
-`leaf.go:138-148`) is the existing precedent for a targeted operation
-living beside the whole-window one.
+entry point, not in the carve. Decided (F1): **`ApplyLayout` itself is
+revised in place** to rebuild only the project region — no additive
+sibling in the style of `RespawnLeaf` (`session.go:67-73`,
+`leaf.go:138-148`), which was the rejected alternative. On a window with
+no frame panes the revised semantics degenerate to today's documented
+whole-window reset, so existing callers observe no change.
 
 ### R2 — The viewer-quiesce sweep must be scoped too
 
@@ -204,10 +208,13 @@ home and every enumeration path must learn it:
   the parent plan's launcher (phase 1, step 4) maps windows back to
   projects through exactly this value.
 
-The `StateKey` mechanism (`driver.go:38-59`; tmux mapping at
-`scale_state.go:19-21`; inline fetch at `list.go:40-43`) is the obvious
-lever for the second home, but *which* identity occupies the owner slot and
-how the filter matches is a design call — **Q2/Q3**, left open.
+Decided (F2/F3): **the project keeps the owner slot** — `@cmdman_window`
+holds the project identity unchanged, so every consumer above keeps
+matching — and the frame moves to the second home: a `StateKey`-backed
+window option (`driver.go:38-59`; tmux mapping at `scale_state.go:19-21`;
+inline fetch at `list.go:40-43`) holding the shown def's name, surfaced as
+an explicit second field on `muxctl.Window`, with identity filtering able
+to match either slot. Details pinned under **Pinned contracts**.
 
 ### R6 — Window takeover must not swallow a framed window
 
@@ -218,11 +225,10 @@ whenever `$TMUX` is set with no explicit `--session`
 (`pkg/cmdman/mux/run.go:127` → `tmux.go:77-81`). Under the parent NOTES.md
 sketch (frame holds the owner slot) this is acute: a plain `cmdman mux up`
 typed inside a *different* project's framed window takes it over, and
-`apply.go:26` → `apply.go:158-176` kills the frame. Under Q3's tentative
-default (project holds the slot) the hazard shrinks but does not vanish —
-the branch still accepts any non-empty identity, including another
-project's. Either way the takeover path must distinguish "my identity" from
-"someone else's".
+`apply.go:26` → `apply.go:158-176` kills the frame. Under F3 (project
+holds the slot) the hazard shrinks but does not vanish — the branch still
+accepts any non-empty identity, including another project's. Either way
+the takeover path must distinguish "my identity" from "someone else's".
 (`Open`'s teardown-side counterpart `currentWindowIfOwned`,
 `reuse.go:72-85`, accepts any owned window for the same reason and needs
 the same distinction.)
@@ -243,9 +249,9 @@ is not a fix either — that is precisely what makes R2's sweep pick them up
 (`detach.go:115-118`). A related trap in the same consumer: `FindPane`
 scans **every** pane in the window for `@cmdman_leaf`
 (`pkg/muxctl/tmux/leaf.go:107-129`, called at `cycle_scale.go:214`), so a
-frame pane must never carry a cycle key. Marker semantics on a framed
-window must be revised
-explicitly.
+frame pane must never carry a cycle key. Decided (F4): frame-stamped panes
+are **excluded from `StatWindow`'s consistency scan** — only project panes
+vote on the marker — and never carry `@cmdman_leaf` or `@cmdman_marker`.
 
 ### R8 — Focus policy
 
@@ -256,23 +262,29 @@ sets `Focus` (`pkg/muxctl/layout.go:104-108`). In a carved frame tree a
 first leaf is `frame-0` — the switcher would take focus on every apply.
 The levers are `Leaf.Focus` (`pkg/muxctl/spec.go:105-109`), which
 `Validate` allows at most once per layout (`validate.go:30-35`), and/or a
-driver-side rule that frame-stamped panes are never focus candidates. Which
-one owns the policy is **Q5**.
+driver-side rule that frame-stamped panes are never focus candidates.
+Decided (F5): **the driver owns the policy** — frame-stamped panes are
+never focus candidates, so no consumer can get it wrong.
 
 ### R9 — Pane-name namespace
 
-If the frame tree and the project layout are ever validated as one
-`muxctl.Layout`, `Validate` rejects duplicate leaf names across the whole
-tree (`validate.go:23-29`), so a project leaf named `frame-0`
-(`carve.go:22-25`) collides. Also, `Carve` requires `main` to be a
-well-formed leaf-or-container (`pkg/muxctl/spec.go:140-142`,
-`validate.go:45-56`): there is no expressible "empty main region" today,
-which is why showing a frame before any project exists is **Q6**.
+If the frame tree and the project layout were ever validated as one
+`muxctl.Layout`, `Validate` would reject duplicate leaf names across the
+whole tree (`validate.go:23-29`), so a project leaf named `frame-0`
+(`carve.go:22-25`) would collide. Decided (F10): the two trees are
+**always validated and applied as separate calls** and never merged into
+one `muxctl.Layout`, so the rule never sees both; no reserved `frame-`
+prefix. Also, `Carve` requires `main` to be a well-formed
+leaf-or-container (`pkg/muxctl/spec.go:140-142`, `validate.go:45-56`):
+there is no expressible "empty main region" today. Decided (F6): when a
+frame is shown on a window with no project, the main region holds the
+driver's **default pane** — whatever the driver respawns by default, with
+no "shell" emphasis in the contract — replaced by the first project apply.
 
 ## What the parent plan's step 15 consumes
 
-The frame verbs need these operations. Spellings are indicative — the API
-shape is Q1.
+The frame verbs need these operations. The API delta delivering them is
+pinned under **Pinned contracts** (per F1).
 
 | Verb | Driver operations needed | Blocking requirement |
 | --- | --- | --- |
@@ -290,60 +302,119 @@ Seams the frame package already exposes, so this plan need not invent them:
 (`pkg/cmdman/frame/spec.go:96-98`) for sizing, and `LoadAndNormalize`
 (`discover.go:135-148`) for def resolution.
 
-## Contracts to pin (before implementation)
+## Pinned contracts
 
-The expensive-to-change surfaces. All three are gated by open questions —
-this section is a checklist of what must be *decided*, not a decision.
+The expensive-to-change surfaces, now decided (DECISION.md F1–F10).
+Implementation must match these; a change here reopens the corresponding
+F-entry.
 
-1. **`muxctl.Session` / `muxctl.Server` API delta** — a new anchored-apply
-   entry point and frame-pane operations, or revised semantics on
-   `ApplyLayout`/`Detach` (Q1). Whatever lands must be reflected in the
-   interface docs that currently state the opposite: `session.go:7`
-   (one window, one owner), `session.go:21` (apply resets),
-   `session.go:58-61` (detach clears the stamp), `driver.go:167-173`
-   (enumeration by one identity), `doc.go:5-12`.
-2. **Durable per-window/per-pane state vocabulary** — the `@cmdman_frame`
-   pane option (R3), the second identity's home, and the def-name slot
-   (Q2/Q3). Existing vocabulary to extend rather than duplicate:
-   `driver.go:38-44` (`StateKey`), `scale_state.go:13-21`
-   (`@cmdman_` prefix), `apply.go:124-127`.
-3. **`muxctl.Window` row shape** — how a framed window reports both
-   identities to consumers (`driver.go:67-91`), since `mux ls` maps rows
-   into `OwnedWindow` (`pkg/cmdman/mux/list.go:93-103`).
+1. **`muxctl.Session` API delta (F1, F5, F6, F7, F8).** No additive apply
+   sibling — `ApplyLayout` is revised in place to be frame-aware:
+   - `ApplyLayout` rebuilds only the project region. `resetWindow` spares
+     frame-stamped panes, the viewer quiesce excludes them (R2), and they
+     are never focus candidates (F5). On a window with no frame panes this
+     degenerates to today's whole-window reset, so existing callers observe
+     no behavior change.
+   - New frame operations beside it:
+     - `ShowFrame(ctx context.Context, root muxctl.PaneSpec, mainName
+       string) error` — realize a carved frame tree around the window's
+       current content: the leaf named `mainName` in `root` stands for the
+       existing project region, which is resized, never rebuilt; on a
+       window with no project it stands for the driver's default pane
+       (F6 — whatever the driver respawns by default, no "shell" emphasis
+       in the contract). Frame panes are stamped as they are created.
+       *(Routine call noted, not user-asked: designating main by leaf name
+       — the consumer passes a placeholder leaf to `frame.Spec.Carve` and
+       hands its name to `ShowFrame`; it reuses the existing leaf-name
+       vocabulary instead of inventing a sentinel type.)*
+     - `HideFrame(ctx context.Context) error` — kill all frame-stamped
+       panes so the project region expands to the whole window. All frame
+       panes are treated alike (F7): managed-ness (D19) is entirely the
+       consumer's concern above the driver. Select/cycle are consumer
+       compositions of hide + show.
+   - Per-side teardown (F8): project teardown and frame teardown each
+     clear only their own side's panes and state; whichever call removes
+     the **last** cmdman-owned state performs today's full restore
+     (`detach.go:12-47` — respawn default pane, unset
+     `pane-border-status`, clear all `@cmdman_*` options).
+   - The interface docs that currently state the violated invariants are
+     rewritten as part of this plan: `session.go:7` (one window, one
+     owner), `session.go:21` (apply resets), `session.go:58-61` (detach
+     clears the stamp), `driver.go:167-173` (enumeration by one identity),
+     `doc.go:5-12`. The contract is stated driver-neutrally in `muxctl`
+     and implemented only in the tmux driver (F9), exactly as the
+     ownership stamp is today.
+2. **Durable state vocabulary (F2, F3, F4).** Extends the existing
+   `@cmdman_` vocabulary (`driver.go:38-44`, `scale_state.go:13-21`,
+   `apply.go:124-127`); nothing is duplicated:
+   - `@cmdman_window` (window option) — **unchanged**: holds the project
+     identity (F3). The frame never occupies the owner slot.
+   - `@cmdman_frame` (pane option, new) — marks a pane as a frame pane;
+     written through the `stampLeaf` path (`leaf.go:49-99`), read back by
+     a `FindPane`-style scan (`leaf.go:107-129`). Frame panes never carry
+     `@cmdman_marker` or `@cmdman_leaf`, and `StatWindow`'s marker
+     consistency scan skips them (F4) — only project panes vote.
+   - Frame def name (window option, new) — the shown def's name in a
+     `StateKey`-backed window option (`muxctl.StateKey` → tmux
+     `@cmdman_frame_def`); non-empty means "framed". Written by
+     `ShowFrame`, cleared by frame teardown.
+3. **`muxctl.Window` row shape (F2).** `Window` (`driver.go:67-91`) gains
+   an explicit frame field carrying the frame def name, filled by
+   `ListWindows` through the existing inline `StateKeys` fetch
+   (`list.go:40-43`, `list.go:102-112`); identity filtering can match
+   either slot, so "windows of project P" and "framed windows" are both
+   answerable. `mux ls` maps the new field into `OwnedWindow`
+   (`pkg/cmdman/mux/list.go:93-103`).
+4. **Validation (F10).** The frame tree and the project layout are always
+   validated and applied as separate calls, never merged into one
+   `muxctl.Layout`; `Validate`'s duplicate-name rule (`validate.go:23-29`)
+   never sees both trees, and no `frame-` prefix is reserved.
 
-## Implementation steps (draft)
+## Implementation steps
 
-Ordered so each lands independently verifiable. Step content firms up once
-Q1–Q3 resolve; the *order* is stable.
+Ordered so each lands independently verifiable; decisions folded in
+(F-references per step).
 
-1. **Frame pane stamp + recognition.** `@cmdman_frame` written through
-   `stampLeaf` (`leaf.go:49-99`), read back by a `FindPane`-style scan
-   (`leaf.go:107-129`). Verify: unit test on a scripted tmux server —
+1. **Frame pane stamp + recognition (F2).** `@cmdman_frame` written
+   through `stampLeaf` (`leaf.go:49-99`), read back by a `FindPane`-style
+   scan (`leaf.go:107-129`). Verify: unit test on a scripted tmux server —
    stamp, list, recognize.
-2. **Subtree-scoped apply.** Anchored entry point over the existing
-   `materialize` (`apply.go:90-121`), with `resetWindow`
-   (`apply.go:158-176`) scoped to non-frame panes. Verify: apply a layout
-   into a window that already has frame panes; frame pane ids unchanged.
-3. **Scoped quiesce.** `listViewerPanes` (`detach.go:98-122`) must exclude
-   frame panes. Verify: assert no `send-keys` reaches a frame pane during a
-   project apply.
-4. **Marker semantics.** Revise `StatWindow` (`stat.go:28-71`) so frame
-   panes do not break consistency. Verify: regression on the cycling path
-   (`run.go:151-161`) — three `mux up`s on a framed window visit three
-   layouts.
-5. **Identity coexistence + enumeration.** Second identity home and
-   `ListWindows` (`list.go:25-134`) learning it; `Window` row
-   (`driver.go:67-91`) carrying it. Verify: `mux ls` and a project-identity
-   `Down` query both find a framed window.
-6. **Per-side teardown.** Split `Detach` (`detach.go:12-47`) into project
-   teardown and frame teardown. Verify: `mux down` leaves the frame; frame
-   hide leaves the project.
-7. **Takeover guard.** `currentWindowToReuse` (`reuse.go:23-61`) /
+2. **Frame-aware `ApplyLayout` (F1).** Revise the entry point in place:
+   `resetWindow` (`apply.go:158-176`) spares frame-stamped panes and
+   anchors on the project region, over the existing `materialize`
+   (`apply.go:90-121`). Verify: apply a layout into a window that already
+   has frame panes — frame pane ids unchanged; the existing apply suites
+   pass unchanged, proving the unframed degenerate case.
+3. **Scoped quiesce (R2).** `listViewerPanes` (`detach.go:98-122`) must
+   exclude frame panes. Verify: assert no `send-keys` reaches a frame pane
+   during a project apply.
+4. **Marker semantics (F4).** Revise `StatWindow` (`stat.go:28-71`) so
+   frame-stamped panes are skipped by the consistency scan. Verify:
+   regression on the cycling path (`run.go:151-161`) — three `mux up`s on
+   a framed window visit three layouts.
+5. **`ShowFrame` / `HideFrame` (F1, F6, F7).** Realize a carved tree
+   around the existing region (or the driver's default pane when there is
+   none), stamping frame panes and writing `@cmdman_frame_def`; hide kills
+   all frame-stamped panes uniformly and the project region expands.
+   Verify: show around a running project — project pane ids unchanged;
+   hide — project region fills the window, project panes still running.
+6. **Identity coexistence + enumeration (F2/F3).** Frame def name in its
+   `StateKey`-backed home; `ListWindows` (`list.go:25-134`) filling the
+   new `Window` field (`driver.go:67-91`). Verify: `mux ls` and a
+   project-identity `Down` query both find a framed window.
+7. **Per-side teardown (F8).** Split `Detach` (`detach.go:12-47`) into
+   project teardown and frame teardown, with the full restore firing only
+   on the last side. Verify: `mux down` leaves the frame; frame hide
+   leaves the project; tearing down the last side leaves a clean window
+   with no residual `@cmdman_*` state.
+8. **Takeover guard (R6).** `currentWindowToReuse` (`reuse.go:23-61`) /
    `currentWindowIfOwned` (`reuse.go:72-85`) distinguishing identities.
    Verify: `mux up` from inside a framed window does not eat the frame.
-8. **Focus policy** (per Q5) and **contract doc updates** —
-   `session.go`, `driver.go`, `doc.go` rewritten to state the new
-   invariants, since today they state the violated ones.
+9. **Focus policy (F5) + contract doc updates (F9).** Frame-stamped panes
+   excluded from focus selection around `PickFocus` (`apply.go:62-69`,
+   `layout.go:78-108`); `session.go`, `driver.go`, `doc.go` rewritten to
+   state the new invariants driver-neutrally, since today they state the
+   violated ones.
 
 ## Testing / verification
 
@@ -367,83 +438,16 @@ Q1–Q3 resolve; the *order* is stable.
   recognizes.
 - **tmux-specific mechanism.** Window/pane user options have no zellij or
   wezterm equivalent — the caveat is already recorded at
-  `scale_state.go:32-34`; a contract written around them narrows future
-  drivers (Q9).
+  `scale_state.go:32-34`. F9 contains this: the contract is stated
+  neutrally in `muxctl`, and only the tmux driver implements it.
 - **The parent plan blocks from its step 15 on** (parent PLAN.md step 14,
   Risks). Phases 0–2 there are independent, so the block is contained, but
   it is real.
 
 ## Open questions
 
-Numbered locally (Q1…); parent-plan question numbers are a separate
-sequence (the parent's Q13/D36 is what spawned this plan). Every default
-below is **tentative** — stated so the question is answerable, not to
-pre-empt it. None is resolved.
-
-1. **API shape: additive sibling or revised `ApplyLayout`?** A new
-   `ApplyLayoutAt(ctx, anchorPaneID, root, marker)` (plus frame-specific
-   calls) leaves `ApplyLayout`'s documented reset semantics
-   (`session.go:21`) intact for every existing caller; alternatively
-   `ApplyLayout` itself becomes frame-aware and always spares frame panes.
-   This is the single biggest size lever. *Tentative default:* additive
-   sibling, in the style of `RespawnLeaf` (`session.go:67-73`).
-2. **Where does the second identity live, and how does enumeration expose
-   it?** Options: a second window option via the existing `StateKey`
-   mechanism (`driver.go:38-44`, `scale_state.go:19-21`); a pane-level
-   stamp on the main-region pane; a new dedicated field. And correspondingly
-   whether `ListOptions.Identity` (`list.go:97-100`) matches either slot, or
-   a new filter field is added. *Tentative default:* `StateKey`-backed
-   window option + an explicit second field on `muxctl.Window`
-   (`driver.go:67-91`), with the filter matching either slot.
-3. **Which side owns `@cmdman_window`?** The parent's NOTES.md sketches
-   *frame owns the window, project moves to the second home*.
-   *Tentative default — deliberately the inverse of that sketch:* **the
-   project keeps the owner slot and the frame moves to the second home.**
-   Every identity-matching consumer then keeps working unchanged —
-   `Down` (`down.go:105-108`), `List` (`pkg/cmdman/mux/list.go:80-84`),
-   `CycleScale` (`cycle_scale.go:94-98`) — and R6's takeover hazard largely
-   evaporates, because a framed window's owner slot still holds the
-   project's own identity (`reuse.go:52-56`). The sketch is a sketch: D1 and
-   D36 commit to the *feature*, not to which slot holds which value, so this
-   is a departure the user can overrule — the cost of overruling it is
-   revising every consumer above. Q2 is downstream of this answer.
-4. **Marker semantics with a frame present (R7).** Frame panes excluded
-   from `StatWindow`'s consistency rule (`stat.go:50-57`), or frame panes
-   carrying their own marker in a separate option, or the layout marker
-   moving to window-level state like `@cmdman_scale`
-   (`scale_state.go:23-35`). *Tentative default:* exclude frame-stamped
-   panes from the consistency scan.
-5. **Who owns focus policy (R8)?** The consumer sets `Leaf.Focus`
-   (`spec.go:105-109`) on the main subtree — one focus per layout is
-   already validated (`validate.go:30-35`) — or the driver refuses to focus
-   a frame-stamped pane, or `PickFocus` (`layout.go:78-108`) grows the
-   rule. *Tentative default:* driver-side rule (frame panes are never focus
-   candidates), so no consumer can get it wrong.
-6. **What is the main region when no project is shown yet?** `Carve`
-   requires a well-formed `main` (`carve.go:41`, `pkg/muxctl/spec.go:140-142`).
-   Options: a shell pane placeholder (precedent: `Detach` respawns the
-   window's default shell, `detach.go:53-61`), an explicitly empty pane, or
-   "frames require a project". *Tentative default:* shell placeholder,
-   replaced by the first subtree apply.
-7. **Frame pane lifecycle on hide / cycle.** D19 makes `command:` entries
-   ephemeral by default with `managed: true` opting into supervision — what,
-   if anything, must the driver do differently for a managed entry's pane
-   (kill vs detach-viewer-then-kill, using `ViewerDetachKeys`,
-   `detach.go:69-93`)? *Tentative default:* the driver treats all frame
-   panes alike; managed-ness is entirely the consumer's concern above the
-   driver.
-8. **What does a window with neither side left look like?** After frame
-   teardown of an unprojected window, or project teardown of an unframed
-   one, `Detach`'s full restore (`detach.go:12-47`) is right; in the mixed
-   cases it is not. *Tentative default:* per-side teardown that performs the
-   full restore only when it removes the last cmdman-owned state.
-9. **Driver-neutral contract, or tmux-scoped?** The mechanism is
-   tmux-specific (`scale_state.go:32-34`); the interface docs
-   (`session.go`, `driver.go:129-177`, `doc.go`) are driver-neutral.
-   *Tentative default:* state the frame contract neutrally in `muxctl`,
-   implement in tmux only, as the ownership stamp already does.
-10. **Pane-name namespace (R9).** Prefix/namespace frame pane names, keep
-    frame and project trees separately validated, or leave the collision to
-    the consumer. *Tentative default:* separate validation — the two trees
-    are applied by separate calls under Q1's default, so they never form one
-    `muxctl.Layout`.
+*(none — all ten resolved with the user on 2026-08-12; the choices,
+rationale, and rejected alternatives are recorded in
+[DECISION.md](./DECISION.md) as F1–F10, mapping Q1→F1 … Q10→F10. The only
+answer that departed from the drafted tentative default was Q1/F1: revise
+`ApplyLayout` in place rather than adding an additive sibling.)*
