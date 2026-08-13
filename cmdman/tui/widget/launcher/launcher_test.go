@@ -745,3 +745,12 @@ func drainLauncherCmd(t *testing.T, cmd tea.Cmd) {
 		}
 	}
 }
+
+func TestNewCarriesContext(t *testing.T) {
+	type ctxKey struct{}
+	ctx := context.WithValue(context.Background(), ctxKey{}, "threaded")
+	m := New(ctx, core.Options{Backend: &coretest.FakeBackend{}})
+	if m.ctx == nil || m.ctx.Value(ctxKey{}) == nil {
+		t.Errorf("New should carry the caller's context into the model")
+	}
+}

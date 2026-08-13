@@ -4,8 +4,9 @@
 //
 // It is a facade over cmdman/tui/widget/internal/panel. The statusbar and the
 // switcher are one model by design — they read the same two listings over the
-// same event subscription and share the update loop, and differ only in the
-// renderer — so what a widget package adds is the name, not an implementation.
+// same event subscription and share the update loop; the switcher's selection
+// and mouse handling simply stays dormant here — so what a widget package adds
+// is the name, not an implementation.
 package statusbar
 
 import (

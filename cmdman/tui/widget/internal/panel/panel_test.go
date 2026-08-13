@@ -667,3 +667,12 @@ func TestWidgetNoQuit(t *testing.T) {
 		t.Errorf("a standalone switcher should hint at quitting: %q", hint)
 	}
 }
+
+func TestNewCarriesContext(t *testing.T) {
+	type ctxKey struct{}
+	ctx := context.WithValue(context.Background(), ctxKey{}, "threaded")
+	m := New(ctx, core.WidgetSwitcher, core.Options{Backend: &coretest.FakeBackend{}})
+	if m.ctx == nil || m.ctx.Value(ctxKey{}) == nil {
+		t.Errorf("New should carry the caller's context into the model")
+	}
+}

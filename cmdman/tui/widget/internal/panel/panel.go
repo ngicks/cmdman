@@ -2,8 +2,9 @@
 // one-line statusbar.
 //
 // They are one model, not two. Both read the same two listings over the same
-// event subscription, share the update loop and the mouse geometry, and differ
-// only in the renderer the core.Widget passed to New picks. The two widget
+// event subscription and share the update loop; the core.Widget passed to New
+// picks the renderer and enables what only the switcher has — selection,
+// mouse clicks, the z hide-frame binding. The two widget
 // packages next door (cmdman/tui/widget/switcher, .../statusbar) are the
 // facades that name them apart; everything they share with the rest of the TUI
 // lives in cmdman/tui/internal/core.
