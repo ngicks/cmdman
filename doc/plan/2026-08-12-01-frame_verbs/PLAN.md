@@ -249,7 +249,7 @@ sequenceDiagram
     opt each managed: true entry
         M->>S: adopt frame-<def>-<i> if running, else create (V7)
         note over M,S: entry hooks: -> CommandConfig.Hooks (V5)
-        S-->>M: running; pane argv becomes the viewer (attach)
+        S-->>M: running — pane argv becomes the viewer (attach)
     end
     M->>F: Spec.Carve(placeholder main, ComponentArgv)
     F-->>M: muxctl.PaneSpec tree
@@ -267,7 +267,7 @@ sequenceDiagram
     participant S as cmdman.Service (step 4)
     participant D as tmux driver (built)
 
-    M->>D: read Window.Frame (which def is up; absent → no-op)
+    M->>D: read Window.Frame (which def is up, absent → no-op)
     opt each managed entry of that def (F7)
         M->>S: quiesce the viewer in the pane
         note over M,S: supervised command keeps running

@@ -54,6 +54,26 @@ func TestTUIWidget_StatusbarRendersAndQuits(t *testing.T) {
 	w.quit(t)
 }
 
+// TestTUIWidget_NoQuitSurvivesTheQuitKey is V6's flag end to end — the one a
+// frame pane always gets. A docked widget that exits on a keypress leaves a hole
+// in the fixture, so q must reach a widget that no longer has it bound, and the
+// hint line must stop offering it.
+func TestTUIWidget_NoQuitSurvivesTheQuitKey(t *testing.T) {
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	wd := composeWorkdir(t)
+	writeComposeFile(t, wd, composeBasicYAML("widgetnq"))
+
+	w := startWidgetEnv(t, ctx, env, wd, wd, "switcher", os.Environ(), "--no-quit")
+	w.waitFor(t, "widgetnq", 5*time.Second)
+	if snap := w.snapshot(); strings.Contains(snap, "q quit") {
+		t.Errorf("a --no-quit switcher must not offer a key it does not have; got:\n%q", snap)
+	}
+	w.send(t, "q")
+	w.mustStayUp(t, time.Second)
+}
+
 // TestTUIWidget_LauncherRendersAndQuits is the quick-launch selector's smoke
 // test: two panes, the compose project discoverable from the work directory in
 // the right one, and q quits.
@@ -251,10 +271,12 @@ func startWidgetEnv(
 	env *testEnv,
 	workDir, runDir, name string,
 	baseEnv []string,
+	extraArgs ...string,
 ) *widgetSession {
 	t.Helper()
 
-	cmd := exec.CommandContext(ctx, cmdmanBin, "tui", "widget", name, "--workdir", workDir)
+	args := append([]string{"tui", "widget", name, "--workdir", workDir}, extraArgs...)
+	cmd := exec.CommandContext(ctx, cmdmanBin, args...)
 	cmd.Dir = runDir
 	// The same three the test env pins for every other invocation: without the
 	// config path the widget would read the developer's own config.
@@ -317,6 +339,21 @@ func (w *widgetSession) send(t *testing.T, keys string) {
 func (w *widgetSession) quit(t *testing.T) {
 	t.Helper()
 	w.quitWith(t, "q")
+}
+
+// mustStayUp is quitWith's opposite: it proves the widget outlived the keys sent
+// to it. The process is killed afterwards, since the run it survived is over.
+func (w *widgetSession) mustStayUp(t *testing.T, d time.Duration) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- w.cmd.Wait() }()
+	select {
+	case err := <-done:
+		t.Fatalf("widget exited (%v) though its quit keys were unbound; got:\n%q",
+			err, w.snapshot())
+	case <-time.After(d):
+	}
+	_ = w.cmd.Process.Kill()
 }
 
 // quitWith dismisses the widget with the given keys. Which key that is belongs

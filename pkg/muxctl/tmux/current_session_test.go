@@ -44,3 +44,53 @@ func TestCurrentSessionName_Attached(t *testing.T) {
 		t.Errorf("session name = %q, want inside-sess", name)
 	}
 }
+
+// TestCurrentWindowID_NotStarted covers the no-server path of the window half
+// of the "where is the caller" probe: nothing to ask means ok=false with a nil
+// error, exactly as CurrentSessionName reports it.
+func TestCurrentWindowID_NotStarted(t *testing.T) {
+	requireTmux(t)
+	socket := uniqueSocket(t) + "-never-started"
+
+	id, ok, err := newServer(t, socket).CurrentWindowID(context.Background(), "")
+	if err != nil {
+		t.Fatalf("CurrentWindowID: want nil error, got %v", err)
+	}
+	if ok || id != "" {
+		t.Errorf("want ok=false/id=\"\" for a never-started socket, got ok=%v id=%q", ok, id)
+	}
+}
+
+// TestCurrentWindowID_Session pins what the frame verbs address a window by:
+// the named session's CURRENT window, not its first — a per-window fixture goes
+// around the window the user is looking at.
+func TestCurrentWindowID_Session(t *testing.T) {
+	requireTmux(t)
+	socket := uniqueSocket(t)
+	t.Cleanup(func() { killServer(t, socket) })
+	run(t, socket, "new-session", "-d", "-s", "inside-sess")
+	second := run(t, socket, "new-window", "-d", "-t", "inside-sess", "-P", "-F", "#{window_id}")
+	run(t, socket, "select-window", "-t", second)
+
+	server := newServer(t, socket)
+	id, ok, err := server.CurrentWindowID(context.Background(), "inside-sess")
+	if err != nil {
+		t.Fatalf("CurrentWindowID: %v", err)
+	}
+	if !ok {
+		t.Fatal("want ok=true for a running session")
+	}
+	if id != second {
+		t.Errorf("window id = %q, want the session's current window %q", id, second)
+	}
+
+	t.Run("unknown session", func(t *testing.T) {
+		id, ok, err := server.CurrentWindowID(context.Background(), "no-such-session")
+		if err != nil {
+			t.Fatalf("CurrentWindowID: want nil error, got %v", err)
+		}
+		if ok || id != "" {
+			t.Errorf("want ok=false/id=\"\" for an unknown session, got ok=%v id=%q", ok, id)
+		}
+	})
+}

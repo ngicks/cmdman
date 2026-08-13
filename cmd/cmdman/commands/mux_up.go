@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/mux"
 )
 
@@ -96,6 +97,8 @@ func runMuxUp(
 
 	return mux.Run(cmd.Context(), built, mux.RunOptions{
 		SessionName: session,
+		Config:      cfg,
+		Svc:         cli.NewFrameSvc(svc),
 		Stdout:      cmd.OutOrStdout(),
 	})
 }

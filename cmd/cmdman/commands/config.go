@@ -30,9 +30,16 @@ The value passed to --format has this shape (Go field name, type, JSON key):
   ├─ .DefaultLogDriver        LogDriver    # log driver for commands    (default_log_driver)
   ├─ .EventWatcherKind        WatcherKind  # inotify (linux) or poll    (event_watcher_kind)
   ├─ .DefaultHooks            HookSet      # OSC/BEL hooks by event     (default_hooks)
+  ├─ .DefaultFrame            string       # frame def shown by default (default_frame)
   └─ .ConfigPath              string       # --config value, if given   (not serialized)
 
 LogDriver and WatcherKind are string types; HookSet is a map keyed by event name.
+
+default_frame names a frame def - a bare name resolved under the frame config
+dir, or a path - and every window "mux up" or "compose mux up" creates gets it
+shown around it. A window that already carries a frame is left alone, and a def
+that is missing or broken warns without failing the up. Unset means no default
+and no auto-show; "cmdman mux frame show DEF" still shows a def by name.
 
 Use the Go field names in --format (e.g. {{.DataDir}}); the default JSON output
 uses the lower-case keys shown in parentheses. DefaultEnvironment is tagged

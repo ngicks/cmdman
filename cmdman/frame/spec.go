@@ -17,9 +17,9 @@ import (
 	"os"
 	"slices"
 
-	"go.yaml.in/yaml/v4"
-
+	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/pkg/muxctl"
+	"go.yaml.in/yaml/v4"
 )
 
 // Edge is the screen edge an entry docks to.
@@ -76,6 +76,11 @@ type RawEntry struct {
 	// frame; the default is an ephemeral pane (D19). It is meaningless on a
 	// Component entry and rejected there.
 	Managed bool `yaml:"managed,omitempty"`
+	// Hooks overrides the config-level default_hooks for the supervised command
+	// a Managed entry becomes (D17). Hooks are monitor behavior, so an entry
+	// that is not managed has nothing to attach them to: [Normalize] warns and
+	// ignores them there.
+	Hooks model.HookSet `yaml:"hooks,omitempty"`
 	// Unknown captures unrecognized entry keys so [Normalize] can warn.
 	Unknown map[string]any `yaml:",inline"`
 }
@@ -152,6 +157,8 @@ type Entry struct {
 	Component string
 	Command   []string
 	Managed   bool
+	// Hooks is non-nil only on a Managed entry; see [RawEntry.Hooks].
+	Hooks model.HookSet
 }
 
 // ---- Decoding ---------------------------------------------------------------
@@ -175,7 +182,9 @@ func Decode(r io.Reader) (RawSpec, error) {
 func DecodeFile(path string) (RawSpec, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return RawSpec{}, fmt.Errorf("open %s: %w", path, err)
+		// Returned bare: *os.PathError already reads "open <path>: …", so any
+		// prefix naming the same open doubles the path in the message.
+		return RawSpec{}, err
 	}
 	defer f.Close()
 

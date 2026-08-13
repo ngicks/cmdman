@@ -5,6 +5,7 @@ import (
 
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/logdriver"
+	"github.com/ngicks/cmdman/cmdman/mux"
 	"github.com/ngicks/cmdman/cmdman/store"
 )
 
@@ -13,6 +14,11 @@ var _ cmdmanSvc = (*cmdman.Service)(nil)
 // cmdmanSvc is the minimal interface the compose package needs from cmdman.Service.
 // Defined here (consumer side) per the small-interface-at-consumer rule.
 // *cmdman.Service satisfies this interface.
+//
+// Nothing here serves the frame verbs. The seam a default_frame's managed entry
+// needs is [mux.FrameSvc], which no cmdman type answers to; it reaches compose
+// as its own dependency instead (see [WithFrameSvc]), so mirroring the service
+// stays a mirror of the service.
 type cmdmanSvc interface {
 	Config() cmdman.CmdmanConfig
 	Start(ctx context.Context, idOrName string) error
@@ -42,6 +48,10 @@ type Service struct {
 	// reporter receives lifecycle state-trace events during up/start/stop/down.
 	// nil disables reporting (see report).
 	reporter Reporter
+	// frameSvc is the seam [Service.MuxUp] hands to mux for the default_frame it
+	// shows (V9). nil is the "no service behind the frame verbs" value; see
+	// [WithFrameSvc] for who sets it and what a def costs when nobody did.
+	frameSvc mux.FrameSvc
 }
 
 // NewService constructs a compose.Service from an existing cmdman.Service.

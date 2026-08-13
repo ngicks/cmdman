@@ -75,6 +75,12 @@ layouts. Pass a layout name or zero-based index to pin a specific layout.
 Inside tmux, the current session is targeted by default. Outside tmux, the
 session defaults to `cmdman` and an attach command is printed.
 
+When the `default_frame` config key is set, every window `up` creates gets that
+frame shown around it, exactly as standalone `mux up` does. A window that
+already carries a frame is left alone, and a def that is missing or broken warns
+without failing the up; see the Configuration section of
+[cmdman-mux(1)](./cmdman-mux.1.md).
+
 ### down
 
 Tear down the cmdman-owned dashboard windows matching this compose project.

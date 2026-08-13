@@ -2,13 +2,14 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-
 	"github.com/mattn/go-runewidth"
 	"github.com/ngicks/cmdman/cmdman/model"
 )
@@ -168,8 +169,16 @@ func TestSwitcherFitsShortPanes(t *testing.T) {
 		for h := 1; h <= 6; h++ {
 			m.height = h
 			out := m.viewContent()
-			if got := len(strings.Split(out, "\n")); got > h {
+			lines := strings.Split(out, "\n")
+			if got := len(lines); got > h {
 				t.Errorf("switcher in a %d-row pane rendered %d lines:\n%s", h, got, out)
+			}
+			// Width counts too: a chrome line wider than the column wraps, which
+			// costs the list a row nobody gave it.
+			for i, line := range lines {
+				if got := lipgloss.Width(line); got > w {
+					t.Errorf("line %d in a %d-row pane is %d cells wide: %q", i, h, got, line)
+				}
 			}
 		}
 	}
@@ -502,8 +511,8 @@ func seedWidget(w Widget, width, height int) widgetModel {
 				State: model.EventTypeRunning},
 		},
 		projs: []ProjectInfo{
-			{Name: "local-dev", Workdir: "/work/local-dev"},
-			{Name: "api-stack", Workdir: "/work/api"},
+			{Name: "local-dev", Workdir: "/work/local-dev", Identity: "id-local-dev"},
+			{Name: "api-stack", Workdir: "/work/api", Identity: "id-api-stack"},
 		},
 	}
 	m := newWidget(Options{Backend: fb, Widget: w, Version: "v0.0.0-test"})
@@ -513,4 +522,203 @@ func seedWidget(w Widget, width, height int) widgetModel {
 	m = next.(widgetModel)
 	next, _ = m.Update(projectsLoadedMsg{infos: fb.projs})
 	return next.(widgetModel)
+}
+
+// updWidget drives one message through the widget model.
+func updWidget(t *testing.T, m widgetModel, msg tea.Msg) (widgetModel, tea.Cmd) {
+	t.Helper()
+	next, cmd := m.Update(msg)
+	got, ok := next.(widgetModel)
+	if !ok {
+		t.Fatalf("Update returned %T, want widgetModel", next)
+	}
+	return got, cmd
+}
+
+// settle runs the command a gesture dispatched and delivers its message back,
+// which is what the program loop does with it.
+func settle(t *testing.T, m widgetModel, cmd tea.Cmd) widgetModel {
+	t.Helper()
+	if cmd == nil {
+		t.Fatalf("expected a command to run")
+	}
+	m, _ = updWidget(t, m, cmd())
+	return m
+}
+
+// TestSwitcherSelectionSwitches covers the two selection gestures (D6/D24):
+// enter on the cursor and a click on a row both take the client to that
+// project's window, addressed by the identity the backend stamped on it.
+func TestSwitcherSelectionSwitches(t *testing.T) {
+	m := seedWidget(WidgetSwitcher, 32, 12)
+	fb := m.backend.(*fakeBackend)
+
+	m, cmd := updWidget(t, m, kEnter)
+	m = settle(t, m, cmd)
+	if !slices.Equal(fb.switched, []string{"id-local-dev"}) {
+		t.Fatalf("enter switched to %v, want the cwd-active project", fb.switched)
+	}
+	if m.status != "" {
+		t.Errorf("a switch that worked has nothing to say: %q", m.status)
+	}
+
+	// Row 4 is api-stack's command line: the title takes row 0, then local-dev's
+	// head and its two commands. Clicking it is enter on that group.
+	m, cmd = updWidget(t, m, tea.MouseClickMsg{Button: tea.MouseLeft, X: 2, Y: 4})
+	m = settle(t, m, cmd)
+	if m.selected != 1 {
+		t.Errorf("a click should move the cursor to the row it hit, selected = %d", m.selected)
+	}
+	if want := []string{"id-local-dev", "id-api-stack"}; !slices.Equal(fb.switched, want) {
+		t.Errorf("switched = %v, want %v", fb.switched, want)
+	}
+
+	// The title row is chrome, and so is everything below the last group.
+	for _, y := range []int{0, 6} {
+		if _, cmd := updWidget(
+			t,
+			m,
+			tea.MouseClickMsg{Button: tea.MouseLeft, X: 2, Y: y},
+		); cmd != nil {
+			t.Errorf("a click on row %d should hit no group", y)
+		}
+	}
+
+	// A switch that fails says so where the hint line is.
+	fb.switchErr = errors.New("no window is up for it")
+	m, cmd = updWidget(t, m, kEnter)
+	m = settle(t, m, cmd)
+	if !strings.Contains(m.status, "no window is up for it") {
+		t.Errorf("a failed switch should be reported, status = %q", m.status)
+	}
+}
+
+// TestSwitcherSelectionNeedsIdentity pins the navigate-only boundary (V6) at
+// its edge: a project the backend could not stamp an identity for has no window
+// to go to, and saying so is all the switcher does about it — it never brings
+// one up.
+func TestSwitcherSelectionNeedsIdentity(t *testing.T) {
+	m := seedWidget(WidgetSwitcher, 32, 12)
+	fb := m.backend.(*fakeBackend)
+	m, _ = updWidget(t, m, commandsLoadedMsg{infos: nil})
+	m, _ = updWidget(t, m, projectsLoadedMsg{infos: []ProjectInfo{{Name: "never-run"}}})
+
+	m, cmd := updWidget(t, m, kEnter)
+	if cmd != nil {
+		t.Fatalf("a project with no identity should dispatch nothing")
+	}
+	if !strings.Contains(m.status, "never-run") {
+		t.Errorf("the switcher should name the project it cannot reach, status = %q", m.status)
+	}
+	if len(fb.switched) != 0 {
+		t.Errorf("backend was asked to switch to %v", fb.switched)
+	}
+}
+
+// TestSwitcherSelectionResolvesBells is D22's clear-on-selection: selecting a
+// project through the switcher reads its bells. The acknowledgement lives in
+// the widget because the monitor keeps reporting the bell unread — only an
+// attach reads one there (D11) — so it has to survive the reload that follows,
+// and only that bell: once the monitor's flag goes down, the next one is news.
+func TestSwitcherSelectionResolvesBells(t *testing.T) {
+	belled := []CommandInfo{{
+		ID: "1", Name: "watcher", Project: "local-dev", Workdir: "/work/local-dev",
+		State: model.EventTypeRunning, BellUnread: true,
+	}}
+	quiet := []CommandInfo{{
+		ID: "1", Name: "watcher", Project: "local-dev", Workdir: "/work/local-dev",
+		State: model.EventTypeRunning,
+	}}
+
+	m := seedWidget(WidgetSwitcher, 32, 12)
+	m, _ = updWidget(t, m, commandsLoadedMsg{infos: belled})
+	if got := markerGlyph(m.groups[0]); got != glyphBell {
+		t.Fatalf("precondition: the marker should be the bell, got %q", got)
+	}
+
+	m, cmd := updWidget(t, m, kEnter)
+	m = settle(t, m, cmd)
+	if got := markerGlyph(m.groups[0]); got == glyphBell {
+		t.Errorf("selecting the project should have read its bell")
+	}
+
+	m, _ = updWidget(t, m, commandsLoadedMsg{infos: belled})
+	if got := markerGlyph(m.groups[0]); got == glyphBell {
+		t.Errorf("the monitor's still-unread flag should not re-ring a read bell")
+	}
+
+	m, _ = updWidget(t, m, commandsLoadedMsg{infos: quiet})
+	m, _ = updWidget(t, m, commandsLoadedMsg{infos: belled})
+	if got := markerGlyph(m.groups[0]); got != glyphBell {
+		t.Errorf("a bell that rang again is news again, marker = %q", got)
+	}
+}
+
+// TestSwitcherCollapse covers V8's `z`: the docked switcher takes the whole
+// frame down without leaving the keyboard. Whether the window was framed at all
+// is the service's business — hide is a no-op there — so what this pins is that
+// a hide reporting nothing stays quiet, and a failing one does not.
+func TestSwitcherCollapse(t *testing.T) {
+	m := seedWidget(WidgetSwitcher, 32, 12)
+	fb := m.backend.(*fakeBackend)
+
+	m, cmd := updWidget(t, m, kr("z"))
+	m = settle(t, m, cmd)
+	if fb.hidden != 1 {
+		t.Fatalf("z should hide the frame once, got %d calls", fb.hidden)
+	}
+	if m.status != "" {
+		t.Errorf("an unframed window is a quiet no-op, status = %q", m.status)
+	}
+
+	fb.hideErr = errors.New("not inside a multiplexer")
+	m, cmd = updWidget(t, m, kr("z"))
+	m = settle(t, m, cmd)
+	if !strings.Contains(m.status, "not inside a multiplexer") {
+		t.Errorf("a failed hide should be reported, status = %q", m.status)
+	}
+
+	// The statusbar has neither a cursor to select with nor a collapse gesture.
+	sb := seedWidget(WidgetStatusbar, 60, 1)
+	for _, key := range []tea.KeyMsg{kr("z"), kEnter} {
+		if _, cmd := updWidget(t, sb, key); cmd != nil {
+			t.Errorf("the statusbar should ignore %v", key)
+		}
+	}
+	if got := sb.backend.(*fakeBackend); got.hidden != 0 || len(got.switched) != 0 {
+		t.Errorf("the statusbar dispatched %d hides and %v switches", got.hidden, got.switched)
+	}
+}
+
+// TestWidgetNoQuit covers V6's flag: a widget docked in a frame pane must not
+// exit from a keypress, and stops advertising a key it no longer has. A
+// standalone run keeps quitting, which is what the flag is opt-in for.
+func TestWidgetNoQuit(t *testing.T) {
+	docked := seedWidget(WidgetSwitcher, 32, 12)
+	docked.noQuit = true
+	for _, key := range []tea.KeyMsg{
+		kr("q"),
+		tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl},
+		tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl},
+	} {
+		next, cmd := updWidget(t, docked, key)
+		if next.quitting {
+			t.Errorf("%v should not quit a docked widget", key)
+		}
+		if cmd != nil && msgIsQuit(cmd()) {
+			t.Errorf("%v should not produce Quit under --no-quit", key)
+		}
+	}
+	if hint := docked.switcherFooter(); strings.Contains(hint, "q quit") {
+		t.Errorf("a docked switcher should not hint at quitting: %q", hint)
+	}
+
+	standalone := seedWidget(WidgetSwitcher, 32, 12)
+	next, cmd := updWidget(t, standalone, kr("q"))
+	if !next.quitting || cmd == nil || !msgIsQuit(cmd()) {
+		t.Errorf("q should still quit a standalone widget")
+	}
+	if hint := standalone.switcherFooter(); !strings.Contains(hint, "q quit") {
+		t.Errorf("a standalone switcher should hint at quitting: %q", hint)
+	}
 }

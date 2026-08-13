@@ -35,6 +35,45 @@ func TestMergeProjectInfosAddsZeroCommandNamedProjects(t *testing.T) {
 	}
 }
 
+// TestMergeProjectInfosStampsIdentity pins which spelling of the work directory
+// the switcher's identity is hashed from: the canonical one compose computes and
+// mux stamps its windows with, not ProjectInfo.Workdir, which is symlink-
+// resolved for cwd comparison and would address a window that does not exist.
+func TestMergeProjectInfosStampsIdentity(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	if err := os.Mkdir(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable here: %v", err)
+	}
+
+	got := mergeProjectInfos(
+		[]compose.ProjectSummary{{Project: "api-stack", WorkDir: link}},
+		[]string{"tools"},
+	)
+	if len(got) != 2 {
+		t.Fatalf("want the summary and the named project, got %d", len(got))
+	}
+	want := compose.ProjectSelection{WorkDir: link, Project: "api-stack"}.ProjectIdentity()
+	if got[0].Identity != want {
+		t.Errorf("identity = %q, want %q", got[0].Identity, want)
+	}
+	resolved := compose.ProjectSelection{
+		WorkDir: normalizePath(link), Project: "api-stack",
+	}.ProjectIdentity()
+	if got[0].Identity == resolved {
+		t.Errorf("identity must not be hashed from the symlink-resolved work directory")
+	}
+	// A never-run named project has no directory to hash, so it gets no identity
+	// rather than one that would match some other project's window.
+	if got[1].Identity != "" {
+		t.Errorf("named project identity = %q, want none", got[1].Identity)
+	}
+}
+
 const cwdComposeYAML = "name: cwdproj\ncommands:\n  a:\n    args: [echo, a]\n"
 
 func TestAppendCwdProjectAddsUnregisteredProject(t *testing.T) {

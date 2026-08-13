@@ -69,7 +69,13 @@ func runComposeUp(
 	}
 	defer prog.Close()
 
-	composeSvc := compose.NewService(svc, compose.WithReporter(prog))
+	// The frame seam is set because of the --mux tail below: its MuxUp shows the
+	// configured default_frame, which may hold a managed entry.
+	composeSvc := compose.NewService(
+		svc,
+		compose.WithReporter(prog),
+		compose.WithFrameSvc(cli.NewFrameSvc(svc)),
+	)
 	result, err := composeSvc.Up(
 		cmd.Context(), spec, compose.UpOption{
 			CreateOption: compose.CreateOption{

@@ -53,14 +53,32 @@ func appendCwdProject(infos []tui.ProjectInfo, workDir string) []tui.ProjectInfo
 		if infos[i].Workdir == "" {
 			infos[i].Workdir = workdir
 		}
+		if infos[i].Identity == "" {
+			infos[i].Identity = projectIdentity(sel.WorkDir, sel.Project)
+		}
 		return infos
 	}
 	return append(infos, tui.ProjectInfo{
 		Name:     sel.Project,
 		Path:     path,
 		Workdir:  workdir,
+		Identity: projectIdentity(sel.WorkDir, sel.Project),
 		Modified: modifiedLabel(path),
 	})
+}
+
+// projectIdentity is the multiplexer ownership stamp of a project's window, the
+// string the switcher hands back to [serviceBackend.SwitchToProject]. workDir is
+// the work directory as compose itself computes it — cleaned and absolute, but
+// NOT symlink-resolved: the hash mux stamped is over that form, while
+// tui.ProjectInfo.Workdir is resolved for cwd comparison and would hash into a
+// window that does not exist. A project with no directory to hash gets no
+// identity rather than one that would match some other project's window.
+func projectIdentity(workDir, project string) string {
+	if workDir == "" || project == "" {
+		return ""
+	}
+	return compose.ProjectSelection{WorkDir: workDir, Project: project}.ProjectIdentity()
 }
 
 // projectHasMux reports whether a compose project declares a mux: section. It
@@ -90,6 +108,7 @@ func mergeProjectInfos(summaries []compose.ProjectSummary, named []string) []tui
 			Name:     s.Project,
 			Path:     s.ComposeFile,
 			Workdir:  normalizePath(s.WorkDir),
+			Identity: projectIdentity(s.WorkDir, s.Project),
 			Commands: s.Commands,
 			Running:  s.Running,
 			Exited:   s.Exited,

@@ -37,6 +37,11 @@ type fakeBackend struct {
 	muxCycled []string // project names passed to CycleMux
 	muxErr    error
 
+	switched  []string // identities passed to SwitchToProject
+	switchErr error    // error returned by SwitchToProject
+	hidden    int      // HideFrame calls
+	hideErr   error    // error returned by HideFrame
+
 	layoutsInfo    LayoutsInfo // info returned by ListLayouts
 	layoutsErr     error       // error returned by ListLayouts
 	layoutsReq     []string    // project names passed to ListLayouts
@@ -116,6 +121,16 @@ func (f *fakeBackend) Attach(_ context.Context, id string) (string, error) {
 func (f *fakeBackend) CycleMux(_ context.Context, projectName, _ string) error {
 	f.muxCycled = append(f.muxCycled, projectName)
 	return f.muxErr
+}
+
+func (f *fakeBackend) SwitchToProject(_ context.Context, identity string) error {
+	f.switched = append(f.switched, identity)
+	return f.switchErr
+}
+
+func (f *fakeBackend) HideFrame(context.Context) error {
+	f.hidden++
+	return f.hideErr
 }
 
 func (f *fakeBackend) ListLayouts(_ context.Context, projectName, _ string) (LayoutsInfo, error) {

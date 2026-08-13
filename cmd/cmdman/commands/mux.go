@@ -21,8 +21,8 @@ argument (or "-"), the spec is read from stdin.
 With no --session, the dashboard targets the current tmux session when run
 inside tmux, otherwise a session named "cmdman".
 
-Subcommands: up, down, ls. A path literally named "up", "down", or "ls" must
-be passed as: cmdman mux up <path>.`,
+Subcommands: up, down, ls, frame. A path literally named "up", "down", "ls",
+or "frame" must be passed as: cmdman mux up <path>.`,
 		Args: cobra.MaximumNArgs(1),
 		// The positional arg is a layout file path; the shell's default file
 		// completion is the right behavior, so ValidArgsFunction is left unset.
@@ -38,6 +38,7 @@ be passed as: cmdman mux up <path>.`,
 	muxUpCmd(cmd, rf, &flagSession)
 	muxDownCmd(cmd, &flagSession)
 	muxLsCmd(cmd, &flagSession)
+	muxFrameCmd(cmd, rf, &flagSession)
 
 	parent.AddCommand(cmd)
 }

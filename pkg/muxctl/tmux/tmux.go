@@ -56,6 +56,36 @@ func (srv *Server) CurrentSessionName(ctx context.Context) (name string, ok bool
 	return out, true, nil
 }
 
+// CurrentWindowID implements [muxctl.Server.CurrentWindowID] as
+// "display-message -p '#{window_id}'", resolved against the caller's attached
+// client or, when session is named, against that session's current window.
+//
+// The target is the "=<session>:" form: the trailing colon makes it a window
+// target so tmux answers with the session's current window, and the leading =
+// keeps the session match exact, as everywhere else in this driver. Without the
+// colon tmux reads "=<session>" as a pane target and resolves nothing (measured
+// on a scratch server: empty output, exit 0).
+//
+// Any failure — no server, no such session, no attached client — is ok=false
+// with a nil error, mirroring [Server.CurrentSessionName]: both answer "where is
+// the caller", and having no answer is not an error.
+func (srv *Server) CurrentWindowID(
+	ctx context.Context,
+	session string,
+) (id string, ok bool, err error) {
+	args := []string{"display-message", "-p"}
+	if session != "" {
+		args = append(args, "-t", "="+session+":")
+	}
+	args = append(args, "#{window_id}")
+
+	out, runErr := srv.exec.run(ctx, args...)
+	if runErr != nil || out == "" {
+		return "", false, nil
+	}
+	return out, true, nil
+}
+
 // New constructs a Session targeting either a known window (cfg.WindowID)
 // or a window found-or-created by name (cfg.SessionName + cfg.WindowName).
 // It does not apply any layout — call [Session.ApplyLayout] to populate

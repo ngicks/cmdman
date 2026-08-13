@@ -2,14 +2,16 @@ package frame_test
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/ngicks/cmdman/cmdman/frame"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/assert/cmp"
-
-	"github.com/ngicks/cmdman/cmdman/frame"
 )
 
 const defContent = "frame:\n  - edge: left\n    size: 20%\n    component: switcher\n"
@@ -71,6 +73,11 @@ func TestDiscoverFile_NamedDef(t *testing.T) {
 		_, _, err := frame.DiscoverFile(cwd, "nope")
 		assert.Assert(t, err != nil)
 		assert.Assert(t, cmp.Contains(err.Error(), filepath.Join(cwd, "nope")))
+		// The open failure names its own path, once: a wrapper repeating it
+		// read as "open <path>: open <path>: …".
+		assert.Equal(t, strings.Count(err.Error(), "open "), 1)
+		// And callers branch on the identity, not on the text.
+		assert.Assert(t, errors.Is(err, fs.ErrNotExist))
 	})
 
 	t.Run("empty name errors", func(t *testing.T) {
@@ -91,6 +98,17 @@ func TestDiscoverFile_FrameDirAbsent(t *testing.T) {
 	path, _, err := frame.DiscoverFile(cwd, "local.yaml")
 	assert.NilError(t, err)
 	assert.Equal(t, path, filepath.Join(cwd, "local.yaml"))
+}
+
+// TestIsBareName pins the split callers phrase failures by: a bare name is the
+// form the frame dir answers for, everything else is a path.
+func TestIsBareName(t *testing.T) {
+	for _, name := range []string{"work", "work.yaml", "work-2"} {
+		assert.Assert(t, frame.IsBareName(name), "%q is a bare def name", name)
+	}
+	for _, name := range []string{"", ".", "..", "./work", "dir/work", `dir\work`, "/abs/work"} {
+		assert.Assert(t, !frame.IsBareName(name), "%q is not a bare def name", name)
+	}
 }
 
 func TestListNamedDefs(t *testing.T) {

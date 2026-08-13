@@ -7,6 +7,7 @@ import (
 
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/compose"
+	"github.com/ngicks/cmdman/cmdman/frame"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/tui"
 )
@@ -160,6 +161,31 @@ func completeComposeFile(
 	toComplete string,
 ) ([]cobra.Completion, cobra.ShellCompDirective) {
 	names, err := compose.ListNamedProjects()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveDefault
+	}
+	var out []cobra.Completion
+	for _, n := range names {
+		if strings.HasPrefix(n, toComplete) {
+			out = append(out, n)
+		}
+	}
+	return out, cobra.ShellCompDirectiveDefault
+}
+
+// completeFrameDefs completes the optional DEF argument of `mux frame show`
+// with the def names discoverable under the frame config dir, while still
+// letting the shell offer its default file-path completion
+// (ShellCompDirectiveDefault): DEF is a bare name or a path to a def file.
+func completeFrameDefs(
+	_ *cobra.Command,
+	args []string,
+	toComplete string,
+) ([]cobra.Completion, cobra.ShellCompDirective) {
+	if len(args) != 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	names, err := frame.ListNamedDefs()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveDefault
 	}

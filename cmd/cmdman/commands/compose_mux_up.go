@@ -3,6 +3,7 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
@@ -72,10 +73,12 @@ func runComposeMuxUp(
 	if len(args) > 0 {
 		layout = args[0]
 	}
-	return compose.NewService(svc).MuxUp(cmd.Context(), compose.MuxUpOption{
-		Selection:   selection,
-		Layout:      layout,
-		SessionName: session,
-		Stdout:      cmd.OutOrStdout(),
-	})
+	return compose.NewService(svc, compose.WithFrameSvc(cli.NewFrameSvc(svc))).MuxUp(
+		cmd.Context(),
+		compose.MuxUpOption{
+			Selection:   selection,
+			Layout:      layout,
+			SessionName: session,
+			Stdout:      cmd.OutOrStdout(),
+		})
 }

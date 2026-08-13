@@ -66,6 +66,12 @@ the dashboard is up's primary job; it warns and continues unframed.
 (2) No `--no-frame` opt-out flag initially: unsetting the key, or
 `frame hide` after up, covers it; a flag can be added on demand.
 
+**Amended 2026-08-14 (user's call):** `compose mux up` auto-shows as
+well — the key applies to every dashboard window cmdman builds, not
+only the standalone `mux up` verb. (The initial implementation had
+left the compose path bare because step 2 named only `mux up`;
+recorded then as a follow-up, now resolved.)
+
 ### V1 (2026-08-13, Q1) — verbs mount at `cmdman mux frame`
 
 **Choice.** `cmdman mux frame show|hide|cycle|ls`, composed in
@@ -176,6 +182,34 @@ doubles as the small-terminal collapse gesture". Restore is CLI
 *Noted routine call:* `z` targets the current window's frame and is a
 quiet no-op when none is up (consistent with hide's no-op semantics),
 so the binding needs no docked/standalone mode split.
+
+### V10 (2026-08-13, implementation) — no viewer quiesce on hide/cycle: by design
+
+**Choice.** Hide/cycle/replace kill a managed
+entry's viewer pane without asking the `cmdman attach` client to exit
+first, and that is by design, not an accepted deficiency. The
+multiplexer is a disposable viewer (muxctl's stated principle:
+closing/rebuilding it must never stop a supervised process); the
+invariant F7 protects is the supervised command's survival, which
+holds — attach does not forward SIGHUP (test-pinned), the monitor
+cleans up a dropped Attach stream identically to a graceful detach
+(`mon_server.go` watches the stream context), and ungraceful viewer
+death is already the driver's designed fallback on the project side
+(`quiesceDeadline` expiry in ApplyLayout/Detach). F7's
+"detach/preserve before removing the pane" is satisfied in substance:
+the managed command is preserved; the viewer needs no ceremony.
+
+**Rationale.** Killing attach viewers with their panes is the
+routinely exercised path everywhere else (layout cycle, window
+teardown); a graceful frame-pane detach would protect nothing that
+exists. The viewer's graceful-exit work is terminal restoration,
+which is moot inside a pane being destroyed.
+
+**Rejected.** A consumer-driven quiesce primitive in `pkg/muxctl`
+(reusing `quiesceViewers` with frame-stamp selection) — driver work
+this plan lists as a non-goal, buying only hypothetical hygiene.
+Revisit only if a viewer ever acquires shutdown work that matters
+beyond its pty.
 
 ## Stubs — open questions (PLAN.md "Open questions")
 

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/go-common/contextkey"
 )
 
@@ -25,8 +26,9 @@ func warnUnknownFields(ctx context.Context, unknown map[string]any, msg string, 
 // file raw was decoded from; it is recorded on the result and used in error and
 // warning messages, and may be empty for an in-memory def.
 //
-// Unrecognized keys are warned about, never dropped silently and never fatal.
-// Everything else — an unknown edge, a missing size, a component that is not
+// Unrecognized keys — and a hooks: override on an entry that has no supervised
+// command to apply it to — are warned about, never dropped silently and never
+// fatal. Everything else — an unknown edge, a missing size, a component that is not
 // built in, an entry that sets both or neither of component/command — is an
 // error: the def cannot be realized as written.
 func Normalize(ctx context.Context, path string, raw RawSpec) (Spec, error) {
@@ -56,7 +58,7 @@ func Normalize(ctx context.Context, path string, raw RawSpec) (Spec, error) {
 			i,
 		)
 
-		entry, err := normalizeEntry(re)
+		entry, err := normalizeEntry(ctx, path, i, re)
 		if err != nil {
 			return Spec{}, fmt.Errorf("frame %s: entry %d: %w", describePath(path), i, err)
 		}
@@ -66,7 +68,7 @@ func Normalize(ctx context.Context, path string, raw RawSpec) (Spec, error) {
 	return Spec{Path: path, Entries: entries}, nil
 }
 
-func normalizeEntry(re RawEntry) (Entry, error) {
+func normalizeEntry(ctx context.Context, path string, i int, re RawEntry) (Entry, error) {
 	edge := Edge(re.Edge)
 	switch edge {
 	case EdgeTop, EdgeBottom, EdgeLeft, EdgeRight:
@@ -101,13 +103,47 @@ func normalizeEntry(re RawEntry) (Entry, error) {
 		}
 	}
 
+	hooks, err := normalizeHooks(ctx, path, i, re)
+	if err != nil {
+		return Entry{}, err
+	}
+
 	return Entry{
 		Edge:      edge,
 		Size:      re.Size.MuxSize(),
 		Component: re.Component,
 		Command:   slices.Clone(re.Command),
 		Managed:   re.Managed,
+		Hooks:     hooks,
 	}, nil
+}
+
+// normalizeHooks keeps an entry's hook override only where it can take effect
+// (D17): a managed entry carries it into its supervised command, anything else
+// drops it with a warning. A kept set is validated here rather than at the
+// far-away create path, so a typo names the def file it came from.
+func normalizeHooks(
+	ctx context.Context,
+	path string,
+	i int,
+	re RawEntry,
+) (model.HookSet, error) {
+	if len(re.Hooks) == 0 {
+		return nil, nil
+	}
+	if !re.Managed {
+		contextkey.ValueSlogLoggerDefault(ctx).WarnContext(
+			ctx,
+			"frame: ignoring hooks: on an entry without managed: true",
+			"path", path,
+			"entry", i,
+		)
+		return nil, nil
+	}
+	if err := re.Hooks.Validate(); err != nil {
+		return nil, err
+	}
+	return maps.Clone(re.Hooks), nil
 }
 
 func edgeNames() []string {

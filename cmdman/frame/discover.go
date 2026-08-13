@@ -62,7 +62,7 @@ func DiscoverFile(cwd, name string) (path string, raw RawSpec, err error) {
 // ok is false when name is not a bare name (contains a path separator) or no
 // matching entry exists. There is no directory form: a frame def is one file.
 func resolveNamedFrameFile(name string) (path string, ok bool, err error) {
-	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+	if !IsBareName(name) {
 		return "", false, nil
 	}
 
@@ -88,6 +88,16 @@ func resolveNamedFrameFile(name string) (path string, ok bool, err error) {
 		}
 	}
 	return "", false, nil
+}
+
+// IsBareName reports whether name is a bare def name — the form step 2 of
+// [DiscoverFile] resolves under the default frame dir — rather than a path.
+//
+// It is exported so that a caller phrasing a discovery failure splits the two
+// forms exactly as discovery does: a bare name has the defs [ListNamedDefs]
+// found to offer as candidates, a path has only itself.
+func IsBareName(name string) bool {
+	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, `/\`)
 }
 
 // ListNamedDefs returns the names of frame defs discoverable under the default

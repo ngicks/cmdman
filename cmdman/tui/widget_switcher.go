@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // switcherGroups joins the global project list (the ListProjects merge:
@@ -42,7 +43,7 @@ func switcherGroups(
 
 	out := make([]projectGroup, 0, len(projs)+len(cmdGroups))
 	for _, p := range projs {
-		g := projectGroup{name: p.Name, workdir: p.Workdir}
+		g := projectGroup{name: p.Name, workdir: p.Workdir, identity: p.Identity}
 		if i, ok := matchCommandGroup(p, byKey, byName, claimed); ok {
 			claimed[i] = true
 			g.commands = cmdGroups[i].commands
@@ -203,35 +204,75 @@ func markerStyle(g projectGroup) lipgloss.Style {
 // and command rows together. The list scrolls inside the pane; the title and
 // the hint footer are pinned, so only the group rows move.
 //
-// A def can dock a switcher into a pane of any height, so the chrome yields to
-// the pane rather than overflowing it: the hint line goes first, then the
-// title, and the group rows are the last thing standing.
+// A def can dock a switcher into a pane of any width and height, so the chrome
+// yields to the pane rather than overflowing it: the hint line goes first, then
+// the title, and the group rows are the last thing standing. The two chrome
+// lines are cut to the pane's width as well — a hint or an error longer than the
+// column would wrap and cost the list a row it was not given.
 func (m widgetModel) renderSwitcher(w, h int) string {
-	h = max(h, 1)
-	title, footer := h >= 2, h >= 3
-	avail := h
-	if title {
-		avail--
-	}
-	if footer {
-		avail--
-	}
+	g := m.switcherGeometry(w, h)
 
-	lines := m.switcherLines(w)
-	if len(lines) == 0 {
-		lines = []switcherLine{{text: styleActive.Render("No projects.")}}
+	out := make([]string, 0, max(h, 1))
+	if g.title {
+		out = append(out, ansi.Truncate(styleWidgetTitle.Render("projects"), w, ""))
 	}
-	off := viewportOffset(lines, m.selected, avail)
-
-	out := make([]string, 0, h)
-	if title {
-		out = append(out, styleWidgetTitle.Render("projects"))
-	}
-	out = append(out, linesText(lines[off:min(off+avail, len(lines))])...)
-	if footer {
-		out = append(out, m.switcherFooter())
+	out = append(out, linesText(g.lines[g.off:min(g.off+g.avail, len(g.lines))])...)
+	if g.footer {
+		out = append(out, ansi.Truncate(m.switcherFooter(), w, ""))
 	}
 	return strings.Join(out, "\n")
+}
+
+// switcherGeometry is where the docked column's rows land: which chrome fits,
+// how many rows are left for the list, and where the list is scrolled to. The
+// render and the click hit-test both read it, so a click resolves against the
+// rows that were actually drawn rather than a second guess at the layout.
+type switcherGeometry struct {
+	lines         []switcherLine
+	title, footer bool
+	avail         int // rows the list may use
+	off           int // index of the first visible line
+}
+
+// top is the screen row the first visible list line occupies.
+func (g switcherGeometry) top() int {
+	if g.title {
+		return 1
+	}
+	return 0
+}
+
+func (m widgetModel) switcherGeometry(w, h int) switcherGeometry {
+	h = max(h, 1)
+	g := switcherGeometry{title: h >= 2, footer: h >= 3, avail: h}
+	if g.title {
+		g.avail--
+	}
+	if g.footer {
+		g.avail--
+	}
+	g.lines = m.switcherLines(w)
+	if len(g.lines) == 0 {
+		g.lines = []switcherLine{{text: styleActive.Render("No projects."), group: -1}}
+	}
+	g.off = viewportOffset(g.lines, m.selected, g.avail)
+	return g
+}
+
+// groupAt resolves a screen row to the group drawn on it. The chrome rows and
+// the placeholder shown when there is nothing to list belong to no group.
+func (m widgetModel) groupAt(y int) (int, bool) {
+	w, h := m.size()
+	g := m.switcherGeometry(w, h)
+	i := g.off + y - g.top()
+	if y < g.top() || i >= min(g.off+g.avail, len(g.lines)) {
+		return 0, false
+	}
+	group := g.lines[i].group
+	if group < 0 || group >= len(m.groups) {
+		return 0, false
+	}
+	return group, true
 }
 
 func linesText(lines []switcherLine) []string {
@@ -243,12 +284,17 @@ func linesText(lines []switcherLine) []string {
 }
 
 // switcherFooter is the pinned last line: the transient error text when there
-// is one, else the key hints.
+// is one, else the key hints. Quit is hinted only where it is bound — a docked
+// switcher runs with it unbound (V6).
 func (m widgetModel) switcherFooter() string {
 	if m.status != "" {
 		return styleActive.Render(m.status)
 	}
-	return styleActive.Render("j/k move · q quit")
+	hint := "j/k move · enter switch · z hide"
+	if !m.noQuit {
+		hint += " · q quit"
+	}
+	return styleActive.Render(hint)
 }
 
 // switcherLines renders the scrollable region: every project's head line

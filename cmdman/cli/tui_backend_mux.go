@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"github.com/ngicks/cmdman/cmdman/compose"
@@ -23,6 +24,40 @@ func (b *serviceBackend) CycleMux(ctx context.Context, projectName, composeFile 
 	return b.compose.MuxUp(ctx, compose.MuxUpOption{
 		Selection: selection,
 		Stdout:    io.Discard,
+	})
+}
+
+// SwitchToProject takes the client to the window carrying identity — the docked
+// switcher's enter/click (D6). It is navigate-only (V6): a project with no
+// window of its own is reported back rather than brought up, and rather than
+// given the synthesized window a landing would build for it (D9), which is the
+// launcher's gesture and not the switcher's.
+func (b *serviceBackend) SwitchToProject(ctx context.Context, identity string) error {
+	if identity == "" {
+		return errors.New("no project identity to switch to")
+	}
+	// The listing is what keeps this navigate-only: mux.Land creates the window
+	// it cannot find, so the window has to be found before it is asked for.
+	windows, err := mux.List(ctx, mux.ListOptions{Identity: identity})
+	if err != nil {
+		return err
+	}
+	if len(windows) == 0 {
+		return errors.New("no window is up for it")
+	}
+	if _, err := mux.Land(ctx, mux.LandOptions{Identity: identity}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// HideFrame takes the frame down around the caller's current window — the docked
+// switcher's collapse gesture (D16/V8). The def to hide is read off the window,
+// so nothing identifies it here; a window with no frame up is a no-op.
+func (b *serviceBackend) HideFrame(ctx context.Context) error {
+	return mux.FrameHide(ctx, mux.FrameOptions{
+		Config: b.svc.Config(),
+		Svc:    NewFrameSvc(b.svc),
 	})
 }
 

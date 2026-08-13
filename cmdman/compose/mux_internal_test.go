@@ -72,6 +72,34 @@ func TestServiceMuxCycleScale_LeafResolverError(t *testing.T) {
 	assert.Assert(t, errors.Is(err, wantErr))
 }
 
+// frameSvcStub is a [mux.FrameSvc] that answers nothing: the plumbing test
+// below only needs a value the seam can hold.
+type frameSvcStub struct{}
+
+func (frameSvcStub) Config() cmdman.CmdmanConfig { return cmdman.CmdmanConfig{} }
+
+func (frameSvcStub) ListCommands(context.Context) ([]mux.CommandStatus, error) {
+	return nil, nil
+}
+
+func (frameSvcStub) CreateCommand(context.Context, mux.CommandSpec) (string, error) {
+	return "", nil
+}
+
+func (frameSvcStub) Start(context.Context, string) error { return nil }
+
+// TestWithFrameSvc pins where the frame seam comes from. No cmdman type is a
+// [mux.FrameSvc], so what [Service.MuxUp] hands to mux is whatever
+// [WithFrameSvc] was given and nothing else — and a Service built without it
+// has no seam at all, which is what makes a managed entry in a default_frame
+// warn instead of show. Every construction site that can reach MuxUp has to
+// pass the option for the auto-show to work on a managed def.
+func TestWithFrameSvc(t *testing.T) {
+	stub := frameSvcStub{}
+	assert.Equal(t, NewService(nil, WithFrameSvc(stub)).frameSvc, mux.FrameSvc(stub))
+	assert.Assert(t, NewService(nil).frameSvc == nil)
+}
+
 // NewService(nil) must store a genuine nil interface (not a typed-nil pointer),
 // so the s.svc != nil guards in the mux verbs behave.
 func TestNewService_NilTolerant(t *testing.T) {

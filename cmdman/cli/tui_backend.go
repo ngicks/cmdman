@@ -31,8 +31,11 @@ func newServiceBackend(svc *cmdman.Service, workDir string) tui.Backend {
 		cwd = normalizePath(workDir)
 	}
 	return &serviceBackend{
-		svc:     svc,
-		compose: compose.NewService(svc),
+		svc: svc,
+		// The frame seam travels with the compose service because the TUI's
+		// layout verbs go through MuxUp, whose default_frame auto-show may hold a
+		// managed entry.
+		compose: compose.NewService(svc, compose.WithFrameSvc(NewFrameSvc(svc))),
 		cwd:     cwd,
 		workDir: workDir,
 	}

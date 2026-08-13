@@ -32,7 +32,8 @@ func RunTUI(ctx context.Context, svc *cmdman.Service, initialTab tui.Tab, workDi
 
 // RunTUIWidget runs a single TUI widget standalone in the current terminal —
 // the `cmdman tui widget <name>` entry point, which is also what a frame def's
-// `component:` resolves to. workDir mirrors RunTUI's override.
+// `component:` resolves to. workDir mirrors RunTUI's override; noQuit unbinds
+// the widget's quit keys, which is how a frame pane always runs it (V6).
 //
 // Every widget but the statusbar takes the alternate screen: the switcher owns a
 // whole pane and the launcher a whole popup window, and both want it clean —
@@ -42,12 +43,14 @@ func RunTUIWidget(
 	svc *cmdman.Service,
 	widget tui.Widget,
 	workDir string,
+	noQuit bool,
 ) error {
 	return tui.Run(ctx, tui.Options{
 		Backend:   newServiceBackend(svc, workDir),
 		Version:   libver.Version,
 		AltScreen: widget != tui.WidgetStatusbar,
 		Widget:    widget,
+		NoQuit:    noQuit,
 	})
 }
 

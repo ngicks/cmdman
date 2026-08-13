@@ -9,7 +9,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ngicks/cmdman/cmdman/config"
 	"github.com/ngicks/cmdman/pkg/muxctl"
+	"github.com/ngicks/go-common/contextkey"
 )
 
 // RunOptions configures [Run].
@@ -50,6 +52,18 @@ type RunOptions struct {
 	// a layout literally named "2" wins over index 2. Empty (the default)
 	// cycles to the next layout after the one currently applied.
 	Layout string
+	// Config is the resolved cmdman configuration. Only DefaultFrame is read —
+	// it names the frame [Run] docks around the window it just brought up (V9),
+	// exactly as [FrameOptions.Config] names the one the frame verbs fall back
+	// to. The zero value shows no frame, which is what a caller with no
+	// configuration to offer wants.
+	Config config.Config
+	// Svc is the seam [FrameOptions.Svc] is, and is needed for the same reason:
+	// a default_frame holding a managed: true entry (D19/V7) has a supervised
+	// command to adopt, restart or create before a pane can view it. A def with no
+	// managed entry never touches it, and an auto-show that needs it without it
+	// warns like any other def that could not be shown.
+	Svc FrameSvc
 	// Env is the process env consulted for driver autodetection ($TMUX /
 	// $ZELLIJ). Empty defaults to os.Environ().
 	Env []string
@@ -74,6 +88,11 @@ var viewerDetachKeys = []string{"C-p", "C-q"}
 // [muxctl.Session.StatWindow] (a fresh window starts at index 0). Either way
 // the applied index is persisted as the window marker, so a subsequent cycling
 // Run continues from the layout just shown.
+//
+// A configured opts.Config.DefaultFrame is then shown around the window (V9),
+// so a dashboard arrives inside its chrome without the user placing a frame per
+// window; see [showDefaultFrame] for what is left alone and why nothing there
+// can fail the up.
 //
 // When invoked outside a multiplexer (no $TMUX / $ZELLIJ in env), Run builds
 // the window detached and prints an attach hint
@@ -163,10 +182,60 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 		return err
 	}
 
+	if err := showDefaultFrame(
+		ctx, server, sess.WindowID(), opts.Config.DefaultFrame, opts.Svc,
+	); err != nil {
+		contextkey.ValueSlogLoggerDefault(ctx).WarnContext(
+			ctx,
+			"mux: up: default_frame not shown",
+			"frame", opts.Config.DefaultFrame,
+			"error", err,
+		)
+	}
+
 	if envOf(env, "TMUX") == "" && envOf(env, "ZELLIJ") == "" {
 		fmt.Fprintf(stdout, "Attach: tmux attach -t %s\n", sessionName)
 	}
 	return nil
+}
+
+// showDefaultFrame docks the configured default_frame around the window an up
+// has just built (V9): the key both names the default def and applies it, which
+// is what keeps the frame present across the per-window jumps D6's switching
+// makes. An unset key shows nothing, and a window that already carries a frame
+// is left as it is — auto-show never replaces a def the user selected
+// deliberately.
+//
+// It targets the window by id rather than resolving the current one the frame
+// verbs' way: `mux up` may well have built a window nobody is looking at, and
+// the frame belongs around the dashboard it just made.
+//
+// Every failure here is the caller's to warn about and none of them is fatal:
+// putting the dashboard up is what `mux up` is for, so a default def that is
+// missing or broken costs the user a warning, never their windows.
+func showDefaultFrame(
+	ctx context.Context,
+	server muxctl.Server,
+	windowID string,
+	defName string,
+	svc FrameSvc,
+) error {
+	if defName == "" {
+		return nil
+	}
+	shown, err := server.ReadWindowState(ctx, windowID, muxctl.StateKeyFrameDef)
+	if err != nil {
+		return fmt.Errorf("read the def shown on window %s: %w", windowID, err)
+	}
+	if shown != "" {
+		return nil
+	}
+	spec, err := loadFrameSpec(ctx, defName)
+	if err != nil {
+		return err
+	}
+	target := frameTarget{server: server, windowID: windowID, shown: shown}
+	return target.show(ctx, FrameOptions{Svc: svc}, defName, spec)
 }
 
 // resolveSessionName determines the session name to target.

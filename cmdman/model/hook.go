@@ -102,8 +102,13 @@ func (s HookSet) Validate() error {
 // field: the most specific layer that names an event defines that event
 // completely, and fields it leaves unset take the built-in default.
 type HookLayers struct {
-	// Frame is the seam for a frame definition's hook override (D17). Phase 3
-	// of the frame work fills it; nothing sets it today.
+	// Frame is unused: a frame definition's hook override (D17) does not travel
+	// through a layer of its own. A `hooks:` entry in a def belongs to a
+	// `managed: true` entry, which is a supervised command like any other, so
+	// the override is written into that command's [CommandConfig.Hooks] when the
+	// frame verbs create it and arrives here as Command (V5). What is left here
+	// is a slot for an override that could not be a per-command one; nothing
+	// sets it.
 	Frame HookSet
 	// Command is the per-command HookSet from [CommandConfig.Hooks].
 	Command HookSet

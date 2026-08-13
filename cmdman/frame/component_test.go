@@ -16,11 +16,15 @@ func TestWidgetArgv(t *testing.T) {
 	resolve := frame.WidgetArgv("/opt/bin/cmdman")
 	argv, err := resolve(frame.ComponentSwitcher)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, argv, []string{"/opt/bin/cmdman", "tui", "widget", "switcher"})
+	// --no-quit rides along on every component invocation (V6): a docked widget
+	// that quits leaves the frame holding an empty pane.
+	assert.DeepEqual(t, argv,
+		[]string{"/opt/bin/cmdman", "tui", "widget", "switcher", "--no-quit"})
 
 	argv, err = frame.WidgetArgv("")(frame.ComponentStatusbar)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, argv, []string{"cmdman", "tui", "widget", "statusbar"})
+	assert.DeepEqual(t, argv,
+		[]string{"cmdman", "tui", "widget", "statusbar", "--no-quit"})
 
 	_, err = resolve("nope")
 	assert.ErrorContains(t, err, "unknown component")
@@ -38,7 +42,7 @@ func TestWidgetArgvCarves(t *testing.T) {
 	assert.NilError(t, err)
 	assert.DeepEqual(t,
 		pane.Panes[0].Cmd,
-		[]string{"cmdman", "tui", "widget", "switcher"})
+		[]string{"cmdman", "tui", "widget", "switcher", "--no-quit"})
 }
 
 // TestBuiltinComponentsMatchWidgets pins the direction of the contract that

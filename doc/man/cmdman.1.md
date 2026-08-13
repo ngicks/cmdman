@@ -77,7 +77,8 @@ Interaction and observation: [attach](./cmdman-attach.1.md),
 [send-keys](./cmdman-send-keys.1.md), [logs](./cmdman-logs.1.md),
 [events](./cmdman-events.1.md), [inspect](./cmdman-inspect.1.md),
 [ls](./cmdman-ls.1.md), [status](./cmdman-status.1.md) (subcommands: `set`,
-`get`, `delete`), [mux](./cmdman-mux.1.md) (subcommands: `up`, `down`, `ls`),
+`get`, `delete`), [mux](./cmdman-mux.1.md) (subcommands: `up`, `down`, `ls`,
+`frame`),
 [tui](./cmdman-tui.1.md) (subcommand group: `widget`).
 
 Project management: [compose](./cmdman-compose.1.md).

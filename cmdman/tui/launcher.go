@@ -177,6 +177,8 @@ type launcherModel struct {
 
 	width, height int
 	altScreen     bool
+	// noQuit unbinds the quit gestures, as it does for the docked widgets (V6).
+	noQuit bool
 
 	locs   []launcherLocation
 	loaded bool
@@ -214,9 +216,19 @@ func newLauncher(opts Options) launcherModel {
 	return launcherModel{
 		backend:   opts.Backend,
 		altScreen: opts.AltScreen,
+		noQuit:    opts.NoQuit,
 		failedLoc: -1,
 		failedPrj: -1,
 	}
+}
+
+// quit ends the run, unless --no-quit took the gesture away (V6).
+func (m launcherModel) quit() (tea.Model, tea.Cmd) {
+	if m.noQuit {
+		return m, nil
+	}
+	m.quitting = true
+	return m, tea.Quit
 }
 
 func (m launcherModel) bgCtx() context.Context {
@@ -395,8 +407,7 @@ func (m launcherModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.note = ""
 	switch msg.String() {
 	case "ctrl+c":
-		m.quitting = true
-		return m, tea.Quit
+		return m.quit()
 	case "esc":
 		// One step at a time: projects → locations → input → clear the query →
 		// dismiss. Clearing comes before quitting so a long path typed by mistake
@@ -410,8 +421,7 @@ func (m launcherModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.filter = ""
 			m = m.clampLeft()
 		default:
-			m.quitting = true
-			return m, tea.Quit
+			return m.quit()
 		}
 	case "ctrl+u":
 		// Readline's erase-line, reachable from anywhere. It returns to the input
@@ -478,8 +488,7 @@ func (m launcherModel) text(t string) (tea.Model, tea.Cmd) {
 	case "S":
 		return m.launchSelected()
 	case "q":
-		m.quitting = true
-		return m, tea.Quit
+		return m.quit()
 	}
 	return m, nil
 }

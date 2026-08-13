@@ -74,6 +74,9 @@ type widgetModel struct {
 	backend Backend
 	widget  Widget
 	version string
+	// noQuit unbinds the quit keys (V6), which is how a widget docked in a
+	// frame pane runs: an exiting viewer leaves a hole in the fixture.
+	noQuit bool
 
 	// ctx is the program-scoped context used for backend calls, mirroring
 	// Model.ctx; tests that drive Update directly may leave it nil.
@@ -99,6 +102,13 @@ type widgetModel struct {
 	cwd      string // normalized working directory for active detection
 	status   string // transient error text, shown in place of the hint line
 
+	// bellRead carries the command ids whose bell was resolved by selecting
+	// their project (D22). The monitor keeps reporting such a bell as unread —
+	// inside it only an attach reads one (D11) — so the switcher remembers what
+	// it already showed the user until the monitor's own flag goes down, at
+	// which point a bell that rings again is news again.
+	bellRead map[string]bool
+
 	events    EventStream
 	reloadGen int
 
@@ -120,6 +130,7 @@ func newWidget(opts Options) widgetModel {
 		widget:    opts.Widget,
 		version:   opts.Version,
 		altScreen: opts.AltScreen,
+		noQuit:    opts.NoQuit,
 	}
 }
 
@@ -187,6 +198,18 @@ func (m widgetModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			listCommandsCmd(m.bgCtx(), m.backend),
 			listProjectsCmd(m.bgCtx(), m.backend),
 		)
+	case projectSwitchedMsg:
+		return m.onProjectSwitched(msg), nil
+	case frameHiddenMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("hide frame: %v", msg.err)
+		}
+		return m, nil
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft {
+			return m, nil
+		}
+		return m.clickAt(msg.Y)
 	case tea.KeyMsg:
 		return m.onKey(msg)
 	}
@@ -206,18 +229,30 @@ func (m widgetModel) onEventSignal(msg eventSignalMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(waitEventCmd(m.events), debounceCmd(m.reloadGen))
 }
 
-// onKey handles the widget key set. Selection-driven window switching (enter)
-// and mouse selection arrive with the frame verbs; until a selection can do
-// something, the switcher only moves its cursor.
+// onKey handles the widget key set: the switcher's cursor keys, the selection
+// that takes the client to a project's window (D6), and the collapse gesture
+// that takes the whole frame down (V8). The switcher is navigate-only — start,
+// stop and kill stay in the full TUI (V6).
 func (m widgetModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c", "ctrl+d":
+		if m.noQuit {
+			// A docked widget has no quit: the pane would stay behind empty (V6).
+			return m, nil
+		}
 		m.quitting = true
 		return m, tea.Quit
 	case "j", "down":
 		m.moveSelection(1)
 	case "k", "up":
 		m.moveSelection(-1)
+	case "enter":
+		return m.switchToSelected()
+	case "z":
+		if m.widget != WidgetSwitcher {
+			return m, nil
+		}
+		return m, hideFrameCmd(m.bgCtx(), m.backend)
 	}
 	return m, nil
 }
@@ -228,6 +263,103 @@ func (m *widgetModel) moveSelection(delta int) {
 		return
 	}
 	m.selected = min(max(m.selected+delta, 0), len(m.groups)-1)
+}
+
+// clickAt selects the group the pointer landed on and switches to it, which is
+// what enter does on that group (D24) — a click is a selection, and a selection
+// is the switch.
+func (m widgetModel) clickAt(y int) (tea.Model, tea.Cmd) {
+	if m.widget != WidgetSwitcher {
+		return m, nil
+	}
+	i, ok := m.groupAt(y)
+	if !ok {
+		return m, nil
+	}
+	m.selected = i
+	return m.switchToSelected()
+}
+
+// switchToSelected takes the client to the selected project's window and reads
+// that project's bells: selecting a project through the switcher is what
+// resolves them (D22).
+func (m widgetModel) switchToSelected() (tea.Model, tea.Cmd) {
+	if m.widget != WidgetSwitcher {
+		// Every widget loads the same listings, but only the switcher paints a
+		// cursor over them: elsewhere there is no selection to act on.
+		return m, nil
+	}
+	g, ok := m.selectedGroup()
+	if !ok {
+		return m, nil
+	}
+	if g.identity == "" {
+		// Nothing to address: a project the backend could not stamp an identity
+		// for has no window this switcher could be looking at.
+		m.status = fmt.Sprintf("%s: no window to switch to", groupLabel(g))
+		return m, nil
+	}
+	m = m.readBells(m.selected)
+	return m, switchProjectCmd(m.bgCtx(), m.backend, g.identity, groupLabel(g))
+}
+
+// onProjectSwitched reports a switch. Success needs no word — the client is
+// looking at the project's window now — so it only clears whatever the last
+// failure left behind.
+func (m widgetModel) onProjectSwitched(msg projectSwitchedMsg) widgetModel {
+	m.status = ""
+	if msg.err != nil {
+		m.status = fmt.Sprintf("switch to %s: %v", msg.name, msg.err)
+	}
+	return m
+}
+
+// readBells marks the group's unread bells read, both in the rows on screen and
+// in the set that survives the next reload (see widgetModel.bellRead).
+func (m widgetModel) readBells(i int) widgetModel {
+	if i < 0 || i >= len(m.groups) {
+		return m
+	}
+	if m.bellRead == nil {
+		m.bellRead = map[string]bool{}
+	}
+	for j, c := range m.groups[i].commands {
+		if !c.bell {
+			continue
+		}
+		m.bellRead[c.id] = true
+		m.groups[i].commands[j].bell = false
+	}
+	return m
+}
+
+// applyBellRead re-suppresses the bells an earlier selection resolved and
+// forgets the ones the monitor has since cleared itself, so the acknowledgement
+// covers the bell it was given for and not the next one.
+func (m widgetModel) applyBellRead() widgetModel {
+	if len(m.bellRead) == 0 {
+		return m
+	}
+	read := make(map[string]bool, len(m.bellRead))
+	for i := range m.groups {
+		for j, c := range m.groups[i].commands {
+			if !c.bell || !m.bellRead[c.id] {
+				continue
+			}
+			read[c.id] = true
+			m.groups[i].commands[j].bell = false
+		}
+	}
+	m.bellRead = read
+	return m
+}
+
+// groupLabel names a project group in a message the user reads.
+func groupLabel(g projectGroup) string {
+	if g.name == "" {
+		return "(unnamed)"
+	}
+	return g.name
 }
 
 // rebuild re-joins the two listings into the switcher's groups, keeping the
@@ -249,7 +381,7 @@ func (m widgetModel) rebuild() widgetModel {
 			break
 		}
 	}
-	return m
+	return m.applyBellRead()
 }
 
 // stampTitles carries every still-current title stamp forward and dates the
@@ -287,13 +419,18 @@ func (m widgetModel) selectedGroup() (projectGroup, bool) {
 func (m widgetModel) View() tea.View {
 	v := tea.NewView(m.viewContent())
 	v.AltScreen = m.altScreen
+	if m.widget == WidgetSwitcher {
+		// Clicking a project is one of its two selection gestures (D24); the
+		// statusbar has nothing to point at.
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	return v
 }
 
-func (m widgetModel) viewContent() string {
-	if m.quitting {
-		return ""
-	}
+// size is the pane the widget draws into, with the fallback a model that has
+// not been told its size yet renders at. Hit-testing measures with the same
+// ruler the render used.
+func (m widgetModel) size() (int, int) {
 	width, height := m.width, m.height
 	if width <= 0 {
 		width = 80
@@ -301,6 +438,14 @@ func (m widgetModel) viewContent() string {
 	if height <= 0 {
 		height = 24
 	}
+	return width, height
+}
+
+func (m widgetModel) viewContent() string {
+	if m.quitting {
+		return ""
+	}
+	width, height := m.size()
 	if m.widget == WidgetStatusbar {
 		return m.renderStatusbar(width)
 	}

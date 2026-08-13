@@ -1,6 +1,8 @@
 # Status
 
-**Current state: finalized — ready for implementation.** (2026-08-13)
+**Current state: implemented — all nine steps done, final review
+passed (approve-with-nits; nits fixed or recorded below).**
+(2026-08-14)
 
 Idea gate passed (IDEA.md confirmed as written), all nine questions
 resolved (DECISION.md V1–V9), traceability gate passed below.
@@ -32,15 +34,115 @@ All resolved 2026-08-13.
 
 ## Implementation checklist (mirrors PLAN.md steps)
 
-- [ ] 1. Def resolution + FrameShow/FrameHide service layer
-- [ ] 2. `mux up` auto-show of `default_frame` (V9)
-- [ ] 3. Cycle composition (V3)
-- [ ] 4. Managed entry lifecycle (D19/F7/V7)
-- [ ] 5. Frame def `hooks:` field (D17/V5)
-- [ ] 6. CLI wiring incl. `ls` + man pages (V1/V2/V4)
-- [ ] 7. Switcher selection actions + `--no-quit` (D6/D22/V6)
-- [ ] 8. Collapse gesture `z` (D16/V8)
-- [ ] 9. Lifecycle e2e (parent step-15 verify)
+- [x] 1. Def resolution + FrameShow/FrameHide service layer (2026-08-13)
+- [x] 2. `mux up` auto-show of `default_frame` (V9) (2026-08-13)
+- [x] 3. Cycle composition (V3) (2026-08-13)
+- [x] 4. Managed entry lifecycle (D19/F7/V7) (2026-08-13; see the
+      F7 note under "Follow-ups")
+- [x] 5. Frame def `hooks:` field (D17/V5) (2026-08-13)
+- [x] 6. CLI wiring incl. `ls` + man pages (V1/V2/V4) (2026-08-13)
+- [x] 7. Switcher selection actions + `--no-quit` (D6/D22/V6)
+      (2026-08-13)
+- [x] 8. Collapse gesture `z` (D16/V8) (2026-08-13)
+- [x] 9. Lifecycle e2e (parent step-15 verify) (2026-08-14;
+      `e2e/cmdman/mux_frame_lifecycle_test.go`, see the two notes under
+      "Follow-ups")
+
+## Follow-ups (recorded during implementation, 2026-08-13)
+
+- **No viewer quiesce on hide/cycle — by design, resolved as V10.**
+  The viewer pane dies with the frame; the supervised command's
+  survival is the invariant and holds (see DECISION.md V10 for the
+  full grounds and the rejected driver-quiesce alternative).
+- ~~`show <unresolvable-name>` reports the path tried, not the
+  candidate list; the decode error is double-wrapped~~ — fixed
+  2026-08-14: a bare name that resolves to nothing appends
+  `; available defs: …` (or names the empty frame dir), an explicit
+  path or a parse error stays bare, and `DecodeFile` no longer
+  re-prefixes the `*os.PathError`. Residue: IDEA.md's "paths tried"
+  (plural — enumerating the `.yaml`/`.yml` candidates probed) would
+  need a `DiscoverFile` signature change; and
+  `cmdman/compose/discover.go:220-232` carries the same doubling,
+  untouched (compose is out of this plan's scope).
+- `mux frame ls` outside tmux succeeds (defs with `-`), by design of
+  `FrameList`'s session filter — deviates from the step-6 verify
+  line's "outside-tmux error", which the man page documents.
+- ~~`compose mux` passes no `Config` to `mux.Run`, so V9 auto-show
+  does not apply there~~ — extended 2026-08-14 (user's call, V9
+  amendment): `Config`/`Svc` are threaded through compose's
+  `cmdmanSvc` seam, so every `Service.MuxUp` caller — `compose mux
+  up`, `compose up --mux`, the TUI mux and launcher paths — gets V9.
+  e2e: `TestComposeMuxFrame` (shown with a managed def / unset stays
+  bare); the already-framed and broken-def branches are shared code
+  covered by `TestUpAutoFrame`.
+- `show` of the def already up is a strict no-op (V2) and so cannot
+  revive a managed command that died while shown; recovery is
+  hide+show or `cmdman start frame-<def>-<i>`.
+- **Driver defect the step-9 e2e turned up — belongs to the muxctl
+  plan, not fixed here.** `findOrCreateWindow` builds
+  `new-window -d -t <sessionName>` (`pkg/muxctl/tmux/tmux.go:300-304`).
+  When a window in that session is named exactly like the session,
+  tmux resolves the target to *that window* and refuses. Standalone
+  mux's own default is that shape — `WindowName` defaults to
+  `SessionName` (`cmdman/mux/run.go:130-133`) — so a second dashboard
+  in the session cannot be built. Reproduced on tmux 3.7b with the
+  built binary, `mux up -s work` then `compose mux up -s work`:
+
+  ```
+  error: tmux: find-or-create window "cmdman-proj" in session "work":
+  tmux new-window -d -t work -n cmdman-proj -P -F #{window_id}:
+  exit status 1: create window failed: index 1 in use
+  ```
+
+  At the tmux level, `-t life` fails against a session `life` whose
+  window is named `life` while `-t "=life:"` succeeds — and that
+  `=<session>:` form is the one the same file already uses for exactly
+  this ambiguity (`tmux.go:59-67,78`). A fix wants its own driver test
+  for a second window in a session whose window is named like it.
+- The step-9 e2e's switch leg is therefore cross-session (the project
+  dashboard goes up in the default `cmdman` session), and a scripted
+  server has no client attached, so it proves `select-window` — the
+  `switch-client` half of `FocusWindow` has nobody to move
+  (`pkg/muxctl/tmux/focus.go:42-48`). Pointing the frame verbs with
+  `-s` likewise means the driver's "a window holding a frame but no
+  project is taken over in place" branch
+  (`pkg/muxctl/tmux/reuse.go:98`) is not what puts the project under
+  the frame there; it stays covered by the muxctl unit tests.
+
+- **Component panes get no root flags (final review, 2026-08-14).**
+  `frame.WidgetArgv` emits `<exe> tui widget <name> --no-quit` with no
+  `--data-dir`/`--runtime-dir`/`--config`, while the managed viewer
+  pane beside it forwards the dirs (`cmdman/mux/build.go` paneArgv).
+  Under `cmdman --data-dir X mux frame show dev` a docked widget reads
+  the default dirs, not X; env-supplied dirs are unaffected (children
+  inherit the environment — the lifecycle e2e leans on exactly that).
+  Fix means a `WidgetArgv` signature change — deferred as a design
+  call.
+- Test-coverage gaps noted by the final review, deferred: no renderer
+  test for `cmdman/cli/mux_frame.go` (`frameLsRows`' union of on-disk
+  and shown-by-path defs); standalone `mux up` auto-show untested
+  with a `managed:`/`component:` def (the compose side covers a
+  managed def end to end via `TestComposeMuxFrame/shown`,
+  2026-08-14). ~~The ensure restart branch~~ closed 2026-08-14 by
+  `TestEnsure/restart` during the FrameSvc refactor.
+- **FrameSvc refactor (2026-08-14, user's call in three rulings):**
+  frame semantics belong to `cmdman/mux`, and `cmdman.Service`
+  carries no mux-typed method at all. Final shape: the ensure state
+  machine (adopt/restart/create, find-by-name) lives in
+  `cmdman/mux/frame_command.go`; `mux.FrameSvc` asks only
+  `Config`/`ListCommands`/`CreateCommand`/`Start` in mux-owned
+  types; the one implementation is the `cmdman/cli.FrameSvc` adapter
+  (`cli.NewFrameSvc`), the layer that may import both sides; compose
+  receives it via `compose.WithFrameSvc(...)` injection.
+  Known consequences, deliberate: (a) the adapter in `cli` is wiring
+  in the presentation package — the only existing package importing
+  both; a dedicated wiring package is the alternative if it grates.
+  (b) `WithFrameSvc` is a silent default — a compose Service built
+  without it still shows defs, but `managed:` entries warn instead
+  of starting; wired at all three `MuxUp`-reachable construction
+  sites, e2e-covered only on `compose mux up` (`compose up --mux`
+  and the TUI paths are wired but not e2e-tested with a managed
+  def).
 
 ## Traceability gate — passed 2026-08-13
 
@@ -70,5 +172,7 @@ step 6 (`ls`). No unowned use case.
 
 ## Next action
 
-Implement step 1 (def resolution + FrameShow/FrameHide in
-`cmdman/mux`).
+None — implementation complete and verified (build/vet/lint/full test
+suite green, 2026-08-14). Remaining work lives in "Follow-ups": the
+muxctl-plan driver defect, the `WidgetArgv` root-flag design call,
+and the deferred test-coverage gaps.

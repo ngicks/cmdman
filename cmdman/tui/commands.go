@@ -31,6 +31,33 @@ type statusMsg struct {
 	text string
 }
 
+// projectSwitchedMsg reports a switcher selection: the client either moved to
+// the project's window or came back with the reason it did not.
+type projectSwitchedMsg struct {
+	name string
+	err  error
+}
+
+// frameHiddenMsg reports the collapse gesture's outcome (V8).
+type frameHiddenMsg struct {
+	err error
+}
+
+// switchProjectCmd and hideFrameCmd are package-level for the same reason the
+// list commands are: the widget model issues them off the update loop with no
+// model of its own to carry.
+func switchProjectCmd(ctx context.Context, backend Backend, identity, name string) tea.Cmd {
+	return func() tea.Msg {
+		return projectSwitchedMsg{name: name, err: backend.SwitchToProject(ctx, identity)}
+	}
+}
+
+func hideFrameCmd(ctx context.Context, backend Backend) tea.Cmd {
+	return func() tea.Msg {
+		return frameHiddenMsg{err: backend.HideFrame(ctx)}
+	}
+}
+
 func (m Model) bgCtx() context.Context {
 	if m.ctx != nil {
 		return m.ctx

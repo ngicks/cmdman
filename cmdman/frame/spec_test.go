@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ngicks/cmdman/cmdman/frame"
+	"github.com/ngicks/cmdman/cmdman/model"
+	"github.com/ngicks/cmdman/pkg/muxctl"
 	"github.com/ngicks/go-common/contextkey"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/assert/cmp"
-
-	"github.com/ngicks/cmdman/cmdman/frame"
-	"github.com/ngicks/cmdman/pkg/muxctl"
 )
 
 // normalize decodes content and normalizes it with a discarding logger.
@@ -184,6 +184,82 @@ frame:
 	assert.Assert(t, cmp.Contains(out, "entry=0"))
 	// One warning per stray key, sorted.
 	assert.Assert(t, strings.Index(out, "field=kolor") < strings.Index(out, "field=zorder"))
+}
+
+// A managed entry's hooks: reaches Spec untouched, so the create path can hand
+// it to the supervised command's CommandConfig.Hooks (D17).
+func TestNormalize_Hooks(t *testing.T) {
+	spec, err := normalize(t, `
+frame:
+  - edge: right
+    size: 30%
+    command: ["tail", "-f", "app.log"]
+    managed: true
+    hooks:
+      bell:
+        action: block
+        exec: ["notify-send", "done"]
+      title:
+        action: passthrough
+`)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, spec.Entries[0].Hooks, model.HookSet{
+		model.HookEventBell: {
+			Action: model.HookActionBlock,
+			Exec:   []string{"notify-send", "done"},
+		},
+		model.HookEventTitle: {Action: model.HookActionPassthrough},
+	})
+}
+
+// Hooks are monitor behavior: an entry with no supervised command behind it has
+// nothing to attach them to, so they warn and are dropped rather than pretending
+// to take effect. A component entry can never be managed, so it lands here too.
+func TestNormalize_HooksWithoutManagedWarn(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		entry string
+	}{
+		{
+			name:  "ephemeral command entry",
+			entry: "    command: [btop]\n",
+		},
+		{
+			name:  "component entry",
+			entry: "    component: statusbar\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := frame.Decode(strings.NewReader(
+				"frame:\n  - edge: top\n    size: 2\n" + tc.entry +
+					"    hooks:\n      bell:\n        action: block\n",
+			))
+			assert.NilError(t, err)
+
+			var buf bytes.Buffer
+			logger := slog.New(slog.NewTextHandler(&buf, nil))
+			ctx := contextkey.WithSlogLogger(context.Background(), logger)
+
+			spec, err := frame.Normalize(ctx, "/conf/frame/mine.yaml", raw)
+			assert.NilError(t, err)
+			assert.Assert(t, spec.Entries[0].Hooks == nil)
+
+			out := buf.String()
+			assert.Assert(t, cmp.Contains(out, "ignoring hooks:"))
+			assert.Assert(t, cmp.Contains(out, "entry=0"))
+			assert.Assert(t, cmp.Contains(out, "/conf/frame/mine.yaml"))
+		})
+	}
+}
+
+// A kept hook set is validated at load time so a typo names the def file rather
+// than surfacing later at the create path.
+func TestNormalize_HooksInvalid(t *testing.T) {
+	_, err := normalize(t, "frame:\n  - edge: top\n    size: 2\n    command: [btop]\n"+
+		"    managed: true\n    hooks:\n      bel:\n        action: block\n")
+	assert.Assert(t, err != nil, "expected an error")
+	assert.Assert(t, cmp.Contains(err.Error(), `unknown event "bel"`))
+	assert.Assert(t, cmp.Contains(err.Error(), "entry 0"))
 }
 
 func TestBuiltinComponents(t *testing.T) {

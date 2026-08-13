@@ -6,7 +6,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/tui"
 )
 
-func tuiWidgetLauncherCmd(parent *cobra.Command, rf *rootFlags) {
+func tuiWidgetLauncherCmd(parent *cobra.Command, rf *rootFlags, noQuit *bool) {
 	var flagWorkDir string
 
 	cmd := &cobra.Command{
@@ -20,7 +20,8 @@ lists the compose projects at the location under the cursor, toggled on or off.
 Type to filter, tab completes the path, enter steps input -> locations ->
 projects, esc walks back and then dismisses. On a list, s starts the enabled
 projects and S launches and lands in one; in the input every key is text, so
-ctrl+c is the dismissal that always works.
+ctrl+c is the dismissal that works from anywhere (unless --no-quit took the
+quit keys away).
 
 The selector fills its window, so the popup framing belongs to the multiplexer.
 Bind it as a tmux popup to summon it from anywhere:
@@ -29,7 +30,7 @@ Bind it as a tmux popup to summon it from anywhere:
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTuiWidget(cmd, args, rf, tui.WidgetLauncher, flagWorkDir)
+			return runTuiWidget(cmd, args, rf, tui.WidgetLauncher, flagWorkDir, *noQuit)
 		},
 	}
 

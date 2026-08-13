@@ -92,8 +92,13 @@ type commandRow struct {
 
 // projectGroup groups command rows under a compose project.
 type projectGroup struct {
-	name     string
-	workdir  string
+	name    string
+	workdir string
+	// identity is the project's multiplexer ownership stamp, carried from
+	// ProjectInfo so the switcher can address the project's window. It is empty
+	// for a group the project listing never claimed, which is a group with no
+	// window to switch to.
+	identity string
 	active   bool
 	commands []commandRow
 }

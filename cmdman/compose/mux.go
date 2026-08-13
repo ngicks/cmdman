@@ -10,6 +10,20 @@ import (
 	"github.com/ngicks/cmdman/pkg/muxctl"
 )
 
+// WithFrameSvc gives the service the seam mux's frame verbs need, for the
+// default_frame [Service.MuxUp] shows around the window it brings up (V9): a
+// managed: true entry (D19/V7) has a supervised command to adopt, restart or
+// create before a pane can view it.
+//
+// It is a dependency of its own rather than something taken off the cmdman
+// service because no cmdman type is a [mux.FrameSvc] — the translation lives in
+// the wiring layer (cmdman/cli.NewFrameSvc), which is also where this option is
+// set. A Service built without it shows any def that has no managed entry, and
+// warns on one that has, exactly as an auto-show that could not load a def does.
+func WithFrameSvc(svc mux.FrameSvc) ServiceOption {
+	return func(s *Service) { s.frameSvc = svc }
+}
+
 // MuxUpOption configures [Service.MuxUp].
 type MuxUpOption struct {
 	// Selection is the resolved compose project; it must declare a "mux:" section.
@@ -33,6 +47,11 @@ type MuxUpOption struct {
 // persisted per-command scale positions first. It resolves each leaf via
 // [Service.MuxLeafResolver] so replicas cycle, and stamps the window with the
 // project identity so [Service.MuxDown] and cycle-scale can find it.
+//
+// The configured default_frame is shown around the window it just brought up on
+// the same terms standalone `mux up` has (V9): the seam [WithFrameSvc] set
+// reaches [mux.Run] for what a managed entry needs, and a def that is missing or
+// broken costs a warning, never the dashboard.
 func (s *Service) MuxUp(ctx context.Context, opts MuxUpOption) error {
 	selection := opts.Selection
 	spec := *selection.Spec.Mux
@@ -78,6 +97,8 @@ func (s *Service) MuxUp(ctx context.Context, opts MuxUpOption) error {
 		Identity:          selection.ProjectIdentity(),
 		Layout:            opts.Layout,
 		KeepCurrentWindow: opts.KeepCurrentWindow,
+		Config:            cfg,
+		Svc:               s.frameSvc,
 		Stdout:            opts.Stdout,
 	})
 }

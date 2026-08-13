@@ -249,6 +249,20 @@ type Server interface {
 	// false when the caller is not attached or the session is undetectable. It
 	// returns a session name, not a [Session]: it opens nothing.
 	CurrentSessionName(ctx context.Context) (name string, ok bool, err error)
+
+	// CurrentWindowID reports the driver-native id (e.g. tmux "@7") of the
+	// window the caller is looking at: the current window of session when that
+	// is non-empty, else of the session the calling terminal is attached to. It
+	// is the "which window am I in" query [CurrentSessionName] is the session
+	// half of — the addressing a per-window fixture needs, since a window the
+	// caller merely sits in carries no name or identity to find it by.
+	//
+	// ok is false with a nil error when there is no such window — no server, no
+	// such session, or no session named and no attached client to ask — because
+	// "not inside the multiplexer" is a caller's decision to make, not a
+	// failure. Like the other session-less queries it opens nothing and mutates
+	// no state.
+	CurrentWindowID(ctx context.Context, session string) (id string, ok bool, err error)
 }
 
 var (

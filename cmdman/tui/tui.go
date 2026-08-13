@@ -60,6 +60,12 @@ type ProjectInfo struct {
 	Active   bool
 	HasMux   bool
 	Modified string
+
+	// Identity is the project's multiplexer ownership stamp — the string
+	// [Backend.SwitchToProject] takes. It is opaque here: only the backend can
+	// derive it, and it is "" for a project whose window could never be found
+	// (a named def that has never run anywhere in particular).
+	Identity string
 }
 
 // LayoutsInfo is the Layout-tab data for the current project: its mux layout
@@ -141,6 +147,16 @@ type Backend interface {
 	// mux path as CycleMux with an explicit layout selector. projectName/composeFile
 	// identify the project as resolved by ListLayouts.
 	ApplyLayout(ctx context.Context, projectName, composeFile, layoutName string) error
+
+	// SwitchToProject puts the client in front of the window carrying identity —
+	// the docked switcher's enter/click (D6). It never brings a project up and
+	// never creates a window: a project with no window of its own comes back as
+	// an error, which the switcher shows in place of its hint line.
+	SwitchToProject(ctx context.Context, identity string) error
+	// HideFrame takes the frame down around the caller's current window — the
+	// docked switcher's collapse gesture (D16/V8). A window with no frame up is
+	// not an error: hiding what is already hidden is what was asked for.
+	HideFrame(ctx context.Context) error
 
 	// ProjectDefinition returns the raw compose YAML file text for a project, as
 	// shown by the read-only definition viewer. projectName identifies the
@@ -285,6 +301,10 @@ type Options struct {
 	// switching, the widget owns the whole pane. The zero value, WidgetNone,
 	// runs the full multi-tab TUI, so leaving it unset changes nothing.
 	Widget Widget
+	// NoQuit unbinds the quit keys (V6). A widget docked in a frame pane always
+	// runs with it: a pane whose viewer exits leaves a dead hole in the fixture,
+	// so quitting is a standalone-run affordance.
+	NoQuit bool
 }
 
 // Run starts the TUI program and blocks until it exits.
