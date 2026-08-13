@@ -3,12 +3,11 @@ package tui
 import (
 	"cmp"
 	"context"
-	"fmt"
 	"slices"
 
 	"github.com/charmbracelet/x/vt"
-	"github.com/ngicks/cmdman/cmdman/logdriver"
-	"github.com/ngicks/cmdman/cmdman/model"
+
+	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
 
 // pane identifies the focused pane within the Commands tab.
@@ -26,7 +25,7 @@ const projectMarker = "⿻"
 // maps (fold state) are shared by reference, which is intentional so fold
 // edits survive the value copy.
 type Model struct {
-	backend Backend
+	backend core.Backend
 	version string
 
 	// ctx is the program-scoped context used to spawn background readers and
@@ -36,7 +35,7 @@ type Model struct {
 
 	width, height int
 
-	active Tab
+	active core.Tab
 
 	commands commandsTab
 	compose  composeTab
@@ -50,8 +49,8 @@ type Model struct {
 	status string // transient status/error message in the footer
 	cwd    string // normalized working directory for active detection
 
-	events    EventStream // lifecycle change-signal subscription
-	reloadGen int         // debounce generation for event-triggered re-list
+	events    core.EventStream // lifecycle change-signal subscription
+	reloadGen int              // debounce generation for event-triggered re-list
 
 	previewGen int // monotonic generation for terminal-preview drain/tick loops
 
@@ -70,43 +69,8 @@ type Model struct {
 	quitting bool
 }
 
-// commandRow is a single compose-managed command in the Commands tab.
-type commandRow struct {
-	id        string
-	name      string
-	project   string
-	workdir   string
-	state     model.EventType
-	exitCode  *int
-	logDriver logdriver.LogDriver
-	tty       bool   // command runs under a pseudo-terminal (preview predicate)
-	pending   string // pending action label; empty when no action is in flight
-
-	// Runtime state as of the last load (see CommandInfo): what the command
-	// said about itself, as opposed to what the store knows about its process.
-	title  string
-	status string // working, waiting, done, or "" when nothing was reported
-	detail string
-	bell   bool
-}
-
-// projectGroup groups command rows under a compose project.
-type projectGroup struct {
-	name    string
-	workdir string
-	// identity is the project's multiplexer ownership stamp, carried from
-	// ProjectInfo so the switcher can address the project's window. It is empty
-	// for a group the project listing never claimed, which is a group with no
-	// window to switch to.
-	identity string
-	active   bool
-	commands []commandRow
-}
-
-func (g projectGroup) key() string { return g.workdir + "\x00" + g.name }
-
 type commandsTab struct {
-	groups    []projectGroup
+	groups    []core.ProjectGroup
 	filter    string
 	filtering bool // filter input is focused
 	selected  int  // index into visibleRows()
@@ -177,12 +141,12 @@ type previewState struct {
 	lines  []string
 	status previewStatus
 	errMsg string
-	stream LogStream // live Tail+Follow reader for cmdID; nil when none
+	stream core.LogStream // live Tail+Follow reader for cmdID; nil when none
 
 	terminal  bool             // terminal-view mode (vt emulator) is active
 	streaming bool             // raw drain is live; the repaint tick runs while true
 	gen       int              // generation of the active drain/tick loop (see Model.previewGen)
-	raw       RawStream        // live raw attach stream for cmdID; nil when none
+	raw       core.RawStream   // live raw attach stream for cmdID; nil when none
 	term      *vt.SafeEmulator // vt emulator for terminal-view; nil when none
 }
 
@@ -207,7 +171,7 @@ type composeUpState struct {
 	project string
 	order   []string                 // services in first-seen order
 	marks   map[string]composeUpMark // service name → latest mark
-	stream  ComposeUpStream          // event source; nil when none
+	stream  core.ComposeUpStream     // event source; nil when none
 }
 
 // composeUpMark is the latest known phase for a single service in the overlay.
@@ -264,7 +228,7 @@ func (c *commandsTab) folded(gi int) bool {
 	if gi < 0 || gi >= len(c.groups) {
 		return false
 	}
-	return c.fold[c.groups[gi].key()]
+	return c.fold[c.groups[gi].Key()]
 }
 
 // setFolded sets group index gi to v; invalid indexes are ignored.
@@ -272,7 +236,7 @@ func (c *commandsTab) setFolded(gi int, v bool) {
 	if gi < 0 || gi >= len(c.groups) {
 		return
 	}
-	c.fold[c.groups[gi].key()] = v
+	c.fold[c.groups[gi].Key()] = v
 }
 
 // visibleRows computes the flattened visible rows honoring the filter and fold
@@ -282,10 +246,10 @@ func (c *commandsTab) visibleRows() []visRow {
 	filtering := c.filter != ""
 	for gi := range c.groups {
 		g := &c.groups[gi]
-		projMatch := filtering && matchesFilter(c.filter, g.name)
+		projMatch := filtering && matchesFilter(c.filter, g.Name)
 		var matched []int
-		for ci := range g.commands {
-			if !filtering || projMatch || commandMatches(c.filter, g.commands[ci]) {
+		for ci := range g.Commands {
+			if !filtering || projMatch || commandMatches(c.filter, g.Commands[ci]) {
 				matched = append(matched, ci)
 			}
 		}
@@ -294,7 +258,7 @@ func (c *commandsTab) visibleRows() []visRow {
 		}
 		// Standalone commands carry no compose project name; list them directly
 		// without a (foldable) group header.
-		if g.name != "" {
+		if g.Name != "" {
 			rows = append(rows, visRow{kind: visProject, group: gi})
 			// When filtering, force-expand so matches are visible; otherwise honor fold.
 			if !filtering && c.folded(gi) {
@@ -337,12 +301,12 @@ func (c *commandsTab) selectedRow() (visRow, bool) {
 
 // selectedCommand returns the selected command row when a command row (not a
 // project header) is selected.
-func (c *commandsTab) selectedCommand() (commandRow, bool) {
+func (c *commandsTab) selectedCommand() (core.CommandRow, bool) {
 	r, ok := c.selectedRow()
 	if !ok || r.kind != visCommand {
-		return commandRow{}, false
+		return core.CommandRow{}, false
 	}
-	return c.groups[r.group].commands[r.cmd], true
+	return c.groups[r.group].Commands[r.cmd], true
 }
 
 // moveSelection applies delta across visible rows and clamps the selection.
@@ -402,15 +366,15 @@ func (t *composeTab) moveSelection(delta int) {
 
 // setGroups replaces the command groups, sorting active (cwd-tied) projects
 // first, then by name, and marks groups active by comparing workdir to cwd.
-func (m *Model) setGroups(groups []projectGroup) {
+func (m *Model) setGroups(groups []core.ProjectGroup) {
 	for i := range groups {
-		groups[i].active = groups[i].workdir != "" && groups[i].workdir == m.cwd
+		groups[i].Active = groups[i].Workdir != "" && groups[i].Workdir == m.cwd
 	}
-	slices.SortStableFunc(groups, func(a, b projectGroup) int {
-		if a.active != b.active {
-			return boolFirst(a.active) // active first
+	slices.SortStableFunc(groups, func(a, b core.ProjectGroup) int {
+		if a.Active != b.Active {
+			return core.BoolFirst(a.Active) // active first
 		}
-		return cmp.Compare(a.name, b.name)
+		return cmp.Compare(a.Name, b.Name)
 	})
 	m.commands.groups = groups
 	m.commands.clampSelection()
@@ -422,7 +386,7 @@ func (m *Model) setComposeRows(rows []composeRow) {
 	}
 	slices.SortStableFunc(rows, func(a, b composeRow) int {
 		if a.active != b.active {
-			return boolFirst(a.active)
+			return core.BoolFirst(a.active)
 		}
 		return cmp.Compare(a.name, b.name)
 	})
@@ -432,72 +396,12 @@ func (m *Model) setComposeRows(rows []composeRow) {
 	}
 }
 
-// boolFirst returns -1 when v is true so that active entries sort before
-// inactive ones in a stable three-way comparator. Only call it when the two
-// compared booleans differ.
-func boolFirst(v bool) int {
-	if v {
-		return -1
-	}
-	return 1
-}
-
-// displayLabel maps a persisted state to a friendly display label. The label is
-// the state value itself, except an exited command annotates its exit code. All
-// logic elsewhere uses the real state values; this is presentation only.
-func displayLabel(state model.EventType, exitCode *int) string {
-	if state == model.EventTypeExited && exitCode != nil {
-		return fmt.Sprintf("exited(%d)", *exitCode)
-	}
-	return string(state)
-}
-
-// liveReport reports whether a row's runtime state may speak for it. Only a
-// running command's does: a run that is over shows its exit state, never its
-// last report (D13), and a command with an action in flight is about to change
-// state anyway. Every renderer gates on this one predicate so no two surfaces
-// disagree about a dead command.
-func liveReport(c commandRow) bool {
-	return c.pending == "" && c.state == model.EventTypeRunning
-}
-
 // reportedText words what a command reported about itself: the status with its
 // detail in parentheses (D12). It is empty when the command reported nothing,
 // which includes every command with no live monitor.
-func reportedText(c commandRow) string {
-	if c.status == "" || c.detail == "" {
-		return c.status
+func reportedText(c core.CommandRow) string {
+	if c.Status == "" || c.Detail == "" {
+		return c.Status
 	}
-	return c.status + " (" + c.detail + ")"
-}
-
-// groupFromInfos builds project groups from flat command infos, grouping by
-// (workdir, project).
-func groupFromInfos(infos []CommandInfo) []projectGroup {
-	idx := map[string]int{}
-	var groups []projectGroup
-	for _, ci := range infos {
-		k := ci.Workdir + "\x00" + ci.Project
-		gi, ok := idx[k]
-		if !ok {
-			gi = len(groups)
-			idx[k] = gi
-			groups = append(groups, projectGroup{name: ci.Project, workdir: ci.Workdir})
-		}
-		groups[gi].commands = append(groups[gi].commands, commandRow{
-			id:        ci.ID,
-			name:      ci.Name,
-			project:   ci.Project,
-			workdir:   ci.Workdir,
-			state:     ci.State,
-			exitCode:  ci.ExitCode,
-			logDriver: ci.LogDriver,
-			tty:       ci.Tty,
-			title:     ci.Title,
-			status:    ci.Status,
-			detail:    ci.Detail,
-			bell:      ci.BellUnread,
-		})
-	}
-	return groups
+	return c.Status + " (" + c.Detail + ")"
 }

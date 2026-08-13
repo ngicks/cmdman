@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
 
 // switcherGroups joins the global project list (the ListProjects merge:
@@ -23,32 +23,32 @@ import (
 // still on screen; standalone commands (no compose project) are dropped, having
 // no project window to switch to.
 func switcherGroups(
-	projs []ProjectInfo,
-	cmds []CommandInfo,
+	projs []core.ProjectInfo,
+	cmds []core.CommandInfo,
 	cwd string,
 	titles map[string]titleStamp,
-) []projectGroup {
-	cmdGroups := groupFromInfos(cmds)
+) []core.ProjectGroup {
+	cmdGroups := core.GroupFromInfos(cmds)
 	claimed := make([]bool, len(cmdGroups))
 	byKey := make(map[string]int, len(cmdGroups))
 	byName := make(map[string][]int, len(cmdGroups))
 	for i, g := range cmdGroups {
-		if g.name == "" {
+		if g.Name == "" {
 			claimed[i] = true
 			continue
 		}
-		byKey[g.key()] = i
-		byName[g.name] = append(byName[g.name], i)
+		byKey[g.Key()] = i
+		byName[g.Name] = append(byName[g.Name], i)
 	}
 
-	out := make([]projectGroup, 0, len(projs)+len(cmdGroups))
+	out := make([]core.ProjectGroup, 0, len(projs)+len(cmdGroups))
 	for _, p := range projs {
-		g := projectGroup{name: p.Name, workdir: p.Workdir, identity: p.Identity}
+		g := core.ProjectGroup{Name: p.Name, Workdir: p.Workdir, Identity: p.Identity}
 		if i, ok := matchCommandGroup(p, byKey, byName, claimed); ok {
 			claimed[i] = true
-			g.commands = cmdGroups[i].commands
-			if g.workdir == "" {
-				g.workdir = cmdGroups[i].workdir
+			g.Commands = cmdGroups[i].Commands
+			if g.Workdir == "" {
+				g.Workdir = cmdGroups[i].Workdir
 			}
 		}
 		out = append(out, g)
@@ -60,14 +60,14 @@ func switcherGroups(
 	}
 
 	for i := range out {
-		out[i].active = out[i].workdir != "" && out[i].workdir == cwd
-		bucketSort(out[i].commands, titles)
+		out[i].Active = out[i].Workdir != "" && out[i].Workdir == cwd
+		bucketSort(out[i].Commands, titles)
 	}
-	slices.SortStableFunc(out, func(a, b projectGroup) int {
-		if a.active != b.active {
-			return boolFirst(a.active)
+	slices.SortStableFunc(out, func(a, b core.ProjectGroup) int {
+		if a.Active != b.Active {
+			return core.BoolFirst(a.Active)
 		}
-		return cmp.Compare(a.name, b.name)
+		return cmp.Compare(a.Name, b.Name)
 	})
 	return out
 }
@@ -78,7 +78,7 @@ func switcherGroups(
 // group from another directory: same-named projects in different directories
 // are different projects.
 func matchCommandGroup(
-	p ProjectInfo,
+	p core.ProjectInfo,
 	byKey map[string]int,
 	byName map[string][]int,
 	claimed []bool,
@@ -123,12 +123,12 @@ const titleBucket = 5 * time.Second
 // bucketSort orders a project's commands newest-title-bucket-first, then by
 // name (then id) inside a bucket. Commands with no title sort last: "recently
 // active floats up" says nothing about a command that never said anything.
-func bucketSort(cmds []commandRow, titles map[string]titleStamp) {
-	slices.SortFunc(cmds, func(a, b commandRow) int {
+func bucketSort(cmds []core.CommandRow, titles map[string]titleStamp) {
+	slices.SortFunc(cmds, func(a, b core.CommandRow) int {
 		return cmp.Or(
-			cmp.Compare(titleBucketOf(titles[b.id]), titleBucketOf(titles[a.id])),
-			cmp.Compare(a.name, b.name),
-			cmp.Compare(a.id, b.id),
+			cmp.Compare(titleBucketOf(titles[b.ID]), titleBucketOf(titles[a.ID])),
+			cmp.Compare(a.Name, b.Name),
+			cmp.Compare(a.ID, b.ID),
 		)
 	})
 }
@@ -141,61 +141,6 @@ func titleBucketOf(s titleStamp) int64 {
 		return math.MinInt64
 	}
 	return s.at.UnixNano() / int64(titleBucket)
-}
-
-// aggregateStatus is a project's one status word, from its commands' reported
-// statuses only: blocked when any command waits on the user, else working when
-// any is working, else idle when any reported done, else "" for a project whose
-// commands have said nothing. The unread bell does not compete here — it takes
-// over the whole marker slot instead (D22/D23), so this is the dot's meaning
-// and the dot's alone. Only live runs are counted: a project must not stay red
-// because something it ran yesterday was waiting when it died (D13).
-func aggregateStatus(g projectGroup) string {
-	status := ""
-	for _, c := range g.commands {
-		if !liveReport(c) {
-			continue
-		}
-		switch c.status {
-		case statusWaiting:
-			return statusWaiting
-		case statusWorking:
-			status = statusWorking
-		case statusDone:
-			if status == "" {
-				status = statusDone
-			}
-		}
-	}
-	return status
-}
-
-// unreadBell reports whether any of the project's live commands has an unread
-// bell; a bell a dead run left behind is as stale as its status.
-func unreadBell(g projectGroup) bool {
-	return slices.ContainsFunc(g.commands, func(c commandRow) bool {
-		return c.bell && liveReport(c)
-	})
-}
-
-// markerGlyph is the raw glyph in a project's one marker slot, and markerStyle
-// its color. The 🔔 replaces the dot while any of the project's commands has an
-// unread bell (D23); otherwise the dot is filled when something was reported
-// and hollow when nothing was, colored by the aggregate. markerGlyph is what
-// gets drawn, so the width math and the drawing cannot pick different glyphs.
-func markerGlyph(g projectGroup) string {
-	switch {
-	case unreadBell(g):
-		return glyphBell
-	case aggregateStatus(g) == "":
-		return glyphHollow
-	default:
-		return glyphFilled
-	}
-}
-
-func markerStyle(g projectGroup) lipgloss.Style {
-	return reportedStatusStyle(aggregateStatus(g))
 }
 
 // renderSwitcher renders the docked column: a grouped list, each project
@@ -214,7 +159,7 @@ func (m widgetModel) renderSwitcher(w, h int) string {
 
 	out := make([]string, 0, max(h, 1))
 	if g.title {
-		out = append(out, ansi.Truncate(styleWidgetTitle.Render("projects"), w, ""))
+		out = append(out, ansi.Truncate(core.StyleWidgetTitle.Render("projects"), w, ""))
 	}
 	out = append(out, linesText(g.lines[g.off:min(g.off+g.avail, len(g.lines))])...)
 	if g.footer {
@@ -253,7 +198,7 @@ func (m widgetModel) switcherGeometry(w, h int) switcherGeometry {
 	}
 	g.lines = m.switcherLines(w)
 	if len(g.lines) == 0 {
-		g.lines = []switcherLine{{text: styleActive.Render("No projects."), group: -1}}
+		g.lines = []switcherLine{{text: core.StyleActive.Render("No projects."), group: -1}}
 	}
 	g.off = viewportOffset(g.lines, m.selected, g.avail)
 	return g
@@ -288,13 +233,13 @@ func linesText(lines []switcherLine) []string {
 // switcher runs with it unbound (V6).
 func (m widgetModel) switcherFooter() string {
 	if m.status != "" {
-		return styleActive.Render(m.status)
+		return core.StyleActive.Render(m.status)
 	}
 	hint := "j/k move · enter switch · z hide"
 	if !m.noQuit {
 		hint += " · q quit"
 	}
-	return styleActive.Render(hint)
+	return core.StyleActive.Render(hint)
 }
 
 // switcherLines renders the scrollable region: every project's head line
@@ -303,15 +248,15 @@ func (m widgetModel) switcherFooter() string {
 func (m widgetModel) switcherLines(w int) []switcherLine {
 	var lines []switcherLine
 	for i, g := range m.groups {
-		bg := bgNone
+		bg := core.BgNone
 		if i == m.selected {
-			bg = bgAccent
+			bg = core.BgAccent
 		}
-		lines = append(lines, switcherLine{text: padLine(m.headLine(g, bg), w, bg), group: i})
-		for _, c := range g.commands {
+		lines = append(lines, switcherLine{text: core.PadLine(m.headLine(g, bg), w, bg), group: i})
+		for _, c := range g.Commands {
 			lines = append(
 				lines,
-				switcherLine{text: padLine(m.commandLine(c, bg), w, bg), group: i},
+				switcherLine{text: core.PadLine(m.commandLine(c, bg), w, bg), group: i},
 			)
 		}
 	}
@@ -321,19 +266,19 @@ func (m widgetModel) switcherLines(w int) []switcherLine {
 // headLine is a project's head: its marker in a fixed-width slot — so heads
 // line up with each other whichever marker shows — then its name. The gap comes
 // off the glyph's measured width, not an assumed one, and the margin leads.
-func (m widgetModel) headLine(g projectGroup, bg rowBg) string {
-	glyph := markerGlyph(g)
-	gap := strings.Repeat(" ", max(markerSlot-glyphWidth(glyph), 1))
-	name := g.name
+func (m widgetModel) headLine(g core.ProjectGroup, bg core.RowBg) string {
+	glyph := core.MarkerGlyph(g)
+	gap := strings.Repeat(" ", max(core.MarkerSlot-core.GlyphWidth(glyph), 1))
+	name := g.Name
 	if name == "" {
 		name = "(unnamed)"
 	}
-	head := bg.plain(markerMargin) +
-		bg.style(markerStyle(g)).Render(glyph) +
-		bg.style(styleWidgetHead).Render(gap+name)
-	if g.active {
+	head := bg.Plain(core.MarkerMargin) +
+		bg.Style(core.MarkerStyle(g)).Render(glyph) +
+		bg.Style(core.StyleWidgetHead).Render(gap+name)
+	if g.Active {
 		// Same word the rest of the TUI marks the cwd project with.
-		head += bg.style(styleActive).Render("  active")
+		head += bg.Style(core.StyleActive).Render("  active")
 	}
 	return head
 }
@@ -343,18 +288,18 @@ func (m widgetModel) headLine(g projectGroup, bg rowBg) string {
 // bell when it has one, and the title it last set — the signal the grouped list
 // exists for (D20), fainter still than the name so a group reads as head plus
 // detail.
-func (m widgetModel) commandLine(c commandRow, bg rowBg) string {
-	line := bg.style(m.weakStyle()).Render("    "+padCells(c.name, 12)+" ") +
-		rowStateBadge(c, bg)
-	if !liveReport(c) {
+func (m widgetModel) commandLine(c core.CommandRow, bg core.RowBg) string {
+	line := bg.Style(m.weakStyle()).Render("    "+core.PadCells(c.Name, 12)+" ") +
+		core.RowStateBadge(c, bg)
+	if !core.LiveReport(c) {
 		// Nothing a finished run said still speaks for it (D13).
 		return line
 	}
-	if c.bell {
-		line += bg.plain(" " + glyphBell)
+	if c.Bell {
+		line += bg.Plain(" " + core.GlyphBell)
 	}
-	if c.title != "" {
-		line += bg.style(styleActive).Render(" · " + c.title)
+	if c.Title != "" {
+		line += bg.Style(core.StyleActive).Render(" · " + c.Title)
 	}
 	return line
 }

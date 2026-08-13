@@ -31,8 +31,8 @@ func (m *Model) anyInProgress() bool {
 		return true
 	}
 	for gi := range m.commands.groups {
-		for _, c := range m.commands.groups[gi].commands {
-			if c.pending != "" || c.state == model.EventTypeStarting {
+		for _, c := range m.commands.groups[gi].Commands {
+			if c.Pending != "" || c.State == model.EventTypeStarting {
 				return true
 			}
 		}

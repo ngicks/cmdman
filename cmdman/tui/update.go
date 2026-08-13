@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
 
 // Init implements tea.Model.
@@ -25,19 +26,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// The terminal-view emulator is sized to the command's PTY (not the pane);
 		// the preview crops it on render, so a window resize needs no emulator work.
 		return m, nil
-	case commandsLoadedMsg:
+	case core.CommandsLoadedMsg:
 		nm, cmd := m.onCommandsLoaded(msg)
 		scmd := (&nm).maybeStartSpinner()
 		return nm, tea.Batch(cmd, scmd)
-	case projectsLoadedMsg:
+	case core.ProjectsLoadedMsg:
 		return m.onProjectsLoaded(msg), nil
 	case actionDoneMsg:
 		return m.onActionDone(msg)
-	case eventsSubscribedMsg:
+	case core.EventsSubscribedMsg:
 		return m.onEventsSubscribed(msg)
-	case eventSignalMsg:
+	case core.EventSignalMsg:
 		return m.onEventSignal(msg)
-	case reloadTickMsg:
+	case core.ReloadTickMsg:
 		return m.onReloadTick(msg)
 	case previewOpenedMsg:
 		return m.onPreviewOpened(msg)
@@ -86,33 +87,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) onCommandsLoaded(msg commandsLoadedMsg) (Model, tea.Cmd) {
+func (m Model) onCommandsLoaded(msg core.CommandsLoadedMsg) (Model, tea.Cmd) {
 	if m.backend != nil {
 		m.cwd = m.backend.Cwd()
 	}
-	if msg.err != nil {
-		m.status = fmt.Sprintf("list error: %v", msg.err)
+	if msg.Err != nil {
+		m.status = fmt.Sprintf("list error: %v", msg.Err)
 		return m, nil
 	}
 	prevID, _ := m.commands.selectedCommand()
-	m.setGroups(groupFromInfos(msg.infos))
-	if prevID.id != "" {
-		m.selectCommandByID(prevID.id)
+	m.setGroups(core.GroupFromInfos(msg.Infos))
+	if prevID.ID != "" {
+		m.selectCommandByID(prevID.ID)
 	}
 	pcmd := (&m).reconcilePreview()
 	return m, pcmd
 }
 
-func (m Model) onProjectsLoaded(msg projectsLoadedMsg) Model {
+func (m Model) onProjectsLoaded(msg core.ProjectsLoadedMsg) Model {
 	if m.backend != nil {
 		m.cwd = m.backend.Cwd()
 	}
-	if msg.err != nil {
-		m.status = fmt.Sprintf("project list error: %v", msg.err)
+	if msg.Err != nil {
+		m.status = fmt.Sprintf("project list error: %v", msg.Err)
 		return m
 	}
-	rows := make([]composeRow, 0, len(msg.infos))
-	for _, p := range msg.infos {
+	rows := make([]composeRow, 0, len(msg.Infos))
+	for _, p := range msg.Infos {
 		rows = append(rows, composeRow{
 			name:     p.Name,
 			path:     p.Path,
@@ -144,7 +145,7 @@ func (m Model) onActionDone(msg actionDoneMsg) (tea.Model, tea.Cmd) {
 func (m *Model) selectCommandByID(id string) {
 	rows := m.commands.visibleRows()
 	for i, r := range rows {
-		if r.kind == visCommand && m.commands.groups[r.group].commands[r.cmd].id == id {
+		if r.kind == visCommand && m.commands.groups[r.group].Commands[r.cmd].ID == id {
 			m.commands.selected = i
 			return
 		}
@@ -155,9 +156,9 @@ func (m *Model) selectCommandByID(id string) {
 // setPending marks the command with id as having a pending action label.
 func (m *Model) setPending(id, label string) {
 	for gi := range m.commands.groups {
-		for ci := range m.commands.groups[gi].commands {
-			if m.commands.groups[gi].commands[ci].id == id {
-				m.commands.groups[gi].commands[ci].pending = label
+		for ci := range m.commands.groups[gi].Commands {
+			if m.commands.groups[gi].Commands[ci].ID == id {
+				m.commands.groups[gi].Commands[ci].Pending = label
 				return
 			}
 		}
@@ -167,9 +168,9 @@ func (m *Model) setPending(id, label string) {
 // clearPending clears the pending marker for the command with id.
 func (m *Model) clearPending(id string) {
 	for gi := range m.commands.groups {
-		for ci := range m.commands.groups[gi].commands {
-			if m.commands.groups[gi].commands[ci].id == id {
-				m.commands.groups[gi].commands[ci].pending = ""
+		for ci := range m.commands.groups[gi].Commands {
+			if m.commands.groups[gi].Commands[ci].ID == id {
+				m.commands.groups[gi].Commands[ci].Pending = ""
 				return
 			}
 		}
@@ -179,9 +180,9 @@ func (m *Model) clearPending(id string) {
 // pendingOf reports the pending label for the command with id, if any.
 func (m *Model) pendingOf(id string) string {
 	for gi := range m.commands.groups {
-		for ci := range m.commands.groups[gi].commands {
-			if m.commands.groups[gi].commands[ci].id == id {
-				return m.commands.groups[gi].commands[ci].pending
+		for ci := range m.commands.groups[gi].Commands {
+			if m.commands.groups[gi].Commands[ci].ID == id {
+				return m.commands.groups[gi].Commands[ci].Pending
 			}
 		}
 	}

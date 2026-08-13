@@ -11,84 +11,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
-
-// LaunchTarget identifies one compose project for a launcher action. WorkDir is
-// the canonical project directory (filepath.Clean(filepath.Abs(p)), no symlink
-// resolution — the form compose project identity and the history table share),
-// Project the compose project name and File the compose file it comes from.
-type LaunchTarget struct {
-	WorkDir string
-	Project string
-	File    string
-}
-
-// LaunchProject is one compose project at a location: what the launcher's right
-// pane toggles and acts on.
-type LaunchProject struct {
-	// Name is the compose project name.
-	Name string
-	// File is the compose file the project comes from.
-	File string
-	// FromHistory reports that the project was brought up before, which is what
-	// makes it enabled on open.
-	FromHistory bool
-	// Running reports that a mux window carrying this project's identity exists.
-	Running bool
-	// HasMux reports that the compose file declares a mux: section. A project
-	// without one is brought up but has no dashboard to land in (D9).
-	HasMux bool
-	// Problem describes why the project cannot be brought up at all, "" when it
-	// can. It is shown inline under the row rather than hidden until the launch
-	// fails (D10).
-	Problem string
-	// Missing reports that Problem is a compose file that no longer exists — the
-	// stale-history case whose answer is removal.
-	Missing bool
-}
-
-// LaunchLocation is one target directory: what the launcher's left pane selects.
-// The git fields are D18's display and match keys; they are empty for a
-// directory that is not a git work tree.
-type LaunchLocation struct {
-	// Dir is the canonical project directory (see LaunchTarget.WorkDir).
-	Dir string
-	// RepoName is the git repository name, "" outside a work tree.
-	RepoName string
-	// RepoURI is the git remote uri, "" when there is no remote.
-	RepoURI string
-	// Branch is the checked-out branch, "" outside a work tree.
-	Branch string
-	// LastUsed is the most recent history stamp among the location's projects;
-	// the zero time means the location was never launched from.
-	LastUsed time.Time
-	// FromHistory reports that at least one project here is known from history,
-	// which is what the empty-input history list shows.
-	FromHistory bool
-	// Projects are the compose projects at this location.
-	Projects []LaunchProject
-}
-
-// LaunchOutcome is what a landing has to say for itself beyond "it worked". A
-// zero value means the caller is looking at the project already, which is the
-// everyday case and the one that dismisses the launcher (D10).
-type LaunchOutcome struct {
-	// Warning is a non-fatal note the user should read: a project with no mux:
-	// section is up and landed on a bare shell window, and the warning is what
-	// explains why the window looks empty (D9). The launcher stays open to show
-	// it — the landing itself already happened underneath.
-	Warning string
-	// AttachCommand is the argv that gives this terminal to the multiplexer,
-	// set when the launcher was summoned from outside it: no client exists to
-	// switch, so landing means becoming one (D8). The launcher runs it with the
-	// terminal released and dismisses when it returns.
-	AttachCommand []string
-}
-
-// landed reports the boring outcome: nothing to say, nothing to run.
-func (o LaunchOutcome) landed() bool {
-	return o.Warning == "" && len(o.AttachCommand) == 0
-}
 
 // launcherZone is which of the three zones has the keyboard (D28 as amended).
 // The input is a zone of its own precisely so bare letters never have to mean
@@ -169,7 +93,7 @@ func newLauncherLocations(locs []LaunchLocation) []launcherLocation {
 // launcherModel is the launcher widget: the popup-summoned two-pane selector
 // over the merged history / project / running-window list (D7, D28).
 type launcherModel struct {
-	backend Backend
+	backend core.Backend
 
 	// ctx is the program-scoped context used for backend calls, mirroring
 	// Model.ctx; tests that drive Update directly may leave it nil.
@@ -212,7 +136,7 @@ type launcherModel struct {
 
 // newLauncher constructs the launcher model from the same options every other
 // TUI mode takes.
-func newLauncher(opts Options) launcherModel {
+func newLauncher(opts core.Options) launcherModel {
 	return launcherModel{
 		backend:   opts.Backend,
 		altScreen: opts.AltScreen,
@@ -330,7 +254,7 @@ func (m launcherModel) onLanded(msg launcherLandedMsg) (tea.Model, tea.Cmd) {
 		m.locs[li].projects[pi].Running = true
 	}
 	switch {
-	case msg.outcome.landed():
+	case msg.outcome.Landed():
 		m.quitting = true
 		return m, tea.Quit
 	case len(msg.outcome.AttachCommand) > 0:

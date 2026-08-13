@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -13,10 +12,8 @@ import (
 	"github.com/charmbracelet/x/vt"
 	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"github.com/ngicks/cmdman/cmdman/model"
+	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
-
-// debounceInterval coalesces a burst of lifecycle events into a single re-list.
-const debounceInterval = 150 * time.Millisecond
 
 // previewMaxLines caps the in-memory preview buffer.
 const previewMaxLines = 5000
@@ -36,74 +33,35 @@ const (
 
 // --- events / debounced re-list --------------------------------------------
 
-type eventsSubscribedMsg struct {
-	stream EventStream
-	err    error
-}
+func (m Model) subscribeEventsCmd() tea.Cmd { return core.SubscribeCmd(m.bgCtx(), m.backend) }
 
-type eventSignalMsg struct {
-	err    error
-	closed bool
-}
-
-type reloadTickMsg struct {
-	gen int
-}
-
-func (m Model) subscribeEventsCmd() tea.Cmd { return subscribeCmd(m.bgCtx(), m.backend) }
-
-// subscribeCmd is package-level so the single-widget model subscribes to the
-// same lifecycle stream as the full model.
-func subscribeCmd(ctx context.Context, backend Backend) tea.Cmd {
-	return func() tea.Msg {
-		stream, err := backend.Events(ctx)
-		return eventsSubscribedMsg{stream: stream, err: err}
-	}
-}
-
-func waitEventCmd(stream EventStream) tea.Cmd {
-	return func() tea.Msg {
-		sig, ok := <-stream.Signals()
-		if !ok {
-			return eventSignalMsg{closed: true}
-		}
-		return eventSignalMsg{err: sig.Err}
-	}
-}
-
-func debounceCmd(gen int) tea.Cmd {
-	return tea.Tick(debounceInterval, func(time.Time) tea.Msg {
-		return reloadTickMsg{gen: gen}
-	})
-}
-
-func (m Model) onEventsSubscribed(msg eventsSubscribedMsg) (tea.Model, tea.Cmd) {
-	if msg.err != nil {
-		m.status = fmt.Sprintf("events: %v", msg.err)
+func (m Model) onEventsSubscribed(msg core.EventsSubscribedMsg) (tea.Model, tea.Cmd) {
+	if msg.Err != nil {
+		m.status = fmt.Sprintf("events: %v", msg.Err)
 		return m, nil
 	}
-	m.events = msg.stream
-	return m, waitEventCmd(msg.stream)
+	m.events = msg.Stream
+	return m, core.WaitEventCmd(msg.Stream)
 }
 
-func (m Model) onEventSignal(msg eventSignalMsg) (tea.Model, tea.Cmd) {
-	if msg.closed {
+func (m Model) onEventSignal(msg core.EventSignalMsg) (tea.Model, tea.Cmd) {
+	if msg.Closed {
 		m.events = nil
 		return m, nil // subscription ended; stop waiting
 	}
-	if msg.err != nil {
+	if msg.Err != nil {
 		// Surface event-tail errors without closing the TUI; keep listening.
-		m.status = fmt.Sprintf("events: %v", msg.err)
-		return m, waitEventCmd(m.events)
+		m.status = fmt.Sprintf("events: %v", msg.Err)
+		return m, core.WaitEventCmd(m.events)
 	}
 	// A lifecycle change occurred: bump the debounce generation and schedule a
 	// re-list, while continuing to listen for further events.
 	m.reloadGen++
-	return m, tea.Batch(waitEventCmd(m.events), debounceCmd(m.reloadGen))
+	return m, tea.Batch(core.WaitEventCmd(m.events), core.DebounceCmd(m.reloadGen))
 }
 
-func (m Model) onReloadTick(msg reloadTickMsg) (tea.Model, tea.Cmd) {
-	if msg.gen != m.reloadGen {
+func (m Model) onReloadTick(msg core.ReloadTickMsg) (tea.Model, tea.Cmd) {
+	if msg.Gen != m.reloadGen {
 		return m, nil // a newer event arrived; let the latest tick win
 	}
 	return m, tea.Batch(m.loadCommandsCmd(), m.loadProjectsCmd())
@@ -137,7 +95,7 @@ func (m *Model) reconcilePreview() tea.Cmd {
 		m.commands.preview = previewState{status: previewEmpty}
 		return nil
 	}
-	if m.commands.preview.cmdID == c.id {
+	if m.commands.preview.cmdID == c.ID {
 		return nil // already showing/loading this command; leave its reader alone
 	}
 	m.stopPreview()
@@ -146,16 +104,16 @@ func (m *Model) reconcilePreview() tea.Cmd {
 	// non-TTY log-only command) falls back to the sanitized log text below. A
 	// command whose vt preview previously panicked also falls back here, since the
 	// predicate includes && !m.termPreviewDisabled.
-	if c.state == model.EventTypeRunning && c.tty && !m.termPreviewDisabled {
-		m.commands.preview = previewState{cmdID: c.id, status: previewLoading, terminal: true}
-		return m.openRawCmd(c.id)
+	if c.State == model.EventTypeRunning && c.Tty && !m.termPreviewDisabled {
+		m.commands.preview = previewState{cmdID: c.ID, status: previewLoading, terminal: true}
+		return m.openRawCmd(c.ID)
 	}
-	if c.logDriver == logdriver.DriverNone {
-		m.commands.preview = previewState{cmdID: c.id, status: previewNoStorage}
+	if c.LogDriver == logdriver.DriverNone {
+		m.commands.preview = previewState{cmdID: c.ID, status: previewNoStorage}
 		return nil
 	}
-	m.commands.preview = previewState{cmdID: c.id, status: previewLoading}
-	return m.openPreviewCmd(c.id)
+	m.commands.preview = previewState{cmdID: c.ID, status: previewLoading}
+	return m.openPreviewCmd(c.ID)
 }
 
 // stopPreview cancels the active follow reader and/or raw terminal stream, if

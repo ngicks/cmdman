@@ -256,16 +256,16 @@ func (m Model) startSelected() (tea.Model, tea.Cmd) {
 		m.status = "select a command"
 		return m, nil
 	}
-	if c.state == model.EventTypeRunning || c.state == model.EventTypeStarting {
-		m.status = fmt.Sprintf("%s is already running", c.name)
+	if c.State == model.EventTypeRunning || c.State == model.EventTypeStarting {
+		m.status = fmt.Sprintf("%s is already running", c.Name)
 		return m, nil
 	}
-	if p := m.pendingOf(c.id); p != "" {
-		m.status = fmt.Sprintf("%s is already %s", c.name, p)
+	if p := m.pendingOf(c.ID); p != "" {
+		m.status = fmt.Sprintf("%s is already %s", c.Name, p)
 		return m, nil
 	}
-	m.setPending(c.id, "starting")
-	return m, m.startCmd(c.id, c.name)
+	m.setPending(c.ID, "starting")
+	return m, m.startCmd(c.ID, c.Name)
 }
 
 func (m Model) stopSelected() (tea.Model, tea.Cmd) {
@@ -274,16 +274,16 @@ func (m Model) stopSelected() (tea.Model, tea.Cmd) {
 		m.status = "select a command"
 		return m, nil
 	}
-	if c.state != model.EventTypeRunning && c.state != model.EventTypeStarting {
-		m.status = fmt.Sprintf("%s is not running", c.name)
+	if c.State != model.EventTypeRunning && c.State != model.EventTypeStarting {
+		m.status = fmt.Sprintf("%s is not running", c.Name)
 		return m, nil
 	}
-	if p := m.pendingOf(c.id); p != "" {
-		m.status = fmt.Sprintf("%s is already %s", c.name, p)
+	if p := m.pendingOf(c.ID); p != "" {
+		m.status = fmt.Sprintf("%s is already %s", c.Name, p)
 		return m, nil
 	}
-	m.setPending(c.id, "stopping")
-	return m, m.stopCmd(c.id, c.name)
+	m.setPending(c.ID, "stopping")
+	return m, m.stopCmd(c.ID, c.Name)
 }
 
 func (m Model) restartSelected() (tea.Model, tea.Cmd) {
@@ -292,12 +292,12 @@ func (m Model) restartSelected() (tea.Model, tea.Cmd) {
 		m.status = "select a command"
 		return m, nil
 	}
-	if p := m.pendingOf(c.id); p != "" {
-		m.status = fmt.Sprintf("%s is already %s", c.name, p)
+	if p := m.pendingOf(c.ID); p != "" {
+		m.status = fmt.Sprintf("%s is already %s", c.Name, p)
 		return m, nil
 	}
-	m.setPending(c.id, "restarting")
-	return m, m.restartCmd(c.id, c.name)
+	m.setPending(c.ID, "restarting")
+	return m, m.restartCmd(c.ID, c.Name)
 }
 
 func (m Model) attachSelected() (tea.Model, tea.Cmd) {
@@ -306,7 +306,7 @@ func (m Model) attachSelected() (tea.Model, tea.Cmd) {
 		m.status = "select a command"
 		return m, nil
 	}
-	m.popup = openAttachPopup(c.project, c.name, c.id)
+	m.popup = openAttachPopup(c.Project, c.Name, c.ID)
 	return m, nil
 }
 
@@ -316,8 +316,8 @@ func (m Model) removeSelected() (tea.Model, tea.Cmd) {
 		m.status = "select a command"
 		return m, nil
 	}
-	running := c.state == model.EventTypeRunning || c.state == model.EventTypeStarting
-	m.popup = openRemovePopup(c.project, c.name, c.id, running)
+	running := c.State == model.EventTypeRunning || c.State == model.EventTypeStarting
+	m.popup = openRemovePopup(c.Project, c.Name, c.ID, running)
 	return m, nil
 }
 

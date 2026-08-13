@@ -6,18 +6,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ngicks/cmdman/cmdman/tui/internal/coretest"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/charmbracelet/x/vt"
 	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"github.com/ngicks/cmdman/cmdman/model"
+	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
 
 func TestEventSignalSchedulesDebouncedRelist(t *testing.T) {
 	m := seed()
-	m.events = &fakeEventStream{ch: make(chan EventSignal, 1)}
+	m.events = &coretest.FakeEventStream{Ch: make(chan EventSignal, 1)}
 	beforeGen := m.reloadGen
-	m, cmd := m2tuple(m.onEventSignal(eventSignalMsg{}))
+	m, cmd := m2tuple(m.onEventSignal(core.EventSignalMsg{}))
 	if m.reloadGen != beforeGen+1 {
 		t.Fatalf("event should bump the debounce generation")
 	}
@@ -30,12 +33,12 @@ func TestReloadTickStaleGenerationIgnored(t *testing.T) {
 	m := seed()
 	m.reloadGen = 5
 	// A tick from an older generation must not re-list (a newer event arrived).
-	_, cmd := m2tuple(m.onReloadTick(reloadTickMsg{gen: 4}))
+	_, cmd := m2tuple(m.onReloadTick(core.ReloadTickMsg{Gen: 4}))
 	if cmd != nil {
 		t.Fatalf("stale debounce tick should not trigger a re-list")
 	}
 	// The latest tick triggers the re-list.
-	_, cmd = m2tuple(m.onReloadTick(reloadTickMsg{gen: 5}))
+	_, cmd = m2tuple(m.onReloadTick(core.ReloadTickMsg{Gen: 5}))
 	if cmd == nil {
 		t.Fatalf("matching debounce tick should trigger a re-list")
 	}
@@ -43,8 +46,8 @@ func TestReloadTickStaleGenerationIgnored(t *testing.T) {
 
 func TestEventTailErrorReportedWithoutClosing(t *testing.T) {
 	m := seed()
-	m.events = &fakeEventStream{ch: make(chan EventSignal, 1)}
-	m, cmd := m2tuple(m.onEventSignal(eventSignalMsg{err: errors.New("tail broke")}))
+	m.events = &coretest.FakeEventStream{Ch: make(chan EventSignal, 1)}
+	m, cmd := m2tuple(m.onEventSignal(core.EventSignalMsg{Err: errors.New("tail broke")}))
 	if !strings.Contains(m.status, "tail broke") {
 		t.Fatalf("event-tail error should be surfaced in the footer, got %q", m.status)
 	}
@@ -55,8 +58,8 @@ func TestEventTailErrorReportedWithoutClosing(t *testing.T) {
 
 func TestEventStreamClosedStopsListening(t *testing.T) {
 	m := seed()
-	m.events = &fakeEventStream{ch: make(chan EventSignal)}
-	m, cmd := m2tuple(m.onEventSignal(eventSignalMsg{closed: true}))
+	m.events = &coretest.FakeEventStream{Ch: make(chan EventSignal)}
+	m, cmd := m2tuple(m.onEventSignal(core.EventSignalMsg{Closed: true}))
 	if cmd != nil {
 		t.Fatalf("a closed event stream should stop the listen loop")
 	}
@@ -71,7 +74,7 @@ func TestRefreshPreservesFoldFilterAndTab(t *testing.T) {
 	m.commands.filter = "web"
 	m.active = TabCommands
 
-	infos := []CommandInfo{
+	infos := []core.CommandInfo{
 		{
 			ID:      "1",
 			Name:    "watcher",
@@ -94,7 +97,7 @@ func TestRefreshPreservesFoldFilterAndTab(t *testing.T) {
 			State:   model.EventTypeRunning,
 		},
 	}
-	m, _ = m.onCommandsLoaded(commandsLoadedMsg{infos: infos})
+	m, _ = m.onCommandsLoaded(core.CommandsLoadedMsg{Infos: infos})
 
 	if !m.commands.folded(0) {
 		t.Fatalf("fold state should survive a refresh")
@@ -109,7 +112,7 @@ func TestRefreshPreservesFoldFilterAndTab(t *testing.T) {
 
 func TestPreviewStartsAndCancelsPreviousReader(t *testing.T) {
 	m := seed()
-	fb := m.backend.(*fakeBackend)
+	fb := m.backend.(*coretest.FakeBackend)
 
 	// Select watcher (idx 1) and open its preview.
 	m.commands.selected = 1
@@ -125,15 +128,15 @@ func TestPreviewStartsAndCancelsPreviousReader(t *testing.T) {
 	if m.commands.preview.stream == nil {
 		t.Fatalf("preview stream should be established")
 	}
-	if len(fb.logStreams) != 1 {
-		t.Fatalf("expected exactly one Logs reader, got %d", len(fb.logStreams))
+	if len(fb.LogStreams) != 1 {
+		t.Fatalf("expected exactly one Logs reader, got %d", len(fb.LogStreams))
 	}
-	first := fb.logStreams[0]
+	first := fb.LogStreams[0]
 
 	// Move to seed-db (idx 2): the previous follow reader must be cancelled.
 	m.commands.selected = 2
 	cmd = (&m).reconcilePreview()
-	if !first.closed {
+	if !first.Closed {
 		t.Fatalf("selection change should cancel the previous follow reader")
 	}
 	if cmd == nil {
@@ -146,7 +149,7 @@ func TestPreviewDuplicateOpenClosesPreviousStream(t *testing.T) {
 	m.commands.preview = previewState{cmdID: "1", status: previewLoading}
 
 	// First open for id "1" establishes a reader.
-	first := &fakeLogStream{ch: make(chan LogLine, 1)}
+	first := &coretest.FakeLogStream{Ch: make(chan LogLine, 1)}
 	m, _ = m2tuple(m.onPreviewOpened(previewOpenedMsg{cmdID: "1", stream: first}))
 	if m.commands.preview.stream == nil {
 		t.Fatalf("the first open should establish a preview stream")
@@ -154,19 +157,19 @@ func TestPreviewDuplicateOpenClosesPreviousStream(t *testing.T) {
 
 	// A second open for the same id (selection bounce A→B→A) must close the
 	// first stream before overwriting it, releasing its pump goroutine.
-	second := &fakeLogStream{ch: make(chan LogLine, 1)}
+	second := &coretest.FakeLogStream{Ch: make(chan LogLine, 1)}
 	m, _ = m2tuple(m.onPreviewOpened(previewOpenedMsg{cmdID: "1", stream: second}))
-	if !first.closed {
+	if !first.Closed {
 		t.Fatalf("a duplicate open for the same id must close the previous stream")
 	}
-	if second.closed {
+	if second.Closed {
 		t.Fatalf("the surviving stream must stay open")
 	}
 }
 
 func TestPreviewLineAppendsAndStaleIgnored(t *testing.T) {
 	m := seed()
-	stream := &fakeLogStream{ch: make(chan LogLine, 4)}
+	stream := &coretest.FakeLogStream{Ch: make(chan LogLine, 4)}
 	m.commands.preview = previewState{cmdID: "1", status: previewLoading, stream: stream}
 
 	m, _ = m2tuple(m.onPreviewLine(previewLineMsg{cmdID: "1", line: "first"}))
@@ -204,7 +207,7 @@ func TestRawDuplicateOpenClosesPreviousStream(t *testing.T) {
 	m.commands.preview = previewState{cmdID: "1", status: previewLoading, terminal: true}
 
 	// First open for id "1" establishes a raw stream and emulator.
-	first := newFakeRawStream(1)
+	first := coretest.NewFakeRawStream(1)
 	m, _ = m2tuple(m.onRawOpened(rawOpenedMsg{cmdID: "1", stream: first}))
 	if m.commands.preview.raw == nil {
 		t.Fatalf("the first open should establish a raw stream")
@@ -213,10 +216,10 @@ func TestRawDuplicateOpenClosesPreviousStream(t *testing.T) {
 	// A second open for the same id (selection bounce A→B→A) must close the
 	// first stream before overwriting it, releasing its drain goroutine. The
 	// close runs off the update loop, so wait briefly for it.
-	second := newFakeRawStream(1)
+	second := coretest.NewFakeRawStream(1)
 	m, _ = m2tuple(m.onRawOpened(rawOpenedMsg{cmdID: "1", stream: second}))
-	first.waitClosed(t)
-	if second.isClosed() {
+	first.WaitClosed(t)
+	if second.IsClosed() {
 		t.Fatalf("the surviving raw stream must stay open")
 	}
 }
@@ -280,17 +283,17 @@ func TestRawClosedErrorRendersErrorState(t *testing.T) {
 }
 
 func TestPreviewNoneDriverShowsNoStorage(t *testing.T) {
-	m := New(Options{Backend: &fakeBackend{}})
+	m := New(core.Options{Backend: &coretest.FakeBackend{}})
 	m.cwd = "/w"
-	m.setGroups([]projectGroup{
-		{name: "p", workdir: "/w", commands: []commandRow{
+	m.setGroups([]core.ProjectGroup{
+		{Name: "p", Workdir: "/w", Commands: []core.CommandRow{
 			{
-				id:        "n1",
-				name:      "quiet",
-				project:   "p",
-				workdir:   "/w",
-				state:     model.EventTypeRunning,
-				logDriver: logdriver.DriverNone,
+				ID:        "n1",
+				Name:      "quiet",
+				Project:   "p",
+				Workdir:   "/w",
+				State:     model.EventTypeRunning,
+				LogDriver: logdriver.DriverNone,
 			},
 		}},
 	})
@@ -324,12 +327,12 @@ func TestAttachDetachKeepsSelectionAndReports(t *testing.T) {
 	m := seed()
 	m.commands.selected = 1
 	c, _ := m.commands.selectedCommand()
-	m, cmd := m2tuple(m.onAttachDone(attachDoneMsg{name: c.name, outcome: AttachDetached}))
+	m, cmd := m2tuple(m.onAttachDone(attachDoneMsg{name: c.Name, outcome: AttachDetached}))
 	if !strings.Contains(m.status, "detached") {
 		t.Fatalf("detach should report a status, got %q", m.status)
 	}
 	got, ok := m.commands.selectedCommand()
-	if !ok || got.id != c.id {
+	if !ok || got.ID != c.ID {
 		t.Fatalf("selection should be preserved across attach handoff")
 	}
 	if cmd == nil {
@@ -356,11 +359,11 @@ func TestAttachErrorReported(t *testing.T) {
 func TestAttachConfirmStartsHandoff(t *testing.T) {
 	m := seed()
 	m.commands.selected = 1
-	m, _ = upd(m, kr("a")) // open attach popup (defaults to yes)
+	m, _ = upd(m, coretest.Kr("a")) // open attach popup (defaults to yes)
 	if m.popup.kind != popupAttach {
 		t.Fatalf("a should open the attach popup")
 	}
-	m, cmd := upd(m, kEnter) // confirm
+	m, cmd := upd(m, coretest.KEnter) // confirm
 	if cmd == nil {
 		t.Fatalf("confirming attach should start the terminal handoff")
 	}
@@ -384,7 +387,7 @@ func TestInitSubscribesToEvents(t *testing.T) {
 	}
 	foundSubscribe := false
 	for _, c := range batch {
-		if _, isSub := c().(eventsSubscribedMsg); isSub {
+		if _, isSub := c().(core.EventsSubscribedMsg); isSub {
 			foundSubscribe = true
 		}
 	}
@@ -402,10 +405,10 @@ func TestDrainRawDoesNotDeadlockOnQueryResponses(t *testing.T) {
 	// query-laden stream while a concurrent Render runs, and requires it to finish
 	// quickly. Without the discard drain it deadlocks (times out).
 	term := vt.NewSafeEmulator(40, 10)
-	stream := newFakeRawStream(256)
+	stream := coretest.NewFakeRawStream(256)
 	query := []byte("x\x1b[c y\x1b[>c\x1b[6n\x1b[?2026$p z\r\n")
 	for range 200 {
-		stream.ch <- RawChunk{Bytes: query}
+		stream.Ch <- RawChunk{Bytes: query}
 	}
 	_ = stream.Close() // closes the chunk channel; the 200 buffered chunks still drain
 
@@ -440,9 +443,9 @@ func TestDrainRawResizeSizesEmulatorToPTY(t *testing.T) {
 	// render dimensions (so the preview matches and does not reflow), without any
 	// remote interaction.
 	term := vt.NewSafeEmulator(defaultPreviewCols, defaultPreviewRows)
-	stream := newFakeRawStream(4)
-	stream.ch <- RawChunk{Resize: &RawSize{Rows: 40, Cols: 120}}
-	stream.ch <- RawChunk{Bytes: []byte("hello")}
+	stream := coretest.NewFakeRawStream(4)
+	stream.Ch <- RawChunk{Resize: &RawSize{Rows: 40, Cols: 120}}
+	stream.Ch <- RawChunk{Bytes: []byte("hello")}
 	_ = stream.Close()
 
 	_ = drainRawCmd(term, stream, "1", 1)()
@@ -460,8 +463,8 @@ func TestDrainRawRecoversEmulatorPanic(t *testing.T) {
 	// insert. drainRawCmd must recover and report a panicked close instead of
 	// crashing the whole TUI. This sequence is a verified-deterministic trigger.
 	term := vt.NewSafeEmulator(1, 1)
-	stream := newFakeRawStream(2)
-	stream.ch <- RawChunk{Bytes: []byte("\x1b[1;5r\x1b[8;24;80t\x1b[L")}
+	stream := coretest.NewFakeRawStream(2)
+	stream.Ch <- RawChunk{Bytes: []byte("\x1b[1;5r\x1b[8;24;80t\x1b[L")}
 	_ = stream.Close()
 
 	msg := drainRawCmd(term, stream, "1", 1)()
@@ -489,10 +492,10 @@ func TestRawClosedPanicDisablesTerminalPreviewAndFallsBack(t *testing.T) {
 
 	// With terminal-view disabled, reconcile must never choose terminal-view again
 	// for a running, TTY-backed command — it falls back to the log path.
-	m2.setGroups([]projectGroup{
-		{name: "p", workdir: "/w", commands: []commandRow{
-			{id: "tty1", name: "codex", project: "p", workdir: "/w",
-				state: model.EventTypeRunning, tty: true, logDriver: logdriver.DriverK8sFile},
+	m2.setGroups([]core.ProjectGroup{
+		{Name: "p", Workdir: "/w", Commands: []core.CommandRow{
+			{ID: "tty1", Name: "codex", Project: "p", Workdir: "/w",
+				State: model.EventTypeRunning, Tty: true, LogDriver: logdriver.DriverK8sFile},
 		}},
 	})
 	m2.commands.selected = 1 // the command row
@@ -508,9 +511,9 @@ func TestRawOpenedStaleCmdIDClosesStream(t *testing.T) {
 	// the update loop and not establish a preview.
 	m := seed()
 	m.commands.preview = previewState{cmdID: "current", status: previewLoading, terminal: true}
-	stale := newFakeRawStream(1)
+	stale := coretest.NewFakeRawStream(1)
 	m2, _ := m2tuple(m.onRawOpened(rawOpenedMsg{cmdID: "old", stream: stale}))
-	stale.waitClosed(t)
+	stale.WaitClosed(t)
 	if m2.commands.preview.raw != nil {
 		t.Fatalf("a stale-cmdID raw open must not establish a stream")
 	}

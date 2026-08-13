@@ -4,7 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ngicks/cmdman/cmdman/tui/internal/coretest"
+
 	"github.com/ngicks/cmdman/cmdman/model"
+	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
 
 func TestStatusGlyphMatchesComposeMarkers(t *testing.T) {
@@ -50,7 +53,7 @@ func TestPressingStartBeginsSpinnerAnimation(t *testing.T) {
 	if m.anyInProgress() {
 		t.Fatalf("precondition: nothing in progress")
 	}
-	m, cmd := upd(m, kr("s"))
+	m, cmd := upd(m, coretest.Kr("s"))
 	if !m.spinning {
 		t.Fatalf("pressing start should begin the spinner animation")
 	}
@@ -82,7 +85,7 @@ func TestSpinnerStopsWhenIdle(t *testing.T) {
 
 func TestSpinnerKeepsTickingWhileStarting(t *testing.T) {
 	m := seed()
-	m.commands.groups[0].commands[0].state = model.EventTypeStarting
+	m.commands.groups[0].Commands[0].State = model.EventTypeStarting
 	if !m.anyInProgress() {
 		t.Fatalf("a starting command should count as in progress")
 	}
@@ -100,7 +103,7 @@ func TestRefreshWithStartingCommandStartsSpinner(t *testing.T) {
 	m := seed()
 	// Simulate an external start cascade surfacing a starting command via a
 	// debounced re-list.
-	infos := []CommandInfo{
+	infos := []core.CommandInfo{
 		{
 			ID:      "1",
 			Name:    "watcher",
@@ -109,7 +112,7 @@ func TestRefreshWithStartingCommandStartsSpinner(t *testing.T) {
 			State:   model.EventTypeStarting,
 		},
 	}
-	nm, cmd := m.Update(commandsLoadedMsg{infos: infos})
+	nm, cmd := m.Update(core.CommandsLoadedMsg{Infos: infos})
 	m = nm.(Model)
 	if !m.spinning {
 		t.Fatalf("a refresh surfacing a starting command should start the spinner")

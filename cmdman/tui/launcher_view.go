@@ -2,13 +2,13 @@ package tui
 
 import (
 	"fmt"
-	"image/color"
 	"os"
 	"strings"
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
 
 // The launcher fills its window edge to edge (D27): `tmux display-popup` already
@@ -27,7 +27,7 @@ const (
 )
 
 var (
-	styleLauncherPrompt = lipgloss.NewStyle().Foreground(colorAccent)
+	styleLauncherPrompt = lipgloss.NewStyle().Foreground(core.ColorAccent)
 	styleLauncherWork   = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 	styleLauncherFail   = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 )
@@ -35,7 +35,7 @@ var (
 // launcherSpinnerFrames animates the in-flight marker (D29). This family is one
 // cell wide under every runewidth condition; the ◐◓◑◒ half-circles were the other
 // candidate but ◐ and ◑ are East-Asian Ambiguous, so two of their four frames
-// would measure 2 without the cells pin — a spinner that changes width would
+// would measure 2 without the core.Cells pin — a spinner that changes width would
 // jitter the whole name column as it turns.
 var launcherSpinnerFrames = []string{"◜", "◝", "◞", "◟"}
 
@@ -61,16 +61,16 @@ func (mk launcherMarker) glyph(frame int) string {
 	case !mk.running:
 		return ""
 	case mk.bell:
-		return glyphBell
+		return core.GlyphBell
 	default:
 		// Hollow, not filled: a running project that has reported nothing is
 		// "nothing said so far", not a claim that all is idle (D24).
-		return glyphHollow
+		return core.GlyphHollow
 	}
 }
 
 // render is the marker slot, styled.
-func (mk launcherMarker) render(frame int, bg rowBg) string {
+func (mk launcherMarker) render(frame int, bg core.RowBg) string {
 	g := mk.glyph(frame)
 	switch {
 	case g == "":
@@ -78,11 +78,11 @@ func (mk launcherMarker) render(frame int, bg rowBg) string {
 	case mk.starting:
 		// Yellow like `working`: something is happening and you did not ask for it
 		// to need you.
-		return bg.style(styleLauncherWork).Render(g)
-	case g == glyphBell:
-		return bg.plain(g)
+		return bg.Style(styleLauncherWork).Render(g)
+	case g == core.GlyphBell:
+		return bg.Plain(g)
 	default:
-		return bg.style(styleMarkerIdle).Render(g)
+		return bg.Style(core.StyleMarkerIdle).Render(g)
 	}
 }
 
@@ -199,7 +199,7 @@ func (m launcherModel) screen() (out string, left, right launcherPane) {
 	leftRows, leftMap := m.leftPane(leftW, f)
 	rightRows, rightMap := m.rightPane(rightW)
 	lines = append(lines, m.paneHead("locations", leftW, m.focus == zoneLeft)+
-		styleActive.Render("│")+m.paneHead(m.rightTitle(), rightW, m.focus == zoneRight))
+		core.StyleActive.Render("│")+m.paneHead(m.rightTitle(), rightW, m.focus == zoneRight))
 	for i := range max(len(leftRows), len(rightRows)) {
 		l, r := strings.Repeat(" ", leftW), ""
 		if i < len(leftRows) {
@@ -208,7 +208,7 @@ func (m launcherModel) screen() (out string, left, right launcherPane) {
 		if i < len(rightRows) {
 			r = rightRows[i]
 		}
-		lines = append(lines, l+styleActive.Render("│")+r)
+		lines = append(lines, l+core.StyleActive.Render("│")+r)
 	}
 	foot := m.footerLines()
 	for len(lines) < m.height-len(foot) {
@@ -235,18 +235,18 @@ func (m launcherModel) inputLine(scope string) string {
 		if text == "" {
 			text = "(no filter)"
 		}
-		return styleActive.Render("› " + text + "   " + scope)
+		return core.StyleActive.Render("› " + text + "   " + scope)
 	}
 	return styleLauncherPrompt.Render("› ") + m.filter + styleLauncherPrompt.Render("▌") +
-		styleActive.Render("   "+scope)
+		core.StyleActive.Render("   "+scope)
 }
 
 func (m launcherModel) paneHead(s string, w int, focused bool) string {
-	st := styleActive
+	st := core.StyleActive
 	if focused {
 		st = styleLauncherPrompt
 	}
-	return padLine(st.Render(" "+s), w, bgNone)
+	return core.PadLine(st.Render(" "+s), w, core.BgNone)
 }
 
 func (m launcherModel) rightTitle() string {
@@ -274,29 +274,36 @@ func (m launcherModel) leftPane(w int, f []int) ([]string, launcherPane) {
 		l := m.locs[f[idx]]
 		bg := launcherRowBg(idx == m.leftSel, m.focus == zoneLeft)
 		mk := l.marker()
-		gap := strings.Repeat(" ", max(markerSlot-glyphWidth(mk.glyph(m.spin)), 0))
-		row := bg.plain(markerMargin) + mk.render(m.spin, bg) +
-			bg.style(lipgloss.NewStyle().Bold(idx == m.leftSel)).Render(gap+l.label())
+		gap := strings.Repeat(" ", max(core.MarkerSlot-core.GlyphWidth(mk.glyph(m.spin)), 0))
+		row := bg.Plain(core.MarkerMargin) + mk.render(m.spin, bg) +
+			bg.Style(lipgloss.NewStyle().Bold(idx == m.leftSel)).Render(gap+l.label())
 		if tw := w - lipgloss.Width(row) - 2; tw >= 10 {
 			tail := shortPath(l.Dir, tw)
 			gap := max(w-lipgloss.Width(row)-lipgloss.Width(tail)-1, 0)
-			row += bg.plain(strings.Repeat(" ", gap)) +
-				bg.style(styleActive).Render(tail) + bg.plain(" ")
+			row += bg.Plain(strings.Repeat(" ", gap)) +
+				bg.Style(core.StyleActive).Render(tail) + bg.Plain(" ")
 		}
 		pm.rowLine = append(pm.rowLine, launcherPaneTop+len(out))
 		pm.cursor = append(pm.cursor, idx)
-		out = append(out, padLine(row, w, bg))
+		out = append(out, core.PadLine(row, w, bg))
 	}
 	switch {
 	case len(f) == 0 && !m.loaded:
-		out = append(out, padLine(styleActive.Render("  loading…"), w, bgNone))
+		out = append(out, core.PadLine(core.StyleActive.Render("  loading…"), w, core.BgNone))
 	case len(f) == 0:
-		out = append(out, padLine(styleActive.Render("  no location matches"), w, bgNone))
+		out = append(
+			out,
+			core.PadLine(core.StyleActive.Render("  no location matches"), w, core.BgNone),
+		)
 	}
 	if hidden := len(f) - m.leftOff - n; hidden > 0 {
 		out = append(
 			out,
-			padLine(styleActive.Render(fmt.Sprintf("  … %d more", hidden)), w, bgNone),
+			core.PadLine(
+				core.StyleActive.Render(fmt.Sprintf("  … %d more", hidden)),
+				w,
+				core.BgNone,
+			),
 		)
 	}
 	return out, pm
@@ -315,7 +322,9 @@ func (m launcherModel) rightPane(w int) ([]string, launcherPane) {
 	}
 	ps := m.locs[li].projects
 	if len(ps) == 0 {
-		return []string{padLine(styleActive.Render("  no compose file here"), w, bgNone)}, pm
+		return []string{
+			core.PadLine(core.StyleActive.Render("  no compose file here"), w, core.BgNone),
+		}, pm
 	}
 	cost := m.rightCost(li)
 	n := rowWindow(cost, m.rightOff, m.budget())
@@ -328,10 +337,10 @@ func (m launcherModel) rightPane(w int) ([]string, launcherPane) {
 			box = "[x]"
 		}
 		mk := launcherMarker{starting: p.starting, running: p.Running}
-		gap := strings.Repeat(" ", max(markerSlot-glyphWidth(mk.glyph(m.spin)), 0))
-		row := bg.plain(markerMargin) + bg.style(m.weakStyle()).Render(box) + bg.plain(" ") +
+		gap := strings.Repeat(" ", max(core.MarkerSlot-core.GlyphWidth(mk.glyph(m.spin)), 0))
+		row := bg.Plain(core.MarkerMargin) + bg.Style(m.weakStyle()).Render(box) + bg.Plain(" ") +
 			mk.render(m.spin, bg) +
-			bg.style(lipgloss.NewStyle().Bold(idx == m.rightSel)).Render(gap+p.Name)
+			bg.Style(lipgloss.NewStyle().Bold(idx == m.rightSel)).Render(gap+p.Name)
 		file := p.File
 		if !p.HasMux {
 			file += " · no mux"
@@ -339,24 +348,31 @@ func (m launcherModel) rightPane(w int) ([]string, launcherPane) {
 		if fw := w - lipgloss.Width(row) - 2; fw >= 6 {
 			f := shortPath(file, fw)
 			gap := max(w-lipgloss.Width(row)-lipgloss.Width(f)-1, 0)
-			row += bg.plain(strings.Repeat(" ", gap)) +
-				bg.style(styleActive).Render(f) + bg.plain(" ")
+			row += bg.Plain(strings.Repeat(" ", gap)) +
+				bg.Style(core.StyleActive).Render(f) + bg.Plain(" ")
 		}
 		pm.rowLine = append(pm.rowLine, launcherPaneTop+len(out))
 		pm.cursor = append(pm.cursor, idx)
-		out = append(out, padLine(row, w, bg))
+		out = append(out, core.PadLine(row, w, bg))
 		if li == m.failedLoc && idx == m.failedPrj {
 			// Keep-and-surface (D10): the row stays, the reason it cannot land is
 			// spelled out under it, with the removal offer where removal is the
-			// answer. padLine truncates from the right, which is what a message
+			// answer. core.PadLine truncates from the right, which is what a message
 			// wants — shortPath's keep-the-tail is for paths only.
-			out = append(out, padLine(styleLauncherFail.Render("  ✖ "+m.failureText(p)), w, bgNone))
+			out = append(
+				out,
+				core.PadLine(styleLauncherFail.Render("  ✖ "+m.failureText(p)), w, core.BgNone),
+			)
 		}
 	}
 	if hidden := len(ps) - m.rightOff - n; hidden > 0 {
 		out = append(
 			out,
-			padLine(styleActive.Render(fmt.Sprintf("  … %d more", hidden)), w, bgNone),
+			core.PadLine(
+				core.StyleActive.Render(fmt.Sprintf("  … %d more", hidden)),
+				w,
+				core.BgNone,
+			),
 		)
 	}
 	return out, pm
@@ -389,7 +405,7 @@ func (m launcherModel) footerLines() []string {
 	if m.width < lipgloss.Width(full) {
 		full = "enter → · j/k move · s start · S launch · / input · esc back"
 	}
-	hints := styleActive.Render(full)
+	hints := core.StyleActive.Render(full)
 	if m.note != "" {
 		return []string{styleLauncherPrompt.Render("· " + m.note), hints}
 	}
@@ -399,14 +415,14 @@ func (m launcherModel) footerLines() []string {
 // launcherRowBg is the background a row carries. The cursor of the unfocused
 // pane keeps the weaker block, so both panes show where they stand without
 // competing (D31 kept the dual cursor).
-func launcherRowBg(cursor, focused bool) rowBg {
+func launcherRowBg(cursor, focused bool) core.RowBg {
 	switch {
 	case cursor && focused:
-		return bgAccent
+		return core.BgAccent
 	case cursor:
-		return bgWeak
+		return core.BgWeak
 	}
-	return bgNone
+	return core.BgNone
 }
 
 // homeDir is the prefix shortPath abbreviates to "~".
@@ -421,7 +437,7 @@ var homeDir = sync.OnceValue(func() string {
 // shortPath abbreviates the home prefix and, when still too long, keeps the tail
 // — the end of a path is what distinguishes it.
 func shortPath(p string, w int) string {
-	return truncateLeftCells(abbrevHome(p, homeDir()), w)
+	return core.TruncateLeftCells(abbrevHome(p, homeDir()), w)
 }
 
 // abbrevHome writes the home prefix as "~", and only on a path-component
@@ -441,23 +457,10 @@ func abbrevHome(p, home string) string {
 // deriveWeak recomputes the toggle-box shade from whatever the terminal has
 // reported so far, so the two answers may arrive in either order (D26).
 func (m launcherModel) deriveWeak() launcherModel {
-	if m.termFg == nil {
-		return m
+	if weak := core.DeriveWeak(m.termFg, m.termBg, m.fgDark); weak != nil {
+		m.weak = weak
 	}
-	bg := m.termBg
-	if bg == nil {
-		bg = color.Black
-		if m.fgDark {
-			bg = color.White
-		}
-	}
-	m.weak = blend(m.termFg, bg, weakRatio)
 	return m
 }
 
-func (m launcherModel) weakStyle() lipgloss.Style {
-	if m.weak == nil {
-		return styleActive
-	}
-	return lipgloss.NewStyle().Foreground(m.weak)
-}
+func (m launcherModel) weakStyle() lipgloss.Style { return core.WeakStyle(m.weak) }

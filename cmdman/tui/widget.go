@@ -4,75 +4,20 @@ import (
 	"context"
 	"fmt"
 	"image/color"
-	"math"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/mattn/go-runewidth"
+
+	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
-
-// Widget names a single-view widget mode: one view filling the pane, with no
-// tab bar and no tab switching. Widgets are the entry point a frame def's
-// `component:` resolves to (`cmdman tui widget <name>`), and each one is its own
-// CLI subcommand.
-type Widget int
-
-const (
-	// WidgetNone is the zero value and names no widget: the full TUI runs.
-	WidgetNone Widget = iota
-	// WidgetSwitcher is the docked project switcher: projects with their
-	// commands listed under them.
-	WidgetSwitcher
-	// WidgetStatusbar is the one-line status bar.
-	WidgetStatusbar
-	// WidgetLauncher is the quick-launch selector: locations left, their compose
-	// projects right. It is the view a mux key binding summons as a popup (D3).
-	WidgetLauncher
-)
-
-// widgetDefs is the single source of truth for the widget modes and their CLI
-// tokens — the `cmdman tui widget <name>` subcommand names, which are also the
-// built-in component names a frame def references. WidgetNone is deliberately
-// absent: it names no widget.
-var widgetDefs = []struct {
-	widget Widget
-	key    string
-}{
-	{WidgetSwitcher, "switcher"},
-	{WidgetStatusbar, "statusbar"},
-	{WidgetLauncher, "launcher"},
-}
-
-// WidgetKeys returns the widget CLI tokens in declaration order.
-func WidgetKeys() []string {
-	keys := make([]string, len(widgetDefs))
-	for i, d := range widgetDefs {
-		keys[i] = d.key
-	}
-	return keys
-}
-
-// ParseWidget maps a widget CLI token to its Widget. It is the inverse of the
-// widgetDefs key column; WidgetNone has no token and never parses.
-func ParseWidget(s string) (Widget, error) {
-	for _, d := range widgetDefs {
-		if d.key == s {
-			return d.widget, nil
-		}
-	}
-	return WidgetNone, fmt.Errorf(
-		"invalid widget %q: want one of %s", s, strings.Join(WidgetKeys(), ", "))
-}
 
 // widgetModel is the restricted single-view model. It shares the Backend, the
 // load commands, and the event subscription with the full model, but renders
 // exactly one widget and handles only the keys that widget needs.
 type widgetModel struct {
-	backend Backend
-	widget  Widget
+	backend core.Backend
+	widget  core.Widget
 	version string
 	// noQuit unbinds the quit keys (V6), which is how a widget docked in a
 	// frame pane runs: an exiting viewer leaves a hole in the fixture.
@@ -87,9 +32,9 @@ type widgetModel struct {
 
 	// cmds and projs are the last loaded lists, kept raw because groups is
 	// their join and either list can arrive first.
-	cmds   []CommandInfo
-	projs  []ProjectInfo
-	groups []projectGroup
+	cmds   []core.CommandInfo
+	projs  []core.ProjectInfo
+	groups []core.ProjectGroup
 
 	// titles carries when each command's current title was first seen, which is
 	// what D20's bucket sort orders by (see titleStamp). now is the clock that
@@ -109,7 +54,7 @@ type widgetModel struct {
 	// which point a bell that rings again is news again.
 	bellRead map[string]bool
 
-	events    EventStream
+	events    core.EventStream
 	reloadGen int
 
 	// termFg/termBg are the terminal's own colors (D26), nil until it answers
@@ -124,7 +69,7 @@ type widgetModel struct {
 
 // newWidget constructs the single-widget model from the same options the full
 // model takes.
-func newWidget(opts Options) widgetModel {
+func newWidget(opts core.Options) widgetModel {
 	return widgetModel{
 		backend:   opts.Backend,
 		widget:    opts.Widget,
@@ -145,11 +90,11 @@ func (m widgetModel) bgCtx() context.Context {
 // switcher paints app rows, so only it asks the terminal for its palette.
 func (m widgetModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{
-		listCommandsCmd(m.bgCtx(), m.backend),
-		listProjectsCmd(m.bgCtx(), m.backend),
-		subscribeCmd(m.bgCtx(), m.backend),
+		core.ListCommandsCmd(m.bgCtx(), m.backend),
+		core.ListProjectsCmd(m.bgCtx(), m.backend),
+		core.SubscribeCmd(m.bgCtx(), m.backend),
 	}
-	if m.widget == WidgetSwitcher {
+	if m.widget == core.WidgetSwitcher {
 		cmds = append(cmds, tea.RequestForegroundColor, tea.RequestBackgroundColor)
 	}
 	return tea.Batch(cmds...)
@@ -167,42 +112,42 @@ func (m widgetModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BackgroundColorMsg:
 		m.termBg = msg.Color
 		return m.deriveWeak(), nil
-	case commandsLoadedMsg:
-		if msg.err != nil {
-			m.status = fmt.Sprintf("list error: %v", msg.err)
+	case core.CommandsLoadedMsg:
+		if msg.Err != nil {
+			m.status = fmt.Sprintf("list error: %v", msg.Err)
 			return m, nil
 		}
-		m.cmds, m.status = msg.infos, ""
+		m.cmds, m.status = msg.Infos, ""
 		return m.rebuild(), nil
-	case projectsLoadedMsg:
-		if msg.err != nil {
-			m.status = fmt.Sprintf("project list error: %v", msg.err)
+	case core.ProjectsLoadedMsg:
+		if msg.Err != nil {
+			m.status = fmt.Sprintf("project list error: %v", msg.Err)
 			return m, nil
 		}
-		m.projs, m.status = msg.infos, ""
+		m.projs, m.status = msg.Infos, ""
 		return m.rebuild(), nil
-	case eventsSubscribedMsg:
-		if msg.err != nil {
-			m.status = fmt.Sprintf("events: %v", msg.err)
+	case core.EventsSubscribedMsg:
+		if msg.Err != nil {
+			m.status = fmt.Sprintf("events: %v", msg.Err)
 			return m, nil
 		}
-		m.events = msg.stream
-		return m, waitEventCmd(msg.stream)
-	case eventSignalMsg:
+		m.events = msg.Stream
+		return m, core.WaitEventCmd(msg.Stream)
+	case core.EventSignalMsg:
 		return m.onEventSignal(msg)
-	case reloadTickMsg:
-		if msg.gen != m.reloadGen {
+	case core.ReloadTickMsg:
+		if msg.Gen != m.reloadGen {
 			return m, nil // a newer event arrived; let the latest tick win
 		}
 		return m, tea.Batch(
-			listCommandsCmd(m.bgCtx(), m.backend),
-			listProjectsCmd(m.bgCtx(), m.backend),
+			core.ListCommandsCmd(m.bgCtx(), m.backend),
+			core.ListProjectsCmd(m.bgCtx(), m.backend),
 		)
-	case projectSwitchedMsg:
+	case core.ProjectSwitchedMsg:
 		return m.onProjectSwitched(msg), nil
-	case frameHiddenMsg:
-		if msg.err != nil {
-			m.status = fmt.Sprintf("hide frame: %v", msg.err)
+	case core.FrameHiddenMsg:
+		if msg.Err != nil {
+			m.status = fmt.Sprintf("hide frame: %v", msg.Err)
 		}
 		return m, nil
 	case tea.MouseClickMsg:
@@ -216,17 +161,17 @@ func (m widgetModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m widgetModel) onEventSignal(msg eventSignalMsg) (tea.Model, tea.Cmd) {
-	if msg.closed {
+func (m widgetModel) onEventSignal(msg core.EventSignalMsg) (tea.Model, tea.Cmd) {
+	if msg.Closed {
 		m.events = nil
 		return m, nil // subscription ended; stop waiting
 	}
-	if msg.err != nil {
-		m.status = fmt.Sprintf("events: %v", msg.err)
-		return m, waitEventCmd(m.events)
+	if msg.Err != nil {
+		m.status = fmt.Sprintf("events: %v", msg.Err)
+		return m, core.WaitEventCmd(m.events)
 	}
 	m.reloadGen++
-	return m, tea.Batch(waitEventCmd(m.events), debounceCmd(m.reloadGen))
+	return m, tea.Batch(core.WaitEventCmd(m.events), core.DebounceCmd(m.reloadGen))
 }
 
 // onKey handles the widget key set: the switcher's cursor keys, the selection
@@ -249,10 +194,10 @@ func (m widgetModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m.switchToSelected()
 	case "z":
-		if m.widget != WidgetSwitcher {
+		if m.widget != core.WidgetSwitcher {
 			return m, nil
 		}
-		return m, hideFrameCmd(m.bgCtx(), m.backend)
+		return m, core.HideFrameCmd(m.bgCtx(), m.backend)
 	}
 	return m, nil
 }
@@ -269,7 +214,7 @@ func (m *widgetModel) moveSelection(delta int) {
 // what enter does on that group (D24) — a click is a selection, and a selection
 // is the switch.
 func (m widgetModel) clickAt(y int) (tea.Model, tea.Cmd) {
-	if m.widget != WidgetSwitcher {
+	if m.widget != core.WidgetSwitcher {
 		return m, nil
 	}
 	i, ok := m.groupAt(y)
@@ -284,7 +229,7 @@ func (m widgetModel) clickAt(y int) (tea.Model, tea.Cmd) {
 // that project's bells: selecting a project through the switcher is what
 // resolves them (D22).
 func (m widgetModel) switchToSelected() (tea.Model, tea.Cmd) {
-	if m.widget != WidgetSwitcher {
+	if m.widget != core.WidgetSwitcher {
 		// Every widget loads the same listings, but only the switcher paints a
 		// cursor over them: elsewhere there is no selection to act on.
 		return m, nil
@@ -293,23 +238,23 @@ func (m widgetModel) switchToSelected() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if g.identity == "" {
+	if g.Identity == "" {
 		// Nothing to address: a project the backend could not stamp an identity
 		// for has no window this switcher could be looking at.
 		m.status = fmt.Sprintf("%s: no window to switch to", groupLabel(g))
 		return m, nil
 	}
 	m = m.readBells(m.selected)
-	return m, switchProjectCmd(m.bgCtx(), m.backend, g.identity, groupLabel(g))
+	return m, core.SwitchProjectCmd(m.bgCtx(), m.backend, g.Identity, groupLabel(g))
 }
 
 // onProjectSwitched reports a switch. Success needs no word — the client is
 // looking at the project's window now — so it only clears whatever the last
 // failure left behind.
-func (m widgetModel) onProjectSwitched(msg projectSwitchedMsg) widgetModel {
+func (m widgetModel) onProjectSwitched(msg core.ProjectSwitchedMsg) widgetModel {
 	m.status = ""
-	if msg.err != nil {
-		m.status = fmt.Sprintf("switch to %s: %v", msg.name, msg.err)
+	if msg.Err != nil {
+		m.status = fmt.Sprintf("switch to %s: %v", msg.Name, msg.Err)
 	}
 	return m
 }
@@ -323,12 +268,12 @@ func (m widgetModel) readBells(i int) widgetModel {
 	if m.bellRead == nil {
 		m.bellRead = map[string]bool{}
 	}
-	for j, c := range m.groups[i].commands {
-		if !c.bell {
+	for j, c := range m.groups[i].Commands {
+		if !c.Bell {
 			continue
 		}
-		m.bellRead[c.id] = true
-		m.groups[i].commands[j].bell = false
+		m.bellRead[c.ID] = true
+		m.groups[i].Commands[j].Bell = false
 	}
 	return m
 }
@@ -342,12 +287,12 @@ func (m widgetModel) applyBellRead() widgetModel {
 	}
 	read := make(map[string]bool, len(m.bellRead))
 	for i := range m.groups {
-		for j, c := range m.groups[i].commands {
-			if !c.bell || !m.bellRead[c.id] {
+		for j, c := range m.groups[i].Commands {
+			if !c.Bell || !m.bellRead[c.ID] {
 				continue
 			}
-			read[c.id] = true
-			m.groups[i].commands[j].bell = false
+			read[c.ID] = true
+			m.groups[i].Commands[j].Bell = false
 		}
 	}
 	m.bellRead = read
@@ -355,11 +300,11 @@ func (m widgetModel) applyBellRead() widgetModel {
 }
 
 // groupLabel names a project group in a message the user reads.
-func groupLabel(g projectGroup) string {
-	if g.name == "" {
+func groupLabel(g core.ProjectGroup) string {
+	if g.Name == "" {
 		return "(unnamed)"
 	}
-	return g.name
+	return g.Name
 }
 
 // rebuild re-joins the two listings into the switcher's groups, keeping the
@@ -370,13 +315,13 @@ func (m widgetModel) rebuild() widgetModel {
 	}
 	var prev string
 	if g, ok := m.selectedGroup(); ok {
-		prev = g.key()
+		prev = g.Key()
 	}
 	m.titles = m.stampTitles()
 	m.groups = switcherGroups(m.projs, m.cmds, m.cwd, m.titles)
 	m.selected = 0
 	for i, g := range m.groups {
-		if g.key() == prev {
+		if g.Key() == prev {
 			m.selected = i
 			break
 		}
@@ -408,9 +353,9 @@ func (m widgetModel) stampTitles() map[string]titleStamp {
 	return out
 }
 
-func (m widgetModel) selectedGroup() (projectGroup, bool) {
+func (m widgetModel) selectedGroup() (core.ProjectGroup, bool) {
 	if m.selected < 0 || m.selected >= len(m.groups) {
-		return projectGroup{}, false
+		return core.ProjectGroup{}, false
 	}
 	return m.groups[m.selected], true
 }
@@ -419,7 +364,7 @@ func (m widgetModel) selectedGroup() (projectGroup, bool) {
 func (m widgetModel) View() tea.View {
 	v := tea.NewView(m.viewContent())
 	v.AltScreen = m.altScreen
-	if m.widget == WidgetSwitcher {
+	if m.widget == core.WidgetSwitcher {
 		// Clicking a project is one of its two selection gestures (D24); the
 		// statusbar has nothing to point at.
 		v.MouseMode = tea.MouseModeCellMotion
@@ -446,230 +391,22 @@ func (m widgetModel) viewContent() string {
 		return ""
 	}
 	width, height := m.size()
-	if m.widget == WidgetStatusbar {
+	if m.widget == core.WidgetStatusbar {
 		return m.renderStatusbar(width)
 	}
 	return m.renderSwitcher(width, height)
 }
 
-// --- shared widget rendering ------------------------------------------------
-
-// cells measures raw glyphs with East-Asian *Ambiguous* characters pinned to
-// one cell. That pin is load-bearing, not tidiness: ● and ○ are Ambiguous, so
-// under a CJK locale go-runewidth's package default calls them 2 while lipgloss
-// (uniseg), which actually draws them, renders 1 — measuring a gap with one
-// ruler and drawing the row with the other tears the columns apart. An explicit
-// Condition also keeps the measurement independent of the ambient locale.
-// Strings that have already been rendered carry ANSI escapes and are measured
-// with lipgloss.Width instead, which knows to skip them.
-var cells = &runewidth.Condition{EastAsianWidth: false, StrictEmojiNeutral: true}
-
-// glyphWidth measures a raw (unrendered) glyph.
-func glyphWidth(s string) int { return cells.StringWidth(s) }
-
-// padCells pads or truncates a raw string to exactly w cells.
-func padCells(s string, w int) string {
-	if d := w - cells.StringWidth(s); d > 0 {
-		return s + strings.Repeat(" ", d)
-	}
-	return cells.Truncate(s, w, "")
-}
-
-// truncateLeftCells cuts a raw string to at most w cells keeping its tail, with
-// a leading ellipsis where it cut. Cells, not runes: a tail of double-width
-// glyphs cut by rune count comes back up to twice as wide as the column that
-// asked for it, which overruns the row and turns the padding that follows into
-// a negative repeat. A wide rune that no longer fits is dropped whole, so the
-// result may land a cell short of w rather than a cell over it.
-func truncateLeftCells(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	if cells.StringWidth(s) <= w {
-		return s
-	}
-	r := []rune(s)
-	width, i := 0, len(r)
-	for i > 0 {
-		cw := cells.RuneWidth(r[i-1])
-		if width+cw > w-1 { // one cell is the ellipsis'
-			break
-		}
-		width += cw
-		i--
-	}
-	return "…" + string(r[i:])
-}
-
-// The marker glyphs. They are named because their widths feed the layout, and
-// those widths are measured rather than assumed — see markerSlot. Filled ● is
-// a reported state (idle/working/blocked, told apart by color); hollow ○ is
-// "nothing reported at all" (D24 amended) — same color, different shape,
-// because color alone cannot carry the reported-vs-not distinction.
-const (
-	glyphBell   = "🔔"
-	glyphFilled = "●"
-	glyphHollow = "○"
-)
-
-// The reported-status vocabulary (D12) as the backend-neutral CommandInfo
-// spells it. They are the rendering of the wire enum, mirrored here rather than
-// imported so the model stays exercisable without the service packages.
-const (
-	statusWorking = "working"
-	statusWaiting = "waiting"
-	statusDone    = "done"
-)
-
-// markerSlot is where a group head's name starts, measured from the marker: the
-// widest marker (the bell) plus one space. The width is taken from the glyph
-// rather than written down, so a terminal that measures the bell differently
-// moves the whole column instead of tearing it — and so the slot does not shift
-// when runtime state starts putting a bell in it.
-var markerSlot = glyphWidth(glyphBell) + 1
-
-// markerMargin is the one space to the left of the marker.
-const markerMargin = " "
-
-// colorWeakBlock is the second cursor's block: dark enough to read as "the
-// cursor is here too" without competing with the focused pane's indigo.
-var colorWeakBlock = lipgloss.Color("237")
-
-// rowBg is the background a rendered row carries. A selected switcher group is
-// one solid block spanning its head and its command rows, so every piece of
-// every line in it renders with the background rather than one outer style
-// being laid over pre-colored text. bgWeak is the launcher's second cursor: a
-// two-pane view shows where both panes stand, so the pane without the keyboard
-// keeps a fainter block (D31).
-type rowBg int
-
-const (
-	bgNone rowBg = iota
-	bgWeak
-	bgAccent
-)
-
-func (b rowBg) style(st lipgloss.Style) lipgloss.Style {
-	switch b {
-	case bgAccent:
-		return st.Background(colorBorder)
-	case bgWeak:
-		return st.Background(colorWeakBlock)
-	}
-	return st
-}
-
-// plain renders s carrying only the row background.
-func (b rowBg) plain(s string) string {
-	return b.style(lipgloss.NewStyle()).Render(s)
-}
-
-var (
-	styleWidgetTitle = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
-	styleWidgetHead  = lipgloss.NewStyle().Bold(true)
-	styleWidgetBar   = lipgloss.NewStyle().Foreground(colorOnAcc)
-	// The traffic-light marker palette (D21): green nothing wants you, yellow
-	// something is working, red something is blocked on you. The status words in
-	// command rows share it, so a row and its project's dot say the same thing
-	// twice rather than in two vocabularies. They are basic ANSI colors like the
-	// rest of this TUI's markers (view.go's styleMark*), so they follow the
-	// user's own theme.
-	styleMarkerIdle    = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	styleMarkerWork    = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	styleMarkerBlocked = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-)
-
-// reportedStatusStyle colors a reported status word or the dot standing for it.
-// Anything unreported keeps idle's green: "nothing wants you" is what both
-// mean, and the glyph — hollow rather than filled — carries the difference.
-func reportedStatusStyle(status string) lipgloss.Style {
-	switch status {
-	case statusWaiting:
-		return styleMarkerBlocked
-	case statusWorking:
-		return styleMarkerWork
-	default:
-		return styleMarkerIdle
-	}
-}
-
-// reportedStatusBadge renders a command's reported status: the word when it
-// reported one, else the hollow circle standing for "nothing said so far", so
-// every command carries a circle-or-word state instead of a blank (D24).
-func reportedStatusBadge(status string, bg rowBg) string {
-	if status == "" {
-		return bg.style(styleMarkerIdle).Render(glyphHollow)
-	}
-	return bg.style(reportedStatusStyle(status)).Render(status)
-}
-
-// rowStateBadge is the one state word a command row carries. A live run shows
-// what it reported about itself; anything else shows its lifecycle state, which
-// is the truthful signal for a run that is over or not yet begun — an exited
-// command must never show its last report (D13).
-func rowStateBadge(c commandRow, bg rowBg) string {
-	if liveReport(c) {
-		return reportedStatusBadge(c.status, bg)
-	}
-	label := displayLabel(c.state, c.exitCode)
-	if c.pending != "" {
-		label = c.pending + "…"
-	}
-	return bg.style(statusStyle(c.state, c.pending)).Render(label)
-}
-
-// padLine truncates and right-pads a rendered line to exactly w cells, so a
-// highlighted group forms a solid block and no line overflows its pane.
-func padLine(line string, w int, bg rowBg) string {
-	line = ansi.Truncate(line, w, "")
-	if pad := w - lipgloss.Width(line); pad > 0 {
-		line += bg.plain(strings.Repeat(" ", pad))
-	}
-	return line
-}
-
-// weakRatio is how far the app rows travel from the letter color toward the
-// background. Much past this they stop being readable on low-contrast themes.
-const weakRatio = 0.55
-
 // deriveWeak recomputes the app-row shade from whatever the terminal has
 // reported so far, so the two answers may arrive in either order.
 func (m widgetModel) deriveWeak() widgetModel {
-	if m.termFg == nil {
-		return m
+	if weak := core.DeriveWeak(m.termFg, m.termBg, m.fgDark); weak != nil {
+		m.weak = weak
 	}
-	bg := m.termBg
-	if bg == nil {
-		// Background unanswered: assume the end opposite the letters, so the
-		// blend still moves away from them rather than into them.
-		bg = color.Black
-		if m.fgDark {
-			bg = color.White
-		}
-	}
-	m.weak = blend(m.termFg, bg, weakRatio)
 	return m
 }
 
 // weakStyle is the command rows' foreground: the terminal's own letter color
 // pulled toward its background, so a group reads as bright head plus subdued
-// detail on light and dark terminals alike. Faint is the fallback for terminals
-// that never answer the query.
-func (m widgetModel) weakStyle() lipgloss.Style {
-	if m.weak == nil {
-		return styleActive
-	}
-	return lipgloss.NewStyle().Foreground(m.weak)
-}
-
-// blend mixes a toward b along a straight line in RGB. RGBA reports 16-bit
-// alpha-premultiplied channels and every color here is opaque, so scaling to
-// 8 bits is both correct and enough to keep this dependency-free.
-func blend(a, b color.Color, t float64) color.RGBA {
-	ar, ag, ab, _ := a.RGBA()
-	br, bg, bb, _ := b.RGBA()
-	mix := func(x, y uint32) uint8 {
-		return uint8(min(math.Round((float64(x)*(1-t)+float64(y)*t)/257), 255))
-	}
-	return color.RGBA{R: mix(ar, br), G: mix(ag, bg), B: mix(ab, bb), A: 0xff}
-}
+// detail on light and dark terminals alike.
+func (m widgetModel) weakStyle() lipgloss.Style { return core.WeakStyle(m.weak) }

@@ -5,13 +5,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
+	"github.com/ngicks/cmdman/cmdman/tui/internal/coretest"
+
 	tea "charm.land/bubbletea/v2"
 )
 
 // composeSeed builds a model on the Compose tab with two projects: one with a
 // mux section, one without.
 func composeSeed(popupMode bool) Model {
-	m := New(Options{Backend: &fakeBackend{cwd: "/work/local-dev"}, PopupMode: popupMode})
+	m := New(
+		core.Options{Backend: &coretest.FakeBackend{Dir: "/work/local-dev"}, PopupMode: popupMode},
+	)
 	m.cwd = "/work/local-dev"
 	m.active = TabCompose
 	m.setComposeRows([]composeRow{
@@ -55,7 +60,7 @@ func TestCycleMuxNoSectionReportsStatus(t *testing.T) {
 	if row.name != "tools" {
 		t.Fatalf("precondition: tools should be selected, got %q", row.name)
 	}
-	m, cmd := upd(m, kr("c"))
+	m, cmd := upd(m, coretest.Kr("c"))
 	if cmd != nil {
 		t.Fatalf("cycling a project without mux should not invoke mux")
 	}
@@ -67,7 +72,7 @@ func TestCycleMuxNoSectionReportsStatus(t *testing.T) {
 func TestCycleMuxPopupModeInvokesImmediately(t *testing.T) {
 	m := composeSeed(true) // popup mode
 	m.compose.selected = 0 // local-dev (has mux)
-	m, cmd := upd(m, kr("c"))
+	m, cmd := upd(m, coretest.Kr("c"))
 	if m.popup.open() {
 		t.Fatalf("popup mode should not show a warning before cycling")
 	}
@@ -79,16 +84,16 @@ func TestCycleMuxPopupModeInvokesImmediately(t *testing.T) {
 	if !ok || done.project != "local-dev" {
 		t.Fatalf("expected a muxDoneMsg for local-dev, got %#v", msg)
 	}
-	fb := m.backend.(*fakeBackend)
-	if len(fb.muxCycled) != 1 || fb.muxCycled[0] != "local-dev" {
-		t.Fatalf("CycleMux should target local-dev, got %v", fb.muxCycled)
+	fb := m.backend.(*coretest.FakeBackend)
+	if len(fb.MuxCycled) != 1 || fb.MuxCycled[0] != "local-dev" {
+		t.Fatalf("CycleMux should target local-dev, got %v", fb.MuxCycled)
 	}
 }
 
 func TestCycleMuxDirectModeWarnsFirst(t *testing.T) {
 	m := composeSeed(false) // direct mode
 	m.compose.selected = 0  // local-dev (has mux)
-	m, cmd := upd(m, kr("c"))
+	m, cmd := upd(m, coretest.Kr("c"))
 	if cmd != nil {
 		t.Fatalf("direct mode should not invoke mux before confirmation")
 	}
@@ -98,14 +103,14 @@ func TestCycleMuxDirectModeWarnsFirst(t *testing.T) {
 	if m.popup.confirmed() {
 		t.Fatalf("mux warning should default to <cancel>")
 	}
-	fb := m.backend.(*fakeBackend)
-	if len(fb.muxCycled) != 0 {
+	fb := m.backend.(*coretest.FakeBackend)
+	if len(fb.MuxCycled) != 0 {
 		t.Fatalf("no mux invocation should happen before confirmation")
 	}
 
 	// Confirm: move to <continue> and press enter.
 	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyLeft})
-	m, cmd = upd(m, kEnter)
+	m, cmd = upd(m, coretest.KEnter)
 	if cmd == nil {
 		t.Fatalf("confirming the warning should invoke the mux cycle")
 	}
@@ -117,8 +122,8 @@ func TestCycleMuxDirectModeWarnsFirst(t *testing.T) {
 func TestMuxWarnCancelDoesNotCycle(t *testing.T) {
 	m := composeSeed(false)
 	m.compose.selected = 0
-	m, _ = upd(m, kr("c"))   // opens warning (default cancel)
-	m, cmd := upd(m, kEnter) // confirm default <cancel>
+	m, _ = upd(m, coretest.Kr("c"))   // opens warning (default cancel)
+	m, cmd := upd(m, coretest.KEnter) // confirm default <cancel>
 	if cmd != nil {
 		t.Fatalf("cancelling the mux warning should not invoke mux")
 	}

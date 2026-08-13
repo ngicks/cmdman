@@ -5,6 +5,7 @@ import (
 	"os/exec"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
 
 // launchTargetsLoadedMsg carries the result of the launcher's one listing.
@@ -39,20 +40,20 @@ type launcherForgotMsg struct {
 	err    error
 }
 
-func listLaunchTargetsCmd(ctx context.Context, backend Backend) tea.Cmd {
+func listLaunchTargetsCmd(ctx context.Context, backend core.Backend) tea.Cmd {
 	return func() tea.Msg {
 		locs, err := backend.ListLaunchTargets(ctx)
 		return launchTargetsLoadedMsg{locs: locs, err: err}
 	}
 }
 
-func startProjectCmd(ctx context.Context, backend Backend, target LaunchTarget) tea.Cmd {
+func startProjectCmd(ctx context.Context, backend core.Backend, target LaunchTarget) tea.Cmd {
 	return func() tea.Msg {
 		return launcherStartedMsg{target: target, err: backend.StartProject(ctx, target)}
 	}
 }
 
-func launchProjectCmd(ctx context.Context, backend Backend, target LaunchTarget) tea.Cmd {
+func launchProjectCmd(ctx context.Context, backend core.Backend, target LaunchTarget) tea.Cmd {
 	return func() tea.Msg {
 		outcome, err := backend.LaunchProject(ctx, target)
 		return launcherLandedMsg{target: target, outcome: outcome, err: err}
@@ -70,7 +71,7 @@ func attachCmd(argv []string) tea.Cmd {
 	})
 }
 
-func forgetTargetCmd(ctx context.Context, backend Backend, target LaunchTarget) tea.Cmd {
+func forgetTargetCmd(ctx context.Context, backend core.Backend, target LaunchTarget) tea.Cmd {
 	return func() tea.Msg {
 		return launcherForgotMsg{target: target, err: backend.ForgetLaunchTarget(ctx, target)}
 	}

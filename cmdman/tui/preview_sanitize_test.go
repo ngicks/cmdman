@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ngicks/cmdman/cmdman/tui/internal/coretest"
+
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -28,7 +30,7 @@ func TestSanitizePreviewLineDropsTerminalStateControls(t *testing.T) {
 
 func TestPreviewLineIsSanitizedBeforeStorage(t *testing.T) {
 	m := seed()
-	stream := &fakeLogStream{ch: make(chan LogLine, 4)}
+	stream := &coretest.FakeLogStream{Ch: make(chan LogLine, 4)}
 	m.commands.preview = previewState{cmdID: "1", status: previewLoading, stream: stream}
 
 	m, _ = m2tuple(m.onPreviewLine(previewLineMsg{

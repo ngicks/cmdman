@@ -1,295 +1,21 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
-	"time"
+
+	"github.com/ngicks/cmdman/cmdman/tui/internal/coretest"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/mattn/go-runewidth"
 	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"github.com/ngicks/cmdman/cmdman/model"
+	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
 
 // --- helpers ---------------------------------------------------------------
-
-type fakeBackend struct {
-	cmds  []CommandInfo
-	projs []ProjectInfo
-	cwd   string
-
-	started     []string
-	stopped     []string
-	restarted   []string
-	removed     []string
-	removeForce map[string]bool
-
-	logStreams  []*fakeLogStream // one per Logs call
-	eventStream *fakeEventStream
-	attachIDs   []string
-	attachOut   string
-	attachErr   error
-
-	muxCycled []string // project names passed to CycleMux
-	muxErr    error
-
-	switched  []string // identities passed to SwitchToProject
-	switchErr error    // error returned by SwitchToProject
-	hidden    int      // HideFrame calls
-	hideErr   error    // error returned by HideFrame
-
-	layoutsInfo    LayoutsInfo // info returned by ListLayouts
-	layoutsErr     error       // error returned by ListLayouts
-	layoutsReq     []string    // project names passed to ListLayouts
-	appliedLayouts []string    // layout names passed to ApplyLayout
-	applyLayoutErr error       // error returned by ApplyLayout
-
-	definition     string   // text returned by ProjectDefinition
-	definitionErr  error    // error returned by ProjectDefinition
-	defRequested   []string // project names passed to ProjectDefinition
-	composePath    string   // path returned by ComposeFilePath
-	composePathErr error    // error returned by ComposeFilePath
-	pathRequested  []string // project names passed to ComposeFilePath
-
-	composeUpCalled []string         // project names passed to ComposeUp
-	composeUpEvents []ComposeUpEvent // events pre-loaded into the stream
-	composeUpErr    error            // error returned by ComposeUp (open failure)
-	composeUpStream *fakeComposeUpStream
-
-	launchLocs       []LaunchLocation // locations returned by ListLaunchTargets
-	launchErr        error            // error returned by ListLaunchTargets
-	startedProjects  []LaunchTarget   // targets passed to StartProject
-	startProjectErr  error            // error returned by StartProject
-	launchedProjects []LaunchTarget   // targets passed to LaunchProject
-	launchOutcome    LaunchOutcome    // outcome returned by LaunchProject
-	launchProjectErr error            // error returned by LaunchProject
-	forgotTargets    []LaunchTarget   // targets passed to ForgetLaunchTarget
-	forgetErr        error            // error returned by ForgetLaunchTarget
-
-	rawIDs     []string         // ids passed to RawView
-	rawChunks  [][]byte         // chunks pre-loaded into each RawView stream
-	rawErr     error            // error returned by RawView (open failure)
-	rawStreams []*fakeRawStream // one per RawView call
-}
-
-func (f *fakeBackend) ListCommands(context.Context) ([]CommandInfo, error) { return f.cmds, nil }
-func (f *fakeBackend) ListProjects(context.Context) ([]ProjectInfo, error) { return f.projs, nil }
-func (f *fakeBackend) Cwd() string                                         { return f.cwd }
-func (f *fakeBackend) Start(_ context.Context, id string) error {
-	f.started = append(f.started, id)
-	return nil
-}
-func (f *fakeBackend) Stop(_ context.Context, id string) error {
-	f.stopped = append(f.stopped, id)
-	return nil
-}
-func (f *fakeBackend) Restart(_ context.Context, id string) error {
-	f.restarted = append(f.restarted, id)
-	return nil
-}
-func (f *fakeBackend) Remove(_ context.Context, id string, force bool) error {
-	f.removed = append(f.removed, id)
-	if f.removeForce == nil {
-		f.removeForce = map[string]bool{}
-	}
-	f.removeForce[id] = force
-	return nil
-}
-
-func (f *fakeBackend) Events(context.Context) (EventStream, error) {
-	if f.eventStream == nil {
-		f.eventStream = &fakeEventStream{ch: make(chan EventSignal, 1)}
-	}
-	return f.eventStream, nil
-}
-
-func (f *fakeBackend) Logs(_ context.Context, _ string, _ int) (LogStream, error) {
-	ls := &fakeLogStream{ch: make(chan LogLine, 16)}
-	f.logStreams = append(f.logStreams, ls)
-	return ls, nil
-}
-
-func (f *fakeBackend) Attach(_ context.Context, id string) (string, error) {
-	f.attachIDs = append(f.attachIDs, id)
-	return f.attachOut, f.attachErr
-}
-
-func (f *fakeBackend) CycleMux(_ context.Context, projectName, _ string) error {
-	f.muxCycled = append(f.muxCycled, projectName)
-	return f.muxErr
-}
-
-func (f *fakeBackend) SwitchToProject(_ context.Context, identity string) error {
-	f.switched = append(f.switched, identity)
-	return f.switchErr
-}
-
-func (f *fakeBackend) HideFrame(context.Context) error {
-	f.hidden++
-	return f.hideErr
-}
-
-func (f *fakeBackend) ListLayouts(_ context.Context, projectName, _ string) (LayoutsInfo, error) {
-	f.layoutsReq = append(f.layoutsReq, projectName)
-	return f.layoutsInfo, f.layoutsErr
-}
-
-func (f *fakeBackend) ApplyLayout(_ context.Context, _, _, layoutName string) error {
-	f.appliedLayouts = append(f.appliedLayouts, layoutName)
-	return f.applyLayoutErr
-}
-
-func (f *fakeBackend) ProjectDefinition(_ context.Context, projectName, _ string) (string, error) {
-	f.defRequested = append(f.defRequested, projectName)
-	return f.definition, f.definitionErr
-}
-
-func (f *fakeBackend) ComposeFilePath(_ context.Context, projectName, _ string) (string, error) {
-	f.pathRequested = append(f.pathRequested, projectName)
-	return f.composePath, f.composePathErr
-}
-
-func (f *fakeBackend) ComposeUp(_ context.Context, projectName, _ string) (ComposeUpStream, error) {
-	f.composeUpCalled = append(f.composeUpCalled, projectName)
-	if f.composeUpErr != nil {
-		return nil, f.composeUpErr
-	}
-	s := &fakeComposeUpStream{ch: make(chan ComposeUpEvent, len(f.composeUpEvents))}
-	for _, ev := range f.composeUpEvents {
-		s.ch <- ev
-	}
-	f.composeUpStream = s
-	return s, nil
-}
-
-func (f *fakeBackend) ListLaunchTargets(context.Context) ([]LaunchLocation, error) {
-	return f.launchLocs, f.launchErr
-}
-
-func (f *fakeBackend) StartProject(_ context.Context, t LaunchTarget) error {
-	f.startedProjects = append(f.startedProjects, t)
-	return f.startProjectErr
-}
-
-func (f *fakeBackend) LaunchProject(
-	_ context.Context,
-	t LaunchTarget,
-) (LaunchOutcome, error) {
-	f.launchedProjects = append(f.launchedProjects, t)
-	return f.launchOutcome, f.launchProjectErr
-}
-
-func (f *fakeBackend) ForgetLaunchTarget(_ context.Context, t LaunchTarget) error {
-	f.forgotTargets = append(f.forgotTargets, t)
-	return f.forgetErr
-}
-
-func (f *fakeBackend) RawView(_ context.Context, id string) (RawStream, error) {
-	f.rawIDs = append(f.rawIDs, id)
-	if f.rawErr != nil {
-		return nil, f.rawErr
-	}
-	s := newFakeRawStream(len(f.rawChunks) + 1)
-	for _, c := range f.rawChunks {
-		s.ch <- RawChunk{Bytes: c}
-	}
-	f.rawStreams = append(f.rawStreams, s)
-	return s, nil
-}
-
-// fakeRawStream is closed off the update loop (see closeRawAsync), so its closed
-// state is mutex-guarded and a closedCh lets a test wait for an async close
-// without racing the goroutine.
-type fakeRawStream struct {
-	ch        chan RawChunk
-	closedCh  chan struct{}
-	closeOnce sync.Once
-
-	mu     sync.Mutex
-	closed bool
-}
-
-func newFakeRawStream(buf int) *fakeRawStream {
-	return &fakeRawStream{ch: make(chan RawChunk, buf), closedCh: make(chan struct{})}
-}
-
-func (s *fakeRawStream) Chunks() <-chan RawChunk { return s.ch }
-func (s *fakeRawStream) Close() error {
-	s.closeOnce.Do(func() {
-		s.mu.Lock()
-		s.closed = true
-		s.mu.Unlock()
-		close(s.ch)
-		close(s.closedCh)
-	})
-	return nil
-}
-
-// isClosed reports the close state without racing an async Close.
-func (s *fakeRawStream) isClosed() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.closed
-}
-
-// waitClosed blocks briefly for an async Close, failing the test if it never
-// happens (closeRawAsync runs Close in a goroutine).
-func (s *fakeRawStream) waitClosed(t *testing.T) {
-	t.Helper()
-	select {
-	case <-s.closedCh:
-	case <-time.After(time.Second):
-		t.Fatalf("raw stream was not closed")
-	}
-}
-
-type fakeComposeUpStream struct {
-	ch     chan ComposeUpEvent
-	err    error
-	closed bool
-}
-
-func (s *fakeComposeUpStream) Events() <-chan ComposeUpEvent { return s.ch }
-func (s *fakeComposeUpStream) Err() error                    { return s.err }
-func (s *fakeComposeUpStream) Close() error {
-	if !s.closed {
-		s.closed = true
-		close(s.ch)
-	}
-	return nil
-}
-
-type fakeLogStream struct {
-	ch     chan LogLine
-	closed bool
-}
-
-func (s *fakeLogStream) Lines() <-chan LogLine { return s.ch }
-func (s *fakeLogStream) Close() error {
-	if !s.closed {
-		s.closed = true
-		close(s.ch)
-	}
-	return nil
-}
-
-type fakeEventStream struct {
-	ch     chan EventSignal
-	closed bool
-}
-
-func (s *fakeEventStream) Signals() <-chan EventSignal { return s.ch }
-func (s *fakeEventStream) Close() error {
-	if !s.closed {
-		s.closed = true
-		close(s.ch)
-	}
-	return nil
-}
 
 func upd(m Model, msg tea.Msg) (Model, tea.Cmd) {
 	nm, cmd := m.Update(msg)
@@ -329,46 +55,43 @@ func firstActionDone(msgs []tea.Msg) (actionDoneMsg, bool) {
 func selectCmd(m *Model, idx int) {
 	m.commands.selected = idx
 	if c, ok := m.commands.selectedCommand(); ok {
-		m.commands.preview.cmdID = c.id
+		m.commands.preview.cmdID = c.ID
 	}
 }
 
-func kr(s string) tea.KeyMsg { return tea.KeyPressMsg{Code: []rune(s)[0], Text: s} }
-
 var (
-	kTab   = tea.KeyPressMsg{Code: tea.KeyTab}
-	kEnter = tea.KeyPressMsg{Code: tea.KeyEnter}
-	kEsc   = tea.KeyPressMsg{Code: tea.KeyEscape}
+	kTab = tea.KeyPressMsg{Code: tea.KeyTab}
+	kEsc = tea.KeyPressMsg{Code: tea.KeyEscape}
 )
 
 // seed builds a model with two projects; local-dev is the cwd-tied project.
 func seed() Model {
-	m := New(Options{Backend: &fakeBackend{cwd: "/work/local-dev"}})
+	m := New(core.Options{Backend: &coretest.FakeBackend{Dir: "/work/local-dev"}})
 	m.cwd = "/work/local-dev"
-	m.setGroups([]projectGroup{
-		{name: "api-stack", workdir: "/work/api", commands: []commandRow{
+	m.setGroups([]core.ProjectGroup{
+		{Name: "api-stack", Workdir: "/work/api", Commands: []core.CommandRow{
 			{
-				id:      "3",
-				name:    "web",
-				project: "api-stack",
-				workdir: "/work/api",
-				state:   model.EventTypeRunning,
+				ID:      "3",
+				Name:    "web",
+				Project: "api-stack",
+				Workdir: "/work/api",
+				State:   model.EventTypeRunning,
 			},
 		}},
-		{name: "local-dev", workdir: "/work/local-dev", commands: []commandRow{
+		{Name: "local-dev", Workdir: "/work/local-dev", Commands: []core.CommandRow{
 			{
-				id:      "1",
-				name:    "watcher",
-				project: "local-dev",
-				workdir: "/work/local-dev",
-				state:   model.EventTypeRunning,
+				ID:      "1",
+				Name:    "watcher",
+				Project: "local-dev",
+				Workdir: "/work/local-dev",
+				State:   model.EventTypeRunning,
 			},
 			{
-				id:      "2",
-				name:    "seed-db",
-				project: "local-dev",
-				workdir: "/work/local-dev",
-				state:   model.EventTypeExited,
+				ID:      "2",
+				Name:    "seed-db",
+				Project: "local-dev",
+				Workdir: "/work/local-dev",
+				State:   model.EventTypeExited,
 			},
 		}},
 	})
@@ -379,13 +102,13 @@ func seed() Model {
 
 func TestActiveProjectSortsFirst(t *testing.T) {
 	m := seed()
-	if got := m.commands.groups[0].name; got != "local-dev" {
+	if got := m.commands.groups[0].Name; got != "local-dev" {
 		t.Fatalf("active project should sort first, got %q", got)
 	}
-	if !m.commands.groups[0].active {
+	if !m.commands.groups[0].Active {
 		t.Fatalf("local-dev should be marked active")
 	}
-	if m.commands.groups[1].active {
+	if m.commands.groups[1].Active {
 		t.Fatalf("api-stack should not be active")
 	}
 }
@@ -405,8 +128,8 @@ func TestDisplayLabels(t *testing.T) {
 		{model.EventTypeFailed, nil, "failed"},
 	}
 	for _, c := range cases {
-		if got := displayLabel(c.state, c.code); got != c.want {
-			t.Errorf("displayLabel(%s) = %q, want %q", c.state, got, c.want)
+		if got := core.DisplayLabel(c.state, c.code); got != c.want {
+			t.Errorf("core.DisplayLabel(%s) = %q, want %q", c.state, got, c.want)
 		}
 	}
 }
@@ -418,11 +141,11 @@ func TestFilteringMatchesAndKeepsGrouping(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("want 2 visible rows (project + command), got %d", len(rows))
 	}
-	if rows[0].kind != visProject || m.commands.groups[rows[0].group].name != "local-dev" {
+	if rows[0].kind != visProject || m.commands.groups[rows[0].group].Name != "local-dev" {
 		t.Fatalf("first row should be local-dev project header")
 	}
 	if rows[1].kind != visCommand ||
-		m.commands.groups[rows[1].group].commands[rows[1].cmd].name != "watcher" {
+		m.commands.groups[rows[1].group].Commands[rows[1].cmd].Name != "watcher" {
 		t.Fatalf("second row should be the watcher command")
 	}
 }
@@ -478,18 +201,18 @@ func TestFoldHidesAndRevealsRows(t *testing.T) {
 func TestStandaloneCommandsHaveNoGroupHeader(t *testing.T) {
 	m := seed()
 	// A standalone command carries no compose project name (empty name group).
-	m.setGroups(append(m.commands.groups, projectGroup{
-		name:    "",
-		workdir: "/work/loose",
-		commands: []commandRow{
-			{id: "9", name: "loose", workdir: "/work/loose", state: model.EventTypeRunning},
+	m.setGroups(append(m.commands.groups, core.ProjectGroup{
+		Name:    "",
+		Workdir: "/work/loose",
+		Commands: []core.CommandRow{
+			{ID: "9", Name: "loose", Workdir: "/work/loose", State: model.EventTypeRunning},
 		},
 	}))
 	rows := m.commands.visibleRows()
 	var standaloneCmds, standaloneHeaders int
 	for _, r := range rows {
 		g := m.commands.groups[r.group]
-		if g.name != "" {
+		if g.Name != "" {
 			continue
 		}
 		switch r.kind {
@@ -525,11 +248,11 @@ func TestSelectionPreservedAcrossRefresh(t *testing.T) {
 	// Select the web command (id 3).
 	m.selectCommandByID("3")
 	sel, ok := m.commands.selectedCommand()
-	if !ok || sel.id != "3" {
+	if !ok || sel.ID != "3" {
 		t.Fatalf("precondition: web not selected")
 	}
 	// Reload with the same data in a different order.
-	infos := []CommandInfo{
+	infos := []core.CommandInfo{
 		{
 			ID:      "1",
 			Name:    "watcher",
@@ -552,9 +275,9 @@ func TestSelectionPreservedAcrossRefresh(t *testing.T) {
 			State:   model.EventTypeExited,
 		},
 	}
-	m, _ = m.onCommandsLoaded(commandsLoadedMsg{infos: infos})
+	m, _ = m.onCommandsLoaded(core.CommandsLoadedMsg{Infos: infos})
 	got, ok := m.commands.selectedCommand()
-	if !ok || got.id != "3" {
+	if !ok || got.ID != "3" {
 		t.Fatalf(
 			"selection should be preserved on web (id 3) after refresh, got %+v ok=%v",
 			got,
@@ -592,27 +315,27 @@ func TestTabSwitchPreservesTabLocalState(t *testing.T) {
 
 func TestFilterFocusMakesSingleKeysInert(t *testing.T) {
 	m := seed()
-	fb := m.backend.(*fakeBackend)
-	m, _ = upd(m, kr("/")) // focus filter
+	fb := m.backend.(*coretest.FakeBackend)
+	m, _ = upd(m, coretest.Kr("/")) // focus filter
 	if !m.commands.filtering {
 		t.Fatalf("filter should be focused after /")
 	}
 	// Typing 's' and 'q' must edit the filter, not start a command or quit.
-	m, _ = upd(m, kr("s"))
-	m, cmd := upd(m, kr("q"))
+	m, _ = upd(m, coretest.Kr("s"))
+	m, cmd := upd(m, coretest.Kr("q"))
 	if m.quitting {
 		t.Fatalf("q must not quit while filter is focused")
 	}
 	if cmd != nil {
 		// q while filtering should not return tea.Quit
-		if msg := cmd(); msgIsQuit(msg) {
+		if msg := cmd(); coretest.MsgIsQuit(msg) {
 			t.Fatalf("q while filtering should not produce Quit")
 		}
 	}
 	if m.commands.filter != "sq" {
 		t.Fatalf("filter should be 'sq', got %q", m.commands.filter)
 	}
-	if len(fb.started) != 0 {
+	if len(fb.Started) != 0 {
 		t.Fatalf("no start action should have dispatched while filtering")
 	}
 	// esc leaves filter focus first.
@@ -622,28 +345,22 @@ func TestFilterFocusMakesSingleKeysInert(t *testing.T) {
 	}
 }
 
-func msgIsQuit(msg tea.Msg) bool {
-	// tea.Quit returns a tea.QuitMsg.
-	_, ok := msg.(tea.QuitMsg)
-	return ok
-}
-
 func TestEnterDoesNotToggleLifecycle(t *testing.T) {
 	m := seed()
-	fb := m.backend.(*fakeBackend)
+	fb := m.backend.(*coretest.FakeBackend)
 	// Select a command row (watcher under local-dev: rows[1]).
 	selectCmd(&m, 1)
 	if _, ok := m.commands.selectedCommand(); !ok {
 		t.Fatalf("precondition: a command row should be selected")
 	}
-	m, cmd := upd(m, kEnter)
+	m, cmd := upd(m, coretest.KEnter)
 	if cmd != nil {
 		t.Fatalf("enter on a command row should not dispatch an action")
 	}
 	if m.popup.open() {
 		t.Fatalf("enter on a command row should not open a popup")
 	}
-	if len(fb.started)+len(fb.stopped)+len(fb.restarted) != 0 {
+	if len(fb.Started)+len(fb.Stopped)+len(fb.Restarted) != 0 {
 		t.Fatalf("enter must not perform lifecycle actions")
 	}
 }
@@ -651,11 +368,11 @@ func TestEnterDoesNotToggleLifecycle(t *testing.T) {
 func TestEnterTogglesFoldOnProjectRow(t *testing.T) {
 	m := seed()
 	m.commands.selected = 0 // local-dev project header
-	m, _ = upd(m, kEnter)
+	m, _ = upd(m, coretest.KEnter)
 	if !m.commands.folded(0) {
 		t.Fatalf("enter on a project row should fold it")
 	}
-	m, _ = upd(m, kEnter)
+	m, _ = upd(m, coretest.KEnter)
 	if m.commands.folded(0) {
 		t.Fatalf("enter on a folded project row should unfold it")
 	}
@@ -664,7 +381,7 @@ func TestEnterTogglesFoldOnProjectRow(t *testing.T) {
 func TestAttachConfirmationDefaultsYes(t *testing.T) {
 	m := seed()
 	m.commands.selected = 1 // a command row
-	m, _ = upd(m, kr("a"))
+	m, _ = upd(m, coretest.Kr("a"))
 	if m.popup.kind != popupAttach {
 		t.Fatalf("a should open the attach popup")
 	}
@@ -678,10 +395,10 @@ func TestRemoveConfirmationDefaultsCancel(t *testing.T) {
 	// Select seed-db (exited, id 2): rows = [local-dev, watcher, seed-db, api-stack, web]
 	m.commands.selected = 2
 	c, ok := m.commands.selectedCommand()
-	if !ok || c.id != "2" {
+	if !ok || c.ID != "2" {
 		t.Fatalf("precondition: seed-db should be selected, got %+v", c)
 	}
-	m, _ = upd(m, kr("x"))
+	m, _ = upd(m, coretest.Kr("x"))
 	if m.popup.kind != popupRemove {
 		t.Fatalf("x on an exited command should open the plain remove popup")
 	}
@@ -694,10 +411,10 @@ func TestRunningRemoveShowsForceConfirmation(t *testing.T) {
 	m := seed()
 	m.commands.selected = 1 // watcher, running
 	c, _ := m.commands.selectedCommand()
-	if c.state != model.EventTypeRunning {
+	if c.State != model.EventTypeRunning {
 		t.Fatalf("precondition: watcher should be running")
 	}
-	m, _ = upd(m, kr("x"))
+	m, _ = upd(m, coretest.Kr("x"))
 	if m.popup.kind != popupForceRemove {
 		t.Fatalf("x on a running command should open the force-remove popup")
 	}
@@ -712,9 +429,9 @@ func TestRunningRemoveShowsForceConfirmation(t *testing.T) {
 func TestRemoveRequiresExplicitConfirmation(t *testing.T) {
 	m := seed()
 	selectCmd(&m, 2) // seed-db, exited
-	m, _ = upd(m, kr("x"))
+	m, _ = upd(m, coretest.Kr("x"))
 	// Default is cancel; enter cancels without removing.
-	m, cmd := upd(m, kEnter)
+	m, cmd := upd(m, coretest.KEnter)
 	if cmd != nil {
 		t.Fatalf("confirming the default <cancel> should not dispatch a remove")
 	}
@@ -723,9 +440,9 @@ func TestRemoveRequiresExplicitConfirmation(t *testing.T) {
 	}
 	// Reopen, move to the action button, confirm.
 	m.commands.selected = 2
-	m, _ = upd(m, kr("x"))
+	m, _ = upd(m, coretest.Kr("x"))
 	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyLeft}) // toggle to <yes>
-	m, cmd = upd(m, kEnter)
+	m, cmd = upd(m, coretest.KEnter)
 	if cmd == nil {
 		t.Fatalf("confirming <yes> should dispatch a remove command")
 	}
@@ -733,16 +450,16 @@ func TestRemoveRequiresExplicitConfirmation(t *testing.T) {
 	if !ok || done.verb != "remove" {
 		t.Fatalf("expected a remove actionDoneMsg")
 	}
-	fb := m.backend.(*fakeBackend)
-	if len(fb.removed) != 1 || fb.removed[0] != "2" {
-		t.Fatalf("remove should target seed-db (id 2), got %v", fb.removed)
+	fb := m.backend.(*coretest.FakeBackend)
+	if len(fb.Removed) != 1 || fb.Removed[0] != "2" {
+		t.Fatalf("remove should target seed-db (id 2), got %v", fb.Removed)
 	}
 }
 
 func TestStartDispatchesForStoppedCommand(t *testing.T) {
 	m := seed()
 	selectCmd(&m, 2) // seed-db, exited
-	m, cmd := upd(m, kr("s"))
+	m, cmd := upd(m, coretest.Kr("s"))
 	if cmd == nil {
 		t.Fatalf("s on a stopped command should dispatch start")
 	}
@@ -753,16 +470,16 @@ func TestStartDispatchesForStoppedCommand(t *testing.T) {
 	if !ok || done.verb != "start" {
 		t.Fatalf("expected start actionDoneMsg")
 	}
-	fb := m.backend.(*fakeBackend)
-	if len(fb.started) != 1 || fb.started[0] != "2" {
-		t.Fatalf("start should target seed-db (id 2), got %v", fb.started)
+	fb := m.backend.(*coretest.FakeBackend)
+	if len(fb.Started) != 1 || fb.Started[0] != "2" {
+		t.Fatalf("start should target seed-db (id 2), got %v", fb.Started)
 	}
 }
 
 func TestStartIgnoredForRunningCommand(t *testing.T) {
 	m := seed()
 	selectCmd(&m, 1) // watcher, running
-	m, cmd := upd(m, kr("s"))
+	m, cmd := upd(m, coretest.Kr("s"))
 	if cmd != nil {
 		t.Fatalf("s on a running command should not dispatch start")
 	}
@@ -774,12 +491,12 @@ func TestStartIgnoredForRunningCommand(t *testing.T) {
 func TestStopOnlyForRunningCommand(t *testing.T) {
 	m := seed()
 	selectCmd(&m, 2) // seed-db, exited
-	m, cmd := upd(m, kr("S"))
+	m, cmd := upd(m, coretest.Kr("S"))
 	if cmd != nil {
 		t.Fatalf("S on a stopped command should not dispatch stop")
 	}
 	selectCmd(&m, 1) // watcher, running
-	m, cmd = upd(m, kr("S"))
+	m, cmd = upd(m, coretest.Kr("S"))
 	if cmd == nil {
 		t.Fatalf("S on a running command should dispatch stop")
 	}
@@ -803,7 +520,7 @@ func m2tuple(model tea.Model, cmd tea.Cmd) (Model, tea.Cmd) {
 
 func TestHelpOverlayOpensWithTabBindings(t *testing.T) {
 	m := seed()
-	m, _ = upd(m, kr("?"))
+	m, _ = upd(m, coretest.Kr("?"))
 	if !m.helpOpen {
 		t.Fatalf("? should open help")
 	}
@@ -816,13 +533,13 @@ func TestHelpOverlayOpensWithTabBindings(t *testing.T) {
 	// Switch to compose tab help.
 	m.helpOpen = false
 	m.active = TabCompose
-	m, _ = upd(m, kr("?"))
+	m, _ = upd(m, coretest.Kr("?"))
 	composeHelp := m.renderHelp()
 	if !strings.Contains(composeHelp, "cycle mux") {
 		t.Fatalf("Compose-tab help should mention mux cycling")
 	}
 	// ? closes help.
-	m, _ = upd(m, kr("?"))
+	m, _ = upd(m, coretest.Kr("?"))
 	if m.helpOpen {
 		t.Fatalf("? should close help")
 	}
@@ -832,10 +549,10 @@ func TestComposeEnterOpensDefinitionViewer(t *testing.T) {
 	m := seed()
 	m.active = TabCompose
 	m.compose.rows = []composeRow{{name: "tools", path: "/etc/compose/tools.yaml"}}
-	fb := m.backend.(*fakeBackend)
-	fb.definition = "name: tools\ncommands:\n  a:\n    args: [echo, a]\n"
+	fb := m.backend.(*coretest.FakeBackend)
+	fb.Definition = "name: tools\ncommands:\n  a:\n    args: [echo, a]\n"
 
-	m, cmd := upd(m, kEnter)
+	m, cmd := upd(m, coretest.KEnter)
 	if !m.defViewer.open {
 		t.Fatalf("enter on the Compose tab should open the definition viewer")
 	}
@@ -853,8 +570,8 @@ func TestComposeEnterOpensDefinitionViewer(t *testing.T) {
 	if !found {
 		t.Fatalf("enter should dispatch a definition-load command")
 	}
-	if len(fb.defRequested) != 1 || fb.defRequested[0] != "tools" {
-		t.Fatalf("ProjectDefinition should be requested for tools, got %v", fb.defRequested)
+	if len(fb.DefRequested) != 1 || fb.DefRequested[0] != "tools" {
+		t.Fatalf("ProjectDefinition should be requested for tools, got %v", fb.DefRequested)
 	}
 	m, _ = upd(m, loaded)
 	if m.defViewer.loading {
@@ -884,11 +601,11 @@ func TestDefViewerScrollAndClose(t *testing.T) {
 	}
 	m.defViewer = defViewerState{open: true, project: "tools", lines: lines}
 
-	m, _ = upd(m, kr("j"))
+	m, _ = upd(m, coretest.Kr("j"))
 	if m.defViewer.scroll != 1 {
 		t.Fatalf("j should scroll down by one, got %d", m.defViewer.scroll)
 	}
-	m, _ = upd(m, kr("k"))
+	m, _ = upd(m, coretest.Kr("k"))
 	if m.defViewer.scroll != 0 {
 		t.Fatalf("k should scroll back to the top, got %d", m.defViewer.scroll)
 	}
@@ -905,7 +622,7 @@ func TestDefViewerScrollAndClose(t *testing.T) {
 		t.Fatalf("scroll should clamp to %d, got %d", want, m.defViewer.scroll)
 	}
 
-	m, _ = upd(m, kr("q"))
+	m, _ = upd(m, coretest.Kr("q"))
 	if m.defViewer.open {
 		t.Fatalf("q should close the definition viewer")
 	}
@@ -915,10 +632,10 @@ func TestComposeEditResolvesPathAndHandsOff(t *testing.T) {
 	m := seed()
 	m.active = TabCompose
 	m.compose.rows = []composeRow{{name: "tools", path: "/etc/compose/tools.yaml"}}
-	fb := m.backend.(*fakeBackend)
-	fb.composePath = "/etc/compose/tools.yaml"
+	fb := m.backend.(*coretest.FakeBackend)
+	fb.ComposePath = "/etc/compose/tools.yaml"
 
-	m, cmd := upd(m, kr("e"))
+	m, cmd := upd(m, coretest.Kr("e"))
 	var pathMsg editPathMsg
 	found := false
 	for _, mm := range drain(cmd) {
@@ -929,8 +646,8 @@ func TestComposeEditResolvesPathAndHandsOff(t *testing.T) {
 	if !found {
 		t.Fatalf("e should dispatch a path-resolve command")
 	}
-	if len(fb.pathRequested) != 1 || fb.pathRequested[0] != "tools" {
-		t.Fatalf("e should resolve the compose path for tools, got %v", fb.pathRequested)
+	if len(fb.PathRequested) != 1 || fb.PathRequested[0] != "tools" {
+		t.Fatalf("e should resolve the compose path for tools, got %v", fb.PathRequested)
 	}
 	if pathMsg.path != "/etc/compose/tools.yaml" {
 		t.Fatalf("resolved edit path = %q, want the compose file", pathMsg.path)
@@ -966,7 +683,7 @@ func TestComposeUpOpensConfirmation(t *testing.T) {
 	m.active = TabCompose
 	m.compose.rows = []composeRow{{name: "tools", path: "/etc/compose/tools.yaml"}}
 
-	m, cmd := upd(m, kr("a"))
+	m, cmd := upd(m, coretest.Kr("a"))
 	if cmd != nil {
 		t.Fatalf("a should only open a popup, not dispatch a command")
 	}
@@ -986,17 +703,17 @@ func TestComposeUpConfirmRunsAndOverlayCollapses(t *testing.T) {
 	m.width, m.height = 80, 24
 	m.active = TabCompose
 	m.compose.rows = []composeRow{{name: "tools", path: "/etc/compose/tools.yaml"}}
-	fb := m.backend.(*fakeBackend)
+	fb := m.backend.(*coretest.FakeBackend)
 	zero := 0
-	fb.composeUpEvents = []ComposeUpEvent{
+	fb.ComposeUpEvents = []ComposeUpEvent{
 		{Command: "web", Phase: "creating"},
 		{Command: "web", Phase: "running", Terminal: true},
 		{Command: "db", Phase: "exited", Terminal: true, ExitCode: &zero},
 	}
 
 	// a → confirm popup; enter confirms (default is the action button).
-	m, _ = upd(m, kr("a"))
-	m, cmd := upd(m, kEnter)
+	m, _ = upd(m, coretest.Kr("a"))
+	m, cmd := upd(m, coretest.KEnter)
 
 	var opened composeUpOpenedMsg
 	found := false
@@ -1008,8 +725,8 @@ func TestComposeUpConfirmRunsAndOverlayCollapses(t *testing.T) {
 	if !found {
 		t.Fatalf("confirming compose up should dispatch a ComposeUp command")
 	}
-	if len(fb.composeUpCalled) != 1 || fb.composeUpCalled[0] != "tools" {
-		t.Fatalf("ComposeUp should target tools, got %v", fb.composeUpCalled)
+	if len(fb.ComposeUpCalled) != 1 || fb.ComposeUpCalled[0] != "tools" {
+		t.Fatalf("ComposeUp should target tools, got %v", fb.ComposeUpCalled)
 	}
 
 	// Opening the stream activates the live overlay.
@@ -1019,7 +736,7 @@ func TestComposeUpConfirmRunsAndOverlayCollapses(t *testing.T) {
 	}
 
 	// Drive the live stream: each buffered event updates the per-service marks.
-	for range fb.composeUpEvents {
+	for range fb.ComposeUpEvents {
 		ev, ok := waitComposeUpCmd(m.composeUp.stream, "tools")().(composeUpEventMsg)
 		if !ok {
 			t.Fatalf("expected a composeUpEventMsg from the stream")
@@ -1133,14 +850,14 @@ func TestCommandsTabMarkerSlotIsFixedWidth(t *testing.T) {
 	m := seed()
 	groups := m.commands.groups
 	// One project with an unread bell, one without: the two marker widths.
-	groups[0].commands[0].bell = true
+	groups[0].Commands[0].Bell = true
 	m.setGroups(groups)
 
 	out := stripANSI(m.renderCommandList("Commands", 70, 12))
 	nameColumn := func(name string) int {
 		for line := range strings.SplitSeq(out, "\n") {
 			if before, _, ok := strings.Cut(line, name); ok {
-				return cells.StringWidth(before)
+				return core.Cells.StringWidth(before)
 			}
 		}
 		t.Fatalf("no row names %q:\n%s", name, out)
@@ -1151,7 +868,7 @@ func TestCommandsTabMarkerSlotIsFixedWidth(t *testing.T) {
 		t.Errorf("a belled project starts its name at column %d and a plain one at %d:\n%s",
 			belled, plain, out)
 	}
-	if !strings.Contains(out, glyphBell) {
+	if !strings.Contains(out, core.GlyphBell) {
 		t.Fatalf("the belled project should carry the bell; the test proves nothing:\n%s", out)
 	}
 }
@@ -1160,11 +877,11 @@ func TestStandaloneCommandShowsWorkdir(t *testing.T) {
 	m := seed()
 	// A free-floating command carries no project name and no group header, so its
 	// workdir must appear on the command row itself.
-	m.setGroups(append(m.commands.groups, projectGroup{
-		name:    "",
-		workdir: "/work/loose",
-		commands: []commandRow{
-			{id: "9", name: "loose", workdir: "/work/loose", state: model.EventTypeRunning},
+	m.setGroups(append(m.commands.groups, core.ProjectGroup{
+		Name:    "",
+		Workdir: "/work/loose",
+		Commands: []core.CommandRow{
+			{ID: "9", Name: "loose", Workdir: "/work/loose", State: model.EventTypeRunning},
 		},
 	}))
 	out := stripANSI(m.renderCommandList("Commands", 60, 16))
@@ -1185,7 +902,7 @@ func TestComposeRowShowsWorkdir(t *testing.T) {
 }
 
 func TestLayoutTabDefaultSelectionIsMarker(t *testing.T) {
-	m := New(Options{Backend: &fakeBackend{}, PopupMode: true})
+	m := New(core.Options{Backend: &coretest.FakeBackend{}, PopupMode: true})
 	m.active = TabLayout
 	info := LayoutsInfo{
 		Project: "tools", Path: "/c.yaml",
@@ -1210,7 +927,7 @@ func TestLayoutTabDefaultSelectionIsMarker(t *testing.T) {
 }
 
 func TestLayoutTabNoMarkerSelectsFirst(t *testing.T) {
-	m := New(Options{Backend: &fakeBackend{}, PopupMode: true})
+	m := New(core.Options{Backend: &coretest.FakeBackend{}, PopupMode: true})
 	m.active = TabLayout
 	// No running dashboard: Current == -1 should land the selection on the first.
 	m, _ = upd(m, layoutsLoadedMsg{info: LayoutsInfo{Names: []string{"a", "b"}, Current: -1}})
@@ -1220,33 +937,33 @@ func TestLayoutTabNoMarkerSelectsFirst(t *testing.T) {
 }
 
 func TestLayoutTabNavigation(t *testing.T) {
-	m := New(Options{Backend: &fakeBackend{}, PopupMode: true})
+	m := New(core.Options{Backend: &coretest.FakeBackend{}, PopupMode: true})
 	m.active = TabLayout
 	m, _ = upd(m, layoutsLoadedMsg{info: LayoutsInfo{Names: []string{"a", "b", "c"}, Current: 0}})
-	m, _ = upd(m, kr("j"))
+	m, _ = upd(m, coretest.Kr("j"))
 	if m.layout.selected != 1 {
 		t.Fatalf("j should move the selection down, got %d", m.layout.selected)
 	}
-	m, _ = upd(m, kr("k"))
+	m, _ = upd(m, coretest.Kr("k"))
 	if m.layout.selected != 0 {
 		t.Fatalf("k should move the selection up, got %d", m.layout.selected)
 	}
 	// Clamp at the top.
-	m, _ = upd(m, kr("k"))
+	m, _ = upd(m, coretest.Kr("k"))
 	if m.layout.selected != 0 {
 		t.Fatalf("k at the top should clamp to 0, got %d", m.layout.selected)
 	}
 }
 
 func TestLayoutTabEnterAppliesInPopupMode(t *testing.T) {
-	m := New(Options{Backend: &fakeBackend{}, PopupMode: true})
+	m := New(core.Options{Backend: &coretest.FakeBackend{}, PopupMode: true})
 	m.active = TabLayout
 	m, _ = upd(m, layoutsLoadedMsg{info: LayoutsInfo{
 		Project: "tools", Path: "/c.yaml", Names: []string{"dev", "ops"}, Current: 0,
 	}})
-	m, _ = upd(m, kr("j")) // select "ops"
+	m, _ = upd(m, coretest.Kr("j")) // select "ops"
 
-	m, cmd := upd(m, kEnter)
+	m, cmd := upd(m, coretest.KEnter)
 	if m.popup.open() {
 		t.Fatalf("popup mode should apply immediately, not open a warning popup")
 	}
@@ -1257,20 +974,20 @@ func TestLayoutTabEnterAppliesInPopupMode(t *testing.T) {
 	if done.layout != "ops" {
 		t.Fatalf("layoutDoneMsg should report the applied layout, got %q", done.layout)
 	}
-	fb := m.backend.(*fakeBackend)
-	if len(fb.appliedLayouts) != 1 || fb.appliedLayouts[0] != "ops" {
-		t.Fatalf("ApplyLayout should target the selected layout, got %v", fb.appliedLayouts)
+	fb := m.backend.(*coretest.FakeBackend)
+	if len(fb.AppliedLayouts) != 1 || fb.AppliedLayouts[0] != "ops" {
+		t.Fatalf("ApplyLayout should target the selected layout, got %v", fb.AppliedLayouts)
 	}
 }
 
 func TestLayoutTabEnterWarnsInDirectMode(t *testing.T) {
-	m := New(Options{Backend: &fakeBackend{}}) // direct mode: PopupMode false
+	m := New(core.Options{Backend: &coretest.FakeBackend{}}) // direct mode: PopupMode false
 	m.active = TabLayout
 	m, _ = upd(m, layoutsLoadedMsg{info: LayoutsInfo{
 		Project: "tools", Path: "/c.yaml", Names: []string{"dev", "ops"}, Current: 0,
 	}})
 
-	m, _ = upd(m, kEnter)
+	m, _ = upd(m, coretest.KEnter)
 	if m.popup.kind != popupMuxWarn {
 		t.Fatalf("direct mode should open the mux warning popup, got %v", m.popup.kind)
 	}
@@ -1280,27 +997,27 @@ func TestLayoutTabEnterWarnsInDirectMode(t *testing.T) {
 	if m.popup.confirmed() {
 		t.Fatalf("the warning popup should default to <cancel>")
 	}
-	fb := m.backend.(*fakeBackend)
-	if len(fb.appliedLayouts) != 0 {
-		t.Fatalf("apply must wait for confirmation, got %v", fb.appliedLayouts)
+	fb := m.backend.(*coretest.FakeBackend)
+	if len(fb.AppliedLayouts) != 0 {
+		t.Fatalf("apply must wait for confirmation, got %v", fb.AppliedLayouts)
 	}
 
 	// Toggle to the action button and confirm.
 	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyLeft})
-	m, cmd := upd(m, kEnter)
+	m, cmd := upd(m, coretest.KEnter)
 	if _, ok := firstMsg[layoutDoneMsg](drain(cmd)); !ok {
 		t.Fatalf("confirming the warning should dispatch ApplyLayout")
 	}
-	if len(fb.appliedLayouts) != 1 || fb.appliedLayouts[0] != "dev" {
+	if len(fb.AppliedLayouts) != 1 || fb.AppliedLayouts[0] != "dev" {
 		t.Fatalf("ApplyLayout should target the selected layout after confirm, got %v",
-			fb.appliedLayouts)
+			fb.AppliedLayouts)
 	}
 }
 
 func TestLayoutTabEntryLoadsLayouts(t *testing.T) {
 	m := seed()
-	fb := m.backend.(*fakeBackend)
-	fb.layoutsInfo = LayoutsInfo{Project: "local-dev", Names: []string{"solo"}, Current: 0}
+	fb := m.backend.(*coretest.FakeBackend)
+	fb.LayoutsInfo = LayoutsInfo{Project: "local-dev", Names: []string{"solo"}, Current: 0}
 	// Switch Commands -> Compose -> Layout; entering Layout dispatches a load.
 	m, _ = upd(m, kTab) // Compose
 	m, cmd := upd(m, kTab)
@@ -1310,7 +1027,7 @@ func TestLayoutTabEntryLoadsLayouts(t *testing.T) {
 	if _, ok := firstMsg[layoutsLoadedMsg](drain(cmd)); !ok {
 		t.Fatalf("entering the Layout tab should dispatch a ListLayouts load")
 	}
-	if len(fb.layoutsReq) == 0 {
+	if len(fb.LayoutsReq) == 0 {
 		t.Fatalf("ListLayouts should have been requested on tab entry")
 	}
 }
@@ -1375,22 +1092,22 @@ func firstMsg[T tea.Msg](msgs []tea.Msg) (T, bool) {
 }
 
 // termModel builds a single-group model (no project header) with the given rows
-// and a fakeBackend, sized to a usable preview pane.
-func termModel(rows ...commandRow) Model {
-	m := New(Options{Backend: &fakeBackend{}})
+// and a coretest.FakeBackend, sized to a usable preview pane.
+func termModel(rows ...core.CommandRow) Model {
+	m := New(core.Options{Backend: &coretest.FakeBackend{}})
 	m.width, m.height = 80, 24
 	m.active = TabCommands
-	m.setGroups([]projectGroup{{name: "", workdir: "/w", commands: rows}})
+	m.setGroups([]core.ProjectGroup{{Name: "", Workdir: "/w", Commands: rows}})
 	return m
 }
 
 func TestPreviewTerminalViewRendersRawStream(t *testing.T) {
-	m := termModel(commandRow{
-		id: "1", name: "shell", workdir: "/w", state: model.EventTypeRunning, tty: true,
+	m := termModel(core.CommandRow{
+		ID: "1", Name: "shell", Workdir: "/w", State: model.EventTypeRunning, Tty: true,
 	})
 	m.commands.selected = 0
-	fb := m.backend.(*fakeBackend)
-	fb.rawChunks = [][]byte{[]byte("hello-term")}
+	fb := m.backend.(*coretest.FakeBackend)
+	fb.RawChunks = [][]byte{[]byte("hello-term")}
 
 	openCmd := (&m).reconcilePreview()
 	if openCmd == nil {
@@ -1403,10 +1120,10 @@ func TestPreviewTerminalViewRendersRawStream(t *testing.T) {
 	if !ok {
 		t.Fatalf("reconcile should dispatch a RawView open")
 	}
-	if len(fb.rawIDs) != 1 || fb.rawIDs[0] != "1" {
-		t.Fatalf("RawView should target the running tty command, got %v", fb.rawIDs)
+	if len(fb.RawIDs) != 1 || fb.RawIDs[0] != "1" {
+		t.Fatalf("RawView should target the running tty command, got %v", fb.RawIDs)
 	}
-	if len(fb.logStreams) != 0 {
+	if len(fb.LogStreams) != 0 {
 		t.Fatalf("terminal-view must not fall back to the log reader")
 	}
 
@@ -1421,7 +1138,7 @@ func TestPreviewTerminalViewRendersRawStream(t *testing.T) {
 	// The background drain writes chunk bytes straight into the shared emulator
 	// (they never travel through the message loop). Close the stream so the drain
 	// loop finishes after consuming the buffered chunk.
-	stream := fb.rawStreams[0]
+	stream := fb.RawStreams[0]
 	_ = stream.Close()
 	closed, ok := drainRawCmd(
 		m.commands.preview.term, stream, "1", m.commands.preview.gen,
@@ -1442,22 +1159,22 @@ func TestPreviewTerminalViewRendersRawStream(t *testing.T) {
 func TestPreviewPredicateSelectsFallback(t *testing.T) {
 	cases := []struct {
 		name string
-		row  commandRow
+		row  core.CommandRow
 	}{
-		{"running non-tty", commandRow{
-			id: "1", name: "svc", workdir: "/w",
-			state: model.EventTypeRunning, logDriver: logdriver.DriverK8sFile,
+		{"running non-tty", core.CommandRow{
+			ID: "1", Name: "svc", Workdir: "/w",
+			State: model.EventTypeRunning, LogDriver: logdriver.DriverK8sFile,
 		}},
-		{"exited tty", commandRow{
-			id: "1", name: "job", workdir: "/w",
-			state: model.EventTypeExited, logDriver: logdriver.DriverK8sFile, tty: true,
+		{"exited tty", core.CommandRow{
+			ID: "1", Name: "job", Workdir: "/w",
+			State: model.EventTypeExited, LogDriver: logdriver.DriverK8sFile, Tty: true,
 		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			m := termModel(c.row)
 			m.commands.selected = 0
-			fb := m.backend.(*fakeBackend)
+			fb := m.backend.(*coretest.FakeBackend)
 
 			cmd := (&m).reconcilePreview()
 			if m.commands.preview.terminal {
@@ -1466,8 +1183,8 @@ func TestPreviewPredicateSelectsFallback(t *testing.T) {
 			if _, ok := firstMsg[previewOpenedMsg](drain(cmd)); !ok {
 				t.Fatalf("%s should open the sanitized log reader", c.name)
 			}
-			if len(fb.rawIDs) != 0 {
-				t.Fatalf("%s must not open a raw stream, got %v", c.name, fb.rawIDs)
+			if len(fb.RawIDs) != 0 {
+				t.Fatalf("%s must not open a raw stream, got %v", c.name, fb.RawIDs)
 			}
 		})
 	}
@@ -1475,10 +1192,22 @@ func TestPreviewPredicateSelectsFallback(t *testing.T) {
 
 func TestPreviewTerminalStreamClosesOnSelectionChange(t *testing.T) {
 	m := termModel(
-		commandRow{id: "1", name: "a", workdir: "/w", state: model.EventTypeRunning, tty: true},
-		commandRow{id: "2", name: "b", workdir: "/w", state: model.EventTypeRunning, tty: true},
+		core.CommandRow{
+			ID:      "1",
+			Name:    "a",
+			Workdir: "/w",
+			State:   model.EventTypeRunning,
+			Tty:     true,
+		},
+		core.CommandRow{
+			ID:      "2",
+			Name:    "b",
+			Workdir: "/w",
+			State:   model.EventTypeRunning,
+			Tty:     true,
+		},
 	)
-	fb := m.backend.(*fakeBackend)
+	fb := m.backend.(*coretest.FakeBackend)
 	m.commands.selected = 0
 
 	opened, ok := firstMsg[rawOpenedMsg](drain((&m).reconcilePreview()))
@@ -1489,20 +1218,20 @@ func TestPreviewTerminalStreamClosesOnSelectionChange(t *testing.T) {
 	if m.commands.preview.raw == nil {
 		t.Fatalf("the first selection should hold a live raw stream")
 	}
-	if len(fb.rawStreams) != 1 {
-		t.Fatalf("expected one raw stream opened, got %d", len(fb.rawStreams))
+	if len(fb.RawStreams) != 1 {
+		t.Fatalf("expected one raw stream opened, got %d", len(fb.RawStreams))
 	}
 
 	// Moving the selection must close the previous raw stream. stopPreview closes
 	// it off the update loop, so wait briefly for the async close.
 	m.commands.selected = 1
 	_ = (&m).reconcilePreview()
-	fb.rawStreams[0].waitClosed(t)
+	fb.RawStreams[0].WaitClosed(t)
 }
 
 func TestPreviewTerminalEmulatorSizedToPTYNotPane(t *testing.T) {
-	m := termModel(commandRow{
-		id: "1", name: "shell", workdir: "/w", state: model.EventTypeRunning, tty: true,
+	m := termModel(core.CommandRow{
+		ID: "1", Name: "shell", Workdir: "/w", State: model.EventTypeRunning, Tty: true,
 	})
 	m.commands.selected = 0
 

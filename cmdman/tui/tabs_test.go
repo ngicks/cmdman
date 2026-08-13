@@ -1,39 +1,43 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
+)
 
 // TestTabDefsInSync guards the invariant that TabNames, TabKeys, NumTabs, and
-// ParseTab all derive from tabDefs in the same order as the Tab constants, so
+// ParseTab all derive from core.TabDefs in the same order as the Tab constants, so
 // the tab bar and the --tab flag can never drift.
 func TestTabDefsInSync(t *testing.T) {
 	names := TabNames()
 	keys := TabKeys()
-	if len(names) != len(tabDefs) {
-		t.Fatalf("TabNames() len = %d, want %d", len(names), len(tabDefs))
+	if len(names) != len(core.TabDefs) {
+		t.Fatalf("TabNames() len = %d, want %d", len(names), len(core.TabDefs))
 	}
-	if len(keys) != len(tabDefs) {
-		t.Fatalf("TabKeys() len = %d, want %d", len(keys), len(tabDefs))
+	if len(keys) != len(core.TabDefs) {
+		t.Fatalf("TabKeys() len = %d, want %d", len(keys), len(core.TabDefs))
 	}
-	if NumTabs() != len(tabDefs) {
-		t.Fatalf("NumTabs() = %d, want %d", NumTabs(), len(tabDefs))
+	if NumTabs() != len(core.TabDefs) {
+		t.Fatalf("NumTabs() = %d, want %d", NumTabs(), len(core.TabDefs))
 	}
 
-	for i, d := range tabDefs {
-		if d.tab != Tab(i) {
-			t.Errorf("tabDefs[%d].tab = %d, want %d (constants must match order)", i, d.tab, i)
+	for i, d := range core.TabDefs {
+		if d.Tab != Tab(i) {
+			t.Errorf("core.TabDefs[%d].Tab = %d, want %d (constants must match order)", i, d.Tab, i)
 		}
-		if names[i] != d.name {
-			t.Errorf("TabNames()[%d] = %q, want %q", i, names[i], d.name)
+		if names[i] != d.Name {
+			t.Errorf("TabNames()[%d] = %q, want %q", i, names[i], d.Name)
 		}
-		if keys[i] != d.key {
-			t.Errorf("TabKeys()[%d] = %q, want %q", i, keys[i], d.key)
+		if keys[i] != d.Key {
+			t.Errorf("TabKeys()[%d] = %q, want %q", i, keys[i], d.Key)
 		}
-		got, err := ParseTab(d.key)
+		got, err := ParseTab(d.Key)
 		if err != nil {
-			t.Errorf("ParseTab(%q) unexpected error: %v", d.key, err)
+			t.Errorf("ParseTab(%q) unexpected error: %v", d.Key, err)
 		}
-		if got != d.tab {
-			t.Errorf("ParseTab(%q) = %d, want %d", d.key, got, d.tab)
+		if got != d.Tab {
+			t.Errorf("ParseTab(%q) = %d, want %d", d.Key, got, d.Tab)
 		}
 	}
 

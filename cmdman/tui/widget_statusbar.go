@@ -7,6 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/ngicks/cmdman/cmdman/model"
+	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
 
 // renderStatusbar renders the bar left to right as "where you are, then what is
@@ -19,25 +20,25 @@ import (
 // a second line would scroll the pane.
 func (m widgetModel) renderStatusbar(w int) string {
 	left := m.statusbarLeft() + m.statusbarCounts()
-	right := bgAccent.style(styleWidgetBar).Render(m.statusbarVersion() + " ")
+	right := core.BgAccent.Style(core.StyleWidgetBar).Render(m.statusbarVersion() + " ")
 
 	pad := w - lipgloss.Width(left) - lipgloss.Width(right)
 	if pad < 1 {
 		// Narrow pane: where you are outranks what version says it.
-		return padLine(left, w, bgAccent)
+		return core.PadLine(left, w, core.BgAccent)
 	}
-	return left + bgAccent.plain(strings.Repeat(" ", pad)) + right
+	return left + core.BgAccent.Plain(strings.Repeat(" ", pad)) + right
 }
 
 // statusbarLeft is the project the working directory sits in, with its marker.
 func (m widgetModel) statusbarLeft() string {
 	g, ok := m.activeGroup()
 	if !ok {
-		return bgAccent.style(styleWidgetBar).Render(" no project")
+		return core.BgAccent.Style(core.StyleWidgetBar).Render(" no project")
 	}
-	return bgAccent.plain(markerMargin) +
-		bgAccent.style(markerStyle(g)).Render(markerGlyph(g)) +
-		bgAccent.style(styleWidgetBar.Bold(true)).Render(" "+g.name)
+	return core.BgAccent.Plain(core.MarkerMargin) +
+		core.BgAccent.Style(core.MarkerStyle(g)).Render(core.MarkerGlyph(g)) +
+		core.BgAccent.Style(core.StyleWidgetBar.Bold(true)).Render(" "+g.Name)
 }
 
 // statusbarCounts summarizes every project, not just the active one: how many
@@ -47,12 +48,12 @@ func (m widgetModel) statusbarLeft() string {
 // saying than a count derived from what did load.
 func (m widgetModel) statusbarCounts() string {
 	if m.status != "" {
-		return bgAccent.style(styleWidgetBar).Render("  " + m.status)
+		return core.BgAccent.Style(core.StyleWidgetBar).Render("  " + m.status)
 	}
 	var running, failed int
 	for _, g := range m.groups {
-		for _, c := range g.commands {
-			switch c.state {
+		for _, c := range g.Commands {
+			switch c.State {
 			case model.EventTypeRunning:
 				running++
 			case model.EventTypeFailed:
@@ -64,7 +65,7 @@ func (m widgetModel) statusbarCounts() string {
 	if failed > 0 {
 		counts += fmt.Sprintf(" · %d failed", failed)
 	}
-	return bgAccent.style(styleWidgetBar).Render(counts)
+	return core.BgAccent.Style(core.StyleWidgetBar).Render(counts)
 }
 
 func (m widgetModel) statusbarVersion() string {
@@ -76,11 +77,11 @@ func (m widgetModel) statusbarVersion() string {
 
 // activeGroup returns the project tied to the working directory. The groups are
 // sorted active-first, so it is the head of the list when one is active.
-func (m widgetModel) activeGroup() (projectGroup, bool) {
+func (m widgetModel) activeGroup() (core.ProjectGroup, bool) {
 	for _, g := range m.groups {
-		if g.active {
+		if g.Active {
 			return g, true
 		}
 	}
-	return projectGroup{}, false
+	return core.ProjectGroup{}, false
 }

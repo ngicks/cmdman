@@ -10,47 +10,44 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/ngicks/cmdman/cmdman/model"
-)
-
-// Charm-ish purple palette (256-color indices degrade gracefully).
-var (
-	colorBorder = lipgloss.Color("63")  // indigo border
-	colorAccent = lipgloss.Color("99")  // purple titles/accents
-	colorOnAcc  = lipgloss.Color("231") // near-white text on a purple fill
+	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
 
 var (
-	styleTitle     = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
+	styleTitle     = lipgloss.NewStyle().Bold(true).Foreground(core.ColorAccent)
 	styleTabActive = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(colorOnAcc).
-			Background(colorBorder).
+			Foreground(core.ColorOnAcc).
+			Background(core.ColorBorder).
 			Padding(0, 1)
 	styleTabIdle  = lipgloss.NewStyle().Faint(true).Padding(0, 1)
-	styleBoxTitle = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
-	styleBorder   = lipgloss.NewStyle().Foreground(colorBorder)
-	styleActive   = lipgloss.NewStyle().Faint(true)
-	styleSelected = lipgloss.NewStyle().Bold(true).Foreground(colorOnAcc).Background(colorBorder)
-	styleFooter   = lipgloss.NewStyle().Faint(true)
-	styleVersion  = lipgloss.NewStyle().Foreground(colorAccent)
-	stylePath     = lipgloss.NewStyle().Faint(true) // dim working-directory paths
-	stylePopup    = lipgloss.NewStyle().
+	styleBoxTitle = lipgloss.NewStyle().Bold(true).Foreground(core.ColorAccent)
+	styleBorder   = lipgloss.NewStyle().Foreground(core.ColorBorder)
+	styleSelected = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(core.ColorOnAcc).
+			Background(core.ColorBorder)
+	styleFooter  = lipgloss.NewStyle().Faint(true)
+	styleVersion = lipgloss.NewStyle().Foreground(core.ColorAccent)
+	stylePath    = lipgloss.NewStyle().Faint(true) // dim working-directory paths
+	stylePopup   = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorBorder).
+			BorderForeground(core.ColorBorder).
 			Padding(0, 1)
 	stylePopupBtn = lipgloss.NewStyle().Padding(0, 1)
 	stylePopupSel = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(colorOnAcc).
-			Background(colorBorder).
+			Foreground(core.ColorOnAcc).
+			Background(core.ColorBorder).
 			Padding(0, 1)
 
-	// Status-marker colors mirror the compose TTY reporter so the TUI shows the
-	// same indicators compose emits to the terminal.
-	styleMarkProgress = lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // in progress
-	styleMarkPending  = lipgloss.NewStyle().Foreground(lipgloss.Color("6")) // created (ready)
-	styleMarkOK       = lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // running/exited
-	styleMarkErr      = lipgloss.NewStyle().Foreground(lipgloss.Color("1")) // failed
+	// The status-marker colors live in core so core.StatusStyle — which the
+	// switcher rows share with this package's lists — can reach them; they are
+	// bound here because this file's own renderers name them directly.
+	styleMarkProgress = core.StyleMarkProgress
+	styleMarkPending  = core.StyleMarkPending
+	styleMarkOK       = core.StyleMarkOK
+	styleMarkErr      = core.StyleMarkErr
 )
 
 // statusGlyph returns the single-cell status marker for a command, matching the
@@ -71,22 +68,6 @@ func statusGlyph(state model.EventType, pending string, frame int) string {
 		return "✘"
 	default:
 		return " "
-	}
-}
-
-func statusStyle(state model.EventType, pending string) lipgloss.Style {
-	if pending != "" || state == model.EventTypeStarting {
-		return styleMarkProgress
-	}
-	switch state {
-	case model.EventTypeCreated:
-		return styleMarkPending
-	case model.EventTypeRunning, model.EventTypeExited:
-		return styleMarkOK
-	case model.EventTypeFailed:
-		return styleMarkErr
-	default:
-		return lipgloss.NewStyle()
 	}
 }
 
@@ -153,7 +134,7 @@ func (m Model) renderComposeUp() string {
 	}
 	var lines []string
 	if len(m.composeUp.order) == 0 {
-		lines = []string{styleActive.Render("Starting…")}
+		lines = []string{core.StyleActive.Render("Starting…")}
 	} else {
 		for _, name := range m.composeUp.order {
 			mk := m.composeUp.marks[name]
@@ -201,7 +182,7 @@ func composeUpGlyph(mk composeUpMark, frame int) string {
 }
 
 // composeUpStyle returns the color style paired with composeUpGlyph, mirroring
-// statusStyle / the compose TTY reporter colors.
+// core.StatusStyle / the compose TTY reporter colors.
 func composeUpStyle(mk composeUpMark) lipgloss.Style {
 	if !mk.terminal {
 		return styleMarkProgress
@@ -229,9 +210,9 @@ func (m Model) renderDefViewer() string {
 	var lines []string
 	switch {
 	case m.defViewer.loading:
-		lines = []string{styleActive.Render("Loading…")}
+		lines = []string{core.StyleActive.Render("Loading…")}
 	case m.defViewer.errMsg != "":
-		lines = []string{styleActive.Render("Unable to read definition:"), m.defViewer.errMsg}
+		lines = []string{core.StyleActive.Render("Unable to read definition:"), m.defViewer.errMsg}
 	default:
 		lines = m.defViewer.lines
 	}
@@ -316,7 +297,7 @@ func (m Model) renderLayoutBody(width, height int) string {
 		if !m.layout.loaded {
 			msg = "Loading…"
 		}
-		content := clampLines([]string{styleActive.Render(msg)}, ch, 0)
+		content := clampLines([]string{core.StyleActive.Render(msg)}, ch, 0)
 		return box(title, content, width, height)
 	}
 	lines := make([]string, 0, len(rows))
@@ -364,7 +345,7 @@ func (m Model) renderCommandList(title string, width, height int) string {
 	rows := m.commands.visibleRows()
 	lines := make([]string, 0, len(rows))
 	if len(rows) == 0 {
-		lines = append(lines, styleActive.Render("No commands."))
+		lines = append(lines, core.StyleActive.Render("No commands."))
 	}
 	for i, r := range rows {
 		selected := i == m.commands.selected
@@ -379,74 +360,74 @@ func (m Model) renderCommandList(title string, width, height int) string {
 			// switcher and the statusbar show, between the fold arrow and the
 			// name: whichever surface the user is looking at says the same thing
 			// about the project.
-			mark := markerGlyph(g)
+			mark := core.MarkerGlyph(g)
 			// The marker sits in the same fixed-width slot the switcher and the
 			// statusbar give it, measured off the glyph rather than assumed: 🔔 is
 			// two cells and ●/○ one, so a single space after it would move the name
 			// a column between rows.
-			gap := strings.Repeat(" ", max(markerSlot-glyphWidth(mark), 1))
-			plain = fmt.Sprintf("%s %s %s%s", glyph, projectMarker, mark, gap+g.name)
+			gap := strings.Repeat(" ", max(core.MarkerSlot-core.GlyphWidth(mark), 1))
+			plain = fmt.Sprintf("%s %s %s%s", glyph, projectMarker, mark, gap+g.Name)
 			styled = fmt.Sprintf("%s %s %s%s", glyph, projectMarker,
-				markerStyle(g).Render(mark), gap+g.name)
-			if g.active {
+				core.MarkerStyle(g).Render(mark), gap+g.Name)
+			if g.Active {
 				plain += "   active"
-				styled += "   " + styleActive.Render("active")
+				styled += "   " + core.StyleActive.Render("active")
 			}
 			// Surface the project's working directory so the user can tell where a
 			// compose project was created, dimmed to keep the name prominent.
-			if g.workdir != "" {
-				plain += "   " + g.workdir
-				styled += "   " + stylePath.Render(g.workdir)
+			if g.Workdir != "" {
+				plain += "   " + g.Workdir
+				styled += "   " + stylePath.Render(g.Workdir)
 			}
 		} else {
-			c := m.commands.groups[r.group].commands[r.cmd]
+			c := m.commands.groups[r.group].Commands[r.cmd]
 			prefix := "  "
 			if selected {
 				prefix = "> "
 			}
 			// Commands under a project header are indented beneath it; standalone
 			// commands (no project name) sit at the top level with no header.
-			standalone := m.commands.groups[r.group].name == ""
+			standalone := m.commands.groups[r.group].Name == ""
 			indent := "  "
 			if standalone {
 				indent = ""
 			}
-			label := displayLabel(c.state, c.exitCode)
-			if c.pending != "" {
-				label = c.pending + "…"
+			label := core.DisplayLabel(c.State, c.ExitCode)
+			if c.Pending != "" {
+				label = c.Pending + "…"
 			}
 			// Status marker (same indicators as compose) to the left of the
 			// command name, so a start cascade is visible as it progresses.
-			glyph := statusGlyph(c.state, c.pending, m.spinner)
-			name := truncate(c.name, 16)
+			glyph := statusGlyph(c.State, c.Pending, m.spinner)
+			name := truncate(c.Name, 16)
 			plain = fmt.Sprintf("%s%s%s %-16s %s", indent, prefix, glyph, name, label)
 			styled = fmt.Sprintf("%s%s%s %-16s %s", indent, prefix,
-				statusStyle(c.state, c.pending).Render(glyph), name, label)
+				core.StatusStyle(c.State, c.Pending).Render(glyph), name, label)
 			// What the command says about itself, after what the store knows
 			// about it: an unread bell (D23), the status it reported with its
 			// detail (D12), and the title it set — dimmed like the paths, since
 			// it is the command's own words, not the TUI's. Only a live run gets
 			// to speak: a run that is over shows its exit state and nothing it
 			// said before it ended (D13), the same rule the switcher rows follow.
-			if liveReport(c) {
-				if c.bell {
-					plain += "  " + glyphBell
-					styled += "  " + glyphBell
+			if core.LiveReport(c) {
+				if c.Bell {
+					plain += "  " + core.GlyphBell
+					styled += "  " + core.GlyphBell
 				}
 				if reported := reportedText(c); reported != "" {
 					plain += "  " + reported
-					styled += "  " + reportedStatusStyle(c.status).Render(reported)
+					styled += "  " + core.ReportedStatusStyle(c.Status).Render(reported)
 				}
-				if c.title != "" {
-					plain += "  " + c.title
-					styled += "  " + stylePath.Render(c.title)
+				if c.Title != "" {
+					plain += "  " + c.Title
+					styled += "  " + stylePath.Render(c.Title)
 				}
 			}
 			// Free-floating commands have no project header to carry the workdir, so
 			// show it on the row itself (dimmed).
-			if standalone && c.workdir != "" {
-				plain += "   " + c.workdir
-				styled += "   " + stylePath.Render(c.workdir)
+			if standalone && c.Workdir != "" {
+				plain += "   " + c.Workdir
+				styled += "   " + stylePath.Render(c.Workdir)
 			}
 		}
 		if selected {
@@ -471,18 +452,18 @@ func (m Model) renderPreview(width, height int) string {
 	var lines []string
 	switch p.status {
 	case previewNoStorage:
-		lines = []string{styleActive.Render("No log storage configured for this command.")}
+		lines = []string{core.StyleActive.Render("No log storage configured for this command.")}
 	case previewError:
 		lines = []string{
-			styleActive.Render("Unable to read command output:"),
+			core.StyleActive.Render("Unable to read command output:"),
 			p.errMsg,
 		}
 	case previewLoading:
-		lines = []string{styleActive.Render("Loading…")}
+		lines = []string{core.StyleActive.Render("Loading…")}
 	case previewOK:
 		lines = p.lines
 	default:
-		lines = []string{styleActive.Render("No output yet.")}
+		lines = []string{core.StyleActive.Render("No output yet.")}
 	}
 	content := clampLines(lines, ch, 0)
 	return box("Preview", content, width, height)
@@ -493,7 +474,11 @@ func (m Model) renderComposeBody(width, height int) string {
 	ch := max(height-2, 1)
 	rows := m.compose.visibleRows()
 	if len(rows) == 0 {
-		content := clampLines([]string{styleActive.Render("No compose projects found.")}, ch, 0)
+		content := clampLines(
+			[]string{core.StyleActive.Render("No compose projects found.")},
+			ch,
+			0,
+		)
 		return box("Compose projects", content, width, height)
 	}
 	lines := make([]string, 0, len(rows))

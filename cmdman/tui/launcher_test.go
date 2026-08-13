@@ -6,8 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ngicks/cmdman/cmdman/tui/internal/coretest"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
 
 // launcherFixture is the shape the launcher was designed against: history
@@ -57,12 +60,12 @@ func launcherFixture() []LaunchLocation {
 	}
 }
 
-func seedLauncher(t *testing.T, width, height int) (launcherModel, *fakeBackend) {
+func seedLauncher(t *testing.T, width, height int) (launcherModel, *coretest.FakeBackend) {
 	t.Helper()
-	fb := &fakeBackend{launchLocs: launcherFixture()}
-	m := newLauncher(Options{Backend: fb, Widget: WidgetLauncher, Version: "v0.0.0-test"})
+	fb := &coretest.FakeBackend{LaunchLocs: launcherFixture()}
+	m := newLauncher(core.Options{Backend: fb, Widget: core.WidgetLauncher, Version: "v0.0.0-test"})
 	m = updLauncher(t, m, tea.WindowSizeMsg{Width: width, Height: height})
-	return updLauncher(t, m, launchTargetsLoadedMsg{locs: fb.launchLocs}), fb
+	return updLauncher(t, m, launchTargetsLoadedMsg{locs: fb.LaunchLocs}), fb
 }
 
 func updLauncher(t *testing.T, m launcherModel, msg tea.Msg) launcherModel {
@@ -79,7 +82,7 @@ func updLauncher(t *testing.T, m launcherModel, msg tea.Msg) launcherModel {
 func typeInto(t *testing.T, m launcherModel, text string) launcherModel {
 	t.Helper()
 	for _, r := range text {
-		m = updLauncher(t, m, kr(string(r)))
+		m = updLauncher(t, m, coretest.Kr(string(r)))
 	}
 	return m
 }
@@ -157,9 +160,9 @@ func TestLauncherInputZoneNeverActs(t *testing.T) {
 		if m.focus != zoneInput {
 			t.Errorf("typing %q left focus %d, want the input zone", query, m.focus)
 		}
-		if len(fb.startedProjects) != 0 || len(fb.launchedProjects) != 0 {
+		if len(fb.StartedProjects) != 0 || len(fb.LaunchedProjects) != 0 {
 			t.Errorf("typing %q started %v and launched %v",
-				query, fb.startedProjects, fb.launchedProjects)
+				query, fb.StartedProjects, fb.LaunchedProjects)
 		}
 	}
 }
@@ -170,11 +173,11 @@ func TestLauncherInputZoneNeverActs(t *testing.T) {
 func TestLauncherZoneWalking(t *testing.T) {
 	m, _ := seedLauncher(t, 100, 20)
 
-	m = updLauncher(t, m, kEnter)
+	m = updLauncher(t, m, coretest.KEnter)
 	if m.focus != zoneLeft {
 		t.Fatalf("enter from the input = zone %d, want left", m.focus)
 	}
-	m = updLauncher(t, m, kEnter)
+	m = updLauncher(t, m, coretest.KEnter)
 	if m.focus != zoneRight {
 		t.Fatalf("enter from the left list = zone %d, want right", m.focus)
 	}
@@ -189,8 +192,8 @@ func TestLauncherZoneWalking(t *testing.T) {
 
 	// `/` reaches the input from a list, and only from a list: in the input it is
 	// a character like any other.
-	m = updLauncher(t, m, kEnter)
-	m = updLauncher(t, m, kr("/"))
+	m = updLauncher(t, m, coretest.KEnter)
+	m = updLauncher(t, m, coretest.Kr("/"))
 	if m.focus != zoneInput {
 		t.Fatalf("/ from a list = zone %d, want input", m.focus)
 	}
@@ -207,7 +210,7 @@ func TestLauncherZoneWalking(t *testing.T) {
 	}
 
 	m = typeInto(t, m, "web")
-	m = updLauncher(t, m, kEnter)
+	m = updLauncher(t, m, coretest.KEnter)
 	m = updLauncher(t, m, tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
 	if m.filter != "" || m.focus != zoneInput {
 		t.Fatalf("ctrl+u should erase the query and return to it, got %q / zone %d",
@@ -221,18 +224,18 @@ func TestLauncherZoneWalking(t *testing.T) {
 func TestLauncherStartEnabledSkipsRunning(t *testing.T) {
 	m, fb := seedLauncher(t, 100, 20)
 	// Both projects at the first location enabled; devenv is already running.
-	m = updLauncher(t, m, kEnter) // into the left list
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
 	m.locs[0].projects[1].enabled = true
 
-	next, cmd := m.Update(kr("s"))
+	next, cmd := m.Update(coretest.Kr("s"))
 	m = next.(launcherModel)
 	if cmd == nil {
 		t.Fatalf("s should issue work")
 	}
 	drainLauncherCmd(t, cmd)
 
-	if len(fb.startedProjects) != 1 || fb.startedProjects[0].Project != "test" {
-		t.Fatalf("s started %v, want only the project that was not running", fb.startedProjects)
+	if len(fb.StartedProjects) != 1 || fb.StartedProjects[0].Project != "test" {
+		t.Fatalf("s started %v, want only the project that was not running", fb.StartedProjects)
 	}
 	if m.locs[0].projects[0].starting {
 		t.Errorf("a running project should not be marked starting")
@@ -246,7 +249,7 @@ func TestLauncherStartEnabledSkipsRunning(t *testing.T) {
 
 	// The launcher stays usable while it turns, and the tick loop stops once the
 	// bring-up reports back (D29).
-	m = updLauncher(t, m, launcherStartedMsg{target: fb.startedProjects[0]})
+	m = updLauncher(t, m, launcherStartedMsg{target: fb.StartedProjects[0]})
 	if m.locs[0].projects[1].starting || !m.locs[0].projects[1].Running {
 		t.Errorf("a finished bring-up should stop spinning and read as running")
 	}
@@ -261,7 +264,7 @@ func TestLauncherStartEnabledSkipsRunning(t *testing.T) {
 // already marked starting spinning with no bring-up behind them, and the tick
 // loop armed for the rest of the session (D29).
 func TestLauncherStartEnabledKeepsTheBatch(t *testing.T) {
-	fb := &fakeBackend{launchLocs: []LaunchLocation{{
+	fb := &coretest.FakeBackend{LaunchLocs: []LaunchLocation{{
 		Dir: "/home/u/gitrepo/cmdman", RepoName: "cmdman", Branch: "main",
 		LastUsed: time.Now(), FromHistory: true,
 		Projects: []LaunchProject{
@@ -274,18 +277,18 @@ func TestLauncherStartEnabledKeepsTheBatch(t *testing.T) {
 			},
 		},
 	}}}
-	m := newLauncher(Options{Backend: fb, Widget: WidgetLauncher, Version: "v0.0.0-test"})
+	m := newLauncher(core.Options{Backend: fb, Widget: core.WidgetLauncher, Version: "v0.0.0-test"})
 	m = updLauncher(t, m, tea.WindowSizeMsg{Width: 100, Height: 20})
-	m = updLauncher(t, m, launchTargetsLoadedMsg{locs: fb.launchLocs})
-	m = updLauncher(t, m, kEnter) // into the left list
+	m = updLauncher(t, m, launchTargetsLoadedMsg{locs: fb.LaunchLocs})
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
 
-	next, cmd := m.Update(kr("s"))
+	next, cmd := m.Update(coretest.Kr("s"))
 	m = next.(launcherModel)
 	drainLauncherCmd(t, cmd)
 
-	if len(fb.startedProjects) != 1 || fb.startedProjects[0].Project != "devenv" {
+	if len(fb.StartedProjects) != 1 || fb.StartedProjects[0].Project != "devenv" {
 		t.Fatalf("s started %v, want the healthy project despite the broken one",
-			fb.startedProjects)
+			fb.StartedProjects)
 	}
 	if m.failedLoc != 0 || m.failedPrj != 1 || !strings.Contains(m.failedMsg, "bad yaml") {
 		t.Errorf("the broken project should fail on its own row, got loc %d row %d msg %q",
@@ -300,7 +303,7 @@ func TestLauncherStartEnabledKeepsTheBatch(t *testing.T) {
 
 	// Nothing is left spinning once the one in-flight bring-up reports back: the
 	// row marked starting is exactly the row that had a command.
-	m = updLauncher(t, m, launcherStartedMsg{target: fb.startedProjects[0]})
+	m = updLauncher(t, m, launcherStartedMsg{target: fb.StartedProjects[0]})
 	if m.anyStarting() {
 		t.Errorf("a row is still marked starting with no bring-up behind it: %+v",
 			m.locs[0].projects)
@@ -315,20 +318,20 @@ func TestLauncherStartEnabledKeepsTheBatch(t *testing.T) {
 // (D9), and a launch that failed outright stays inline on its row.
 func TestLauncherLanding(t *testing.T) {
 	m, fb := seedLauncher(t, 100, 20)
-	m = updLauncher(t, m, kEnter)
+	m = updLauncher(t, m, coretest.KEnter)
 
-	next, cmd := m.Update(kr("S"))
+	next, cmd := m.Update(coretest.Kr("S"))
 	m = next.(launcherModel)
 	drainLauncherCmd(t, cmd)
-	if len(fb.launchedProjects) != 1 || fb.launchedProjects[0].Project != "devenv" {
+	if len(fb.LaunchedProjects) != 1 || fb.LaunchedProjects[0].Project != "devenv" {
 		t.Fatalf("S launched %v, want the location's first enabled project",
-			fb.launchedProjects)
+			fb.LaunchedProjects)
 	}
 
 	// D9: the project is up and focus moved, but the window is a bare shell —
 	// that is a notice to read, not an inline failure on the row.
 	warned := updLauncher(t, m, launcherLandedMsg{
-		target:  fb.launchedProjects[0],
+		target:  fb.LaunchedProjects[0],
 		outcome: LaunchOutcome{Warning: "devenv is up, but its compose file has no mux"},
 	})
 	if warned.quitting {
@@ -346,14 +349,14 @@ func TestLauncherLanding(t *testing.T) {
 
 	// A launch failure lands on its row.
 	failed := updLauncher(t, m, launcherLandedMsg{
-		target: fb.launchedProjects[0],
+		target: fb.LaunchedProjects[0],
 		err:    errors.New("compose up: boom"),
 	})
 	if failed.failedLoc != 0 || !strings.Contains(failed.failedMsg, "boom") {
 		t.Errorf("a real launch failure should surface on its row, got %+v", failed.failedMsg)
 	}
 
-	landed, quit := m.Update(launcherLandedMsg{target: fb.launchedProjects[0]})
+	landed, quit := m.Update(launcherLandedMsg{target: fb.LaunchedProjects[0]})
 	if !landed.(launcherModel).quitting || quit == nil {
 		t.Errorf("a completed landing should dismiss the launcher")
 	}
@@ -364,13 +367,13 @@ func TestLauncherLanding(t *testing.T) {
 // dismisses when it comes back.
 func TestLauncherLandingAttaches(t *testing.T) {
 	m, fb := seedLauncher(t, 100, 20)
-	m = updLauncher(t, m, kEnter)
-	next, cmd := m.Update(kr("S"))
+	m = updLauncher(t, m, coretest.KEnter)
+	next, cmd := m.Update(coretest.Kr("S"))
 	m = next.(launcherModel)
 	drainLauncherCmd(t, cmd)
 
 	next, cmd = m.Update(launcherLandedMsg{
-		target:  fb.launchedProjects[0],
+		target:  fb.LaunchedProjects[0],
 		outcome: LaunchOutcome{AttachCommand: []string{"tmux", "attach-session", "-t", "=work"}},
 	})
 	m = next.(launcherModel)
@@ -396,12 +399,12 @@ func TestLauncherLandingAttaches(t *testing.T) {
 func TestLauncherStaleEntry(t *testing.T) {
 	m, fb := seedLauncher(t, 100, 20)
 	m = typeInto(t, m, "demo")
-	m = updLauncher(t, m, kEnter) // into the left list
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
 
-	next, _ := m.Update(kr("S"))
+	next, _ := m.Update(coretest.Kr("S"))
 	m = next.(launcherModel)
-	if len(fb.launchedProjects) != 0 {
-		t.Fatalf("S on a stale entry should not launch, got %v", fb.launchedProjects)
+	if len(fb.LaunchedProjects) != 0 {
+		t.Fatalf("S on a stale entry should not launch, got %v", fb.LaunchedProjects)
 	}
 	if m.failedLoc < 0 || m.focus != zoneRight {
 		t.Fatalf("a stale entry should surface inline and take the cursor")
@@ -414,10 +417,10 @@ func TestLauncherStaleEntry(t *testing.T) {
 	next, cmd := m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	m = next.(launcherModel)
 	drainLauncherCmd(t, cmd)
-	if len(fb.forgotTargets) != 1 || fb.forgotTargets[0].Project != "demo" {
-		t.Fatalf("ctrl+d should ask the backend to forget the entry, got %v", fb.forgotTargets)
+	if len(fb.ForgotTargets) != 1 || fb.ForgotTargets[0].Project != "demo" {
+		t.Fatalf("ctrl+d should ask the backend to forget the entry, got %v", fb.ForgotTargets)
 	}
-	m = updLauncher(t, m, launcherForgotMsg{target: fb.forgotTargets[0]})
+	m = updLauncher(t, m, launcherForgotMsg{target: fb.ForgotTargets[0]})
 	if len(m.locs[2].projects) != 0 {
 		t.Errorf("a forgotten entry should leave the list")
 	}
@@ -434,8 +437,8 @@ func TestLauncherMarkerPrecedence(t *testing.T) {
 	}{
 		{"starting wins", launcherMarker{starting: true, bell: true, running: true},
 			launcherSpinnerFrames[0]},
-		{"bell over dot", launcherMarker{bell: true, running: true}, glyphBell},
-		{"dot when running", launcherMarker{running: true}, glyphHollow},
+		{"bell over dot", launcherMarker{bell: true, running: true}, core.GlyphBell},
+		{"dot when running", launcherMarker{running: true}, core.GlyphHollow},
 		{"blank when cold", launcherMarker{}, ""},
 		{"blank outranks a bell nothing is ringing", launcherMarker{bell: true}, ""},
 	} {
@@ -450,7 +453,7 @@ func TestLauncherMarkerPrecedence(t *testing.T) {
 		if got := (launcherMarker{starting: true}).glyph(i); got != f {
 			t.Errorf("frame %d = %q, want %q", i, got, f)
 		}
-		if got, want := glyphWidth(f), lipgloss.Width(f); got != want {
+		if got, want := core.GlyphWidth(f), lipgloss.Width(f); got != want {
 			t.Errorf("spinner frame %q measures %d, renderer draws %d", f, got, want)
 		}
 	}
@@ -504,7 +507,7 @@ func TestLauncherScrollKeepsWindowFull(t *testing.T) {
 func TestLauncherFillsItsWindow(t *testing.T) {
 	const w, h = 80, 14
 	m, _ := seedLauncher(t, w, h)
-	m = updLauncher(t, m, kEnter)
+	m = updLauncher(t, m, coretest.KEnter)
 
 	lines := strings.Split(m.viewContent(), "\n")
 	if len(lines) > h {
@@ -528,12 +531,12 @@ func TestLauncherFillsItsWindow(t *testing.T) {
 // prefix of what it matches.
 func TestLauncherToggleAndCompletion(t *testing.T) {
 	m, _ := seedLauncher(t, 100, 20)
-	m = updLauncher(t, m, kEnter)
-	m = updLauncher(t, m, kEnter) // into the right list
+	m = updLauncher(t, m, coretest.KEnter)
+	m = updLauncher(t, m, coretest.KEnter) // into the right list
 	if !m.locs[0].projects[0].enabled {
 		t.Fatalf("a history project should open enabled (D28)")
 	}
-	m = updLauncher(t, m, kr(" "))
+	m = updLauncher(t, m, coretest.Kr(" "))
 	if m.locs[0].projects[0].enabled {
 		t.Errorf("space should toggle the project under the cursor")
 	}
@@ -598,17 +601,17 @@ func TestLauncherColdRowsKeepABlankSlot(t *testing.T) {
 	if len(rows) < 2 {
 		t.Fatalf("expected the history rows, got %d", len(rows))
 	}
-	if !strings.Contains(rows[0], glyphHollow) {
+	if !strings.Contains(rows[0], core.GlyphHollow) {
 		t.Errorf("the location with a running project should carry a marker: %q", rows[0])
 	}
-	if strings.Contains(rows[1], glyphHollow) {
+	if strings.Contains(rows[1], core.GlyphHollow) {
 		t.Errorf("a cold location's marker slot should be blank: %q", rows[1])
 	}
 	// The name column is measured in cells, not bytes: the marker is a
 	// multi-byte glyph and the blank slot is spaces.
 	nameColumn := func(row, name string) int {
 		plain := stripANSI(row)
-		return cells.StringWidth(plain[:strings.Index(plain, name)])
+		return core.Cells.StringWidth(plain[:strings.Index(plain, name)])
 	}
 	if got, want := nameColumn(rows[1], "webapp"), nameColumn(rows[0], "cmdman"); got != want {
 		t.Errorf("a blank slot starts the name at column %d, a marked row at %d:\n%q\n%q",
@@ -622,7 +625,7 @@ func TestLauncherColdRowsKeepABlankSlot(t *testing.T) {
 // width that was reserved, which is a row that overruns its pane and, before
 // that, a negative pad the renderer used to panic on.
 func TestLauncherWideRunesFitTheirColumn(t *testing.T) {
-	fb := &fakeBackend{launchLocs: []LaunchLocation{
+	fb := &coretest.FakeBackend{LaunchLocs: []LaunchLocation{
 		{
 			Dir: "/home/u/作業場/日本語のディレクトリ名", RepoName: "リポジトリ",
 			Branch: "主線", LastUsed: time.Now(), FromHistory: true,
@@ -641,10 +644,12 @@ func TestLauncherWideRunesFitTheirColumn(t *testing.T) {
 	}}
 
 	for w := 24; w <= 100; w++ {
-		m := newLauncher(Options{Backend: fb, Widget: WidgetLauncher, Version: "v0.0.0-test"})
+		m := newLauncher(
+			core.Options{Backend: fb, Widget: core.WidgetLauncher, Version: "v0.0.0-test"},
+		)
 		m = updLauncher(t, m, tea.WindowSizeMsg{Width: w, Height: 20})
-		m = updLauncher(t, m, launchTargetsLoadedMsg{locs: fb.launchLocs})
-		m = updLauncher(t, m, kEnter) // into the left list, so the right pane draws
+		m = updLauncher(t, m, launchTargetsLoadedMsg{locs: fb.LaunchLocs})
+		m = updLauncher(t, m, coretest.KEnter) // into the left list, so the right pane draws
 
 		leftW, rightW := m.widths()
 		left, _ := m.leftPane(leftW, m.matched())
@@ -682,13 +687,13 @@ func TestShortPathKeepsTheTailInCells(t *testing.T) {
 	} {
 		for w := range 40 {
 			got := shortPath(p, w)
-			if cells.StringWidth(got) > w {
+			if core.Cells.StringWidth(got) > w {
 				t.Errorf("shortPath(%q, %d) = %q, %d cells wide",
-					p, w, got, cells.StringWidth(got))
+					p, w, got, core.Cells.StringWidth(got))
 			}
-			if cells.StringWidth(got) != lipgloss.Width(got) {
+			if core.Cells.StringWidth(got) != lipgloss.Width(got) {
 				t.Errorf("shortPath(%q, %d) = %q measures %d by cells and %d by lipgloss",
-					p, w, got, cells.StringWidth(got), lipgloss.Width(got))
+					p, w, got, core.Cells.StringWidth(got), lipgloss.Width(got))
 			}
 		}
 	}
