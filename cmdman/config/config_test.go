@@ -56,6 +56,7 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, cfg.DefaultLogDriver, model.DefaultLogDriver)
 	assert.Equal(t, cfg.EventWatcherKind, defaultEventWatcherKind())
 	assert.Assert(t, cfg.DefaultHooks == nil)
+	assert.Equal(t, cfg.DefaultFrame, "")
 	assert.NilError(t, cfg.Validate())
 }
 
@@ -81,8 +82,10 @@ func TestPartialConfig_Apply(t *testing.T) {
 
 	t.Run("scalars overwrite", func(t *testing.T) {
 		dataDir := "/from/partial"
-		got := PartialConfig{DataDir: &dataDir}.Apply(base)
+		frame := "dev"
+		got := PartialConfig{DataDir: &dataDir, DefaultFrame: &frame}.Apply(base)
 		assert.Equal(t, got.DataDir, dataDir)
+		assert.Equal(t, got.DefaultFrame, frame)
 		assert.Equal(t, got.RuntimeDir, base.RuntimeDir)
 	})
 
@@ -139,7 +142,8 @@ func TestLoad_ConfigFileBeatsDefaults(t *testing.T) {
   "default_working_dir": "`+home+`",
   "default_scrollback_bytes": `+strconv.Itoa(scrollbackFromConf)+`,
   "default_log_driver": "none",
-  "event_watcher_kind": "poll"
+  "event_watcher_kind": "poll",
+  "default_frame": "dev"
 }`)
 
 	cfg, err := Load("")
@@ -150,6 +154,7 @@ func TestLoad_ConfigFileBeatsDefaults(t *testing.T) {
 	assert.Equal(t, cfg.DefaultScrollbackBytes, scrollbackFromConf)
 	assert.Equal(t, cfg.DefaultLogDriver, logdriver.LogDriver("none"))
 	assert.Equal(t, cfg.EventWatcherKind, eventlog.WatcherKindPoll)
+	assert.Equal(t, cfg.DefaultFrame, "dev")
 }
 
 func TestLoad_EnvBeatsConfigFile(t *testing.T) {

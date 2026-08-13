@@ -71,6 +71,13 @@ type Config struct {
 	// name the event itself in model.CommandConfig.Hooks (D17/D40). It is a
 	// config-file field only: there is no flag or environment variable for it.
 	DefaultHooks model.HookSet `json:"default_hooks" yaml:"default_hooks"`
+	// DefaultFrame names the frame def applied when no def is named
+	// explicitly (D15): a bare name resolved under the frame config dir
+	// ([FrameConfigDir], <name>.yaml/.yml) or a path, exactly as a frame
+	// flag would pass it. Empty means no default frame (D16). It is a
+	// config-file field only: there is no flag or environment variable for
+	// it; the frame verbs supply their own flag on top.
+	DefaultFrame string `json:"default_frame" yaml:"default_frame"`
 	// ConfigPath is the --config value [Load] resolved this Config with; it is
 	// "" when the file came from $CMDMAN_CONF or the default location. It is
 	// provenance rather than a setting - no layer can set it, so it has no
@@ -220,6 +227,7 @@ type PartialConfig struct {
 	DefaultLogDriver       *logdriver.LogDriver  `json:"default_log_driver,omitzero" yaml:"default_log_driver,omitempty"`
 	EventWatcherKind       *eventlog.WatcherKind `json:"event_watcher_kind,omitzero" yaml:"event_watcher_kind,omitempty"`
 	DefaultHooks           model.HookSet         `json:"default_hooks,omitzero" yaml:"default_hooks,omitempty"`
+	DefaultFrame           *string               `json:"default_frame,omitzero" yaml:"default_frame,omitempty"`
 }
 
 // Apply overlays p's present fields onto base and returns the merged Config.
@@ -256,6 +264,9 @@ func (p PartialConfig) Apply(base Config) Config {
 		maps.Copy(merged, base.DefaultHooks)
 		maps.Copy(merged, p.DefaultHooks)
 		base.DefaultHooks = merged
+	}
+	if p.DefaultFrame != nil {
+		base.DefaultFrame = *p.DefaultFrame
 	}
 	return base
 }
