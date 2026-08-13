@@ -1,4 +1,4 @@
-package tui
+package panel
 
 import (
 	"cmp"
@@ -154,7 +154,7 @@ func titleBucketOf(s titleStamp) int64 {
 // the title, and the group rows are the last thing standing. The two chrome
 // lines are cut to the pane's width as well — a hint or an error longer than the
 // column would wrap and cost the list a row it was not given.
-func (m widgetModel) renderSwitcher(w, h int) string {
+func (m Model) renderSwitcher(w, h int) string {
 	g := m.switcherGeometry(w, h)
 
 	out := make([]string, 0, max(h, 1))
@@ -187,7 +187,7 @@ func (g switcherGeometry) top() int {
 	return 0
 }
 
-func (m widgetModel) switcherGeometry(w, h int) switcherGeometry {
+func (m Model) switcherGeometry(w, h int) switcherGeometry {
 	h = max(h, 1)
 	g := switcherGeometry{title: h >= 2, footer: h >= 3, avail: h}
 	if g.title {
@@ -206,7 +206,7 @@ func (m widgetModel) switcherGeometry(w, h int) switcherGeometry {
 
 // groupAt resolves a screen row to the group drawn on it. The chrome rows and
 // the placeholder shown when there is nothing to list belong to no group.
-func (m widgetModel) groupAt(y int) (int, bool) {
+func (m Model) groupAt(y int) (int, bool) {
 	w, h := m.size()
 	g := m.switcherGeometry(w, h)
 	i := g.off + y - g.top()
@@ -231,7 +231,7 @@ func linesText(lines []switcherLine) []string {
 // switcherFooter is the pinned last line: the transient error text when there
 // is one, else the key hints. Quit is hinted only where it is bound — a docked
 // switcher runs with it unbound (V6).
-func (m widgetModel) switcherFooter() string {
+func (m Model) switcherFooter() string {
 	if m.status != "" {
 		return core.StyleActive.Render(m.status)
 	}
@@ -245,7 +245,7 @@ func (m widgetModel) switcherFooter() string {
 // switcherLines renders the scrollable region: every project's head line
 // followed by one line per command, each padded to w so a highlighted group
 // forms a solid block.
-func (m widgetModel) switcherLines(w int) []switcherLine {
+func (m Model) switcherLines(w int) []switcherLine {
 	var lines []switcherLine
 	for i, g := range m.groups {
 		bg := core.BgNone
@@ -266,7 +266,7 @@ func (m widgetModel) switcherLines(w int) []switcherLine {
 // headLine is a project's head: its marker in a fixed-width slot — so heads
 // line up with each other whichever marker shows — then its name. The gap comes
 // off the glyph's measured width, not an assumed one, and the margin leads.
-func (m widgetModel) headLine(g core.ProjectGroup, bg core.RowBg) string {
+func (m Model) headLine(g core.ProjectGroup, bg core.RowBg) string {
 	glyph := core.MarkerGlyph(g)
 	gap := strings.Repeat(" ", max(core.MarkerSlot-core.GlyphWidth(glyph), 1))
 	name := g.Name
@@ -288,7 +288,7 @@ func (m widgetModel) headLine(g core.ProjectGroup, bg core.RowBg) string {
 // bell when it has one, and the title it last set — the signal the grouped list
 // exists for (D20), fainter still than the name so a group reads as head plus
 // detail.
-func (m widgetModel) commandLine(c core.CommandRow, bg core.RowBg) string {
+func (m Model) commandLine(c core.CommandRow, bg core.RowBg) string {
 	line := bg.Style(m.weakStyle()).Render("    "+core.PadCells(c.Name, 12)+" ") +
 		core.RowStateBadge(c, bg)
 	if !core.LiveReport(c) {

@@ -1,4 +1,13 @@
-package tui
+// Package panel implements the docked widgets: the project switcher and the
+// one-line statusbar.
+//
+// They are one model, not two. Both read the same two listings over the same
+// event subscription, share the update loop and the mouse geometry, and differ
+// only in the renderer the core.Widget passed to New picks. The two widget
+// packages next door (cmdman/tui/widget/switcher, .../statusbar) are the
+// facades that name them apart; everything they share with the rest of the TUI
+// lives in cmdman/tui/internal/core.
+package panel
 
 import (
 	"context"
@@ -12,10 +21,11 @@ import (
 	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
 
-// widgetModel is the restricted single-view model. It shares the Backend, the
+// Model is the restricted single-view model. It shares the Backend, the
 // load commands, and the event subscription with the full model, but renders
-// exactly one widget and handles only the keys that widget needs.
-type widgetModel struct {
+// exactly one widget — the one New was given — and handles only the keys that
+// widget needs.
+type Model struct {
 	backend core.Backend
 	widget  core.Widget
 	version string
@@ -23,8 +33,8 @@ type widgetModel struct {
 	// frame pane runs: an exiting viewer leaves a hole in the fixture.
 	noQuit bool
 
-	// ctx is the program-scoped context used for backend calls, mirroring
-	// Model.ctx; tests that drive Update directly may leave it nil.
+	// ctx is the program-scoped context used for backend calls, as the root
+	// model holds it; tests that drive Update directly may leave it nil.
 	ctx context.Context
 
 	width, height int
@@ -67,19 +77,21 @@ type widgetModel struct {
 	quitting bool
 }
 
-// newWidget constructs the single-widget model from the same options the full
-// model takes.
-func newWidget(opts core.Options) widgetModel {
-	return widgetModel{
+// New constructs the model for widget from the same options the full model
+// takes. The widget is a parameter rather than Options.Widget so each facade
+// package names its own: an Options carrying no widget still builds one.
+func New(ctx context.Context, widget core.Widget, opts core.Options) Model {
+	return Model{
+		ctx:       ctx,
 		backend:   opts.Backend,
-		widget:    opts.Widget,
+		widget:    widget,
 		version:   opts.Version,
 		altScreen: opts.AltScreen,
 		noQuit:    opts.NoQuit,
 	}
 }
 
-func (m widgetModel) bgCtx() context.Context {
+func (m Model) bgCtx() context.Context {
 	if m.ctx != nil {
 		return m.ctx
 	}
@@ -88,7 +100,7 @@ func (m widgetModel) bgCtx() context.Context {
 
 // Init implements tea.Model. Both widgets read the same two listings; only the
 // switcher paints app rows, so only it asks the terminal for its palette.
-func (m widgetModel) Init() tea.Cmd {
+func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		core.ListCommandsCmd(m.bgCtx(), m.backend),
 		core.ListProjectsCmd(m.bgCtx(), m.backend),
@@ -101,7 +113,7 @@ func (m widgetModel) Init() tea.Cmd {
 }
 
 // Update implements tea.Model.
-func (m widgetModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -161,7 +173,7 @@ func (m widgetModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m widgetModel) onEventSignal(msg core.EventSignalMsg) (tea.Model, tea.Cmd) {
+func (m Model) onEventSignal(msg core.EventSignalMsg) (tea.Model, tea.Cmd) {
 	if msg.Closed {
 		m.events = nil
 		return m, nil // subscription ended; stop waiting
@@ -178,7 +190,7 @@ func (m widgetModel) onEventSignal(msg core.EventSignalMsg) (tea.Model, tea.Cmd)
 // that takes the client to a project's window (D6), and the collapse gesture
 // that takes the whole frame down (V8). The switcher is navigate-only — start,
 // stop and kill stay in the full TUI (V6).
-func (m widgetModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c", "ctrl+d":
 		if m.noQuit {
@@ -202,7 +214,7 @@ func (m widgetModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *widgetModel) moveSelection(delta int) {
+func (m *Model) moveSelection(delta int) {
 	if len(m.groups) == 0 {
 		m.selected = 0
 		return
@@ -213,7 +225,7 @@ func (m *widgetModel) moveSelection(delta int) {
 // clickAt selects the group the pointer landed on and switches to it, which is
 // what enter does on that group (D24) — a click is a selection, and a selection
 // is the switch.
-func (m widgetModel) clickAt(y int) (tea.Model, tea.Cmd) {
+func (m Model) clickAt(y int) (tea.Model, tea.Cmd) {
 	if m.widget != core.WidgetSwitcher {
 		return m, nil
 	}
@@ -228,7 +240,7 @@ func (m widgetModel) clickAt(y int) (tea.Model, tea.Cmd) {
 // switchToSelected takes the client to the selected project's window and reads
 // that project's bells: selecting a project through the switcher is what
 // resolves them (D22).
-func (m widgetModel) switchToSelected() (tea.Model, tea.Cmd) {
+func (m Model) switchToSelected() (tea.Model, tea.Cmd) {
 	if m.widget != core.WidgetSwitcher {
 		// Every widget loads the same listings, but only the switcher paints a
 		// cursor over them: elsewhere there is no selection to act on.
@@ -251,7 +263,7 @@ func (m widgetModel) switchToSelected() (tea.Model, tea.Cmd) {
 // onProjectSwitched reports a switch. Success needs no word — the client is
 // looking at the project's window now — so it only clears whatever the last
 // failure left behind.
-func (m widgetModel) onProjectSwitched(msg core.ProjectSwitchedMsg) widgetModel {
+func (m Model) onProjectSwitched(msg core.ProjectSwitchedMsg) Model {
 	m.status = ""
 	if msg.Err != nil {
 		m.status = fmt.Sprintf("switch to %s: %v", msg.Name, msg.Err)
@@ -260,8 +272,8 @@ func (m widgetModel) onProjectSwitched(msg core.ProjectSwitchedMsg) widgetModel 
 }
 
 // readBells marks the group's unread bells read, both in the rows on screen and
-// in the set that survives the next reload (see widgetModel.bellRead).
-func (m widgetModel) readBells(i int) widgetModel {
+// in the set that survives the next reload (see Model.bellRead).
+func (m Model) readBells(i int) Model {
 	if i < 0 || i >= len(m.groups) {
 		return m
 	}
@@ -281,7 +293,7 @@ func (m widgetModel) readBells(i int) widgetModel {
 // applyBellRead re-suppresses the bells an earlier selection resolved and
 // forgets the ones the monitor has since cleared itself, so the acknowledgement
 // covers the bell it was given for and not the next one.
-func (m widgetModel) applyBellRead() widgetModel {
+func (m Model) applyBellRead() Model {
 	if len(m.bellRead) == 0 {
 		return m
 	}
@@ -309,7 +321,7 @@ func groupLabel(g core.ProjectGroup) string {
 
 // rebuild re-joins the two listings into the switcher's groups, keeping the
 // selection on the project it was on across a reload.
-func (m widgetModel) rebuild() widgetModel {
+func (m Model) rebuild() Model {
 	if m.backend != nil {
 		m.cwd = m.backend.Cwd()
 	}
@@ -333,7 +345,7 @@ func (m widgetModel) rebuild() widgetModel {
 // rest at now: a command whose title is unchanged keeps the time it was first
 // seen with it, one that retitled starts a new bucket, and one that vanished
 // drops out with the map it is rebuilt into.
-func (m widgetModel) stampTitles() map[string]titleStamp {
+func (m Model) stampTitles() map[string]titleStamp {
 	now := time.Now
 	if m.now != nil {
 		now = m.now
@@ -353,7 +365,7 @@ func (m widgetModel) stampTitles() map[string]titleStamp {
 	return out
 }
 
-func (m widgetModel) selectedGroup() (core.ProjectGroup, bool) {
+func (m Model) selectedGroup() (core.ProjectGroup, bool) {
 	if m.selected < 0 || m.selected >= len(m.groups) {
 		return core.ProjectGroup{}, false
 	}
@@ -361,7 +373,7 @@ func (m widgetModel) selectedGroup() (core.ProjectGroup, bool) {
 }
 
 // View implements tea.Model.
-func (m widgetModel) View() tea.View {
+func (m Model) View() tea.View {
 	v := tea.NewView(m.viewContent())
 	v.AltScreen = m.altScreen
 	if m.widget == core.WidgetSwitcher {
@@ -375,7 +387,7 @@ func (m widgetModel) View() tea.View {
 // size is the pane the widget draws into, with the fallback a model that has
 // not been told its size yet renders at. Hit-testing measures with the same
 // ruler the render used.
-func (m widgetModel) size() (int, int) {
+func (m Model) size() (int, int) {
 	width, height := m.width, m.height
 	if width <= 0 {
 		width = 80
@@ -386,7 +398,7 @@ func (m widgetModel) size() (int, int) {
 	return width, height
 }
 
-func (m widgetModel) viewContent() string {
+func (m Model) viewContent() string {
 	if m.quitting {
 		return ""
 	}
@@ -399,7 +411,7 @@ func (m widgetModel) viewContent() string {
 
 // deriveWeak recomputes the app-row shade from whatever the terminal has
 // reported so far, so the two answers may arrive in either order.
-func (m widgetModel) deriveWeak() widgetModel {
+func (m Model) deriveWeak() Model {
 	if weak := core.DeriveWeak(m.termFg, m.termBg, m.fgDark); weak != nil {
 		m.weak = weak
 	}
@@ -409,4 +421,4 @@ func (m widgetModel) deriveWeak() widgetModel {
 // weakStyle is the command rows' foreground: the terminal's own letter color
 // pulled toward its background, so a group reads as bright head plus subdued
 // detail on light and dark terminals alike.
-func (m widgetModel) weakStyle() lipgloss.Style { return core.WeakStyle(m.weak) }
+func (m Model) weakStyle() lipgloss.Style { return core.WeakStyle(m.weak) }

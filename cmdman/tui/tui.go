@@ -18,6 +18,8 @@ import (
 
 	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 	"github.com/ngicks/cmdman/cmdman/tui/widget/launcher"
+	"github.com/ngicks/cmdman/cmdman/tui/widget/statusbar"
+	"github.com/ngicks/cmdman/cmdman/tui/widget/switcher"
 )
 
 // Run starts the TUI program and blocks until it exits.
@@ -29,19 +31,20 @@ func Run(ctx context.Context, opts Options) error {
 	return err
 }
 
-// newProgramModel picks the model Run drives: the restricted single-widget
-// model when Options.Widget names one, the full multi-tab model otherwise. The
-// launcher is its own model rather than a third widget branch: its keys are
-// zoned (a bare letter types in the input and acts on a list), so it shares no
-// key handling with the docked widgets.
+// newProgramModel picks the model Run drives: the one the widget package named
+// by Options.Widget builds, the full multi-tab model otherwise. The switcher
+// and the statusbar are two names for one panel model — they share the update
+// loop and differ only in the renderer — while the launcher is a model of its
+// own: its keys are zoned (a bare letter types in the input and acts on a
+// list), so it shares no key handling with the docked widgets.
 func newProgramModel(ctx context.Context, opts Options) tea.Model {
-	if opts.Widget == core.WidgetLauncher {
+	switch opts.Widget {
+	case core.WidgetSwitcher:
+		return switcher.New(ctx, opts)
+	case core.WidgetStatusbar:
+		return statusbar.New(ctx, opts)
+	case core.WidgetLauncher:
 		return launcher.New(ctx, opts)
-	}
-	if opts.Widget != core.WidgetNone {
-		w := newWidget(opts)
-		w.ctx = ctx
-		return w
 	}
 	m := New(opts)
 	m.ctx = ctx

@@ -1,4 +1,4 @@
-package tui
+package panel
 
 import (
 	"fmt"
@@ -18,7 +18,7 @@ import (
 //
 // A statusbar entry carves a one-row pane, so this renders exactly one line —
 // a second line would scroll the pane.
-func (m widgetModel) renderStatusbar(w int) string {
+func (m Model) renderStatusbar(w int) string {
 	left := m.statusbarLeft() + m.statusbarCounts()
 	right := core.BgAccent.Style(core.StyleWidgetBar).Render(m.statusbarVersion() + " ")
 
@@ -31,7 +31,7 @@ func (m widgetModel) renderStatusbar(w int) string {
 }
 
 // statusbarLeft is the project the working directory sits in, with its marker.
-func (m widgetModel) statusbarLeft() string {
+func (m Model) statusbarLeft() string {
 	g, ok := m.activeGroup()
 	if !ok {
 		return core.BgAccent.Style(core.StyleWidgetBar).Render(" no project")
@@ -46,7 +46,7 @@ func (m widgetModel) statusbarLeft() string {
 // count only when there is one. A load or event-stream error takes the slot
 // instead — the bar has one line, and a failure to read the data is more worth
 // saying than a count derived from what did load.
-func (m widgetModel) statusbarCounts() string {
+func (m Model) statusbarCounts() string {
 	if m.status != "" {
 		return core.BgAccent.Style(core.StyleWidgetBar).Render("  " + m.status)
 	}
@@ -68,7 +68,7 @@ func (m widgetModel) statusbarCounts() string {
 	return core.BgAccent.Style(core.StyleWidgetBar).Render(counts)
 }
 
-func (m widgetModel) statusbarVersion() string {
+func (m Model) statusbarVersion() string {
 	if m.version == "" {
 		return "cmdman"
 	}
@@ -77,7 +77,7 @@ func (m widgetModel) statusbarVersion() string {
 
 // activeGroup returns the project tied to the working directory. The groups are
 // sorted active-first, so it is the head of the list when one is active.
-func (m widgetModel) activeGroup() (core.ProjectGroup, bool) {
+func (m Model) activeGroup() (core.ProjectGroup, bool) {
 	for _, g := range m.groups {
 		if g.Active {
 			return g, true
