@@ -246,7 +246,7 @@ func (c *commandsTab) visibleRows() []visRow {
 	filtering := c.filter != ""
 	for gi := range c.groups {
 		g := &c.groups[gi]
-		projMatch := filtering && matchesFilter(c.filter, g.Name)
+		projMatch := filtering && core.MatchesFilter(c.filter, g.Name)
 		var matched []int
 		for ci := range g.Commands {
 			if !filtering || projMatch || commandMatches(c.filter, g.Commands[ci]) {

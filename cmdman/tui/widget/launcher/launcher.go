@@ -1,4 +1,11 @@
-package tui
+// Package launcher implements the launcher widget: the popup-summoned two-pane
+// selector over the merged history / project / running-window list (D7, D28).
+//
+// It is its own package rather than a branch of the root model because its keys
+// are zoned — a bare letter types in the input and acts on a list — so it shares
+// no key handling with the docked widgets. Everything it shares with them lives
+// in cmdman/tui/internal/core.
+package launcher
 
 import (
 	"context"
@@ -26,16 +33,16 @@ const (
 	zoneRight
 )
 
-// launcherProject is a LaunchProject plus the launcher's own per-row state.
+// launcherProject is a core.LaunchProject plus the launcher's own per-row state.
 type launcherProject struct {
-	LaunchProject
+	core.LaunchProject
 	enabled  bool
 	starting bool
 }
 
-// launcherLocation is a LaunchLocation whose projects carry launcher state.
+// launcherLocation is a core.LaunchLocation whose projects carry launcher state.
 type launcherLocation struct {
-	LaunchLocation
+	core.LaunchLocation
 	projects []launcherProject
 }
 
@@ -72,7 +79,7 @@ func (l launcherLocation) marker() launcherMarker {
 // newLauncherLocations wraps the backend listing in the launcher's own row
 // state. History projects arrive enabled, so the everyday case really is
 // "summon, s" (D28).
-func newLauncherLocations(locs []LaunchLocation) []launcherLocation {
+func newLauncherLocations(locs []core.LaunchLocation) []launcherLocation {
 	out := make([]launcherLocation, 0, len(locs))
 	for _, l := range locs {
 		ll := launcherLocation{
@@ -90,13 +97,15 @@ func newLauncherLocations(locs []LaunchLocation) []launcherLocation {
 	return out
 }
 
-// launcherModel is the launcher widget: the popup-summoned two-pane selector
-// over the merged history / project / running-window list (D7, D28).
-type launcherModel struct {
+// Model is the launcher widget: the popup-summoned two-pane selector over the
+// merged history / project / running-window list (D7, D28). It is the whole
+// program when Options.Widget names the launcher, not a view inside another.
+type Model struct {
 	backend core.Backend
 
-	// ctx is the program-scoped context used for backend calls, mirroring
-	// Model.ctx; tests that drive Update directly may leave it nil.
+	// ctx is the program-scoped context used for backend calls. A bubbletea
+	// Update takes no context of its own, so the one New was given is held here;
+	// a zero-value Model built by a test has none and bgCtx covers that.
 	ctx context.Context
 
 	width, height int
@@ -134,10 +143,12 @@ type launcherModel struct {
 	quitting bool
 }
 
-// newLauncher constructs the launcher model from the same options every other
-// TUI mode takes.
-func newLauncher(opts core.Options) launcherModel {
-	return launcherModel{
+// New constructs the launcher model from the same options every other TUI mode
+// takes. ctx is the program's, and is what the backend calls the model issues
+// are made under.
+func New(ctx context.Context, opts core.Options) Model {
+	return Model{
+		ctx:       ctx,
 		backend:   opts.Backend,
 		altScreen: opts.AltScreen,
 		noQuit:    opts.NoQuit,
@@ -147,7 +158,7 @@ func newLauncher(opts core.Options) launcherModel {
 }
 
 // quit ends the run, unless --no-quit took the gesture away (V6).
-func (m launcherModel) quit() (tea.Model, tea.Cmd) {
+func (m Model) quit() (tea.Model, tea.Cmd) {
 	if m.noQuit {
 		return m, nil
 	}
@@ -155,7 +166,7 @@ func (m launcherModel) quit() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-func (m launcherModel) bgCtx() context.Context {
+func (m Model) bgCtx() context.Context {
 	if m.ctx != nil {
 		return m.ctx
 	}
@@ -165,7 +176,7 @@ func (m launcherModel) bgCtx() context.Context {
 // Init implements tea.Model. The listing is taken once at open: git info costs
 // an exec per entry (D41), and a branch that changes while the launcher is up is
 // acceptable to miss.
-func (m launcherModel) Init() tea.Cmd {
+func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		listLaunchTargetsCmd(m.bgCtx(), m.backend),
 		tea.RequestForegroundColor,
@@ -174,7 +185,7 @@ func (m launcherModel) Init() tea.Cmd {
 }
 
 // Update implements tea.Model.
-func (m launcherModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -210,7 +221,7 @@ func (m launcherModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m launcherModel) onTargetsLoaded(msg launchTargetsLoadedMsg) launcherModel {
+func (m Model) onTargetsLoaded(msg launchTargetsLoadedMsg) Model {
 	m.loaded = true
 	if msg.err != nil {
 		m.note = fmt.Sprintf("list error: %v", msg.err)
@@ -222,7 +233,7 @@ func (m launcherModel) onTargetsLoaded(msg launchTargetsLoadedMsg) launcherModel
 
 // onStarted promotes a finished bring-up: the spinner stops and the row becomes
 // running, or the failure is spelled out where the row is (D10).
-func (m launcherModel) onStarted(msg launcherStartedMsg) launcherModel {
+func (m Model) onStarted(msg launcherStartedMsg) Model {
 	li, pi, ok := m.find(msg.target)
 	if !ok {
 		return m
@@ -238,7 +249,7 @@ func (m launcherModel) onStarted(msg launcherStartedMsg) launcherModel {
 // onLanded reports a launch+focus. A landing that worked leaves nothing to look
 // at, so the launcher dismisses (D10) — except for the two outcomes that still
 // have something to do: a warning to read (D9) or a terminal to hand over (D8).
-func (m launcherModel) onLanded(msg launcherLandedMsg) (tea.Model, tea.Cmd) {
+func (m Model) onLanded(msg launcherLandedMsg) (tea.Model, tea.Cmd) {
 	li, pi, ok := m.find(msg.target)
 	if ok {
 		m.locs[li].projects[pi].starting = false
@@ -274,7 +285,7 @@ func (m launcherModel) onLanded(msg launcherLandedMsg) (tea.Model, tea.Cmd) {
 // onAttached closes the launcher after the terminal comes back from the
 // multiplexer: the landing is over either way, and a failed handoff is worth
 // saying out loud rather than dismissing into.
-func (m launcherModel) onAttached(msg launcherAttachedMsg) (tea.Model, tea.Cmd) {
+func (m Model) onAttached(msg launcherAttachedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		m.note = fmt.Sprintf("attach: %v", msg.err)
 		return m, tea.ClearScreen
@@ -283,7 +294,7 @@ func (m launcherModel) onAttached(msg launcherAttachedMsg) (tea.Model, tea.Cmd) 
 	return m, tea.Quit
 }
 
-func (m launcherModel) onForgot(msg launcherForgotMsg) launcherModel {
+func (m Model) onForgot(msg launcherForgotMsg) Model {
 	li, pi, ok := m.find(msg.target)
 	if !ok {
 		return m
@@ -299,7 +310,7 @@ func (m launcherModel) onForgot(msg launcherForgotMsg) launcherModel {
 
 // fail puts an error where its row is and moves the cursor onto it: an error the
 // user cannot see is an error they cannot act on.
-func (m launcherModel) fail(li, pi int, err error) launcherModel {
+func (m Model) fail(li, pi int, err error) Model {
 	m.failedLoc, m.failedPrj, m.failedMsg = li, pi, err.Error()
 	if cur, ok := m.currentLoc(); ok && cur == li {
 		m.focus, m.rightSel = zoneRight, pi
@@ -311,7 +322,7 @@ func (m launcherModel) fail(li, pi int, err error) launcherModel {
 // find locates the row an async result belongs to. Results are matched by
 // identity rather than by index because the list can be edited (a stale entry
 // dropped) while a bring-up is in flight.
-func (m launcherModel) find(t LaunchTarget) (li, pi int, ok bool) {
+func (m Model) find(t core.LaunchTarget) (li, pi int, ok bool) {
 	for i := range m.locs {
 		if m.locs[i].Dir != t.WorkDir {
 			continue
@@ -327,7 +338,7 @@ func (m launcherModel) find(t LaunchTarget) (li, pi int, ok bool) {
 
 // --- keys -------------------------------------------------------------------
 
-func (m launcherModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.note = ""
 	switch msg.String() {
 	case "ctrl+c":
@@ -387,7 +398,7 @@ func (m launcherModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // text applies a printable key. This is what the three zones buy (D28 amended):
 // in the input every key is text, on a list every key is a command, and no key
 // has to guess which was meant.
-func (m launcherModel) text(t string) (tea.Model, tea.Cmd) {
+func (m Model) text(t string) (tea.Model, tea.Cmd) {
 	if t == "" {
 		return m, nil
 	}
@@ -419,7 +430,7 @@ func (m launcherModel) text(t string) (tea.Model, tea.Cmd) {
 
 // complete extends the input to the common path prefix of what it matches — tab
 // in a path picker should move you down the tree, never widen the search.
-func (m launcherModel) complete() launcherModel {
+func (m Model) complete() Model {
 	f := m.matched()
 	if len(f) == 0 {
 		return m
@@ -441,7 +452,7 @@ func (m launcherModel) complete() launcherModel {
 
 // matched lists the locations the input selects: history only while the input is
 // empty (D28's opening state), every matching location once the user types.
-func (m launcherModel) matched() []int {
+func (m Model) matched() []int {
 	out := make([]int, 0, len(m.locs))
 	for i, l := range m.locs {
 		if m.filter == "" {
@@ -458,7 +469,7 @@ func (m launcherModel) matched() []int {
 }
 
 // currentLoc is the location under the left cursor.
-func (m launcherModel) currentLoc() (int, bool) {
+func (m Model) currentLoc() (int, bool) {
 	f := m.matched()
 	if m.leftSel < 0 || m.leftSel >= len(f) {
 		return 0, false
@@ -467,7 +478,7 @@ func (m launcherModel) currentLoc() (int, bool) {
 }
 
 // currentPrj is the project under the right cursor.
-func (m launcherModel) currentPrj() (li, pi int, ok bool) {
+func (m Model) currentPrj() (li, pi int, ok bool) {
 	li, ok = m.currentLoc()
 	if !ok || m.rightSel < 0 || m.rightSel >= len(m.locs[li].projects) {
 		return 0, 0, false
@@ -478,7 +489,7 @@ func (m launcherModel) currentPrj() (li, pi int, ok bool) {
 // move drives the focused list. Arrows and ctrl+p/n work from the input zone too
 // and steer the left list there, the fzf reflex: you type, you arrow down to the
 // row you meant, without leaving the query.
-func (m launcherModel) move(d int) launcherModel {
+func (m Model) move(d int) Model {
 	if m.focus == zoneRight {
 		li, ok := m.currentLoc()
 		if !ok || len(m.locs[li].projects) == 0 {
@@ -498,7 +509,7 @@ func (m launcherModel) move(d int) launcherModel {
 	return m.clampLeft()
 }
 
-func (m launcherModel) clampLeft() launcherModel {
+func (m Model) clampLeft() Model {
 	f := m.matched()
 	if m.leftSel >= len(f) {
 		m.leftSel = max(len(f)-1, 0)
@@ -511,7 +522,7 @@ func (m launcherModel) clampLeft() launcherModel {
 	return m.clampRight()
 }
 
-func (m launcherModel) clampRight() launcherModel {
+func (m Model) clampRight() Model {
 	li, ok := m.currentLoc()
 	if !ok {
 		m.rightSel, m.rightOff = 0, 0
@@ -527,7 +538,7 @@ func (m launcherModel) clampRight() launcherModel {
 
 // rightCost is each right-pane row's line count: the row whose failure is spelled
 // out spends a second line on the message under it.
-func (m launcherModel) rightCost(li int) []int {
+func (m Model) rightCost(li int) []int {
 	cost := make([]int, len(m.locs[li].projects))
 	for i := range cost {
 		cost[i] = 1
@@ -540,7 +551,7 @@ func (m launcherModel) rightCost(li int) []int {
 
 // --- actions ----------------------------------------------------------------
 
-func (m launcherModel) toggle() launcherModel {
+func (m Model) toggle() Model {
 	li, pi, ok := m.currentPrj()
 	if !ok {
 		return m
@@ -560,7 +571,7 @@ func (m launcherModel) toggle() launcherModel {
 // the rest of the batch still starts: dropping the whole batch on the first
 // problem would leave the rows already marked starting spinning against no
 // bring-up at all, since the marks and the commands are made in one pass.
-func (m launcherModel) startEnabled() (tea.Model, tea.Cmd) {
+func (m Model) startEnabled() (tea.Model, tea.Cmd) {
 	li, ok := m.currentLoc()
 	if !ok {
 		return m, nil
@@ -613,7 +624,7 @@ func (m launcherModel) startEnabled() (tea.Model, tea.Cmd) {
 // its window. A compose file that no longer resolves cannot land at all, so the
 // error stays in the launcher and offers removal instead of failing cryptically
 // (D10).
-func (m launcherModel) launchSelected() (tea.Model, tea.Cmd) {
+func (m Model) launchSelected() (tea.Model, tea.Cmd) {
 	li, ok := m.currentLoc()
 	if !ok {
 		return m, nil
@@ -637,7 +648,7 @@ func (m launcherModel) launchSelected() (tea.Model, tea.Cmd) {
 
 // pickProject is what `S` acts on: the project under the right cursor when that
 // pane has focus, otherwise the location's first enabled one.
-func (m launcherModel) pickProject(li int) int {
+func (m Model) pickProject(li int) int {
 	ps := m.locs[li].projects
 	if len(ps) == 0 {
 		return -1
@@ -656,7 +667,7 @@ func (m launcherModel) pickProject(li int) int {
 // drop removes a stale history entry, the offer D10 makes when resolution fails.
 // History is never dropped silently, only on request, and only for the row that
 // actually cannot be resolved.
-func (m launcherModel) drop() (tea.Model, tea.Cmd) {
+func (m Model) drop() (tea.Model, tea.Cmd) {
 	li, pi, ok := m.currentPrj()
 	if !ok || !m.locs[li].projects[pi].Missing {
 		return m, nil
@@ -664,8 +675,8 @@ func (m launcherModel) drop() (tea.Model, tea.Cmd) {
 	return m, forgetTargetCmd(m.bgCtx(), m.backend, m.target(li, pi))
 }
 
-func (m launcherModel) target(li, pi int) LaunchTarget {
-	return LaunchTarget{
+func (m Model) target(li, pi int) core.LaunchTarget {
+	return core.LaunchTarget{
 		WorkDir: m.locs[li].Dir,
 		Project: m.locs[li].projects[pi].Name,
 		File:    m.locs[li].projects[pi].File,
@@ -685,7 +696,7 @@ func launcherTickCmd() tea.Cmd {
 
 // startTicking arms the animation loop, unless one is already in flight — a
 // second `s` elsewhere must not leave two loops ticking against each other.
-func (m launcherModel) startTicking() (launcherModel, tea.Cmd) {
+func (m Model) startTicking() (Model, tea.Cmd) {
 	if m.ticking {
 		return m, nil
 	}
@@ -695,7 +706,7 @@ func (m launcherModel) startTicking() (launcherModel, tea.Cmd) {
 
 // tick advances the spinner. It re-arms only while something is still starting,
 // so an idle launcher costs nothing.
-func (m launcherModel) tick() (tea.Model, tea.Cmd) {
+func (m Model) tick() (tea.Model, tea.Cmd) {
 	m.spin++
 	if !m.anyStarting() {
 		m.ticking = false
@@ -704,7 +715,7 @@ func (m launcherModel) tick() (tea.Model, tea.Cmd) {
 	return m, launcherTickCmd()
 }
 
-func (m launcherModel) anyStarting() bool {
+func (m Model) anyStarting() bool {
 	for i := range m.locs {
 		for _, p := range m.locs[i].projects {
 			if p.starting {
@@ -728,12 +739,12 @@ func matchLaunchLocation(filter string, l launcherLocation) (string, bool) {
 		{"repo", l.RepoName},
 		{"path", l.Dir},
 	} {
-		if f.value != "" && matchesFilter(filter, f.value) {
+		if f.value != "" && core.MatchesFilter(filter, f.value) {
 			return f.name, true
 		}
 	}
 	for _, p := range l.projects {
-		if matchesFilter(filter, p.Name) {
+		if core.MatchesFilter(filter, p.Name) {
 			return "project", true
 		}
 	}

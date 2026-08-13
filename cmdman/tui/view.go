@@ -674,32 +674,13 @@ func overlay(box string, width, height int) string {
 		b.WriteByte('\n')
 	}
 	for i, l := range boxLines {
-		lw := runewidth.StringWidth(stripANSI(l))
+		lw := runewidth.StringWidth(core.StripANSI(l))
 		left := max((width-lw)/2, 0)
 		b.WriteString(strings.Repeat(" ", left))
 		b.WriteString(l)
 		if i < len(boxLines)-1 {
 			b.WriteByte('\n')
 		}
-	}
-	return b.String()
-}
-
-func stripANSI(s string) string {
-	var b strings.Builder
-	inEsc := false
-	for _, r := range s {
-		if r == '\x1b' {
-			inEsc = true
-			continue
-		}
-		if inEsc {
-			if r == 'm' {
-				inEsc = false
-			}
-			continue
-		}
-		b.WriteRune(r)
 	}
 	return b.String()
 }

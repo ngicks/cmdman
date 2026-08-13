@@ -17,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
+	"github.com/ngicks/cmdman/cmdman/tui/widget/launcher"
 )
 
 // Run starts the TUI program and blocks until it exits.
@@ -35,9 +36,7 @@ func Run(ctx context.Context, opts Options) error {
 // key handling with the docked widgets.
 func newProgramModel(ctx context.Context, opts Options) tea.Model {
 	if opts.Widget == core.WidgetLauncher {
-		l := newLauncher(opts)
-		l.ctx = ctx
-		return l
+		return launcher.New(ctx, opts)
 	}
 	if opts.Widget != core.WidgetNone {
 		w := newWidget(opts)

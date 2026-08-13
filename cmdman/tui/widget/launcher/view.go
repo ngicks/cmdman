@@ -1,4 +1,4 @@
-package tui
+package launcher
 
 import (
 	"fmt"
@@ -87,14 +87,14 @@ func (mk launcherMarker) render(frame int, bg core.RowBg) string {
 }
 
 // View implements tea.Model.
-func (m launcherModel) View() tea.View {
+func (m Model) View() tea.View {
 	v := tea.NewView(m.viewContent())
 	v.AltScreen = m.altScreen
 	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 
-func (m launcherModel) viewContent() string {
+func (m Model) viewContent() string {
 	if m.quitting || m.width == 0 || m.height == 0 {
 		return ""
 	}
@@ -125,7 +125,7 @@ func (p launcherPane) at(x, y int) (int, bool) {
 
 // clickAt moves the left cursor or toggles a project, whichever pane was hit,
 // and focuses that pane so the keyboard carries on from where you clicked (D31).
-func (m launcherModel) clickAt(x, y int) launcherModel {
+func (m Model) clickAt(x, y int) Model {
 	if y == 0 {
 		// Clicking the text area puts the keyboard back in it.
 		m.focus = zoneInput
@@ -151,7 +151,7 @@ const launcherWheelStep = 3
 
 // wheel scrolls the pane the pointer is over, cursor unmoved — scrolling away
 // from the cursor is what a wheel is for (D31).
-func (m launcherModel) wheel(msg tea.MouseWheelMsg) launcherModel {
+func (m Model) wheel(msg tea.MouseWheelMsg) Model {
 	d := launcherWheelStep
 	switch msg.Button {
 	case tea.MouseWheelUp:
@@ -174,11 +174,11 @@ func (m launcherModel) wheel(msg tea.MouseWheelMsg) launcherModel {
 	return m
 }
 
-func (m launcherModel) budget() int {
+func (m Model) budget() int {
 	return max(m.height-launcherPaneTop-launcherGapLines-len(m.footerLines()), 1)
 }
 
-func (m launcherModel) widths() (leftW, rightW int) {
+func (m Model) widths() (leftW, rightW int) {
 	leftW = max(m.width*launcherLeftPct/100, 1)
 	if m.width >= 24 {
 		leftW = min(max(leftW, 12), m.width-12)
@@ -187,7 +187,7 @@ func (m launcherModel) widths() (leftW, rightW int) {
 }
 
 // screen renders the whole window edge to edge and reports both panes' row maps.
-func (m launcherModel) screen() (out string, left, right launcherPane) {
+func (m Model) screen() (out string, left, right launcherPane) {
 	leftW, rightW := m.widths()
 	f := m.matched()
 	scope := "history"
@@ -229,7 +229,7 @@ func (m launcherModel) screen() (out string, left, right launcherPane) {
 // inputLine is the text area. Its focus has to be legible at a glance, since
 // whether a letter types or acts depends on it: focused, the prompt is lit and
 // carries a cursor block; unfocused, both go dim and the block is gone.
-func (m launcherModel) inputLine(scope string) string {
+func (m Model) inputLine(scope string) string {
 	if m.focus != zoneInput {
 		text := m.filter
 		if text == "" {
@@ -241,7 +241,7 @@ func (m launcherModel) inputLine(scope string) string {
 		core.StyleActive.Render("   "+scope)
 }
 
-func (m launcherModel) paneHead(s string, w int, focused bool) string {
+func (m Model) paneHead(s string, w int, focused bool) string {
 	st := core.StyleActive
 	if focused {
 		st = styleLauncherPrompt
@@ -249,7 +249,7 @@ func (m launcherModel) paneHead(s string, w int, focused bool) string {
 	return core.PadLine(st.Render(" "+s), w, core.BgNone)
 }
 
-func (m launcherModel) rightTitle() string {
+func (m Model) rightTitle() string {
 	li, ok := m.currentLoc()
 	if !ok {
 		return "projects"
@@ -259,7 +259,7 @@ func (m launcherModel) rightTitle() string {
 
 // leftPane draws the locations: marker, git-aware label, and as much of the path
 // as the column can spare.
-func (m launcherModel) leftPane(w int, f []int) ([]string, launcherPane) {
+func (m Model) leftPane(w int, f []int) ([]string, launcherPane) {
 	var (
 		out []string
 		pm  launcherPane
@@ -311,7 +311,7 @@ func (m launcherModel) leftPane(w int, f []int) ([]string, launcherPane) {
 
 // rightPane draws the projects at the selected location: a toggle box, the
 // running marker, the project name and the compose file it comes from.
-func (m launcherModel) rightPane(w int) ([]string, launcherPane) {
+func (m Model) rightPane(w int) ([]string, launcherPane) {
 	var (
 		out []string
 		pm  launcherPane
@@ -381,7 +381,7 @@ func (m launcherModel) rightPane(w int) ([]string, launcherPane) {
 // failureText is the inline error line: the reason, plus the removal offer only
 // for the entry whose file is gone — ctrl+d drops a history row, and a compose
 // file that merely fails to parse is not one to forget.
-func (m launcherModel) failureText(p launcherProject) string {
+func (m Model) failureText(p launcherProject) string {
 	text := m.failedMsg
 	if text == "" {
 		text = p.Problem
@@ -392,7 +392,7 @@ func (m launcherModel) failureText(p launcherProject) string {
 	return text
 }
 
-func (m launcherModel) footerLines() []string {
+func (m Model) footerLines() []string {
 	var full string
 	switch m.focus {
 	case zoneInput:
@@ -456,11 +456,11 @@ func abbrevHome(p, home string) string {
 
 // deriveWeak recomputes the toggle-box shade from whatever the terminal has
 // reported so far, so the two answers may arrive in either order (D26).
-func (m launcherModel) deriveWeak() launcherModel {
+func (m Model) deriveWeak() Model {
 	if weak := core.DeriveWeak(m.termFg, m.termBg, m.fgDark); weak != nil {
 		m.weak = weak
 	}
 	return m
 }
 
-func (m launcherModel) weakStyle() lipgloss.Style { return core.WeakStyle(m.weak) }
+func (m Model) weakStyle() lipgloss.Style { return core.WeakStyle(m.weak) }

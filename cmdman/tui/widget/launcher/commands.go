@@ -1,4 +1,4 @@
-package tui
+package launcher
 
 import (
 	"context"
@@ -10,13 +10,13 @@ import (
 
 // launchTargetsLoadedMsg carries the result of the launcher's one listing.
 type launchTargetsLoadedMsg struct {
-	locs []LaunchLocation
+	locs []core.LaunchLocation
 	err  error
 }
 
 // launcherStartedMsg reports a background bring-up (`s`) reaching its end.
 type launcherStartedMsg struct {
-	target LaunchTarget
+	target core.LaunchTarget
 	err    error
 }
 
@@ -24,8 +24,8 @@ type launcherStartedMsg struct {
 // means the caller is looking at the project; outcome carries the two endings
 // that still need the launcher (D9's warning, D8's attach handoff).
 type launcherLandedMsg struct {
-	target  LaunchTarget
-	outcome LaunchOutcome
+	target  core.LaunchTarget
+	outcome core.LaunchOutcome
 	err     error
 }
 
@@ -36,7 +36,7 @@ type launcherAttachedMsg struct {
 
 // launcherForgotMsg reports the removal of a stale history entry.
 type launcherForgotMsg struct {
-	target LaunchTarget
+	target core.LaunchTarget
 	err    error
 }
 
@@ -47,13 +47,13 @@ func listLaunchTargetsCmd(ctx context.Context, backend core.Backend) tea.Cmd {
 	}
 }
 
-func startProjectCmd(ctx context.Context, backend core.Backend, target LaunchTarget) tea.Cmd {
+func startProjectCmd(ctx context.Context, backend core.Backend, target core.LaunchTarget) tea.Cmd {
 	return func() tea.Msg {
 		return launcherStartedMsg{target: target, err: backend.StartProject(ctx, target)}
 	}
 }
 
-func launchProjectCmd(ctx context.Context, backend core.Backend, target LaunchTarget) tea.Cmd {
+func launchProjectCmd(ctx context.Context, backend core.Backend, target core.LaunchTarget) tea.Cmd {
 	return func() tea.Msg {
 		outcome, err := backend.LaunchProject(ctx, target)
 		return launcherLandedMsg{target: target, outcome: outcome, err: err}
@@ -71,7 +71,7 @@ func attachCmd(argv []string) tea.Cmd {
 	})
 }
 
-func forgetTargetCmd(ctx context.Context, backend core.Backend, target LaunchTarget) tea.Cmd {
+func forgetTargetCmd(ctx context.Context, backend core.Backend, target core.LaunchTarget) tea.Cmd {
 	return func() tea.Msg {
 		return launcherForgotMsg{target: target, err: backend.ForgetLaunchTarget(ctx, target)}
 	}

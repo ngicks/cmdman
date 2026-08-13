@@ -184,6 +184,28 @@ func PadLine(line string, w int, bg RowBg) string {
 	return line
 }
 
+// StripANSI drops SGR escape sequences so a rendered line can be measured or
+// searched as plain text. It handles exactly the escapes this TUI emits — CSI
+// sequences ending in 'm' — rather than the whole ANSI grammar.
+func StripANSI(s string) string {
+	var b strings.Builder
+	inEsc := false
+	for _, r := range s {
+		if r == '\x1b' {
+			inEsc = true
+			continue
+		}
+		if inEsc {
+			if r == 'm' {
+				inEsc = false
+			}
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 // WeakRatio is how far the app rows travel from the letter color toward the
 // background. Much past this they stop being readable on low-contrast themes.
 const WeakRatio = 0.55

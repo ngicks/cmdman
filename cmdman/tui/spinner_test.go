@@ -38,7 +38,7 @@ func TestStatusGlyphMatchesComposeMarkers(t *testing.T) {
 
 func TestCommandRowShowsStatusMarker(t *testing.T) {
 	m := seed()
-	out := stripANSI(m.renderCommandList("Commands", 44, 12))
+	out := core.StripANSI(m.renderCommandList("Commands", 44, 12))
 	if !strings.Contains(out, "● watcher") {
 		t.Fatalf("running command should show the ● marker left of its name:\n%s", out)
 	}

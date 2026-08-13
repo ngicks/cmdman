@@ -318,8 +318,12 @@ func (s *FakeEventStream) Close() error {
 // Kr is a single-rune key press.
 func Kr(s string) tea.KeyMsg { return tea.KeyPressMsg{Code: []rune(s)[0], Text: s} }
 
-// KEnter is the enter key press.
-var KEnter = tea.KeyPressMsg{Code: tea.KeyEnter}
+// The named key presses a driven model is fed.
+var (
+	KEnter = tea.KeyPressMsg{Code: tea.KeyEnter}
+	KEsc   = tea.KeyPressMsg{Code: tea.KeyEscape}
+	KTab   = tea.KeyPressMsg{Code: tea.KeyTab}
+)
 
 // MsgIsQuit reports whether a command's message is bubbletea's quit.
 func MsgIsQuit(msg tea.Msg) bool {
