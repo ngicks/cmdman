@@ -409,7 +409,10 @@ func (m Model) fail(li, pi int, err error) Model {
 	m.failedLoc, m.failedPrj, m.failedMsg = li, pi, err.Error()
 	if cur, ok := m.currentLoc(); ok && cur == li {
 		m.focus, m.rightSel = zoneRight, pi
-		return m.clampRight()
+		// This is the one focus change a reply can make on its own, so it is the
+		// one that can strand the suggestion list outside the input zone it
+		// belongs to — a list nothing on the right pane's keys would dismiss (D43).
+		return m.closeMenu().clampLeft()
 	}
 	return m
 }
@@ -444,10 +447,11 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// clear the query → dismiss. Clearing comes before quitting so a long path
 		// typed by mistake costs one key, not the whole popup (D31).
 		switch {
-		case m.menuOpen():
+		case m.focus == zoneInput && m.menuOpen():
 			// The list is a proposal, so esc takes back what cycling put in the
 			// input rather than stepping a zone: a candidate tried and rejected must
-			// not cost the query it was tried against (D43).
+			// not cost the query it was tried against (D43). Zoned like tab: the list
+			// is the input's, so on a list esc steps a zone as it always did.
 			m.filter = m.menu.base
 			m = m.closeMenu().clampLeft()
 		case m.focus == zoneRight:
@@ -483,10 +487,11 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		switch {
-		case m.cycling():
+		case m.focus == zoneInput && m.cycling():
 			// The insertion is what this enter accepts; the zone step is the next
 			// one, so settling on a candidate cannot overshoot into the list (D43).
-			m = m.closeMenu()
+			// Zoned like tab: on a list enter is the step into the next pane.
+			m = m.closeMenu().clampLeft()
 		case m.focus == zoneInput:
 			m.focus = zoneLeft
 			// The list is an input-zone affordance and tab is an input-zone key:

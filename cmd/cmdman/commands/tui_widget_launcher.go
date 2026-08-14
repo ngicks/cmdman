@@ -17,11 +17,14 @@ func tuiWidgetLauncherCmd(parent *cobra.Command, rf *rootFlags, noQuit *bool) {
 The left pane lists target locations — the directories you have brought projects
 up in, most recent first, plus everything the filter reaches; the right pane
 lists the compose projects at the location under the cursor, toggled on or off.
-Type to filter, tab completes the path, enter steps input -> locations ->
-projects, esc walks back and then dismisses. On a list, s starts the enabled
-projects and S launches and lands in one; in the input every key is text, so
-ctrl+c is the dismissal that works from anywhere (unless --no-quit took the
-quit keys away).
+Type to filter; tab completes the path over the locations and the directories on
+disk, and lists the candidates it cannot choose between — tab and shift+tab then
+put them in the input one at a time and enter accepts the one it stands on.
+Otherwise enter steps input -> locations -> projects, and esc drops the list —
+taking back whatever it put in the input — before it walks the zones back and
+dismisses. On a list, s starts the enabled projects and S launches and lands in
+one; in the input every key is text, so ctrl+c is the dismissal that works from
+anywhere (unless --no-quit took the quit keys away).
 
 The selector fills its window, so the popup framing belongs to the multiplexer.
 Bind it as a tmux popup to summon it from anywhere:

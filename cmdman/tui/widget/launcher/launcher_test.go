@@ -744,9 +744,8 @@ func TestLauncherKeepsTheHomeSpelling(t *testing.T) {
 // the shift modifier, which is what bubbletea spells "shift+tab".
 var kShiftTab = tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
 
-// menuFixture is a directory of siblings tab cannot choose between, with the
-// launcher parked on the ambiguous prefix — one tab away from the menu.
-func menuFixture(t *testing.T, names ...string) (string, Model) {
+// menuDirs makes a fresh root holding the siblings tab cannot choose between.
+func menuDirs(t *testing.T, names ...string) string {
 	t.Helper()
 	root := t.TempDir()
 	for _, n := range names {
@@ -754,8 +753,44 @@ func menuFixture(t *testing.T, names ...string) (string, Model) {
 			t.Fatalf("mkdir %s: %v", n, err)
 		}
 	}
+	return root
+}
+
+// menuFixture is a directory of siblings tab cannot choose between, with the
+// launcher parked on the ambiguous prefix — one tab away from the menu.
+func menuFixture(t *testing.T, names ...string) (string, Model) {
+	t.Helper()
+	root := menuDirs(t, names...)
 	m, _ := seedLauncher(t, 100, 20)
 	return root, typeInto(t, m, root+"/")
+}
+
+// seedLauncherAt lists locations at the directories a test made itself, so a
+// path typed at their root reaches rows the panes can really draw. The
+// suggestion list only ever opens over a typed path, and the listing the other
+// tests share lives somewhere that path can never name.
+func seedLauncherAt(
+	t *testing.T, width, height int, dirs ...string,
+) (Model, *coretest.FakeBackend) {
+	t.Helper()
+	locs := make([]core.LaunchLocation, 0, len(dirs))
+	for i, d := range dirs {
+		name := filepath.Base(d)
+		locs = append(locs, core.LaunchLocation{
+			Dir: d, RepoName: name, Branch: "main",
+			LastUsed: time.Now().Add(-time.Duration(i) * time.Hour), FromHistory: true,
+			Projects: []core.LaunchProject{
+				{Name: name, File: "compose.yaml", FromHistory: true, HasMux: true},
+			},
+		})
+	}
+	fb := &coretest.FakeBackend{LaunchLocs: locs}
+	m := New(
+		context.Background(),
+		core.Options{Backend: fb, Widget: core.WidgetLauncher, Version: "v0.0.0-test"},
+	)
+	m = updLauncher(t, m, tea.WindowSizeMsg{Width: width, Height: height})
+	return updLauncher(t, m, launchTargetsLoadedMsg{locs: fb.LaunchLocs}), fb
 }
 
 // TestLauncherCompletionMenuLists covers D43's list: a tab that extends as far
@@ -902,10 +937,10 @@ func TestLauncherCompletionMenuCycles(t *testing.T) {
 	}
 }
 
-// TestLauncherCompletionMenuDismissal covers D43's three ways out: esc takes the
+// TestLauncherCompletionMenuDismissal covers D43's four ways out: esc takes the
 // insertion back and is spent doing it, enter accepts where it stands without
-// spending the zone step too, and editing keeps the insertion while dropping the
-// list.
+// spending the zone step too, editing keeps the insertion while dropping the
+// list, and ctrl+u erases the query the list was computed for, list included.
 func TestLauncherCompletionMenuDismissal(t *testing.T) {
 	root, m := menuFixture(t, "alpha", "beta")
 	m = updLauncher(t, m, coretest.KTab)
@@ -937,6 +972,16 @@ func TestLauncherCompletionMenuDismissal(t *testing.T) {
 	back := updLauncher(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
 	if back.menuOpen() || back.filter != root+"/alpha" {
 		t.Errorf("backspace = %q, want the insertion edited and the list gone", back.filter)
+	}
+
+	erased := updLauncher(t, m, tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	if erased.menuOpen() || erased.filter != "" || erased.focus != zoneInput {
+		t.Errorf("ctrl+u = %q / zone %d with the list %v, want the query and the list gone",
+			erased.filter, erased.focus, erased.menu.labels)
+	}
+	if got := erased.paneTop(); got != launcherPaneTop {
+		t.Errorf("the panes start at %d after ctrl+u, want the list's rows back at %d",
+			got, launcherPaneTop)
 	}
 }
 
@@ -991,6 +1036,132 @@ func TestLauncherCompletionMenuResolvesTheInsertion(t *testing.T) {
 	}
 	if got := leftLabels(m); len(got) != 1 || got[0] != "alpha(main)" {
 		t.Errorf("the chosen directory should be selectable, got %v", got)
+	}
+}
+
+// TestLauncherCompletionMenuBeforeAChoice covers the list as it opens, with
+// nothing in the input yet to accept: enter is the zone step it has always been
+// and takes the list with it, shift+tab starts at the end of the candidates
+// rather than nowhere, and the footer offers an acceptance only once there is
+// something to accept (D43).
+func TestLauncherCompletionMenuBeforeAChoice(t *testing.T) {
+	root := menuDirs(t, "proj-a", "proj-b")
+	m, _ := seedLauncher(t, 100, 20)
+	m = updLauncher(t, typeInto(t, m, root+"/proj"), coretest.KTab)
+
+	if m.filter != root+"/proj-" {
+		t.Fatalf("tab completed to %q, want the common prefix %q", m.filter, root+"/proj-")
+	}
+	if !m.menuOpen() || m.cycling() {
+		t.Fatalf("an ambiguous completion should list the candidates without choosing one")
+	}
+
+	ent := updLauncher(t, m, coretest.KEnter)
+	if ent.focus != zoneLeft || ent.menuOpen() || ent.filter != root+"/proj-" {
+		t.Errorf("enter with nothing chosen = zone %d / %q with the list %v, want the "+
+			"locations and no list", ent.focus, ent.filter, ent.menu.labels)
+	}
+
+	back := updLauncher(t, m, kShiftTab)
+	if want := root + "/proj-b/"; !back.cycling() || back.filter != want {
+		t.Errorf("shift+tab with nothing chosen = %q, want the last candidate %q",
+			back.filter, want)
+	}
+
+	listed := core.StripANSI(strings.Join(m.footerLines(), "\n"))
+	if strings.Contains(listed, "enter accept") {
+		t.Errorf("the footer offers an acceptance with nothing chosen: %q", listed)
+	}
+	if got := core.StripANSI(strings.Join(back.footerLines(), "\n")); !strings.Contains(
+		got, "enter accept",
+	) {
+		t.Errorf("the footer while cycling = %q, want the acceptance enter really makes", got)
+	}
+}
+
+// TestLauncherCompletionMenuClosesWhenAFailureTakesTheCursor pins the zone the
+// list lives in (D43): it is the input zone's affordance, and a failed reply is
+// the one focus change the launcher makes on its own (D10). Left open behind
+// that move, the right pane's enter would dismiss the list instead of toggling
+// the project, and its esc would spend a zone step rewriting the query.
+func TestLauncherCompletionMenuClosesWhenAFailureTakesTheCursor(t *testing.T) {
+	root := menuDirs(t, "alpha", "beta")
+	dir := filepath.Join(root, "alpha")
+	m, fb := seedLauncherAt(t, 100, 20, dir)
+
+	// A bring-up in flight, then back to the input to type a path: the reply is
+	// free to land at any point after it, this one included.
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+	next, cmd := m.Update(coretest.Kr("s"))
+	m = next.(Model)
+	drainLauncherCmd(t, cmd)
+	if len(fb.StartedProjects) != 1 {
+		t.Fatalf("s started %v, want the location's one enabled project", fb.StartedProjects)
+	}
+	m = updLauncher(t, m, coretest.Kr("/")) // back to the input
+	m = updLauncher(t, typeInto(t, m, root+"/"), coretest.KTab)
+	if !m.cycling() || m.filter != dir+"/" {
+		t.Fatalf("tab = %q with cycling %v, want the first candidate in the input",
+			m.filter, m.cycling())
+	}
+
+	m = updLauncher(t, m, launcherStartedMsg{
+		target: fb.StartedProjects[0], err: errors.New("compose up: boom"),
+	})
+	if m.focus != zoneRight || !strings.Contains(m.failedMsg, "boom") {
+		t.Fatalf("a failure should take the cursor to its row, got zone %d msg %q",
+			m.focus, m.failedMsg)
+	}
+	if m.menuOpen() {
+		t.Fatalf("the list must not outlive the input zone, got %v", m.menu.labels)
+	}
+
+	// The keys the right pane promises, not the list's: enter toggles the project
+	// and esc steps a zone back, both leaving the query where it is.
+	enabled := m.locs[0].projects[0].enabled
+	m = updLauncher(t, m, coretest.KEnter)
+	if m.locs[0].projects[0].enabled == enabled || m.focus != zoneRight {
+		t.Errorf("enter on the failed row = zone %d, want the project toggled", m.focus)
+	}
+	m = updLauncher(t, m, coretest.KEsc)
+	if m.focus != zoneLeft || m.filter != dir+"/" {
+		t.Errorf("esc on the failed row = zone %d / %q, want the locations with the query kept",
+			m.focus, m.filter)
+	}
+}
+
+// TestLauncherClicksUnderTheCompletionMenu is the offset the list introduces:
+// the panes draw from paneTop, so a click is resolved against the rows as they
+// were drawn rather than against the no-list baseline (D43).
+func TestLauncherClicksUnderTheCompletionMenu(t *testing.T) {
+	root := menuDirs(t, "proj-a", "proj-b")
+	m, _ := seedLauncherAt(t, 100, 20,
+		filepath.Join(root, "proj-a"), filepath.Join(root, "proj-b"))
+	m = updLauncher(t, typeInto(t, m, root+"/proj"), coretest.KTab)
+	if !m.menuOpen() || len(leftLabels(m)) != 2 {
+		t.Fatalf("expected both locations under an open list, got %v", leftLabels(m))
+	}
+	if top := m.paneTop(); top <= launcherPaneTop {
+		t.Fatalf("the list should have pushed the panes past %d, got %d", launcherPaneTop, top)
+	}
+
+	left := updLauncher(t, m, tea.MouseClickMsg{
+		Button: tea.MouseLeft, X: 3, Y: m.paneTop() + 1,
+	})
+	if left.focus != zoneLeft || left.leftSel != 1 || left.menuOpen() {
+		t.Errorf("clicking the second location under the list = zone %d row %d, want the "+
+			"left pane on row 1", left.focus, left.leftSel)
+	}
+
+	leftW, _ := m.widths()
+	enabled := m.locs[0].projects[0].enabled
+	right := updLauncher(t, m, tea.MouseClickMsg{
+		Button: tea.MouseLeft, X: leftW + 2, Y: m.paneTop(),
+	})
+	if right.focus != zoneRight || right.rightSel != 0 || right.menuOpen() ||
+		right.locs[0].projects[0].enabled == enabled {
+		t.Errorf("clicking a project under the list = zone %d row %d, want the first "+
+			"project toggled", right.focus, right.rightSel)
 	}
 }
 

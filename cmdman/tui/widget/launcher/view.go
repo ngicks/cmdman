@@ -16,8 +16,9 @@ import (
 // that window as its whole terminal. Drawing another box inside it would waste
 // popup space and double the borders.
 const (
-	// launcherHeadLines is the input line plus the blank under it,
-	// launcherPaneTop the first row either pane draws on.
+	// launcherHeadLines is the input line plus the blank under it, and
+	// launcherPaneTop the first row either pane draws on with nothing between them
+	// — the baseline paneTop() adds the suggestion list's lines to (D43).
 	launcherHeadLines = 2
 	launcherPaneTop   = launcherHeadLines + 1
 	launcherGapLines  = 1
@@ -492,10 +493,14 @@ func (m Model) failureText(p launcherProject) string {
 func (m Model) footerLines() []string {
 	var full string
 	switch {
-	case m.menuOpen():
+	case m.cycling():
 		// The list only ever shows over the input zone, and shift+tab is a key
 		// nobody finds without being told.
 		full = "tab next · shift+tab prev · enter accept · esc cancel · type to filter"
+	case m.menuOpen():
+		// Nothing is in the input yet, so there is nothing for enter to accept:
+		// offering it would promise the query a step that goes to the locations.
+		full = "tab next · shift+tab prev · esc cancel · type to filter"
 	case m.focus == zoneInput:
 		full = "type to filter · tab complete · ↑↓ move · enter → locations · esc clear/quit"
 	case m.focus == zoneLeft:
