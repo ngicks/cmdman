@@ -168,6 +168,15 @@ type Backend interface {
 	// running, grouped by target directory and ordered by recency (D7). Git
 	// info is read per entry as the listing is built (D41).
 	ListLaunchTargets(ctx context.Context) ([]LaunchLocation, error)
+	// ResolveLaunchDir builds the location row for one directory on its own, so
+	// a path the user typed can be selected even though it is not among the
+	// listed locations (D28). dir is an absolute path to an existing directory;
+	// the row is what ListLaunchTargets would have produced for it — the compose
+	// projects discovered there merged with the directory's history, git info
+	// read the same way. A directory with neither compose file nor history is
+	// still a location: it comes back with no projects, and the caller decides
+	// what that renders as. Only a failure that hides what is there is an error.
+	ResolveLaunchDir(ctx context.Context, dir string) (LaunchLocation, error)
 	// StartProject brings a project up in the background without moving focus —
 	// the launcher's `s` (D4). It returns when the bring-up reached its terminal
 	// phase, which is what stops the row's spinner.

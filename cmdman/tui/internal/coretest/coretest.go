@@ -66,6 +66,9 @@ type FakeBackend struct {
 
 	LaunchLocs       []core.LaunchLocation // locations returned by ListLaunchTargets
 	LaunchErr        error                 // error returned by ListLaunchTargets
+	ResolveDirLoc    core.LaunchLocation   // location returned by ResolveLaunchDir
+	ResolveDirErr    error                 // error returned by ResolveLaunchDir
+	ResolveDirReq    []string              // dirs passed to ResolveLaunchDir
 	StartedProjects  []core.LaunchTarget   // targets passed to StartProject
 	StartProjectErr  error                 // error returned by StartProject
 	LaunchedProjects []core.LaunchTarget   // targets passed to LaunchProject
@@ -190,6 +193,14 @@ func (f *FakeBackend) ComposeUp(
 
 func (f *FakeBackend) ListLaunchTargets(context.Context) ([]core.LaunchLocation, error) {
 	return f.LaunchLocs, f.LaunchErr
+}
+
+func (f *FakeBackend) ResolveLaunchDir(
+	_ context.Context,
+	dir string,
+) (core.LaunchLocation, error) {
+	f.ResolveDirReq = append(f.ResolveDirReq, dir)
+	return f.ResolveDirLoc, f.ResolveDirErr
 }
 
 func (f *FakeBackend) StartProject(_ context.Context, t core.LaunchTarget) error {

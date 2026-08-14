@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"path/filepath"
 	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/compose"
 	"github.com/ngicks/cmdman/cmdman/mux"
 	"github.com/ngicks/cmdman/cmdman/tui"
@@ -70,6 +72,78 @@ func (b *serviceBackend) ListLaunchTargets(ctx context.Context) ([]tui.LaunchLoc
 	locs := acc.locations(resolver, b.runningIdentities(ctx))
 	fillGitInfo(ctx, locs)
 	return locs, nil
+}
+
+// ResolveLaunchDir builds the listing row for one directory on its own — the
+// launcher turning a path the user typed into a location it can select (D28).
+//
+// A directory with nothing to run is still a location, so "no compose file, no
+// history" is an empty Projects rather than an error; what does come back as an
+// error is a failure that would hide what is there, which is the history query.
+func (b *serviceBackend) ResolveLaunchDir(
+	ctx context.Context,
+	dir string,
+) (tui.LaunchLocation, error) {
+	history, err := b.svc.ListComposeHistory(ctx)
+	if err != nil {
+		return tui.LaunchLocation{}, fmt.Errorf("launcher: list compose history: %w", err)
+	}
+	return resolveLaunchDir(ctx, dir, history, b.runningIdentities(ctx))
+}
+
+// resolveLaunchDir is the listing's per-directory build fed only what belongs to
+// dir: the same accumulator, the same projection and the same git fill
+// ListLaunchTargets runs, so a resolved row and a listed row are the same shape.
+// It takes the history as data rather than reading it so the merge can be
+// exercised without a live service.
+func resolveLaunchDir(
+	ctx context.Context,
+	dir string,
+	history []cmdman.ComposeHistoryEntry,
+	running map[string]bool,
+) (tui.LaunchLocation, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return tui.LaunchLocation{}, fmt.Errorf("launcher: resolve %s: %w", dir, err)
+	}
+	dir = abs
+
+	acc := &launchAccumulator{}
+	for _, h := range history {
+		if h.WorkDir == dir {
+			acc.add(dir, h.Project, h.File, h.LastUsed, true)
+		}
+	}
+	// The discovered project is recorded under dir rather than under the work
+	// directory its spec resolved to: this row is the answer about dir, and a
+	// spec declaring work_dir: elsewhere would otherwise open a second location
+	// the caller never asked about.
+	if spec, err := discoverLaunchDirSpec(ctx, dir); err == nil {
+		acc.add(dir, spec.Project, spec.ComposeFile, time.Time{}, false)
+	}
+
+	locs := acc.locations(&composeResolver{}, running)
+	if len(locs) == 0 {
+		locs = []tui.LaunchLocation{{Dir: dir}}
+	}
+	fillGitInfo(ctx, locs)
+	return locs[0], nil
+}
+
+// discoverLaunchDirSpec loads the compose file sitting in dir. Discovery is
+// pointed at dir because [compose.LoadOrProject] searches the process working
+// directory, which for a launcher popup is wherever the user summoned it from.
+//
+// The work directory is forced to dir for the same reason a launch forces it
+// (see loadLaunchSpec): a spec that declares none falls back to the process
+// working directory, and a row that claimed to be somewhere else than where its
+// launch puts the project would be lying about both.
+func discoverLaunchDirSpec(ctx context.Context, dir string) (compose.ComposeSpec, error) {
+	file, raw, err := compose.DiscoverFile(dir, compose.NormalizeOpts{})
+	if err != nil {
+		return compose.ComposeSpec{}, err
+	}
+	return compose.Normalize(ctx, file, raw, compose.NormalizeOpts{WorkDir: dir})
 }
 
 // runningIdentities is the set of mux ownership identities with a live window,

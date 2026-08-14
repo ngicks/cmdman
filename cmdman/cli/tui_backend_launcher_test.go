@@ -4,10 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/compose"
 	"github.com/ngicks/cmdman/cmdman/mux"
 	"github.com/ngicks/cmdman/cmdman/tui"
@@ -105,6 +108,82 @@ func TestLaunchRunningIdentityUsesComposeWorkdir(t *testing.T) {
 	}
 	if locs[0].Projects[1].Running {
 		t.Errorf("a project with no window of its own must not read as running")
+	}
+}
+
+// TestResolveLaunchDir covers the typed directory (D28): the row built for one
+// directory on its own is the row the listing would have produced for it — the
+// compose file discovered there merged with the directory's history into a
+// single enabled project — and a directory with neither is still a location.
+//
+// The git fields are deliberately not asserted: the probe shells out to git, so
+// a temp dir that happens to sit inside a work tree would report a real branch.
+func TestResolveLaunchDir(t *testing.T) {
+	// The resolution must not depend on where the process stands: a launcher
+	// popup runs in whatever directory it was summoned from, which is the one
+	// place the typed directory is guaranteed not to be.
+	t.Chdir(t.TempDir())
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cmd-compose.yaml")
+	content := "name: api\ncommands:\n  a:\n    args: [echo, a]\n"
+	if err := os.WriteFile(file, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lastUsed := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	history := []cmdman.ComposeHistoryEntry{
+		{WorkDir: dir, Project: "api", File: file, LastUsed: lastUsed},
+		{WorkDir: filepath.Join(dir, "elsewhere"), Project: "other", File: "other.yaml"},
+	}
+
+	loc, err := resolveLaunchDir(t.Context(), dir, history, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loc.Dir != dir {
+		t.Errorf("Dir = %q, want %q", loc.Dir, dir)
+	}
+	if !loc.FromHistory || !loc.LastUsed.Equal(lastUsed) {
+		t.Errorf("the history stamp should reach the location: %+v", loc)
+	}
+	// The discovered project is the one history already knows, so the merge is
+	// one enabled row rather than the same project listed twice.
+	if len(loc.Projects) != 1 {
+		t.Fatalf("projects = %+v, want the discovered project merged into one row", loc.Projects)
+	}
+	p := loc.Projects[0]
+	if p.Name != "api" || p.File != file || !p.FromHistory {
+		t.Errorf("project = %+v, want the history row for api at %s", p, file)
+	}
+	if p.Problem != "" || p.HasMux {
+		t.Errorf("a loadable file with no mux: section = %+v, want no problem and no mux", p)
+	}
+
+	// The same directory with nothing recorded: the compose file standing there
+	// is found on its own, which is what the merge above has to have merged.
+	loc, err = resolveLaunchDir(t.Context(), dir, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loc.Projects) != 1 || loc.Projects[0].Name != "api" {
+		t.Fatalf("projects = %+v, want the compose file discovered at %s", loc.Projects, dir)
+	}
+	if loc.Projects[0].FromHistory || loc.FromHistory {
+		t.Errorf("a discovered project must not claim history: %+v", loc)
+	}
+
+	// A directory with no compose file and no history of its own: still a
+	// location, and the projects it has none of are not an error.
+	plain := t.TempDir()
+	loc, err = resolveLaunchDir(t.Context(), plain, history, nil)
+	if err != nil {
+		t.Fatalf("a directory with nothing to run should resolve, got %v", err)
+	}
+	if loc.Dir != plain || len(loc.Projects) != 0 {
+		t.Errorf("plain directory = %+v, want %s with no projects", loc, plain)
+	}
+	if loc.FromHistory || !loc.LastUsed.IsZero() {
+		t.Errorf("plain directory = %+v, want no history claim", loc)
 	}
 }
 
