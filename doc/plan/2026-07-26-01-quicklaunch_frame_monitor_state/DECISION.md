@@ -777,7 +777,9 @@ fields).
 
 **Choice:** the shipped launcher had narrowed D28's "tab
 auto-completion of paths" to the common prefix of the *known
-locations* (a mock-stage drift; see IMPROVEMENT.md). Corrected, with
+locations* — a mock-stage drift: the launcher mock ran on fixture
+locations where the two readings were indistinguishable, and its
+narrowed `complete()` was promoted verbatim. Corrected, with
 the user picking the full scope over expansion-only:
 
 - The input expands a leading `~` / `$HOME` (path-component boundary,

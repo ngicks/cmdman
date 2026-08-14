@@ -50,7 +50,10 @@ muxctl-blocked step 15.** (2026-08-11)
       of `src`/`staging` silently started projects); replaced by the
       three-zone focus model (input → left list → right list via Enter,
       esc walks back, `/` jumps to input, ctrl+u erases). Collision
-      table now a passing regression test.
+      table now a passing regression test. Correction (D42): "tab
+      completion" had shipped as known-location prefix only; it now
+      completes filesystem paths with `~`/`$HOME` expansion, and a
+      typed directory resolves into a selectable location.
 - [x] D29 folded in: no blocking start view — `s` keeps the launcher
       interactive; starting rows spin ◜◝◞◟ (1 cell under every locale
       condition — ◐◑ rejected as EA-ambiguous) in the marker slot,
