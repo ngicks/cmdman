@@ -865,3 +865,51 @@ candidate would land the cursor on a row nobody asked for); a list
 for fuzzy queries (no tree to walk — D42's rejection stands); a list
 that scrolls or overflows the panes (the panes are what the launcher
 is for).
+
+### D44 (2026-08-15, display) — workdir headers and scale badges
+
+**Choice:** the two surfaces that name "where you are" name the
+directory instead of the project. The switcher's group heads show the
+group's workdir, home-abbreviated (`~/…`) and cut keeping the tail;
+the statusbar's left segment shows the cwd-tied group's workdir the
+same way, with its marker and bell logic untouched. Where two or more
+*listed* groups sit in one directory the path no longer tells them
+apart, so those heads — and only those — append the project name:
+`~/src/app (api)`. A group with no directory at all (a named def that
+has never run anywhere in particular) still heads with its name.
+
+Every command listing badges a replica: a command with
+`ScaleCount > 1` and `ScaleIndex > 0` carries a compact ` [i/n]`
+right after its state word, in the row's weak/dim shade so a title
+after it still reads as the command's own words. It follows the state
+rather than ending the row because the row's tail is what a narrow
+docked column cuts first, and it sits outside D13's live-report gate:
+which replica a command is, is what it is, not something it said, so
+an exited replica keeps it. An unscaled command — the zero
+index/count pair, which is also how a single-instance compose command
+arrives from the listing — renders exactly as before. The Compose tab
+lists projects, not commands, so nothing there changes.
+
+**Rationale:** several compose projects can run on one directory, so
+the project name misidentifies the place — and the place is what the
+user navigates by. The directory is also what the launcher's left
+pane already lists, so the two surfaces now name a location the same
+way. Scale, in turn, was invisible: replicas of one compose command
+share its name, and a listing that shows the same row three times
+says nothing about which is which.
+
+**Refines:** D20 (the grouped list is unchanged — this is what its
+heads say; D20 already keyed the groups by project path). Also D24's
+marker slot, which the head's path starts after, and D13, which the
+badge is explicitly outside of.
+
+**Rejected:** regrouping the switcher by workdir so co-located
+projects merge into one group — the user declined it: the groups are
+projects and merging them would hide that there are two, where
+headers-with-disambiguation shows both and still names the place;
+disambiguating *every* head with its project name (noise on the
+common case, where a directory holds one project); a badge at the end
+of the row (the docked column truncates its tail, so the replica
+index would be the first thing lost in exactly the widget it is for);
+folding the index into the name column (it is padded to a fixed width
+— the badge would push the name out or be cut itself).

@@ -36,16 +36,22 @@ resolves to exactly this invocation, so a widget is also debuggable by hand: run
 it in any terminal or pane. Each widget is its own subcommand.
 
 - `switcher`: every known compose project — running, exited, and never run —
-  each heading a group with its commands listed under it. `j`/`k` (or the arrow
-  keys) move the selection; `enter` and a left mouse click switch the client to
-  the selected project's window and mark that project's bells read; `z` takes
-  the frame around the current window down (a window with no frame up is left
-  alone); `q` quits. The switcher navigates only — starting, stopping and
-  removing commands stay in the full dashboard. A project with no window of its
-  own is reported on the hint line rather than brought up.
-- `statusbar`: a single line — the working directory's compose project on the
-  left, the counts across every project next to it, and the cmdman version at
-  the right edge. Sized for a one-row pane; `q` quits.
+  each heading a group with its commands listed under it. A group heads with the
+  directory it sits in, written `~/…` where that is under your home and cut
+  keeping the tail; projects sharing a directory add their name in parentheses to
+  tell them apart. A command that is one replica among several carries a `[i/n]`
+  badge after its state — replicas of one command share its name, so the index is
+  what tells them apart. `j`/`k` (or the arrow keys) move the selection; `enter`
+  and a left mouse click switch the client to the selected project's window and
+  mark that project's bells read; `z` takes the frame around the current window
+  down (a window with no frame up is left alone); `q` quits. The switcher
+  navigates only — starting, stopping and removing commands stay in the full
+  dashboard. A project with no window of its own is reported on the hint line
+  rather than brought up.
+- `statusbar`: a single line — the working directory itself on the left, marked
+  with its compose project's marker, the counts across every project next to it,
+  and the cmdman version at the right edge. A bar too narrow for all three keeps
+  where you are. Sized for a one-row pane; `q` quits.
 - `launcher`: quick-launch selector. The left pane lists target locations (the
   directories you have brought projects up in, most recent first, plus
   everything the filter reaches); the right pane lists the compose projects at
