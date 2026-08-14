@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ngicks/cmdman/cmdman/tui/internal/coretest"
 
@@ -596,13 +597,22 @@ func TestLauncherToggleAndCompletion(t *testing.T) {
 	}
 
 	// A query that is not a path completes over the listing alone and gains no
-	// separator: only a path being typed is one the filesystem has a say in.
+	// separator: only a path being typed is one the filesystem has a say in. The
+	// row's directory is on disk, so the separator is exactly what the completion
+	// would append were the input's shape not what decides it.
+	dir := filepath.Join(t.TempDir(), "webapp")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir webapp: %v", err)
+	}
 	m, _ = seedLauncher(t, 100, 20)
+	m = updLauncher(t, m, launchTargetsLoadedMsg{locs: []core.LaunchLocation{{
+		Dir: dir, RepoName: "webapp", Branch: "main", FromHistory: true,
+		Projects: []core.LaunchProject{{Name: "staging", File: "compose.yaml"}},
+	}}})
 	m = typeInto(t, m, "webapp")
 	m = updLauncher(t, m, coretest.KTab)
-	if m.filter != "/home/u/src/webapp" {
-		t.Errorf("tab over a bare word completed to %q, want %q",
-			m.filter, "/home/u/src/webapp")
+	if m.filter != dir {
+		t.Errorf("tab over a bare word completed to %q, want %q", m.filter, dir)
 	}
 }
 
@@ -662,6 +672,29 @@ func TestLauncherCompletesPathsOnDisk(t *testing.T) {
 	t.Chdir(root)
 	if got := tab(t, "./proj-b").filter; got != "./proj-beta/" {
 		t.Errorf("tab on %q = %q, want %q", "./proj-b", got, "./proj-beta/")
+	}
+}
+
+// TestLauncherCompletionStaysValidUTF8 pins commonPrefix's trim: names off the
+// filesystem reach it, and two siblings can share the lead bytes of a multibyte
+// character without sharing the character — a completion stopping between them
+// must not put half a rune under the cursor.
+func TestLauncherCompletionStaysValidUTF8(t *testing.T) {
+	if got := commonPrefix([]string{"/x/日本", "/x/日月"}); got != "/x/日" ||
+		!utf8.ValidString(got) {
+		t.Errorf("commonPrefix over multibyte siblings = %q, want %q", got, "/x/日")
+	}
+
+	root := t.TempDir()
+	for _, d := range []string{"日本", "日月"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	m, _ := seedLauncher(t, 100, 20)
+	m = updLauncher(t, typeInto(t, m, root+"/"), coretest.KTab)
+	if want := root + "/日"; m.filter != want || !utf8.ValidString(m.filter) {
+		t.Errorf("tab over multibyte siblings = %q, want %q", m.filter, want)
 	}
 }
 
@@ -780,6 +813,49 @@ func TestLauncherResolvesACompletedPath(t *testing.T) {
 	m = updLauncher(t, next.(Model), reply)
 	if got := leftLabels(m); len(got) != 1 || got[0] != "scratch(main)" {
 		t.Fatalf("the completed path should list the row it resolved to, got %v", got)
+	}
+}
+
+// TestLauncherResolvesARelativePath is the same regression a spelling further
+// out: ./x is a path the input keeps relative while the row it resolves to holds
+// its directory absolutely, so the query has to be read the way the resolve
+// canonicalized it or the pane goes empty on the very path tab just completed.
+func TestLauncherResolvesARelativePath(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "scratch"), 0o755); err != nil {
+		t.Fatalf("mkdir scratch: %v", err)
+	}
+	t.Chdir(root)
+	// Getwd rather than root: a temp dir can sit behind a symlink, and it is what
+	// filepath.Abs resolves the relative query against.
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	dir := filepath.Join(cwd, "scratch")
+
+	m, fb := seedLauncher(t, 100, 20)
+	fb.ResolveDirLoc = core.LaunchLocation{Dir: dir, RepoName: "scratch", Branch: "main"}
+	m = updLauncher(t, typeInto(t, m, "./scr"), coretest.KTab)
+	if m.filter != "./scratch/" {
+		t.Fatalf("tab completed to %q, want %q", m.filter, "./scratch/")
+	}
+
+	next, cmd := m.Update(core.ReloadTickMsg{Gen: m.resolveGen})
+	if cmd == nil {
+		t.Fatalf("a completed relative path should be resolved")
+	}
+	reply := cmd()
+	if len(fb.ResolveDirReq) != 1 || fb.ResolveDirReq[0] != dir {
+		t.Fatalf("ResolveLaunchDir asked for %v, want [%s]", fb.ResolveDirReq, dir)
+	}
+	m = updLauncher(t, next.(Model), reply)
+	if got := leftLabels(m); len(got) != 1 || got[0] != "scratch(main)" {
+		t.Fatalf("a relative path should list the row it resolved to, got %v", got)
+	}
+	rows, _ := m.leftPane(50, m.matched())
+	if len(rows) == 0 || !strings.Contains(rows[0], "scratch") {
+		t.Errorf("the resolved row should be on screen, got %q", rows)
 	}
 }
 

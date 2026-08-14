@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
@@ -604,7 +605,7 @@ func (m Model) respell(p string) string {
 // empty (D28's opening state), every matching location once the user types.
 func (m Model) matched() []int {
 	out := make([]int, 0, len(m.locs))
-	path := trimTrailingSep(expandHome(m.filter, m.home))
+	path := m.pathNeedle()
 	for i, l := range m.locs {
 		if m.filter == "" {
 			if l.FromHistory {
@@ -617,6 +618,18 @@ func (m Model) matched() []int {
 		}
 	}
 	return out
+}
+
+// pathNeedle is what the path field is matched against. A path being typed is
+// canonicalized by typedDir, the very form the row it resolves to holds its
+// directory in: left as ./x or with the separator tab completed onto it, the
+// query would miss the row the same keystrokes just produced. A query that is
+// not a path keeps the user's spelling — it is a fuzzy search, not a location.
+func (m Model) pathNeedle() string {
+	if dir, ok := m.typedDir(); ok {
+		return dir
+	}
+	return trimTrailingSep(expandHome(m.filter, m.home))
 }
 
 // currentLoc is the location under the left cursor.
@@ -907,7 +920,10 @@ func matchLaunchLocation(filter, path string, l launcherLocation) (string, bool)
 	return "", false
 }
 
-// commonPrefix is what tab completes the input to.
+// commonPrefix is what tab completes the input to. It gives ground a rune at a
+// time: names off the filesystem reach it, and two siblings can share the lead
+// bytes of a multibyte character without sharing the character — a byte-wise
+// trim would leave that half rune in the query.
 func commonPrefix(ss []string) string {
 	if len(ss) == 0 {
 		return ""
@@ -915,7 +931,8 @@ func commonPrefix(ss []string) string {
 	out := ss[0]
 	for _, s := range ss[1:] {
 		for !strings.HasPrefix(s, out) {
-			out = out[:len(out)-1]
+			_, n := utf8.DecodeLastRuneInString(out)
+			out = out[:len(out)-n]
 			if out == "" {
 				return ""
 			}

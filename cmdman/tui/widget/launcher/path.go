@@ -95,9 +95,11 @@ func entryIsDir(path string, e fs.DirEntry) bool {
 }
 
 // trimTrailingSep drops a path's trailing separator, except from the root — it
-// is nothing but its separator. A completed path carries one so the next tab can
-// reach inside it, while a location holds its directory canonically (see
-// core.LaunchTarget), and the two have to meet for the row to match.
+// is nothing but its separator. A location holds its directory canonically (see
+// core.LaunchTarget), so a query spelled with a trailing one has to be read back
+// without it to reach the row. A path being typed is canonicalized outright
+// (pathNeedle); this is what is left of that for a query that only looks a
+// little like a path.
 func trimTrailingSep(p string) string {
 	if len(p) <= 1 {
 		return p
