@@ -772,3 +772,38 @@ always correct, including worktrees and exotic setups.
 **Rejected:** parsing `.git` directly (fast but re-implements gitdir
 indirection and edge cases); go-git (heavy dependency for three
 fields).
+
+### D42 (2026-08-14, D28 correction) — tab completion really completes paths
+
+**Choice:** the shipped launcher had narrowed D28's "tab
+auto-completion of paths" to the common prefix of the *known
+locations* (a mock-stage drift; see IMPROVEMENT.md). Corrected, with
+the user picking the full scope over expansion-only:
+
+- The input expands a leading `~` / `$HOME` (path-component boundary,
+  the exact inverse of the view's home abbreviation) for matching and
+  path operations; the typed spelling is preserved, including in
+  completion write-backs.
+- For path-shaped input (`/`, `~`, `$HOME`, `./`, `../`), tab
+  completes over the union of matched known-location dirs and on-disk
+  directories extending the typed path (one ReadDir of the parent;
+  dot-dirs only when the typed base starts with `.`; a completion
+  ending exactly at a directory gains the trailing separator).
+  Non-path input keeps the location-prefix behavior unchanged.
+- A typed existing directory that is not a known location resolves
+  into a selectable left-pane row via the new
+  `Backend.ResolveLaunchDir` (debounced, generation-guarded; the
+  listing's richer row wins on dedup; not part of history mode).
+
+**Rationale:** filesystem completion is only useful if the completed
+path can be acted on; without the resolved row it dead-ends on an
+empty pane. The resolved row reuses the listing's per-directory
+build, so the row and the eventual launch agree on WorkDir.
+
+**Refines:** D28 (restores its literal completion wording); D7
+(history mode is unaffected — the resolved row never joins it).
+
+**Rejected:** expansion + fs completion without the typed-path row
+(offered as the minimal option; dead-ends exactly where D28 matters);
+completing against the filesystem for non-path-shaped queries
+(fuzzy words are project/repo searches, not paths).
