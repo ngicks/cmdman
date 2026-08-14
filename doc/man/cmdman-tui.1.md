@@ -50,8 +50,8 @@ it in any terminal or pane. Each widget is its own subcommand.
   directories you have brought projects up in, most recent first, plus
   everything the filter reaches); the right pane lists the compose projects at
   the location under the cursor, toggled on or off. Type to filter, tab
-  completes the path, enter steps input → locations → projects, esc walks back
-  and then dismisses. On a list, `s` starts the enabled projects and `S`
+  completes what is typed, enter steps input → locations → projects, esc walks
+  back and then dismisses. On a list, `s` starts the enabled projects and `S`
   launches and lands in one; in the input every key is text, so ctrl+c is the
   dismissal that works from anywhere (unless `--no-quit` took the quit keys
   away).
@@ -61,6 +61,28 @@ A widget fills its window, so popup framing belongs to the multiplexer:
 ```sh
 bind-key -n M-Space display-popup -E -w 80% -h 60% 'cmdman tui widget launcher'
 ```
+
+The launcher's input line is a path field as much as a filter. A leading `~` or
+`$HOME` is expanded for matching and completion — on a path-component boundary,
+so `~work` names something else entirely — while the input keeps the spelling
+that was typed. For input shaped like a path (`/`, `~`, `$HOME`, `./`, `../`),
+tab completes over the locations and the on-disk directories that extend what is
+typed, and a completion that can only be the one directory gains the trailing
+separator, so the next tab reaches inside it. A bare word stays a fuzzy query
+over the listing — branch, repo, path, project name — where tab extends to the
+common prefix of the locations it matches, with no filesystem read and no
+suggestion list.
+
+What tab cannot decide it shows: two or more candidates leave a suggestion list
+under the input line. On it, tab and shift+tab cycle candidates into the input
+one at a time, enter accepts the candidate it has put there and leaves the zone
+step to the next enter, esc drops the list and puts back the text the cycling
+started from, and typing drops the list but keeps what was inserted. The list is
+the input zone's, so leaving the zone takes it down too.
+
+A path typed to an existing directory that is none of the known locations
+becomes a selectable row of its own in the left pane, carrying whatever compose
+projects are there.
 
 ## Options
 
