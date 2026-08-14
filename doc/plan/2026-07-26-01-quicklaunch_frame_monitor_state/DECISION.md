@@ -866,7 +866,7 @@ for fuzzy queries (no tree to walk — D42's rejection stands); a list
 that scrolls or overflows the panes (the panes are what the launcher
 is for).
 
-### D44 (2026-08-15, display) — workdir headers and scale badges
+### D44 (2026-08-14, display) — workdir headers and scale badges
 
 **Choice:** the two surfaces that name "where you are" name the
 directory instead of the project. The switcher's group heads show the
@@ -879,16 +879,24 @@ apart, so those heads — and only those — append the project name:
 has never run anywhere in particular) still heads with its name.
 
 Every command listing badges a replica: a command with
-`ScaleCount > 1` and `ScaleIndex > 0` carries a compact ` [i/n]`
-right after its state word, in the row's weak/dim shade so a title
-after it still reads as the command's own words. It follows the state
-rather than ending the row because the row's tail is what a narrow
-docked column cuts first, and it sits outside D13's live-report gate:
-which replica a command is, is what it is, not something it said, so
-an exited replica keeps it. An unscaled command — the zero
-index/count pair, which is also how a single-instance compose command
-arrives from the listing — renders exactly as before. The Compose tab
-lists projects, not commands, so nothing there changes.
+`ScaleCount > 1` and `ScaleIndex > 0` carries a compact ` [i]` right
+after its state word, in the row's weak/dim shade so a title after it
+still reads as the command's own words. The count decides whether
+there is a badge — it is the scaled-ness discriminator — but it is
+not shown: `LabelScale` is stamped when an instance is created
+(`plan.go`'s `BuildLabels`) and scale is not part of the config hash,
+so a `compose scale` leaves the instances it keeps `ActionUnchanged`
+and their label at the count that was desired when they started
+(pre-existing behavior, untouched here). The index cannot go stale —
+it is which replica this one is — so the index alone is what the
+badge says. It follows the state rather than ending the row because
+the row's tail is what a narrow docked column cuts first, and it sits
+outside D13's live-report gate: which replica a command is, is what it
+is, not something it said, so an exited replica keeps it. An unscaled
+command — the zero index/count pair, which is also how a
+single-instance compose command arrives from the listing — renders
+exactly as before. The Compose tab lists projects, not commands, so
+nothing there changes.
 
 **Rationale:** several compose projects can run on one directory, so
 the project name misidentifies the place — and the place is what the
