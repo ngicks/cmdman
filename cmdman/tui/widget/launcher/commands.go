@@ -40,10 +40,26 @@ type launcherForgotMsg struct {
 	err    error
 }
 
+// launcherResolvedMsg carries the row a typed path resolved to. dir is the
+// directory that was asked for, so a reply the input has since moved past can be
+// dropped instead of shown against a query that no longer names it.
+type launcherResolvedMsg struct {
+	dir string
+	loc core.LaunchLocation
+	err error
+}
+
 func listLaunchTargetsCmd(ctx context.Context, backend core.Backend) tea.Cmd {
 	return func() tea.Msg {
 		locs, err := backend.ListLaunchTargets(ctx)
 		return launchTargetsLoadedMsg{locs: locs, err: err}
+	}
+}
+
+func resolveLaunchDirCmd(ctx context.Context, backend core.Backend, dir string) tea.Cmd {
+	return func() tea.Msg {
+		loc, err := backend.ResolveLaunchDir(ctx, dir)
+		return launcherResolvedMsg{dir: dir, loc: loc, err: err}
 	}
 }
 

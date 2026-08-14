@@ -3,6 +3,8 @@ package launcher
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -119,8 +121,11 @@ func TestLauncherHistoryIsTheOpeningList(t *testing.T) {
 
 // TestLauncherMatchFields covers D18's match surface: a row survives on its
 // branch, its repo uri or name, its full path, or one of its project names — and
-// the field that matched is reported, so each is exercised independently.
+// the field that matched is reported, so each is exercised independently. The
+// path field takes the query with its home spelling expanded, so a path typed
+// the way the pane displays it reaches the row that holds it in full.
 func TestLauncherMatchFields(t *testing.T) {
+	const home = "/home/u"
 	m, _ := seedLauncher(t, 100, 20)
 	cmdmanLoc, webapp := m.locs[0], m.locs[1]
 
@@ -134,8 +139,10 @@ func TestLauncherMatchFields(t *testing.T) {
 		{"webapp", webapp, "repo"},
 		{"gitrepo/cmdman", cmdmanLoc, "path"},
 		{"prod", webapp, "project"},
+		{"~/src/webapp", webapp, "path"},
+		{"$HOME/gitrepo/cmdman", cmdmanLoc, "path"},
 	} {
-		field, ok := matchLaunchLocation(tc.filter, tc.loc)
+		field, ok := matchLaunchLocation(tc.filter, expandHome(tc.filter, home), tc.loc)
 		if !ok {
 			t.Errorf("filter %q should match %s", tc.filter, tc.loc.Dir)
 			continue
@@ -144,8 +151,33 @@ func TestLauncherMatchFields(t *testing.T) {
 			t.Errorf("filter %q matched on %q, want %q", tc.filter, field, tc.field)
 		}
 	}
-	if _, ok := matchLaunchLocation("zzz", cmdmanLoc); ok {
-		t.Errorf("filter %q should match nothing", "zzz")
+	for _, filter := range []string{"zzz", "~X/src/webapp", "$HOMEX/src/webapp"} {
+		if _, ok := matchLaunchLocation(filter, expandHome(filter, home), cmdmanLoc); ok {
+			t.Errorf("filter %q should match nothing", filter)
+		}
+	}
+}
+
+// TestLauncherHomeSpellingMatches is the same rule driven through the model: the
+// left pane writes paths home-abbreviated (shortPath), so typing one back has to
+// find the row it came from — under either spelling, and only on a component
+// boundary.
+func TestLauncherHomeSpellingMatches(t *testing.T) {
+	for _, tc := range []struct {
+		query string
+		want  []string
+	}{
+		{"~/src/webapp", []string{"webapp(feat/auth)"}},
+		{"$HOME/src/webapp", []string{"webapp(feat/auth)"}},
+		{"~/gitrepo", []string{"cmdman(main)"}},
+		{"~X/src/webapp", nil},
+	} {
+		m, _ := seedLauncher(t, 100, 20)
+		m.home = "/home/u"
+		m = typeInto(t, m, tc.query)
+		if got := leftLabels(m); strings.Join(got, ",") != strings.Join(tc.want, ",") {
+			t.Errorf("query %q listed %v, want %v", tc.query, got, tc.want)
+		}
 	}
 }
 
@@ -561,6 +593,206 @@ func TestLauncherToggleAndCompletion(t *testing.T) {
 	m = updLauncher(t, m, coretest.KTab)
 	if m.filter != "/home/u/src/" || m.note == "" {
 		t.Errorf("a second tab changed the query to %q (note %q)", m.filter, m.note)
+	}
+
+	// A query that is not a path completes over the listing alone and gains no
+	// separator: only a path being typed is one the filesystem has a say in.
+	m, _ = seedLauncher(t, 100, 20)
+	m = typeInto(t, m, "webapp")
+	m = updLauncher(t, m, coretest.KTab)
+	if m.filter != "/home/u/src/webapp" {
+		t.Errorf("tab over a bare word completed to %q, want %q",
+			m.filter, "/home/u/src/webapp")
+	}
+}
+
+// TestLauncherCompletesPathsOnDisk covers D28's tab completion where the paths
+// actually are: a path being typed completes over the directories under it, not
+// only over the locations the listing happens to know.
+func TestLauncherCompletesPathsOnDisk(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"proj-alpha/inner", "proj-beta", ".hidden"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "proj-gamma"), nil, 0o600); err != nil {
+		t.Fatalf("write proj-gamma: %v", err)
+	}
+
+	tab := func(t *testing.T, query string) Model {
+		t.Helper()
+		m, _ := seedLauncher(t, 100, 20)
+		return updLauncher(t, typeInto(t, m, query), coretest.KTab)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		query string
+		want  string
+	}{
+		// Two directories share the prefix, so the completion stops between them.
+		{"common prefix", root + "/proj", root + "/proj-"},
+		// One directory left: the separator is added so the next tab reaches in.
+		{"unique directory", root + "/proj-a", root + "/proj-alpha/"},
+		{"inside it", root + "/proj-alpha/", root + "/proj-alpha/inner/"},
+		// A regular file is not a location, and a dot-directory stays out of the
+		// way until the user types the dot.
+		{"a file is not a location", root + "/proj-g", root + "/proj-g"},
+		{"dot directory when asked for", root + "/.", root + "/.hidden/"},
+	} {
+		if got := tab(t, tc.query).filter; got != tc.want {
+			t.Errorf("%s: tab on %q = %q, want %q", tc.name, tc.query, got, tc.want)
+		}
+	}
+
+	// A completed prefix that is itself a directory keeps its siblings reachable:
+	// the separator would cut proj-alpha-2 out of the search.
+	if err := os.MkdirAll(filepath.Join(root, "proj-alpha-2"), 0o755); err != nil {
+		t.Fatalf("mkdir proj-alpha-2: %v", err)
+	}
+	m := tab(t, root+"/proj-alpha")
+	if m.filter != root+"/proj-alpha" || m.note == "" {
+		t.Errorf("tab on a directory with a sibling = %q (note %q), want it left alone",
+			m.filter, m.note)
+	}
+
+	// A relative path is a path too, resolved against the process cwd and written
+	// back the way it was typed.
+	t.Chdir(root)
+	if got := tab(t, "./proj-b").filter; got != "./proj-beta/" {
+		t.Errorf("tab on %q = %q, want %q", "./proj-b", got, "./proj-beta/")
+	}
+}
+
+// TestLauncherKeepsTheHomeSpelling pins the write-back: the pane shows paths
+// abbreviated, so they get typed that way, and a completion must not expand the
+// query under the cursor.
+func TestLauncherKeepsTheHomeSpelling(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "sandbox", "deep"), 0o755); err != nil {
+		t.Fatalf("mkdir sandbox/deep: %v", err)
+	}
+	for _, tok := range []string{"~", "$HOME"} {
+		m, _ := seedLauncher(t, 100, 20)
+		m.home = home
+		m = updLauncher(t, typeInto(t, m, tok+"/sand"), coretest.KTab)
+		if want := tok + "/sandbox/"; m.filter != want {
+			t.Errorf("tab on %q completed to %q, want %q", tok+"/sand", m.filter, want)
+		}
+		m = updLauncher(t, m, coretest.KTab)
+		if want := tok + "/sandbox/deep/"; m.filter != want {
+			t.Errorf("a second tab completed to %q, want %q", m.filter, want)
+		}
+	}
+}
+
+// TestLauncherResolvesATypedDirectory covers D28's other half of "type a path":
+// a directory the listing never mentioned becomes a row of its own, resolved by
+// the backend once the typing settles — and a reply the input has moved past is
+// dropped rather than shown against a query that no longer names it.
+func TestLauncherResolvesATypedDirectory(t *testing.T) {
+	dir := t.TempDir()
+	m, fb := seedLauncher(t, 100, 20)
+	fb.ResolveDirLoc = core.LaunchLocation{
+		Dir: dir, RepoName: "scratch", Branch: "main",
+		// A resolve carries whatever history the directory has; the row it becomes
+		// still must not join the empty query's history list (D28).
+		FromHistory: true,
+		Projects:    []core.LaunchProject{{Name: "scratch", File: "compose.yaml", HasMux: true}},
+	}
+	m = typeInto(t, m, dir)
+
+	// A tick the next keystroke already superseded never reaches the backend.
+	if _, cmd := m.Update(core.ReloadTickMsg{Gen: m.resolveGen - 1}); cmd != nil {
+		t.Fatalf("a superseded debounce tick should not resolve anything")
+	}
+	pending, cmd := m.Update(core.ReloadTickMsg{Gen: m.resolveGen})
+	if cmd == nil {
+		t.Fatalf("a typed directory should be resolved")
+	}
+	reply := cmd()
+	if len(fb.ResolveDirReq) != 1 || fb.ResolveDirReq[0] != dir {
+		t.Fatalf("ResolveLaunchDir asked for %v, want [%s]", fb.ResolveDirReq, dir)
+	}
+
+	stale := updLauncher(t, typeInto(t, pending.(Model), "X"), reply)
+	if len(stale.locs) != len(m.locs) {
+		t.Errorf("a reply for a path the input has moved past should be dropped")
+	}
+
+	m = updLauncher(t, pending.(Model), reply)
+	if got := leftLabels(m); len(got) != 1 || got[0] != "scratch(main)" {
+		t.Fatalf("the typed directory should be selectable, got %v", got)
+	}
+	if m.locs[len(m.locs)-1].FromHistory {
+		t.Errorf("a typed location must not join the empty query's history list")
+	}
+	if got := leftLabels(updLauncher(t, m, coretest.KEsc)); len(got) != 3 {
+		t.Errorf("clearing the query should be back to history alone, got %v", got)
+	}
+
+	// The listing's row wins: a resolve is thinner than what ListLaunchTargets
+	// builds, so a directory the list already carries is neither re-resolved nor
+	// added twice.
+	if again := updLauncher(t, m, reply); len(again.locs) != len(m.locs) {
+		t.Errorf("a directory the list already carries should not be added twice")
+	}
+	if _, cmd := m.Update(core.ReloadTickMsg{Gen: m.resolveGen}); cmd != nil {
+		t.Errorf("a directory the list already carries should not be resolved again")
+	}
+
+	failed := updLauncher(t, pending.(Model), launcherResolvedMsg{
+		dir: dir, err: errors.New("stat: boom"),
+	})
+	if !strings.Contains(failed.note, "boom") {
+		t.Errorf("a failed resolve should be said out loud, got note %q", failed.note)
+	}
+}
+
+// TestLauncherResolvesACompletedPath is the trailing-separator regression: tab
+// completing onto a directory leaves the separator in the query, while the row
+// the backend resolves holds its directory canonically (core.LaunchTarget). The
+// two have to meet, or the pane reads "no location matches" for the very path
+// tab just completed.
+func TestLauncherResolvesACompletedPath(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "scratch"), 0o755); err != nil {
+		t.Fatalf("mkdir scratch: %v", err)
+	}
+	dir := filepath.Join(root, "scratch")
+
+	m, fb := seedLauncher(t, 100, 20)
+	fb.ResolveDirLoc = core.LaunchLocation{Dir: dir, RepoName: "scratch", Branch: "main"}
+	m = updLauncher(t, typeInto(t, m, root+"/scr"), coretest.KTab)
+	if m.filter != dir+"/" {
+		t.Fatalf("tab completed to %q, want %q", m.filter, dir+"/")
+	}
+
+	next, cmd := m.Update(core.ReloadTickMsg{Gen: m.resolveGen})
+	if cmd == nil {
+		t.Fatalf("a completed path should be resolved")
+	}
+	reply := cmd()
+	if len(fb.ResolveDirReq) != 1 || fb.ResolveDirReq[0] != dir {
+		t.Fatalf("ResolveLaunchDir asked for %v, want [%s]", fb.ResolveDirReq, dir)
+	}
+	m = updLauncher(t, next.(Model), reply)
+	if got := leftLabels(m); len(got) != 1 || got[0] != "scratch(main)" {
+		t.Fatalf("the completed path should list the row it resolved to, got %v", got)
+	}
+}
+
+// TestLauncherLeavesNonPathQueriesAlone pins the other side of the trigger: a
+// fuzzy query is not a path, so it never stats or resolves anything.
+func TestLauncherLeavesNonPathQueriesAlone(t *testing.T) {
+	m, fb := seedLauncher(t, 100, 20)
+	m = typeInto(t, m, "webapp")
+	if _, cmd := m.Update(core.ReloadTickMsg{Gen: m.resolveGen}); cmd != nil {
+		t.Fatalf("a bare word should not be resolved as a directory")
+	}
+	if len(fb.ResolveDirReq) != 0 {
+		t.Errorf("ResolveLaunchDir was asked for %v", fb.ResolveDirReq)
 	}
 }
 

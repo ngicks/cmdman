@@ -119,6 +119,17 @@ type Model struct {
 	filter string
 	focus  launcherZone
 
+	// home is what the input's "~" and "$HOME" expand to, and what a completion
+	// is written back with. It is read once by New; a zero-value Model built by a
+	// test simply has no home to expand against, as the view's homeDir() has none
+	// when the environment cannot say.
+	home string
+
+	// resolveGen sequences the debounced typed-path lookup: a tick that a later
+	// keystroke has already superseded carries the older generation and is
+	// dropped, so a path typed one character at a time costs one backend call.
+	resolveGen int
+
 	leftSel, leftOff   int
 	rightSel, rightOff int
 
@@ -152,6 +163,7 @@ func New(ctx context.Context, opts core.Options) Model {
 		backend:   opts.Backend,
 		altScreen: opts.AltScreen,
 		noQuit:    opts.NoQuit,
+		home:      homeDir(),
 		failedLoc: -1,
 		failedPrj: -1,
 	}
@@ -197,7 +209,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.termBg = msg.Color
 		return m.deriveWeak(), nil
 	case launchTargetsLoadedMsg:
-		return m.onTargetsLoaded(msg), nil
+		return m.onTargetsLoaded(msg)
 	case launcherStartedMsg:
 		return m.onStarted(msg), nil
 	case launcherLandedMsg:
@@ -206,6 +218,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onAttached(msg)
 	case launcherForgotMsg:
 		return m.onForgot(msg), nil
+	case core.ReloadTickMsg:
+		return m.resolveTyped(msg)
+	case launcherResolvedMsg:
+		return m.onResolved(msg), nil
 	case launcherTickMsg:
 		return m.tick()
 	case tea.MouseWheelMsg:
@@ -221,14 +237,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) onTargetsLoaded(msg launchTargetsLoadedMsg) Model {
+func (m Model) onTargetsLoaded(msg launchTargetsLoadedMsg) (tea.Model, tea.Cmd) {
 	m.loaded = true
 	if msg.err != nil {
 		m.note = fmt.Sprintf("list error: %v", msg.err)
-		return m
+		return m, nil
 	}
 	m.locs = newLauncherLocations(msg.locs)
-	return m.clampLeft()
+	// The listing replaces every row, including one a path typed while it was in
+	// flight had already resolved to; asking for that row again is cheaper than
+	// merging two listings, and costs an idle tick when nothing was typed.
+	return m.clampLeft().armResolve()
 }
 
 // onStarted promotes a finished bring-up: the spinner stops and the row becomes
@@ -308,6 +327,77 @@ func (m Model) onForgot(msg launcherForgotMsg) Model {
 	return m.clampRight()
 }
 
+// --- typed paths (D28) ------------------------------------------------------
+
+// armResolve schedules the typed-path lookup after an edit to the query. It is
+// debounced rather than fired per keystroke because a path typed one character
+// at a time passes through every directory on the way down, and resolving one
+// costs the backend a git read per entry (D41). The tick is core's shared
+// debounce: the launcher is the whole program when it runs, so no parent model
+// forwards a ReloadTickMsg of its own into it.
+func (m Model) armResolve() (tea.Model, tea.Cmd) {
+	m.resolveGen++
+	return m, core.DebounceCmd(m.resolveGen)
+}
+
+// resolveTyped asks the backend for the row a typed directory would have listed
+// as, once the typing has settled: a path the user types their way to is a
+// location like any other (D28). A directory the listing already carries is left
+// alone — its row is the richer one.
+func (m Model) resolveTyped(msg core.ReloadTickMsg) (tea.Model, tea.Cmd) {
+	if msg.Gen != m.resolveGen {
+		return m, nil
+	}
+	dir, ok := m.typedDir()
+	if !ok || m.knownDir(dir) || !dirExists(dir) {
+		return m, nil
+	}
+	return m, resolveLaunchDirCmd(m.bgCtx(), m.backend, dir)
+}
+
+// onResolved puts a typed path's row in the left pane. The reply carries the
+// directory it was asked for: typing moves on while the backend reads the
+// location, and a row the input no longer names is a row with nothing on screen
+// to explain it.
+func (m Model) onResolved(msg launcherResolvedMsg) Model {
+	if dir, ok := m.typedDir(); !ok || dir != msg.dir {
+		return m
+	}
+	if msg.err != nil {
+		m.note = fmt.Sprintf("resolve error: %v", msg.err)
+		return m
+	}
+	if m.knownDir(msg.loc.Dir) {
+		return m
+	}
+	loc := msg.loc
+	// Out of history whatever the resolve merged into it: the empty query is
+	// D28's history list, and a directory the user typed their way to has not
+	// joined it. Appended rather than inserted because failedLoc indexes m.locs —
+	// a row put anywhere but the end would move a failure off its own row.
+	loc.FromHistory = false
+	m.locs = append(m.locs, newLauncherLocations([]core.LaunchLocation{loc})...)
+	return m.clampLeft()
+}
+
+// typedDir is the directory the input names, in the canonical form the listing
+// and the history table share (see core.LaunchTarget). It reports false for a
+// query that is not a path at all.
+func (m Model) typedDir() (string, bool) {
+	if !pathShaped(m.filter) {
+		return "", false
+	}
+	abs, err := filepath.Abs(expandHome(m.filter, m.home))
+	if err != nil {
+		return "", false
+	}
+	return abs, true
+}
+
+func (m Model) knownDir(dir string) bool {
+	return slices.ContainsFunc(m.locs, func(l launcherLocation) bool { return l.Dir == dir })
+}
+
 // fail puts an error where its row is and moves the cursor onto it: an error the
 // user cannot see is an error they cannot act on.
 func (m Model) fail(li, pi int, err error) Model {
@@ -340,6 +430,7 @@ func (m Model) find(t core.LaunchTarget) (li, pi int, ok bool) {
 
 func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.note = ""
+	before := m.filter
 	switch msg.String() {
 	case "ctrl+c":
 		return m.quit()
@@ -392,7 +483,10 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	default:
 		return m.text(msg.Text)
 	}
-	return m, nil
+	if m.filter == before {
+		return m, nil
+	}
+	return m.armResolve()
 }
 
 // text applies a printable key. This is what the three zones buy (D28 amended):
@@ -405,7 +499,7 @@ func (m Model) text(t string) (tea.Model, tea.Cmd) {
 	if m.focus == zoneInput {
 		m.filter += t
 		m.failedLoc, m.failedPrj, m.failedMsg = -1, -1, ""
-		return m.clampLeft(), nil
+		return m.clampLeft().armResolve()
 	}
 	switch t {
 	case "/":
@@ -428,24 +522,80 @@ func (m Model) text(t string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// complete extends the input to the common path prefix of what it matches — tab
-// in a path picker should move you down the tree, never widen the search.
+// complete extends the input toward the one path it could still be: the common
+// prefix of the locations it matches and, while a path is being typed, of the
+// directories on disk that extend it (D28). Tab in a path picker should move you
+// down the tree, never widen the search.
 func (m Model) complete() Model {
-	f := m.matched()
-	if len(f) == 0 {
+	exp := expandHome(m.filter, m.home)
+	cands := m.completions(exp)
+	if len(cands) == 0 {
 		return m
 	}
-	dirs := make([]string, 0, len(f))
-	for _, i := range f {
-		dirs = append(dirs, m.locs[i].Dir)
+	p := commonPrefix(cands)
+	if pathShaped(m.filter) && endsAtDir(p, cands) {
+		// The separator is what lets the next tab reach inside; without it a path
+		// completed onto a directory name needs a keystroke the user did not have
+		// to guess at.
+		p += "/"
 	}
-	p := commonPrefix(dirs)
-	if len(p) <= len(m.filter) {
+	if len(p) <= len(exp) {
 		m.note = "no common prefix past the current input"
 		return m
 	}
-	m.filter = p
+	m.filter = m.respell(p)
 	return m.clampLeft()
+}
+
+// completions is what tab may complete to: the paths of the locations the input
+// matches, plus the directories on disk under a path being typed. A matched
+// location that does not extend that path is dropped — it can only drag the
+// common prefix back behind the cursor, which is the widening tab must never do,
+// and a relative path has no absolute location to share a prefix with at all.
+func (m Model) completions(exp string) []string {
+	shaped := pathShaped(m.filter)
+	out := make([]string, 0, len(m.locs))
+	for _, i := range m.matched() {
+		if shaped && !strings.HasPrefix(m.locs[i].Dir, exp) {
+			continue
+		}
+		out = append(out, m.locs[i].Dir)
+	}
+	if shaped {
+		out = append(out, fsDirCandidates(exp)...)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// endsAtDir reports that the completed prefix is a directory the input can only
+// go inside: every candidate is that directory or something under it. A sibling
+// sharing the same letters (proj and proj-2) is not, and a separator there would
+// cut the sibling out of the search.
+func endsAtDir(p string, cands []string) bool {
+	if p == "" || strings.HasSuffix(p, "/") || !dirExists(p) {
+		return false
+	}
+	for _, c := range cands {
+		if c != p && !strings.HasPrefix(c, p+"/") {
+			return false
+		}
+	}
+	return true
+}
+
+// respell writes a completed path back the way the input spells home: a query
+// typed as ~/src or $HOME/src must not turn into /home/u/src under the cursor.
+func (m Model) respell(p string) string {
+	tok, ok := homeToken(m.filter)
+	if !ok {
+		return p
+	}
+	a := abbrevHome(p, m.home)
+	if a == p {
+		return p
+	}
+	return tok + strings.TrimPrefix(a, "~")
 }
 
 // --- selection --------------------------------------------------------------
@@ -454,6 +604,7 @@ func (m Model) complete() Model {
 // empty (D28's opening state), every matching location once the user types.
 func (m Model) matched() []int {
 	out := make([]int, 0, len(m.locs))
+	path := trimTrailingSep(expandHome(m.filter, m.home))
 	for i, l := range m.locs {
 		if m.filter == "" {
 			if l.FromHistory {
@@ -461,7 +612,7 @@ func (m Model) matched() []int {
 			}
 			continue
 		}
-		if _, ok := matchLaunchLocation(m.filter, l); ok {
+		if _, ok := matchLaunchLocation(m.filter, path, l); ok {
 			out = append(out, i)
 		}
 	}
@@ -732,14 +883,19 @@ func (m Model) anyStarting() bool {
 // a reviewer can both see *why* a row survived. Branch, repo uri and path are
 // D18's location fields; project names are kept as a last resort because the
 // projects moved to the right pane and typing one should still find its home.
-func matchLaunchLocation(filter string, l launcherLocation) (string, bool) {
-	for _, f := range []struct{ name, value string }{
-		{"branch", l.Branch},
-		{"repo", l.RepoURI},
-		{"repo", l.RepoName},
-		{"path", l.Dir},
+//
+// path is the filter with its home spelling expanded (see expandHome). Only the
+// path field takes it: the row stores its directory in full, so a query typed
+// the way the pane displays it has to be read back the way the row holds it,
+// while a branch or a repo named "~" would be exactly that string.
+func matchLaunchLocation(filter, path string, l launcherLocation) (string, bool) {
+	for _, f := range []struct{ name, value, needle string }{
+		{"branch", l.Branch, filter},
+		{"repo", l.RepoURI, filter},
+		{"repo", l.RepoName, filter},
+		{"path", l.Dir, path},
 	} {
-		if f.value != "" && core.MatchesFilter(filter, f.value) {
+		if f.value != "" && core.MatchesFilter(f.needle, f.value) {
 			return f.name, true
 		}
 	}
