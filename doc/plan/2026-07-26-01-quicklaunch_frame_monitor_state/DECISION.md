@@ -809,3 +809,59 @@ build, so the row and the eventual launch agree on WorkDir.
 (offered as the minimal option; dead-ends exactly where D28 matters);
 completing against the filesystem for non-path-shaped queries
 (fuzzy words are project/repo searches, not paths).
+
+### D43 (2026-08-14, D42 follow-up) — completion suggestion list with menu cycling [automatic]
+
+**Choice:** tab gets zsh's other half — what the completion cannot
+decide, it shows and lets you choose. The user confirmed the scope
+(menu cycling, and path-shaped input only); the corners below marked
+`[automatic]` were settled while implementing.
+
+- Tab extends to the union common prefix as before (D42). Two or
+  more candidates surviving that leave a suggestion list open under
+  the input line; nothing left to extend puts the first candidate in
+  the input, each further tab the next, wrapping, with `shift+tab`
+  walking back. An insertion keeps the typed home spelling and takes
+  the trailing separator D42 withholds from an *extension* — picking
+  a directory off the list is the request to go inside it, so the
+  sibling it cuts out of the search is one the user just passed over.
+- Non-path input is strictly unchanged: no list, no cycling, and the
+  same note when there is no prefix past what is typed.
+- The candidate set is D42's union (on-disk dirs extending the typed
+  path + matched known-location dirs), fixed when the menu opens: a
+  set recomputed from an insertion would be the directories *inside*
+  the proposal rather than the ones it is one of. Cycling edits the
+  query like any keystroke, so the debounced `ResolveLaunchDir` still
+  turns the chosen directory into a left-pane row.
+- Dismissal: esc while the list is up drops it and puts back the text
+  the cycling started from, spending that esc ahead of D31's chain;
+  enter accepts the insertion in place, leaving the zone step to the
+  next enter; typing/backspace keep the insertion and drop the list;
+  leaving the input zone (enter, a click on a pane) drops it too,
+  since tab is an input-zone key. The arrows stay pane navigation —
+  cycling is tab/shift+tab alone. [automatic]
+- Presentation: each candidate shows as the part past the directory
+  they share (the last component, in the usual case) in a row-major
+  grid, the inserted one carrying the pane cursor's BgAccent block;
+  the list is capped at 6 lines with a `+N more` tail and spends the
+  panes' row budget rather than the bottom of the window (D27).
+  [automatic]
+
+**Rationale:** D42 made tab walk the filesystem, which is where a
+prefix stops being enough: the useful half of a picker is seeing the
+handful of directories the prefix left and choosing one, not typing
+the letter that distinguishes them. Cycling reuses the input as the
+selection — there is nothing new to focus, so the zones (D28) are
+untouched.
+
+**Refines:** D42 (the common-prefix rule and `endsAtDir`'s
+sibling-preserving separator are unchanged; the menu is what makes
+the "left alone, nothing to extend" outcome actionable).
+
+**Rejected:** up/down cycling the list (they are the panes' keys, and
+arrowing to a row while typing is D28's fzf reflex — one key cannot
+mean both); enter accepting *and* advancing a zone (a mis-chosen
+candidate would land the cursor on a row nobody asked for); a list
+for fuzzy queries (no tree to walk — D42's rejection stands); a list
+that scrolls or overflows the panes (the panes are what the launcher
+is for).
