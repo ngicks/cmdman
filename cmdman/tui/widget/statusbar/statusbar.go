@@ -1,6 +1,7 @@
 // Package statusbar implements the one-line status bar: where you are, then
-// what is running, then what this is — the working directory's project with its
-// marker, the counts across every project, and the version at the right edge.
+// what is running, then what this is — the working directory itself, marked
+// with the marker of the project tied to it (D44), the counts across every
+// project, and the version at the right edge.
 //
 // It is a facade over cmdman/tui/widget/internal/panel. The statusbar and the
 // switcher are one model by design — they read the same two listings over the

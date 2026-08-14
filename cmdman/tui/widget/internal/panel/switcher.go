@@ -317,6 +317,11 @@ func (m Model) headLine(g core.ProjectGroup, bg core.RowBg, dup bool, w int) str
 	return head
 }
 
+// headMinPath is the least path a disambiguated head keeps: the ellipsis plus a
+// few cells of where the directory ends. Narrower than that the project name is
+// the cheaper thing to lose.
+const headMinPath = 4
+
 // headLabel is what a group's head calls itself: the directory it sits in
 // (D44), home-abbreviated and cut to w cells keeping its tail — several compose
 // projects can run on one directory, so the project name misidentifies the
@@ -332,14 +337,23 @@ func headLabel(g core.ProjectGroup, dup bool, w int) string {
 		return groupLabel(g)
 	}
 	label := core.AbbrevHome(g.Workdir, core.HomeDir())
-	if dup {
-		name := g.Name
-		if name == "" {
-			// The same word groupLabel falls back to, without its parentheses:
-			// wrapped again the head would read "((unnamed))".
-			name = "unnamed"
-		}
-		label += " (" + name + ")"
+	if !dup {
+		return core.TruncateLeftCells(label, w)
+	}
+	name := g.Name
+	if name == "" {
+		// The same word groupLabel falls back to, without its parentheses:
+		// wrapped again the head would read "((unnamed))".
+		name = "unnamed"
+	}
+	suffix := " (" + name + ")"
+	// The suffix is reserved out of the budget rather than cut along with the
+	// path: cut together it is the path that goes, leaving "…(alpha)" — a name
+	// where the head's job is to say the place. A column with no room for both
+	// drops the suffix instead, since the path is the identity and the name only
+	// tells two of them apart.
+	if room := w - core.GlyphWidth(suffix); room >= headMinPath {
+		return core.TruncateLeftCells(label, room) + suffix
 	}
 	return core.TruncateLeftCells(label, w)
 }

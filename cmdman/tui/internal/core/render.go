@@ -176,11 +176,16 @@ func RowStateBadge(c CommandRow, bg RowBg) string {
 }
 
 // ScaleBadge is the replica identity a command row carries when the command is
-// one replica among several: " [i/n]", appended after the row's state word by
+// one replica among several: " [i]", appended after the row's state word by
 // every listing that renders commands (D44). It sits next to the state rather
 // than at the end of the row because the row's tail is what a narrow pane cuts
 // first, and it is styled by its caller in the row's weak shade so a title
 // following it stays visibly the command's own words rather than the badge's.
+//
+// The count still decides whether there is a badge at all — it is what tells a
+// scaled command from an unscaled one — but it is not shown: a replica's stored
+// count is the desired count as of its own start, which a later `compose scale`
+// leaves behind, while its index is what it is for as long as it lives.
 //
 // An unscaled command — the zero ScaleIndex/ScaleCount pair, which is also how
 // a single-instance compose command arrives — has nothing to say and renders
@@ -189,7 +194,7 @@ func ScaleBadge(c CommandRow) string {
 	if c.ScaleCount <= 1 || c.ScaleIndex <= 0 {
 		return ""
 	}
-	return fmt.Sprintf(" [%d/%d]", c.ScaleIndex, c.ScaleCount)
+	return fmt.Sprintf(" [%d]", c.ScaleIndex)
 }
 
 // PadLine truncates and right-pads a rendered line to exactly w cells, so a

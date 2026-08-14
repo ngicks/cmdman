@@ -886,7 +886,7 @@ func TestCommandRowShowsScaleBadge(t *testing.T) {
 	for line := range strings.SplitSeq(out, "\n") {
 		switch {
 		case strings.Contains(line, "watcher"):
-			if !strings.Contains(line, "[2/3]") {
+			if !strings.Contains(line, "[2]") {
 				t.Errorf("a replica's row should say which one it is: %q", line)
 			}
 		case strings.Contains(line, "seed-db"):

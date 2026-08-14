@@ -192,7 +192,9 @@ func TestSwitcherActiveHeadKeepsItsMarker(t *testing.T) {
 
 // TestSwitcherHeadLabel covers what a head says on its own, including the two
 // groups a directory cannot speak for: one that has never run anywhere in
-// particular, and one whose column is narrower than its path.
+// particular, and one whose column is narrower than its path — where the
+// disambiguating project name is budgeted out of the column before the path is
+// cut to it, and dropped entirely once there is room for only one of the two.
 func TestSwitcherHeadLabel(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -237,6 +239,22 @@ func TestSwitcherHeadLabel(t *testing.T) {
 			g:    core.ProjectGroup{Name: "api", Workdir: "/work/api/deep"},
 			w:    12,
 			want: "…rk/api/deep",
+		},
+		{
+			// Cut as one string the suffix survives and the path is eaten
+			// ("…(alpha)"), which names no place at all.
+			name: "a tight column shortens the path, not the name it needs",
+			g:    core.ProjectGroup{Name: "alpha", Workdir: "/work/shared"},
+			dup:  true,
+			w:    12,
+			want: "…red (alpha)",
+		},
+		{
+			name: "a column with room for one of the two keeps the path",
+			g:    core.ProjectGroup{Name: "alpha", Workdir: "/work/shared"},
+			dup:  true,
+			w:    11,
+			want: "…ork/shared",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -286,17 +304,18 @@ func TestSwitcherWidthsSurviveWidePathsAndBadges(t *testing.T) {
 }
 
 // TestScaleBadgeMarksReplicasOnly covers the badge's guard at both its edges: a
-// command that is one replica among several says which one, and neither half of
-// the unscaled zero value invents an answer. The listing already collapses a
-// sole instance to that zero pair (cli.commandInfos), so what the guard here
-// keeps out is a {1,1} pair reaching a row and badging an unscaled command.
+// command that is one replica among several says which one — the index alone,
+// never the count it was scaled to — and neither half of the unscaled zero
+// value invents an answer. The listing already collapses a sole instance to
+// that zero pair (cli.commandInfos), so what the guard here keeps out is a
+// {1,1} pair reaching a row and badging an unscaled command.
 func TestScaleBadgeMarksReplicasOnly(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		index, count int
 		want         string
 	}{
-		{"one replica among several", 2, 3, " [2/3]"},
+		{"one replica among several", 2, 3, " [2]"},
 		{"a sole instance is not scaled", 1, 1, ""},
 		{"a count with no index says nothing", 0, 3, ""},
 		{"an index with no count says nothing", 2, 0, ""},
@@ -336,7 +355,7 @@ func TestSwitcherRowsBadgeReplicas(t *testing.T) {
 	}})
 
 	out := core.StripANSI(m.viewContent())
-	for _, want := range []string{"[2/3]", "[1/2]"} {
+	for _, want := range []string{"[2]", "[1]"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("a replica's row should carry %q:\n%s", want, out)
 		}
@@ -676,6 +695,95 @@ func TestStatusbarRendersOneLine(t *testing.T) {
 	if got := lipgloss.Width(belled); got != w {
 		t.Errorf("statusbar width with a bell = %d, want %d", got, w)
 	}
+}
+
+// TestStatusbarBudgetsWholeSegments covers what a long working directory used
+// to do to the row it shares. The bar laid its segments out and clipped what
+// overran, so a 60-cell path at 80 cells left the counts half-rendered ("2
+// runni", "2 pro") — a cut number reads as a smaller number rather than as a
+// cut, and the widget's e2e test lost the word it waits for whenever $TMPDIR
+// was long. The segments are budgeted whole now, and the path is what shortens.
+func TestStatusbarBudgetsWholeSegments(t *testing.T) {
+	// A temp directory under a long $TMPDIR — where the e2e widget test runs the
+	// bar — against the 80-cell terminal it renders into.
+	const dir = "/tmp/cmdman-e2e-aaaaaaaaaaaaaaaaaaaa/cmdman-e2e-compose-zzzz"
+	const counts = "2 projects · 2 running"
+
+	m := seedStatusbarAt(dir, 80)
+	line := core.StripANSI(m.viewContent())
+	if !strings.Contains(line, counts) {
+		t.Errorf("an 80-cell bar should carry the counts whole: %q", line)
+	}
+	if !strings.Contains(line, "running") {
+		t.Errorf("the word the e2e widget test waits for should be there: %q", line)
+	}
+	// What paid for them is the path's head: the end of a path is what says which
+	// directory it is.
+	if !strings.Contains(line, "compose-zzzz") {
+		t.Errorf("a shortened path should still end where it does: %q", line)
+	}
+	if got := lipgloss.Width(line); got != 80 {
+		t.Errorf("statusbar width = %d, want 80", got)
+	}
+
+	// Squeezed, the counts are there whole or not at all — never as a fragment of
+	// themselves — and the version, which ranks below them, cannot outlive them.
+	for w := 20; w <= 90; w++ {
+		next, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: 1})
+		line := core.StripANSI(next.(Model).viewContent())
+		whole := strings.Contains(line, counts)
+		if piece := strings.Contains(line, "pro") ||
+			strings.Contains(line, "run"); piece != whole {
+			t.Errorf("%d-cell bar rendered a piece of the counts: %q", w, line)
+		}
+		if !whole && strings.Contains(line, "v0.0.0-test") {
+			t.Errorf("%d-cell bar dropped the counts but kept the version: %q", w, line)
+		}
+		if got := lipgloss.Width(line); got != w {
+			t.Errorf("%d-cell bar rendered %d cells: %q", w, got, line)
+		}
+	}
+
+	// A short path leaves room the version would take once the counts are out of
+	// the way, which is the one width where the rank between those two shows: the
+	// version is the least of the three, so it cannot outlive what outranks it.
+	short := core.StripANSI(seedStatusbarAt("/w", 28).viewContent())
+	if strings.Contains(short, "2 projects") {
+		t.Errorf("a 28-cell bar has no room for the counts: %q", short)
+	}
+	if strings.Contains(short, "v0.0.0-test") {
+		t.Errorf("the version cannot outlive the counts it ranks below: %q", short)
+	}
+	if got := lipgloss.Width(short); got != 28 {
+		t.Errorf("28-cell bar rendered %d cells: %q", got, short)
+	}
+}
+
+// seedStatusbarAt is seedWidget's fixture with the cwd-tied project sitting in
+// dir: the bar's left segment is a path, so the path's length is the variable
+// its layout turns on.
+func seedStatusbarAt(dir string, width int) Model {
+	fb := &coretest.FakeBackend{
+		Dir: dir,
+		Cmds: []core.CommandInfo{
+			{ID: "1", Name: "watcher", Project: "local-dev", Workdir: dir,
+				State: model.EventTypeRunning},
+			{ID: "2", Name: "web", Project: "api-stack", Workdir: "/work/api",
+				State: model.EventTypeRunning},
+		},
+		Projs: []core.ProjectInfo{
+			{Name: "local-dev", Workdir: dir, Identity: "id-local-dev"},
+			{Name: "api-stack", Workdir: "/work/api", Identity: "id-api-stack"},
+		},
+	}
+	m := New(context.Background(), core.WidgetStatusbar,
+		core.Options{Backend: fb, Version: "v0.0.0-test"})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 1})
+	m = next.(Model)
+	next, _ = m.Update(core.CommandsLoadedMsg{Infos: fb.Cmds})
+	m = next.(Model)
+	next, _ = m.Update(core.ProjectsLoadedMsg{Infos: fb.Projs})
+	return next.(Model)
 }
 
 // seedWidget builds a panel over two projects — local-dev is the cwd-tied one —
