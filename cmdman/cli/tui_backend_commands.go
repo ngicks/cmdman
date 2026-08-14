@@ -43,6 +43,11 @@ func (b *serviceBackend) ListCommands(ctx context.Context) ([]tui.CommandInfo, e
 // configured working directory, so it still appears in the TUI rather than
 // being dropped. A command whose monitor did not answer keeps the zero runtime
 // fields.
+//
+// Scale is projected only for a command that is one replica among several:
+// every compose-created command carries a scale index (an unscaled command's
+// sole instance has index 1), so the single-replica case is collapsed to the
+// zero value here rather than reported as replica 1 of 1.
 func commandInfos(
 	entries []store.CommandEntry,
 	runtime map[string]cmdman.RuntimeState,
@@ -68,6 +73,10 @@ func commandInfos(
 		if cmd := labels[compose.LabelCommand]; cmd != "" {
 			name = cmd
 		}
+		scaleIndex, scaleCount := compose.ScaleOf(labels)
+		if scaleIndex <= 0 || scaleCount <= 1 {
+			scaleIndex, scaleCount = 0, 0
+		}
 		rs := runtime[e.ID]
 		out = append(out, tui.CommandInfo{
 			ID:         e.ID,
@@ -78,6 +87,8 @@ func commandInfos(
 			ExitCode:   e.ExitCode,
 			LogDriver:  driver,
 			Tty:        tty,
+			ScaleIndex: scaleIndex,
+			ScaleCount: scaleCount,
 			Title:      rs.Title,
 			Status:     rs.Status,
 			Detail:     rs.Detail,

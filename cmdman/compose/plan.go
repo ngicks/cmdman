@@ -187,6 +187,26 @@ type instanceKey struct {
 	scaleIndex int
 }
 
+// ScaleOf reads back the replica identity [BuildLabels] recorded on a compose
+// command: its 1-based index among the command's replicas, and the desired
+// replica count as of the create that stamped the labels. A missing or
+// unparseable label yields 0 for that value, so a command created outside
+// compose reads back as (0, 0).
+func ScaleOf(labels map[string]string) (index, count int) {
+	return scaleLabelValue(labels[LabelScaleIndex]), scaleLabelValue(labels[LabelScale])
+}
+
+// scaleLabelValue parses one scale label. An unparseable value yields 0 rather
+// than what [strconv.Atoi] salvages from it, so an out-of-range label cannot
+// come back as a plausible-looking count.
+func scaleLabelValue(v string) int {
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
 // scaleIndexOf reads the 1-based scale index recorded on an existing entry. A
 // missing or unparseable label yields 0, which never matches a desired index
 // (>= 1), so such an entry is treated as surplus/orphan rather than a live
@@ -195,11 +215,8 @@ func scaleIndexOf(e store.CommandEntry) int {
 	if e.ConfigJSON == nil {
 		return 0
 	}
-	n, err := strconv.Atoi(e.ConfigJSON.Labels[LabelScaleIndex])
-	if err != nil {
-		return 0
-	}
-	return n
+	index, _ := ScaleOf(e.ConfigJSON.Labels)
+	return index
 }
 
 // BuildLabels returns the complete label map for one replica of a compose

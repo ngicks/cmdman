@@ -69,3 +69,59 @@ func TestCommandInfosIncludesStandalone(t *testing.T) {
 		t.Fatalf("standalone workdir = %q, want %q", tool.Workdir, normalizePath("/work/tool"))
 	}
 }
+
+func TestCommandInfosScale(t *testing.T) {
+	composeEntry := func(id string, labels map[string]string) store.CommandEntry {
+		labels[compose.LabelProject] = "api-stack"
+		labels[compose.LabelWorkdir] = "/work/api"
+		return store.CommandEntry{
+			ID:         id,
+			Name:       id,
+			State:      model.EventTypeRunning,
+			ConfigJSON: &model.CommandConfig{Labels: labels},
+		}
+	}
+	entries := []store.CommandEntry{
+		composeEntry("r2", map[string]string{
+			compose.LabelCommand:    "api",
+			compose.LabelScaleIndex: "2",
+			compose.LabelScale:      "3",
+		}),
+		// Every compose-created command is labelled, an unscaled one as 1 of 1.
+		composeEntry("single", map[string]string{
+			compose.LabelCommand:    "web",
+			compose.LabelScaleIndex: "1",
+			compose.LabelScale:      "1",
+		}),
+		{
+			ID:         "tool",
+			Name:       "standalone-tool",
+			State:      model.EventTypeExited,
+			ConfigJSON: &model.CommandConfig{Dir: "/work/tool"},
+		},
+	}
+
+	byID := map[string]tui.CommandInfo{}
+	for _, c := range commandInfos(entries, nil) {
+		byID[c.ID] = c
+	}
+
+	for _, tc := range []struct {
+		id         string
+		wantIndex  int
+		wantCount  int
+		wantReason string
+	}{
+		{"r2", 2, 3, "replica 2 of a command scaled to 3"},
+		{"single", 0, 0, "a single-replica compose command is unscaled"},
+		{"tool", 0, 0, "a standalone command carries no scale labels"},
+	} {
+		got := byID[tc.id]
+		if got.ScaleIndex != tc.wantIndex || got.ScaleCount != tc.wantCount {
+			t.Errorf(
+				"%s: scale = %d/%d, want %d/%d (%s)",
+				tc.id, got.ScaleIndex, got.ScaleCount, tc.wantIndex, tc.wantCount, tc.wantReason,
+			)
+		}
+	}
+}

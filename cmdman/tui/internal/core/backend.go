@@ -23,6 +23,15 @@ type CommandInfo struct {
 	// sanitized log fallback.
 	Tty bool
 
+	// ScaleIndex and ScaleCount are the command's replica identity within its
+	// compose command: its 1-based index among the replicas, and the replica
+	// count desired as of the create that stamped its labels. Both are zero for
+	// a command that is not one replica among several — a standalone command,
+	// or a compose command running a single instance — so the zero value reads
+	// as "unscaled" and there is nothing for a scale badge to say.
+	ScaleIndex int
+	ScaleCount int
+
 	// Title, Status, Detail and BellUnread are the runtime state the command's
 	// monitor holds for the current run: the title it set, the status it
 	// reported (working/waiting/done, "" when it reported none) with its

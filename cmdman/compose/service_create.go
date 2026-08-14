@@ -221,11 +221,7 @@ func entryDisplayName(e store.CommandEntry) string {
 		return ""
 	}
 	name := e.ConfigJSON.Labels[LabelCommand]
-	idx := scaleIndexOf(e)
-	scale := 1
-	if n, err := strconv.Atoi(e.ConfigJSON.Labels[LabelScale]); err == nil {
-		scale = n
-	}
+	idx, scale := ScaleOf(e.ConfigJSON.Labels)
 	if scale <= 1 || idx <= 0 {
 		return name
 	}
