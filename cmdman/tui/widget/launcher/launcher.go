@@ -120,6 +120,10 @@ type Model struct {
 	filter string
 	focus  launcherZone
 
+	// menu is the completion suggestion list under the input, zero when none is
+	// showing (D43).
+	menu completionMenu
+
 	// home is what the input's "~" and "$HOME" expand to, and what a completion
 	// is written back with. It is read once by New; a zero-value Model built by a
 	// test simply has no home to expand against, as the view's homeDir() has none
@@ -436,10 +440,16 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m.quit()
 	case "esc":
-		// One step at a time: projects → locations → input → clear the query →
-		// dismiss. Clearing comes before quitting so a long path typed by mistake
-		// costs one key, not the whole popup (D31).
+		// One step at a time: the suggestion list → projects → locations → input →
+		// clear the query → dismiss. Clearing comes before quitting so a long path
+		// typed by mistake costs one key, not the whole popup (D31).
 		switch {
+		case m.menuOpen():
+			// The list is a proposal, so esc takes back what cycling put in the
+			// input rather than stepping a zone: a candidate tried and rejected must
+			// not cost the query it was tried against (D43).
+			m.filter = m.menu.base
+			m = m.closeMenu().clampLeft()
 		case m.focus == zoneRight:
 			m.focus = zoneLeft
 		case m.focus == zoneLeft:
@@ -454,20 +464,38 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Readline's erase-line, reachable from anywhere. It returns to the input
 		// too: having just emptied the query you are about to retype it.
 		m.filter, m.focus = "", zoneInput
-		m = m.clampLeft()
+		m = m.closeMenu().clampLeft()
 	case "tab":
-		if m.focus == zoneInput {
+		switch {
+		case m.focus != zoneInput:
+			// Completion is the input zone's; on a list tab stays unbound.
+		case m.menuOpen():
+			// The candidate set is the one the menu opened with: recomputed from an
+			// insertion it would be the directories *inside* the proposal rather
+			// than the ones it is one of (D43).
+			m = m.cycle(1)
+		default:
 			m = m.complete()
 		}
+	case "shift+tab":
+		if m.focus == zoneInput && m.menuOpen() {
+			m = m.cycle(-1)
+		}
 	case "enter":
-		switch m.focus {
-		case zoneInput:
+		switch {
+		case m.cycling():
+			// The insertion is what this enter accepts; the zone step is the next
+			// one, so settling on a candidate cannot overshoot into the list (D43).
+			m = m.closeMenu()
+		case m.focus == zoneInput:
 			m.focus = zoneLeft
-			m = m.clampLeft()
-		case zoneLeft:
+			// The list is an input-zone affordance and tab is an input-zone key:
+			// leaving the zone with it up would strand it with nothing to dismiss it.
+			m = m.closeMenu().clampLeft()
+		case m.focus == zoneLeft:
 			m.focus = zoneRight
 			m = m.clampRight()
-		case zoneRight:
+		case m.focus == zoneRight:
 			m = m.toggle()
 		}
 	case "down", "ctrl+n":
@@ -479,7 +507,9 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "backspace":
 		if r := []rune(m.filter); len(r) > 0 && m.focus == zoneInput {
 			m.filter = string(r[:len(r)-1])
-			m = m.clampLeft()
+			// Editing keeps what cycling wrote and drops the list: the candidates
+			// were computed for a query that no longer exists (D43).
+			m = m.closeMenu().clampLeft()
 		}
 	default:
 		return m.text(msg.Text)
@@ -500,7 +530,7 @@ func (m Model) text(t string) (tea.Model, tea.Cmd) {
 	if m.focus == zoneInput {
 		m.filter += t
 		m.failedLoc, m.failedPrj, m.failedMsg = -1, -1, ""
-		return m.clampLeft().armResolve()
+		return m.closeMenu().clampLeft().armResolve()
 	}
 	switch t {
 	case "/":
@@ -525,14 +555,20 @@ func (m Model) text(t string) (tea.Model, tea.Cmd) {
 
 // complete extends the input toward the one path it could still be: the common
 // prefix of the locations it matches and, while a path is being typed, of the
-// directories on disk that extend it (D28). Tab in a path picker should move you
-// down the tree, never widen the search.
+// directories on disk that extend it (D28, D42). Tab in a path picker should
+// move you down the tree, never widen the search. What it cannot decide it
+// shows: several candidates leave the suggestion list open behind the extended
+// prefix, and nothing left to extend starts cycling through them (D43).
 func (m Model) complete() Model {
 	exp := expandHome(m.filter, m.home)
 	cands := m.completions(exp)
 	if len(cands) == 0 {
 		return m
 	}
+	// The shape of what was *typed*, taken before the completion moves the input:
+	// a bare word completing onto a location's directory ends up looking like a
+	// path, and the list is path-shaped input's alone (D42, D43).
+	ambiguous := pathShaped(m.filter) && len(cands) > 1
 	p := commonPrefix(cands)
 	if pathShaped(m.filter) && endsAtDir(p, cands) {
 		// The separator is what lets the next tab reach inside; without it a path
@@ -541,10 +577,18 @@ func (m Model) complete() Model {
 		p += "/"
 	}
 	if len(p) <= len(exp) {
-		m.note = "no common prefix past the current input"
-		return m
+		if !ambiguous {
+			m.note = "no common prefix past the current input"
+			return m
+		}
+		// Nothing left to extend and several ways down: tab starts putting the
+		// candidates themselves in the input, one per press.
+		return m.openMenu(cands).cycle(1)
 	}
-	m.filter = m.respell(p)
+	m.filter = m.respell(m.filter, p)
+	if ambiguous {
+		m = m.openMenu(cands)
+	}
 	return m.clampLeft()
 }
 
@@ -587,8 +631,11 @@ func endsAtDir(p string, cands []string) bool {
 
 // respell writes a completed path back the way the input spells home: a query
 // typed as ~/src or $HOME/src must not turn into /home/u/src under the cursor.
-func (m Model) respell(p string) string {
-	tok, ok := homeToken(m.filter)
+// src is the spelling to follow — the input itself while completing, and the
+// text the menu opened on while cycling, so a candidate that lies outside home
+// cannot cost the candidates after it their abbreviation (D43).
+func (m Model) respell(src, p string) string {
+	tok, ok := homeToken(src)
 	if !ok {
 		return p
 	}
@@ -597,6 +644,86 @@ func (m Model) respell(p string) string {
 		return p
 	}
 	return tok + strings.TrimPrefix(a, "~")
+}
+
+// --- completion menu (D43) --------------------------------------------------
+
+// completionMenu is the zsh-like suggestion list under the input: the
+// candidates the last tab could not choose between, and how far cycling has got
+// through them. The set is fixed when the menu opens — see the tab key.
+type completionMenu struct {
+	cands  []string // the completions, as completions() sorted and deduped them
+	labels []string // what each shows as: the part past the directory they share
+	sel    int      // the candidate now in the input, -1 while none is
+	base   string   // the input the cycling started from; esc puts it back
+}
+
+func (m Model) menuOpen() bool { return len(m.menu.cands) > 0 }
+
+// cycling reports that a candidate is actually in the input, which is what esc
+// takes back and enter accepts. A list that is merely being shown has nothing to
+// accept yet, so enter there means what it always did: on to the locations.
+func (m Model) cycling() bool { return m.menuOpen() && m.menu.sel >= 0 }
+
+func (m Model) openMenu(cands []string) Model {
+	m.menu = completionMenu{cands: cands, labels: menuLabels(cands), sel: -1, base: m.filter}
+	return m
+}
+
+func (m Model) closeMenu() Model {
+	m.menu = completionMenu{}
+	return m
+}
+
+// cycle puts the next candidate in the input, wrapping at both ends. It replaces
+// the whole insertion rather than appending to it: the menu offers one choice at
+// a time, and appending would grow a path out of the alternatives to it.
+func (m Model) cycle(d int) Model {
+	n := len(m.menu.cands)
+	if n == 0 {
+		return m
+	}
+	switch {
+	case m.menu.sel >= 0:
+		m.menu.sel = (m.menu.sel + d + n) % n
+	case d < 0:
+		// Backward out of a list nothing has been chosen from starts at its end.
+		m.menu.sel = n - 1
+	default:
+		m.menu.sel = 0
+	}
+	m.filter = m.respell(m.menu.base, menuInsert(m.menu.cands[m.menu.sel]))
+	return m.clampLeft()
+}
+
+// menuInsert is the text one candidate puts in the input: the candidate under
+// the same trailing-separator rule tab's own completion follows, so the next tab
+// reaches inside it. It needs no sibling check of its own (endsAtDir's) — the
+// separator cuts the siblings out of the search, which is exactly what choosing
+// one of them off the list asks for.
+func menuInsert(cand string) string {
+	if strings.HasSuffix(cand, "/") || !dirExists(cand) {
+		return cand
+	}
+	return cand + "/"
+}
+
+// menuLabels is what each candidate shows as: the part past the directory they
+// all share, which in the usual case is the last component — the rest of the
+// path is what the user typed. A matched location deeper than the path being
+// typed keeps the components between, so no two rows can read the same.
+func menuLabels(cands []string) []string {
+	head := commonPrefix(cands)
+	if i := strings.LastIndex(head, "/"); i >= 0 {
+		head = head[:i+1]
+	} else {
+		head = ""
+	}
+	out := make([]string, len(cands))
+	for i, c := range cands {
+		out[i] = strings.TrimPrefix(c, head)
+	}
+	return out
 }
 
 // --- selection --------------------------------------------------------------

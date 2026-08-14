@@ -3,6 +3,7 @@ package launcher
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -589,11 +590,25 @@ func TestLauncherToggleAndCompletion(t *testing.T) {
 	if m.filter != "/home/u/src/" {
 		t.Errorf("tab completed to %q, want the common prefix %q", m.filter, "/home/u/src/")
 	}
-	// Tab moves down the tree or does nothing: with no prefix past what is
-	// already typed it says so instead of widening the search.
+	// Two locations extend it, so the prefix is as far as tab can decide: the
+	// list opens behind it and the next tab chooses between them (D43).
+	if !m.menuOpen() || m.cycling() {
+		t.Errorf("an ambiguous completion should list the candidates without choosing, got %v",
+			m.menu)
+	}
 	m = updLauncher(t, m, coretest.KTab)
-	if m.filter != "/home/u/src/" || m.note == "" {
-		t.Errorf("a second tab changed the query to %q (note %q)", m.filter, m.note)
+	if m.filter != "/home/u/src/blog" {
+		t.Errorf("a second tab put %q in the input, want the first candidate", m.filter)
+	}
+
+	// Tab moves down the tree or does nothing: with no prefix past what is
+	// already typed and nothing to choose between, it says so instead of
+	// widening the search.
+	m, _ = seedLauncher(t, 100, 20)
+	m = updLauncher(t, typeInto(t, m, "/home/u/gitrepo/cmdman"), coretest.KTab)
+	if m.filter != "/home/u/gitrepo/cmdman" || m.note == "" || m.menuOpen() {
+		t.Errorf("tab on the one location it matches changed the query to %q (note %q)",
+			m.filter, m.note)
 	}
 
 	// A query that is not a path completes over the listing alone and gains no
@@ -657,14 +672,19 @@ func TestLauncherCompletesPathsOnDisk(t *testing.T) {
 	}
 
 	// A completed prefix that is itself a directory keeps its siblings reachable:
-	// the separator would cut proj-alpha-2 out of the search.
+	// the separator would cut proj-alpha-2 out of the search. With nothing left to
+	// extend, tab offers the two instead — and choosing one *does* take the
+	// separator, since that is what choosing it means (D43).
 	if err := os.MkdirAll(filepath.Join(root, "proj-alpha-2"), 0o755); err != nil {
 		t.Fatalf("mkdir proj-alpha-2: %v", err)
 	}
 	m := tab(t, root+"/proj-alpha")
-	if m.filter != root+"/proj-alpha" || m.note == "" {
-		t.Errorf("tab on a directory with a sibling = %q (note %q), want it left alone",
-			m.filter, m.note)
+	if m.filter != root+"/proj-alpha/" || !m.cycling() {
+		t.Errorf("tab on a directory with a sibling = %q, want the first candidate chosen",
+			m.filter)
+	}
+	if got := updLauncher(t, m, coretest.KTab).filter; got != root+"/proj-alpha-2/" {
+		t.Errorf("the next tab = %q, want the sibling the separator would have cut out", got)
 	}
 
 	// A relative path is a path too, resolved against the process cwd and written
@@ -717,6 +737,260 @@ func TestLauncherKeepsTheHomeSpelling(t *testing.T) {
 		if want := tok + "/sandbox/deep/"; m.filter != want {
 			t.Errorf("a second tab completed to %q, want %q", m.filter, want)
 		}
+	}
+}
+
+// kShiftTab cycles the suggestion list backward: terminals send it as tab with
+// the shift modifier, which is what bubbletea spells "shift+tab".
+var kShiftTab = tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
+
+// menuFixture is a directory of siblings tab cannot choose between, with the
+// launcher parked on the ambiguous prefix — one tab away from the menu.
+func menuFixture(t *testing.T, names ...string) (string, Model) {
+	t.Helper()
+	root := t.TempDir()
+	for _, n := range names {
+		if err := os.MkdirAll(filepath.Join(root, n), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", n, err)
+		}
+	}
+	m, _ := seedLauncher(t, 100, 20)
+	return root, typeInto(t, m, root+"/")
+}
+
+// TestLauncherCompletionMenuLists covers D43's list: a tab that extends as far
+// as the candidates agree and still cannot decide shows them under the input,
+// by last component, capped to a few rows with a count of the rest — and the
+// rows come out of the panes' budget rather than off the bottom (D27).
+func TestLauncherCompletionMenuLists(t *testing.T) {
+	root := t.TempDir()
+	for i := range 14 {
+		if err := os.MkdirAll(filepath.Join(root, fmt.Sprintf("proj-%02d", i)), 0o755); err != nil {
+			t.Fatalf("mkdir proj-%02d: %v", i, err)
+		}
+	}
+	// A narrow window, so the grid is two columns and 14 candidates run past the
+	// cap without needing 70 directories to do it.
+	const w, h = 24, 20
+	m, _ := seedLauncher(t, w, h)
+	m = updLauncher(t, typeInto(t, m, root+"/proj"), coretest.KTab)
+
+	if m.filter != root+"/proj-" {
+		t.Fatalf("tab completed to %q, want the common prefix %q", m.filter, root+"/proj-")
+	}
+	if !m.menuOpen() || m.cycling() {
+		t.Fatalf("an ambiguous completion should list the candidates without choosing one")
+	}
+	if got := m.menu.labels; len(got) != 14 || got[0] != "proj-00" {
+		t.Fatalf("the list shows %v, want every candidate by its last component", got)
+	}
+
+	lines := m.menuLines()
+	if len(lines) != launcherMenuRows {
+		t.Fatalf("the list is %d lines, want it capped at %d", len(lines), launcherMenuRows)
+	}
+	if got := core.StripANSI(lines[0]); !strings.Contains(got, "proj-00") ||
+		!strings.Contains(got, "proj-01") {
+		t.Errorf("the first row = %q, want two candidates side by side", got)
+	}
+	// Five rows of two, and a count of the four that left out.
+	if got := core.StripANSI(lines[len(lines)-1]); !strings.Contains(got, "+4 more") {
+		t.Errorf("the capped list's tail = %q, want the count of the rest", got)
+	}
+	if got, want := m.paneTop(), launcherPaneTop+launcherMenuRows; got != want {
+		t.Errorf("the panes start at line %d, want %d — the list shrinks them", got, want)
+	}
+
+	out := strings.Split(m.viewContent(), "\n")
+	if len(out) > h {
+		t.Errorf("view = %d lines, must fit the %d-row window", len(out), h)
+	}
+	for i, l := range out {
+		if got := lipgloss.Width(l); got > w {
+			t.Errorf("line %d width = %d, must not exceed %d (%q)", i, got, w, l)
+		}
+	}
+	if !strings.Contains(m.viewContent(), "proj-00") {
+		t.Errorf("the list should be on screen:\n%s", m.viewContent())
+	}
+
+	// A window with no room to spare keeps the launcher whole: the panes and the
+	// footer come first, so the list gives up its rows entirely rather than
+	// pushing either off the bottom (D27).
+	const shortH = 7
+	short, _ := seedLauncher(t, 80, shortH)
+	short = updLauncher(t, typeInto(t, short, root+"/proj"), coretest.KTab)
+	if !short.menuOpen() {
+		t.Fatalf("the list is still open in a short window, only undrawable")
+	}
+	if got := short.paneTop(); got != launcherPaneTop {
+		t.Errorf("a list with no room left the panes at %d, want %d", got, launcherPaneTop)
+	}
+	view := short.viewContent()
+	if got := len(strings.Split(view, "\n")); got > shortH {
+		t.Errorf("view = %d lines, must fit the %d-row window:\n%s", got, shortH, view)
+	}
+	if !strings.Contains(view, "esc cancel") || !strings.Contains(view, "locations") {
+		t.Errorf("the footer and the panes must survive a window too short:\n%s", view)
+	}
+}
+
+// TestLauncherCompletionMenuCycles covers D43's menu mode: with nothing left to
+// extend, tab puts the candidates in the input one at a time, shift+tab walks
+// back, both wrap — and every insertion keeps the home spelling and the
+// trailing separator the next tab needs (D42's write-back rule).
+func TestLauncherCompletionMenuCycles(t *testing.T) {
+	home := t.TempDir()
+	for _, d := range []string{"alpha", "beta", "gamma"} {
+		if err := os.MkdirAll(filepath.Join(home, "sandbox", d), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	for _, tok := range []string{"~", "$HOME"} {
+		m, _ := seedLauncher(t, 100, 20)
+		m.home = home
+		m = updLauncher(t, typeInto(t, m, tok+"/sandbox/"), coretest.KTab)
+
+		if !m.cycling() {
+			t.Fatalf("%s: nothing left to extend should start choosing", tok)
+		}
+		if got := strings.Join(m.menu.labels, ","); got != "alpha,beta,gamma" {
+			t.Fatalf("%s: the list shows %q", tok, got)
+		}
+		if want := tok + "/sandbox/alpha/"; m.filter != want {
+			t.Fatalf("%s: the opening tab = %q, want %q", tok, m.filter, want)
+		}
+		for _, step := range []struct {
+			key  tea.KeyPressMsg
+			want string
+		}{
+			{coretest.KTab, "beta"},
+			{coretest.KTab, "gamma"},
+			{coretest.KTab, "alpha"}, // wraps forward
+			{kShiftTab, "gamma"},     // and backward out of the first
+			{kShiftTab, "beta"},
+		} {
+			m = updLauncher(t, m, step.key)
+			if want := tok + "/sandbox/" + step.want + "/"; m.filter != want {
+				t.Errorf("%s: cycling put %q in the input, want %q", tok, m.filter, want)
+			}
+		}
+
+		// The block moves with the insertion: the same candidates, drawn
+		// differently. Pinned as "rendered differently, reads the same" rather
+		// than against the escapes lipgloss happens to emit.
+		before, after := m.menuLines(), updLauncher(t, m, coretest.KTab).menuLines()
+		if len(before) != len(after) {
+			t.Fatalf("%s: cycling changed the list's shape: %d lines then %d",
+				tok, len(before), len(after))
+		}
+		same, reads := true, true
+		for i := range before {
+			if before[i] != after[i] {
+				same = false
+			}
+			if core.StripANSI(before[i]) != core.StripANSI(after[i]) {
+				reads = false
+			}
+		}
+		if same {
+			t.Errorf("%s: the list draws the same before and after cycling: %q", tok, after)
+		}
+		if !reads {
+			t.Errorf("%s: cycling rewrote the list itself: %q then %q", tok, before, after)
+		}
+	}
+}
+
+// TestLauncherCompletionMenuDismissal covers D43's three ways out: esc takes the
+// insertion back and is spent doing it, enter accepts where it stands without
+// spending the zone step too, and editing keeps the insertion while dropping the
+// list.
+func TestLauncherCompletionMenuDismissal(t *testing.T) {
+	root, m := menuFixture(t, "alpha", "beta")
+	m = updLauncher(t, m, coretest.KTab)
+	if m.filter != root+"/alpha/" {
+		t.Fatalf("tab = %q, want the first candidate", m.filter)
+	}
+
+	esc := updLauncher(t, m, coretest.KEsc)
+	if esc.filter != root+"/" || esc.menuOpen() || esc.focus != zoneInput {
+		t.Errorf("esc = %q / zone %d, want the query the list opened on", esc.filter, esc.focus)
+	}
+	// Spent on the list, not on the chain behind it: the *next* esc clears (D31).
+	if got := updLauncher(t, esc, coretest.KEsc).filter; got != "" {
+		t.Errorf("the esc after the list left %q, want the query cleared", got)
+	}
+
+	ent := updLauncher(t, m, coretest.KEnter)
+	if ent.menuOpen() || ent.filter != root+"/alpha/" || ent.focus != zoneInput {
+		t.Errorf("enter = %q / zone %d, want the insertion accepted in place",
+			ent.filter, ent.focus)
+	}
+	if got := updLauncher(t, ent, coretest.KEnter).focus; got != zoneLeft {
+		t.Errorf("the enter after the list = zone %d, want the locations", got)
+	}
+
+	if typed := typeInto(t, m, "x"); typed.menuOpen() || typed.filter != root+"/alpha/x" {
+		t.Errorf("typing = %q, want the insertion kept and the list gone", typed.filter)
+	}
+	back := updLauncher(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if back.menuOpen() || back.filter != root+"/alpha" {
+		t.Errorf("backspace = %q, want the insertion edited and the list gone", back.filter)
+	}
+}
+
+// TestLauncherCompletionMenuIsPathShapedOnly is the guard D42 drew and D43 keeps:
+// `src` matches two locations, so its completion is ambiguous in exactly the way
+// that opens the list for a typed path — but a bare word is a search over the
+// listing, not a path, and gets no list and no cycling.
+func TestLauncherCompletionMenuIsPathShapedOnly(t *testing.T) {
+	m, _ := seedLauncher(t, 100, 20)
+	m = updLauncher(t, typeInto(t, m, "src"), coretest.KTab)
+
+	if m.filter != "/home/u/src/" {
+		t.Fatalf("tab over a bare word completed to %q, want the locations' common prefix",
+			m.filter)
+	}
+	if m.menuOpen() || len(m.menuLines()) != 0 {
+		t.Errorf("a bare word must not open the suggestion list, got %v", m.menu.labels)
+	}
+	if got := m.paneTop(); got != launcherPaneTop {
+		t.Errorf("with no list the panes start at %d, want %d", got, launcherPaneTop)
+	}
+}
+
+// TestLauncherCompletionMenuResolvesTheInsertion is the other half of cycling: an
+// insertion is an edit to the query like any other, so the debounced lookup that
+// turns a typed directory into a row runs for it too (D28/D42).
+func TestLauncherCompletionMenuResolvesTheInsertion(t *testing.T) {
+	root, m := menuFixture(t, "alpha", "beta")
+	dir := filepath.Join(root, "alpha")
+	fb := &coretest.FakeBackend{
+		LaunchLocs:    launcherFixture(),
+		ResolveDirLoc: core.LaunchLocation{Dir: dir, RepoName: "alpha", Branch: "main"},
+	}
+	m.backend = fb
+
+	next, cmd := m.Update(coretest.KTab)
+	if cmd == nil {
+		t.Fatalf("cycling edits the query, so it must arm the debounce")
+	}
+	m = next.(Model)
+	if m.filter != dir+"/" {
+		t.Fatalf("tab = %q, want the first candidate", m.filter)
+	}
+
+	next, cmd = m.Update(core.ReloadTickMsg{Gen: m.resolveGen})
+	if cmd == nil {
+		t.Fatalf("the inserted directory should be resolved")
+	}
+	m = updLauncher(t, next.(Model), cmd())
+	if len(fb.ResolveDirReq) != 1 || fb.ResolveDirReq[0] != dir {
+		t.Fatalf("ResolveLaunchDir asked for %v, want [%s]", fb.ResolveDirReq, dir)
+	}
+	if got := leftLabels(m); len(got) != 1 || got[0] != "alpha(main)" {
+		t.Errorf("the chosen directory should be selectable, got %v", got)
 	}
 }
 

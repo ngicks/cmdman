@@ -24,6 +24,10 @@ const (
 	// launcherLeftPct is the locations pane's share of the width: the left pane
 	// carries paths, the right one names.
 	launcherLeftPct = 55
+	// launcherMenuRows caps the suggestion list (D43). It is an aid to typing and
+	// the panes under it are what the launcher is for, so it takes a few rows at
+	// most and says how many candidates that left out.
+	launcherMenuRows = 6
 )
 
 var (
@@ -132,16 +136,19 @@ func (m Model) clickAt(x, y int) Model {
 		return m
 	}
 	_, left, right := m.screen()
+	// The click is resolved against the screen as it was drawn, list included, and
+	// only then is the list dropped: it is an input-zone affordance, and the
+	// keyboard has just left the input zone (D43).
 	if i, ok := left.at(x, y); ok {
 		m.focus = zoneLeft
 		if i != m.leftSel {
 			m.leftSel, m.rightSel, m.rightOff = i, 0, 0
 		}
-		return m.clampLeft()
+		return m.closeMenu().clampLeft()
 	}
 	if i, ok := right.at(x, y); ok {
 		m.focus, m.rightSel = zoneRight, i
-		return m.clampRight().toggle()
+		return m.closeMenu().clampRight().toggle()
 	}
 	return m
 }
@@ -174,8 +181,95 @@ func (m Model) wheel(msg tea.MouseWheelMsg) Model {
 	return m
 }
 
+// paneTop is the first row either pane draws on: the head lines, plus whatever
+// the suggestion list is spending under the input (D43).
+func (m Model) paneTop() int { return launcherPaneTop + m.menuGrid().lines() }
+
 func (m Model) budget() int {
-	return max(m.height-launcherPaneTop-launcherGapLines-len(m.footerLines()), 1)
+	return max(m.height-m.paneTop()-launcherGapLines-len(m.footerLines()), 1)
+}
+
+// menuGrid is where the suggestion list's candidates land: a zsh-style grid
+// filled row-major, windowed to the rows the screen can spare. It is derived
+// rather than stored so a resize re-lays it out, and the window follows the
+// insertion rather than stranding it off the bottom of a long list.
+type menuGrid struct {
+	cell   int // one candidate's column width, in cells
+	cols   int
+	off    int // the first grid row on screen
+	rows   int // grid rows on screen, 0 when the list cannot be drawn at all
+	hidden int // candidates the window leaves out, above it and below it
+	tail   int // the line the "+N more" count spends, 0 when nothing is hidden
+}
+
+func (g menuGrid) lines() int { return g.rows + g.tail }
+
+func (m Model) menuGrid() menuGrid {
+	n := len(m.menu.cands)
+	if n == 0 || m.width <= 0 {
+		return menuGrid{}
+	}
+	cell := 0
+	for _, l := range m.menu.labels {
+		cell = max(cell, core.Cells.StringWidth(l))
+	}
+	// A gutter either side of the widest label, and never wider than the window:
+	// a column that overruns it would be truncated to nothing worth reading.
+	cell = min(cell+2, m.width)
+	cols := max(m.width/cell, 1)
+	total := (n + cols - 1) / cols
+	// What the list may spend, computed from the window rather than from budget()
+	// — budget() is computed from *this*, through paneTop. The panes keep a row
+	// and the footer keeps its lines: a suggestion that hides the list it is
+	// suggesting into is no help at all.
+	fit := min(
+		launcherMenuRows,
+		m.height-launcherPaneTop-launcherGapLines-len(m.footerLines())-1,
+	)
+	g := menuGrid{cell: cell, cols: cols, rows: min(total, fit)}
+	if total > g.rows {
+		g.rows, g.tail = g.rows-1, 1
+	}
+	if g.rows <= 0 {
+		// Nothing but the count would be left, which says nothing at all.
+		return menuGrid{}
+	}
+	if m.menu.sel >= 0 {
+		g.off = min(max(m.menu.sel/cols-g.rows+1, 0), total-g.rows)
+	}
+	g.hidden = n - (min(n, (g.off+g.rows)*cols) - g.off*cols)
+	return g
+}
+
+// menuLines is the suggestion list as it is drawn: one line per grid row, the
+// candidate now in the input carrying the cursor block its pane rows carry, and
+// a count of whatever did not fit.
+func (m Model) menuLines() []string {
+	g := m.menuGrid()
+	if g.rows == 0 {
+		return nil
+	}
+	out := make([]string, 0, g.lines())
+	for r := g.off; r < g.off+g.rows; r++ {
+		var b strings.Builder
+		for c := range g.cols {
+			i := r*g.cols + c
+			if i >= len(m.menu.labels) {
+				break
+			}
+			bg, st := core.BgNone, m.weakStyle()
+			if i == m.menu.sel {
+				bg, st = core.BgAccent, lipgloss.NewStyle().Bold(true)
+			}
+			b.WriteString(bg.Style(st).Render(core.PadCells(" "+m.menu.labels[i], g.cell)))
+		}
+		out = append(out, core.PadLine(b.String(), m.width, core.BgNone))
+	}
+	if g.tail > 0 {
+		out = append(out, core.PadLine(
+			core.StyleActive.Render(fmt.Sprintf("  +%d more", g.hidden)), m.width, core.BgNone))
+	}
+	return out
 }
 
 func (m Model) widths() (leftW, rightW int) {
@@ -194,7 +288,8 @@ func (m Model) screen() (out string, left, right launcherPane) {
 	if m.filter != "" {
 		scope = fmt.Sprintf("%d/%d", len(f), len(m.locs))
 	}
-	lines := []string{m.inputLine(scope), ""}
+	lines := append([]string{m.inputLine(scope)}, m.menuLines()...)
+	lines = append(lines, "")
 
 	leftRows, leftMap := m.leftPane(leftW, f)
 	rightRows, rightMap := m.rightPane(rightW)
@@ -268,6 +363,7 @@ func (m Model) leftPane(w int, f []int) ([]string, launcherPane) {
 	for i := range cost {
 		cost[i] = 1
 	}
+	top := m.paneTop()
 	n := rowWindow(cost, m.leftOff, m.budget())
 	for k := range n {
 		idx := m.leftOff + k
@@ -283,7 +379,7 @@ func (m Model) leftPane(w int, f []int) ([]string, launcherPane) {
 			row += bg.Plain(strings.Repeat(" ", gap)) +
 				bg.Style(core.StyleActive).Render(tail) + bg.Plain(" ")
 		}
-		pm.rowLine = append(pm.rowLine, launcherPaneTop+len(out))
+		pm.rowLine = append(pm.rowLine, top+len(out))
 		pm.cursor = append(pm.cursor, idx)
 		out = append(out, core.PadLine(row, w, bg))
 	}
@@ -327,6 +423,7 @@ func (m Model) rightPane(w int) ([]string, launcherPane) {
 		}, pm
 	}
 	cost := m.rightCost(li)
+	top := m.paneTop()
 	n := rowWindow(cost, m.rightOff, m.budget())
 	for k := range n {
 		idx := m.rightOff + k
@@ -351,7 +448,7 @@ func (m Model) rightPane(w int) ([]string, launcherPane) {
 			row += bg.Plain(strings.Repeat(" ", gap)) +
 				bg.Style(core.StyleActive).Render(f) + bg.Plain(" ")
 		}
-		pm.rowLine = append(pm.rowLine, launcherPaneTop+len(out))
+		pm.rowLine = append(pm.rowLine, top+len(out))
 		pm.cursor = append(pm.cursor, idx)
 		out = append(out, core.PadLine(row, w, bg))
 		if li == m.failedLoc && idx == m.failedPrj {
@@ -394,12 +491,16 @@ func (m Model) failureText(p launcherProject) string {
 
 func (m Model) footerLines() []string {
 	var full string
-	switch m.focus {
-	case zoneInput:
+	switch {
+	case m.menuOpen():
+		// The list only ever shows over the input zone, and shift+tab is a key
+		// nobody finds without being told.
+		full = "tab next · shift+tab prev · enter accept · esc cancel · type to filter"
+	case m.focus == zoneInput:
 		full = "type to filter · tab complete · ↑↓ move · enter → locations · esc clear/quit"
-	case zoneLeft:
+	case m.focus == zoneLeft:
 		full = "j/k move · enter → projects · s start · S launch · / input · esc back"
-	case zoneRight:
+	case m.focus == zoneRight:
 		full = "space toggle · s start enabled · S launch · / input · esc ← locations"
 	}
 	if m.width < lipgloss.Width(full) {
