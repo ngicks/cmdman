@@ -104,4 +104,4 @@ projects are there.
 ## See Also
 
 [cmdman-compose(1)](./cmdman-compose.1.md), [cmdman-compose-mux(1)](./cmdman-compose-mux.1.md),
-[cmdman-mux(1)](./cmdman-mux.1.md)
+[cmdman-mux(1)](./cmdman-mux.1.md), [cmdman-frame(5)](./cmdman-frame.5.md)

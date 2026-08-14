@@ -43,7 +43,8 @@ absent) resolve the command name without a replica suffix. A pinned leaf
 The mux file format is documented in [cmdman-mux(5)](./cmdman-mux.5.md).
 
 `mux frame` controls the frame — the components docked around the edges of a
-window, described by a frame definition file. The frame is a fixture the
+window, described by a frame definition file whose format is documented in
+[cmdman-frame(5)](./cmdman-frame.5.md). The frame is a fixture the
 dashboard lives inside: it is per-window state of its own, so `mux up`,
 layout cycling and `mux down` leave it standing.
 
@@ -361,6 +362,6 @@ cmdman mux frame show dev --session work
 
 ## See Also
 
-[cmdman-mux(5)](./cmdman-mux.5.md),
+[cmdman-mux(5)](./cmdman-mux.5.md), [cmdman-frame(5)](./cmdman-frame.5.md),
 [cmdman-compose-mux(1)](./cmdman-compose-mux.1.md), [cmdman-attach(1)](./cmdman-attach.1.md),
 [cmdman-tui(1)](./cmdman-tui.1.md)

@@ -292,4 +292,5 @@ cmdman compose mux ls --format '{{.SessionName}} {{.WindowName}} {{muxMarker .Ma
 ## See Also
 
 [cmdman-mux(1)](./cmdman-mux.1.md), [cmdman-mux(5)](./cmdman-mux.5.md),
+[cmdman-frame(5)](./cmdman-frame.5.md),
 [cmdman-compose(5)](./cmdman-compose.5.md), [cmdman-compose-attach(1)](./cmdman-compose-attach.1.md)

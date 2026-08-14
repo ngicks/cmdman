@@ -84,7 +84,7 @@ Interaction and observation: [attach](./cmdman-attach.1.md),
 Project management: [compose](./cmdman-compose.1.md).
 
 File formats: [cmdman-compose(5)](./cmdman-compose.5.md),
-[cmdman-mux(5)](./cmdman-mux.5.md).
+[cmdman-mux(5)](./cmdman-mux.5.md), [cmdman-frame(5)](./cmdman-frame.5.md).
 
 Maintenance: [migrate](./cmdman-migrate.1.md), [help](./cmdman-help.1.md),
 [version](./cmdman-version.1.md).
@@ -101,4 +101,5 @@ cmdman start server
 ## See Also
 
 [cmdman-compose(1)](./cmdman-compose.1.md), [cmdman-compose(5)](./cmdman-compose.5.md),
-[cmdman-mux(5)](./cmdman-mux.5.md), [cmdman-run(1)](./cmdman-run.1.md)
+[cmdman-mux(5)](./cmdman-mux.5.md), [cmdman-frame(5)](./cmdman-frame.5.md),
+[cmdman-run(1)](./cmdman-run.1.md)

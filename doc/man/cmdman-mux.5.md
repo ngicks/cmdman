@@ -188,4 +188,4 @@ Other `cmd_opt` keys are ignored by the tmux driver.
 ## See Also
 
 [cmdman-mux(1)](./cmdman-mux.1.md), [cmdman-compose-mux(1)](./cmdman-compose-mux.1.md),
-[cmdman-compose(5)](./cmdman-compose.5.md)
+[cmdman-compose(5)](./cmdman-compose.5.md), [cmdman-frame(5)](./cmdman-frame.5.md)
