@@ -19,6 +19,12 @@ type CommandRow struct {
 	Tty       bool   // command runs under a pseudo-terminal (preview predicate)
 	Pending   string // pending action label; empty when no action is in flight
 
+	// ScaleIndex and ScaleCount are the command's replica identity (see
+	// CommandInfo), carried through so every listing can badge a replica with
+	// which of the several it is. Both are zero for an unscaled command.
+	ScaleIndex int
+	ScaleCount int
+
 	// Runtime state as of the last load (see CommandInfo): what the command
 	// said about itself, as opposed to what the store knows about its process.
 	Title  string
@@ -93,10 +99,14 @@ func GroupFromInfos(infos []CommandInfo) []ProjectGroup {
 			ExitCode:  ci.ExitCode,
 			LogDriver: ci.LogDriver,
 			Tty:       ci.Tty,
-			Title:     ci.Title,
-			Status:    ci.Status,
-			Detail:    ci.Detail,
-			Bell:      ci.BellUnread,
+
+			ScaleIndex: ci.ScaleIndex,
+			ScaleCount: ci.ScaleCount,
+
+			Title:  ci.Title,
+			Status: ci.Status,
+			Detail: ci.Detail,
+			Bell:   ci.BellUnread,
 		})
 	}
 	return groups

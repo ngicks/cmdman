@@ -126,8 +126,8 @@ type Model struct {
 
 	// home is what the input's "~" and "$HOME" expand to, and what a completion
 	// is written back with. It is read once by New; a zero-value Model built by a
-	// test simply has no home to expand against, as the view's homeDir() has none
-	// when the environment cannot say.
+	// test simply has no home to expand against, as core.HomeDir() has none when
+	// the environment cannot say.
 	home string
 
 	// resolveGen sequences the debounced typed-path lookup: a tick that a later
@@ -168,7 +168,7 @@ func New(ctx context.Context, opts core.Options) Model {
 		backend:   opts.Backend,
 		altScreen: opts.AltScreen,
 		noQuit:    opts.NoQuit,
-		home:      homeDir(),
+		home:      core.HomeDir(),
 		failedLoc: -1,
 		failedPrj: -1,
 	}
@@ -644,7 +644,7 @@ func (m Model) respell(src, p string) string {
 	if !ok {
 		return p
 	}
-	a := abbrevHome(p, m.home)
+	a := core.AbbrevHome(p, m.home)
 	if a == p {
 		return p
 	}

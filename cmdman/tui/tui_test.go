@@ -873,6 +873,30 @@ func TestCommandsTabMarkerSlotIsFixedWidth(t *testing.T) {
 	}
 }
 
+// TestCommandRowShowsScaleBadge covers D44 on the Commands tab: a command that
+// is one replica among several says which one, next to its state where the
+// pane's own truncation reaches last, and an unscaled row is left as it was.
+func TestCommandRowShowsScaleBadge(t *testing.T) {
+	m := seed()
+	groups := m.commands.groups
+	groups[0].Commands[0].ScaleIndex, groups[0].Commands[0].ScaleCount = 2, 3
+	m.setGroups(groups)
+
+	out := core.StripANSI(m.renderCommandList("Commands", 80, 12))
+	for line := range strings.SplitSeq(out, "\n") {
+		switch {
+		case strings.Contains(line, "watcher"):
+			if !strings.Contains(line, "[2/3]") {
+				t.Errorf("a replica's row should say which one it is: %q", line)
+			}
+		case strings.Contains(line, "seed-db"):
+			if strings.Contains(line, "[") {
+				t.Errorf("an unscaled command's row should carry no badge: %q", line)
+			}
+		}
+	}
+}
+
 func TestStandaloneCommandShowsWorkdir(t *testing.T) {
 	m := seed()
 	// A free-floating command carries no project name and no group header, so its

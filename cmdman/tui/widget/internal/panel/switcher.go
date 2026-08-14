@@ -246,13 +246,17 @@ func (m Model) switcherFooter() string {
 // followed by one line per command, each padded to w so a highlighted group
 // forms a solid block.
 func (m Model) switcherLines(w int) []switcherLine {
+	dup := sharedWorkdirs(m.groups)
 	var lines []switcherLine
 	for i, g := range m.groups {
 		bg := core.BgNone
 		if i == m.selected {
 			bg = core.BgAccent
 		}
-		lines = append(lines, switcherLine{text: core.PadLine(m.headLine(g, bg), w, bg), group: i})
+		lines = append(lines, switcherLine{
+			text:  core.PadLine(m.headLine(g, bg, dup[g.Workdir], w), w, bg),
+			group: i,
+		})
 		for _, c := range g.Commands {
 			lines = append(
 				lines,
@@ -263,34 +267,98 @@ func (m Model) switcherLines(w int) []switcherLine {
 	return lines
 }
 
+// sharedWorkdirs is the set of directories two or more listed groups sit in.
+// Their heads name the directory (D44), which for those groups no longer says
+// which project is which, so they — and only they — spell their project name
+// out as well. A group with no directory at all heads with its name anyway.
+func sharedWorkdirs(groups []core.ProjectGroup) map[string]bool {
+	count := make(map[string]int, len(groups))
+	for _, g := range groups {
+		if g.Workdir == "" {
+			continue
+		}
+		count[g.Workdir]++
+	}
+	dup := make(map[string]bool)
+	for dir, n := range count {
+		if n > 1 {
+			dup[dir] = true
+		}
+	}
+	return dup
+}
+
+// headActive is the word the rest of the TUI marks the cwd project with, with
+// the gap that sets it off from the head.
+const headActive = "  active"
+
 // headLine is a project's head: its marker in a fixed-width slot — so heads
-// line up with each other whichever marker shows — then its name. The gap comes
-// off the glyph's measured width, not an assumed one, and the margin leads.
-func (m Model) headLine(g core.ProjectGroup, bg core.RowBg) string {
+// line up with each other whichever marker shows — then the directory it sits
+// in. The gap comes off the glyph's measured width, not an assumed one, and the
+// margin leads; what is left of w after them is what the path may spend.
+//
+// The active marker is reserved out of that budget rather than left to the
+// row's own truncation: a path fills a docked column where a project name never
+// did, and "you are here" losing to the tail of a path it could have shortened
+// instead is the wrong trade.
+func (m Model) headLine(g core.ProjectGroup, bg core.RowBg, dup bool, w int) string {
 	glyph := core.MarkerGlyph(g)
 	gap := strings.Repeat(" ", max(core.MarkerSlot-core.GlyphWidth(glyph), 1))
-	name := g.Name
-	if name == "" {
-		name = "(unnamed)"
+	avail := w - core.GlyphWidth(core.MarkerMargin) - core.GlyphWidth(glyph) - core.GlyphWidth(gap)
+	if g.Active {
+		avail -= core.GlyphWidth(headActive)
 	}
 	head := bg.Plain(core.MarkerMargin) +
 		bg.Style(core.MarkerStyle(g)).Render(glyph) +
-		bg.Style(core.StyleWidgetHead).Render(gap+name)
+		bg.Style(core.StyleWidgetHead).Render(gap+headLabel(g, dup, max(avail, 1)))
 	if g.Active {
-		// Same word the rest of the TUI marks the cwd project with.
-		head += bg.Style(core.StyleActive).Render("  active")
+		head += bg.Style(core.StyleActive).Render(headActive)
 	}
 	return head
 }
 
+// headLabel is what a group's head calls itself: the directory it sits in
+// (D44), home-abbreviated and cut to w cells keeping its tail — several compose
+// projects can run on one directory, so the project name misidentifies the
+// place, and the end of a path is what distinguishes it. A group sharing its
+// directory with another visible group appends the project name to tell the two
+// apart.
+//
+// A group with no directory — a named def that has never run anywhere in
+// particular — has only its name to give, and a name is not a path: it is left
+// for the row's own right-hand truncation, which keeps the head of it.
+func headLabel(g core.ProjectGroup, dup bool, w int) string {
+	if g.Workdir == "" {
+		return groupLabel(g)
+	}
+	label := core.AbbrevHome(g.Workdir, core.HomeDir())
+	if dup {
+		name := g.Name
+		if name == "" {
+			// The same word groupLabel falls back to, without its parentheses:
+			// wrapped again the head would read "((unnamed))".
+			name = "unnamed"
+		}
+		label += " (" + name + ")"
+	}
+	return core.TruncateLeftCells(label, w)
+}
+
 // commandLine is one command under its project's head: the command name in the
-// weak shade derived from the terminal's own colors, its state badge, an unread
-// bell when it has one, and the title it last set — the signal the grouped list
-// exists for (D20), fainter still than the name so a group reads as head plus
-// detail.
+// weak shade derived from the terminal's own colors, its state badge, which
+// replica it is when it is one of several (D44), an unread bell when it has
+// one, and the title it last set — the signal the grouped list exists for
+// (D20), fainter still than the name so a group reads as head plus detail.
 func (m Model) commandLine(c core.CommandRow, bg core.RowBg) string {
 	line := bg.Style(m.weakStyle()).Render("    "+core.PadCells(c.Name, 12)+" ") +
 		core.RowStateBadge(c, bg)
+	// Which replica this is comes before the report and outlives it: it is the
+	// command's identity, not something it said, so a run that is over keeps it
+	// where D13 takes its words away. An unscaled row appends nothing at all
+	// rather than an empty render, which would still emit the style's escapes.
+	if badge := core.ScaleBadge(c); badge != "" {
+		line += bg.Style(m.weakStyle()).Render(badge)
+	}
 	if !core.LiveReport(c) {
 		// Nothing a finished run said still speaks for it (D13).
 		return line

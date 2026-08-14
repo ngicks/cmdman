@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -32,7 +33,9 @@ func TestTUIWidget_SwitcherRendersAndQuits(t *testing.T) {
 
 	w := startWidget(t, ctx, env, wd, "switcher")
 	w.waitFor(t, "projects", 5*time.Second)
-	w.waitFor(t, "widgetsw", 5*time.Second)
+	// The head is the project's directory, not its name (D44): the path only
+	// reaches the column once discovery has found the project sitting there.
+	w.waitFor(t, filepath.Base(wd), 5*time.Second)
 	// The widget is a single view: the full TUI's tab bar must not be there.
 	if snap := w.snapshot(); strings.Contains(snap, "Layout") {
 		t.Errorf("switcher widget rendered the full TUI chrome; got:\n%q", snap)
@@ -48,8 +51,8 @@ func TestTUIWidget_StatusbarRendersAndQuits(t *testing.T) {
 	writeComposeFile(t, wd, composeBasicYAML("widgetsb"))
 
 	w := startWidget(t, ctx, env, wd, "statusbar")
-	// The bar names the project the work directory sits in and the counts.
-	w.waitFor(t, "widgetsb", 5*time.Second)
+	// The bar names the work directory itself (D44) and the counts.
+	w.waitFor(t, filepath.Base(wd), 5*time.Second)
 	w.waitFor(t, "running", 5*time.Second)
 	w.quit(t)
 }
@@ -66,7 +69,7 @@ func TestTUIWidget_NoQuitSurvivesTheQuitKey(t *testing.T) {
 	writeComposeFile(t, wd, composeBasicYAML("widgetnq"))
 
 	w := startWidgetEnv(t, ctx, env, wd, wd, "switcher", os.Environ(), "--no-quit")
-	w.waitFor(t, "widgetnq", 5*time.Second)
+	w.waitFor(t, filepath.Base(wd), 5*time.Second)
 	if snap := w.snapshot(); strings.Contains(snap, "q quit") {
 		t.Errorf("a --no-quit switcher must not offer a key it does not have; got:\n%q", snap)
 	}

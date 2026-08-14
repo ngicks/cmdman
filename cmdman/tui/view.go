@@ -403,6 +403,14 @@ func (m Model) renderCommandList(title string, width, height int) string {
 			plain = fmt.Sprintf("%s%s%s %-16s %s", indent, prefix, glyph, name, label)
 			styled = fmt.Sprintf("%s%s%s %-16s %s", indent, prefix,
 				core.StatusStyle(c.State, c.Pending).Render(glyph), name, label)
+			// Which replica this is when it is one of several (D44), next to the
+			// state and before anything the command said: it is the row's
+			// identity, so it stays on a row D13 has taken the words off. Dimmed
+			// like the paths, so a title after it still reads as the command's.
+			if badge := core.ScaleBadge(c); badge != "" {
+				plain += badge
+				styled += stylePath.Render(badge)
+			}
 			// What the command says about itself, after what the store knows
 			// about it: an unread bell (D23), the status it reported with its
 			// detail (D12), and the title it set — dimmed like the paths, since

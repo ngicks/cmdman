@@ -8,7 +8,7 @@ import (
 
 // homeToken is the home spelling the input carries — "~" or "$HOME" — and only
 // on a path-component boundary: "~X" and "$HOMEX" name somewhere else entirely,
-// the same rule abbrevHome writes the abbreviation under.
+// the same rule core.AbbrevHome writes the abbreviation under.
 func homeToken(p string) (string, bool) {
 	for _, tok := range []string{"~", "$HOME"} {
 		after, ok := strings.CutPrefix(p, tok)
@@ -20,7 +20,7 @@ func homeToken(p string) (string, bool) {
 	return "", false
 }
 
-// expandHome is abbrevHome's inverse: what the input means when it is read as a
+// expandHome is core.AbbrevHome's inverse: what the input means when it is read as a
 // path. The filter itself keeps the user's spelling — the pane displays paths
 // abbreviated, so that is how they get typed back in — while matching and every
 // filesystem call work on the expanded form.

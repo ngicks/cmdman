@@ -11,7 +11,7 @@ import (
 )
 
 // renderStatusbar renders the bar left to right as "where you are, then what is
-// running, then what this is": the working directory's project with its own
+// running, then what this is": the working directory itself with its project's
 // marker, the counts across every project, and the version pushed to the right
 // edge. Every piece carries the bar's background, so the marker keeps its color
 // inside the block instead of being flattened by one outer style.
@@ -19,7 +19,7 @@ import (
 // A statusbar entry carves a one-row pane, so this renders exactly one line —
 // a second line would scroll the pane.
 func (m Model) renderStatusbar(w int) string {
-	left := m.statusbarLeft() + m.statusbarCounts()
+	left := m.statusbarLeft(w) + m.statusbarCounts()
 	right := core.BgAccent.Style(core.StyleWidgetBar).Render(m.statusbarVersion() + " ")
 
 	pad := w - lipgloss.Width(left) - lipgloss.Width(right)
@@ -30,15 +30,25 @@ func (m Model) renderStatusbar(w int) string {
 	return left + core.BgAccent.Plain(strings.Repeat(" ", pad)) + right
 }
 
-// statusbarLeft is the project the working directory sits in, with its marker.
-func (m Model) statusbarLeft() string {
+// statusbarLeft is the working directory itself, with the marker of the project
+// tied to it: the bar names the place rather than the project (D44), since
+// several compose projects can run on one directory and the name would then
+// misidentify where you are. The path is home-abbreviated and cut to what is
+// left of the bar after the marker, keeping its tail — the rest of the bar is
+// what the counts and the version spend, and PadLine takes those back first.
+func (m Model) statusbarLeft(w int) string {
 	g, ok := m.activeGroup()
 	if !ok {
 		return core.BgAccent.Style(core.StyleWidgetBar).Render(" no project")
 	}
+	glyph := core.MarkerGlyph(g)
+	// The margin, the marker and the space before the path, measured off the
+	// glyph rather than assumed — the bell is two cells and ●/○ one.
+	avail := w - core.GlyphWidth(core.MarkerMargin) - core.GlyphWidth(glyph) - 1
+	dir := core.ShortPath(g.Workdir, max(avail, 1))
 	return core.BgAccent.Plain(core.MarkerMargin) +
-		core.BgAccent.Style(core.MarkerStyle(g)).Render(core.MarkerGlyph(g)) +
-		core.BgAccent.Style(core.StyleWidgetBar.Bold(true)).Render(" "+g.Name)
+		core.BgAccent.Style(core.MarkerStyle(g)).Render(glyph) +
+		core.BgAccent.Style(core.StyleWidgetBar.Bold(true)).Render(" "+dir)
 }
 
 // statusbarCounts summarizes every project, not just the active one: how many

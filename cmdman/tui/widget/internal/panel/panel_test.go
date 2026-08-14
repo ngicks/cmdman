@@ -86,7 +86,11 @@ func TestSwitcherRenderAlignment(t *testing.T) {
 	}
 
 	out := m.viewContent()
-	for _, want := range []string{"projects", "local-dev", "api-stack", "watcher", "seed-db"} {
+	// The heads name their directories (D44), so the project names are gone from
+	// the view and the paths are what has to be there.
+	for _, want := range []string{
+		"projects", "/work/local-dev", "/work/api", "watcher", "seed-db",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("switcher view should contain %q:\n%s", want, out)
 		}
@@ -120,6 +124,226 @@ func TestSwitcherFitsShortPanes(t *testing.T) {
 					t.Errorf("line %d in a %d-row pane is %d cells wide: %q", i, h, got, line)
 				}
 			}
+		}
+	}
+}
+
+// TestSwitcherHeadsNameTheirDirectory covers D44's head line: a group heads
+// with the directory it sits in rather than with its project name — several
+// compose projects can run on one directory, so the name misidentifies the
+// place — and only the groups actually sharing one add their name back.
+func TestSwitcherHeadsNameTheirDirectory(t *testing.T) {
+	m := seedWidget(core.WidgetSwitcher, 60, 12)
+
+	out := m.viewContent()
+	for _, want := range []string{"/work/local-dev", "/work/api"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("a head should name its directory %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "api-stack") {
+		t.Errorf("a head that names its directory should not name its project:\n%s", out)
+	}
+
+	// Two projects in one directory: there the path no longer says which is
+	// which, so those heads carry their project names — and the third does not.
+	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: nil})
+	m, _ = updWidget(t, m, core.ProjectsLoadedMsg{Infos: []core.ProjectInfo{
+		{Name: "alpha", Workdir: "/work/shared", Identity: "id-alpha"},
+		{Name: "beta", Workdir: "/work/shared", Identity: "id-beta"},
+		{Name: "solo", Workdir: "/work/solo", Identity: "id-solo"},
+	}})
+
+	out = m.viewContent()
+	for _, want := range []string{"/work/shared (alpha)", "/work/shared (beta)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("a shared directory should be told apart by %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "/work/solo (") {
+		t.Errorf("a directory only one project sits in needs no project name:\n%s", out)
+	}
+}
+
+// TestSwitcherActiveHeadKeepsItsMarker pins what the head's new budget is for:
+// a path fills a docked column where a project name never did, so the row has
+// to shorten the path rather than lose the one cue saying you are standing in
+// that project. 40 cells is the width the frame fixtures dock a switcher at.
+func TestSwitcherActiveHeadKeepsItsMarker(t *testing.T) {
+	const w = 40
+	m := seedWidget(core.WidgetSwitcher, w, 12)
+	g := core.ProjectGroup{
+		Name:    "cmdman",
+		Workdir: "/work/aaaa/bbbb/cccc/dddd/eeee",
+		Active:  true,
+	}
+
+	line := core.StripANSI(core.PadLine(m.headLine(g, core.BgNone, false, w), w, core.BgNone))
+	if !strings.Contains(line, "active") {
+		t.Errorf("an active head should keep its marker at %d cells: %q", w, line)
+	}
+	if !strings.Contains(line, "/eeee") {
+		t.Errorf("a shortened path should still end where it does: %q", line)
+	}
+	if got := core.Cells.StringWidth(line); got != w {
+		t.Errorf("head line = %d cells, want %d: %q", got, w, line)
+	}
+}
+
+// TestSwitcherHeadLabel covers what a head says on its own, including the two
+// groups a directory cannot speak for: one that has never run anywhere in
+// particular, and one whose column is narrower than its path.
+func TestSwitcherHeadLabel(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		g    core.ProjectGroup
+		dup  bool
+		w    int
+		want string
+	}{
+		{
+			name: "the directory heads the group",
+			g:    core.ProjectGroup{Name: "api", Workdir: "/work/api"},
+			w:    40,
+			want: "/work/api",
+		},
+		{
+			name: "a shared directory adds the project name",
+			g:    core.ProjectGroup{Name: "api", Workdir: "/work/api"},
+			dup:  true,
+			w:    40,
+			want: "/work/api (api)",
+		},
+		{
+			name: "a shared directory says so even for a nameless group",
+			g:    core.ProjectGroup{Workdir: "/work/api"},
+			dup:  true,
+			w:    40,
+			want: "/work/api (unnamed)",
+		},
+		{
+			name: "a never-run def has only its name to give",
+			g:    core.ProjectGroup{Name: "blog"},
+			w:    40,
+			want: "blog",
+		},
+		{
+			name: "a group with neither keeps the old fallback",
+			w:    40,
+			want: "(unnamed)",
+		},
+		{
+			name: "a path too long for the column keeps its tail",
+			g:    core.ProjectGroup{Name: "api", Workdir: "/work/api/deep"},
+			w:    12,
+			want: "…rk/api/deep",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := headLabel(tc.g, tc.dup, tc.w); got != tc.want {
+				t.Errorf("headLabel() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSwitcherHeadAbbreviatesHome pins the abbreviation the heads share with
+// the launcher's paths: a directory under the user's own home is written "~/…"
+// rather than spending the column on a prefix every row would repeat.
+func TestSwitcherHeadAbbreviatesHome(t *testing.T) {
+	home := core.HomeDir()
+	if home == "" {
+		t.Skip("no home directory for this process to abbreviate against")
+	}
+	g := core.ProjectGroup{Name: "api", Workdir: home + "/src/app"}
+	if got, want := headLabel(g, false, 40), "~/src/app"; got != want {
+		t.Errorf("headLabel() = %q, want %q", got, want)
+	}
+}
+
+// TestSwitcherWidthsSurviveWidePathsAndBadges pins the cell math the head's
+// path and the row's badge go through. A double-width path cut by rune count
+// comes back twice as wide as the column that asked for it, which would push
+// every line past its pane; the badge has to fit the same ruler.
+func TestSwitcherWidthsSurviveWidePathsAndBadges(t *testing.T) {
+	const dir = "/work/作業場/日本語のディレクトリ"
+	m := seedWidget(core.WidgetSwitcher, 24, 12)
+	m, _ = updWidget(t, m, core.ProjectsLoadedMsg{Infos: []core.ProjectInfo{
+		{Name: "アプリ", Workdir: dir, Identity: "id-app"},
+	}})
+	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: []core.CommandInfo{{
+		ID: "1", Name: "ワーカー", Project: "アプリ", Workdir: dir,
+		State: model.EventTypeRunning, ScaleIndex: 2, ScaleCount: 3,
+	}}})
+
+	for w := 8; w <= 40; w++ {
+		for i, l := range m.switcherLines(w) {
+			if got := lipgloss.Width(l.text); got != w {
+				t.Fatalf("width %d: line %d = %d cells (%q)", w, i, got, l.text)
+			}
+		}
+	}
+}
+
+// TestScaleBadgeMarksReplicasOnly covers the badge's guard at both its edges: a
+// command that is one replica among several says which one, and neither half of
+// the unscaled zero value invents an answer. The listing already collapses a
+// sole instance to that zero pair (cli.commandInfos), so what the guard here
+// keeps out is a {1,1} pair reaching a row and badging an unscaled command.
+func TestScaleBadgeMarksReplicasOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		index, count int
+		want         string
+	}{
+		{"one replica among several", 2, 3, " [2/3]"},
+		{"a sole instance is not scaled", 1, 1, ""},
+		{"a count with no index says nothing", 0, 3, ""},
+		{"an index with no count says nothing", 2, 0, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := core.CommandRow{
+				ID: "1", Name: "web", State: model.EventTypeRunning,
+				ScaleIndex: tc.index, ScaleCount: tc.count,
+			}
+			if got := core.ScaleBadge(c); got != tc.want {
+				t.Errorf("core.ScaleBadge(%d/%d) = %q, want %q",
+					tc.index, tc.count, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSwitcherRowsBadgeReplicas is the badge where it was asked for: a scaled
+// command's row says which replica it is, the identity survives the load path
+// (core.GroupFromInfos) and a run that is over — D13 takes a command's words
+// away, not what it is — and an unscaled row says nothing new.
+func TestSwitcherRowsBadgeReplicas(t *testing.T) {
+	m := seedWidget(core.WidgetSwitcher, 60, 12)
+	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: []core.CommandInfo{
+		{
+			ID: "1", Name: "web", Project: "local-dev", Workdir: "/work/local-dev",
+			State: model.EventTypeRunning, ScaleIndex: 2, ScaleCount: 3, Title: "serving",
+		},
+		{
+			ID: "2", Name: "db", Project: "local-dev", Workdir: "/work/local-dev",
+			State: model.EventTypeExited, ExitCode: new(0), ScaleIndex: 1, ScaleCount: 2,
+		},
+		{
+			ID: "3", Name: "solo", Project: "local-dev", Workdir: "/work/local-dev",
+			State: model.EventTypeRunning,
+		},
+	}})
+
+	out := core.StripANSI(m.viewContent())
+	for _, want := range []string{"[2/3]", "[1/2]"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("a replica's row should carry %q:\n%s", want, out)
+		}
+	}
+	for line := range strings.SplitSeq(out, "\n") {
+		if strings.Contains(line, "solo") && strings.Contains(line, "[") {
+			t.Errorf("an unscaled command's row should carry no badge: %q", line)
 		}
 	}
 }
@@ -412,10 +636,22 @@ func TestStatusbarRendersOneLine(t *testing.T) {
 	if got := lipgloss.Width(out); got != w {
 		t.Errorf("statusbar width = %d, want %d", got, w)
 	}
-	for _, want := range []string{"local-dev", "2 projects", "2 running"} {
+	// The left segment names the place, not the project (D44).
+	for _, want := range []string{"/work/local-dev", "2 projects", "2 running"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("statusbar should contain %q: %q", want, out)
 		}
+	}
+	// A path is longer than the name it replaced, and 60 cells no longer hold
+	// both it and the version: the bar's own rule is that where you are outranks
+	// what version says it, so the version is what goes.
+	if strings.Contains(out, "v0.0.0-test") {
+		t.Errorf("a 60-cell bar has no room left for the version: %q", out)
+	}
+	if wide := seedWidget(core.WidgetStatusbar, 100, 1).viewContent(); !strings.Contains(
+		wide, "v0.0.0-test",
+	) {
+		t.Errorf("a bar with room to spare should still carry the version: %q", wide)
 	}
 
 	// A pane too narrow for the version keeps where-you-are and still fills

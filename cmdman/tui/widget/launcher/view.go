@@ -2,9 +2,7 @@ package launcher
 
 import (
 	"fmt"
-	"os"
 	"strings"
-	"sync"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -375,7 +373,7 @@ func (m Model) leftPane(w int, f []int) ([]string, launcherPane) {
 		row := bg.Plain(core.MarkerMargin) + mk.render(m.spin, bg) +
 			bg.Style(lipgloss.NewStyle().Bold(idx == m.leftSel)).Render(gap+l.label())
 		if tw := w - lipgloss.Width(row) - 2; tw >= 10 {
-			tail := shortPath(l.Dir, tw)
+			tail := core.ShortPath(l.Dir, tw)
 			gap := max(w-lipgloss.Width(row)-lipgloss.Width(tail)-1, 0)
 			row += bg.Plain(strings.Repeat(" ", gap)) +
 				bg.Style(core.StyleActive).Render(tail) + bg.Plain(" ")
@@ -444,7 +442,7 @@ func (m Model) rightPane(w int) ([]string, launcherPane) {
 			file += " · no mux"
 		}
 		if fw := w - lipgloss.Width(row) - 2; fw >= 6 {
-			f := shortPath(file, fw)
+			f := core.ShortPath(file, fw)
 			gap := max(w-lipgloss.Width(row)-lipgloss.Width(f)-1, 0)
 			row += bg.Plain(strings.Repeat(" ", gap)) +
 				bg.Style(core.StyleActive).Render(f) + bg.Plain(" ")
@@ -456,7 +454,7 @@ func (m Model) rightPane(w int) ([]string, launcherPane) {
 			// Keep-and-surface (D10): the row stays, the reason it cannot land is
 			// spelled out under it, with the removal offer where removal is the
 			// answer. core.PadLine truncates from the right, which is what a message
-			// wants — shortPath's keep-the-tail is for paths only.
+			// wants — core.ShortPath's keep-the-tail is for paths only.
 			out = append(
 				out,
 				core.PadLine(styleLauncherFail.Render("  ✖ "+m.failureText(p)), w, core.BgNone),
@@ -529,35 +527,6 @@ func launcherRowBg(cursor, focused bool) core.RowBg {
 		return core.BgWeak
 	}
 	return core.BgNone
-}
-
-// homeDir is the prefix shortPath abbreviates to "~".
-var homeDir = sync.OnceValue(func() string {
-	h, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return h
-})
-
-// shortPath abbreviates the home prefix and, when still too long, keeps the tail
-// — the end of a path is what distinguishes it.
-func shortPath(p string, w int) string {
-	return core.TruncateLeftCells(abbrevHome(p, homeDir()), w)
-}
-
-// abbrevHome writes the home prefix as "~", and only on a path-component
-// boundary: a sibling home like /home/uX shares every letter of /home/u without
-// being under it, and "~X/y" would name a directory that does not exist.
-func abbrevHome(p, home string) string {
-	if home == "" {
-		return p
-	}
-	after, ok := strings.CutPrefix(p, home)
-	if !ok || (after != "" && after[0] != '/') {
-		return p
-	}
-	return "~" + after
 }
 
 // deriveWeak recomputes the toggle-box shade from whatever the terminal has

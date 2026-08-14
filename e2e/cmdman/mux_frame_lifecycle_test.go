@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -246,9 +247,11 @@ func TestFrameLifecycle(t *testing.T) {
 			time.Sleep(200 * time.Millisecond)
 		}
 	}
+	// The head names the project's directory, not the project (D44), so the
+	// listing is observed through the directory the project was brought up in.
 	waitFor(
 		"the docked switcher never listed the project",
-		func(s string) bool { return strings.Contains(s, frameLifeProject) },
+		func(s string) bool { return strings.Contains(s, filepath.Base(wd)) },
 		func() string { return capturePane(t, tmuxTmpdir, switcher) },
 	)
 	// One project is listed, so the initial selection is it and enter is the

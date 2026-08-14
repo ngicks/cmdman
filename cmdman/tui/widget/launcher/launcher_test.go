@@ -161,7 +161,7 @@ func TestLauncherMatchFields(t *testing.T) {
 }
 
 // TestLauncherHomeSpellingMatches is the same rule driven through the model: the
-// left pane writes paths home-abbreviated (shortPath), so typing one back has to
+// left pane writes paths home-abbreviated (core.ShortPath), so typing one back has to
 // find the row it came from — under either spelling, and only on a component
 // boundary.
 func TestLauncherHomeSpellingMatches(t *testing.T) {
@@ -1437,9 +1437,11 @@ func TestLauncherWideRunesFitTheirColumn(t *testing.T) {
 	}
 }
 
-// TestShortPathKeepsTheTailInCells covers shortPath on its own: the home prefix
-// is abbreviated only on a separator boundary, and whatever it keeps fits the
-// cells it was given whether the path is ASCII or double-width.
+// TestShortPathKeepsTheTailInCells covers core.ShortPath on its own: the home
+// prefix is abbreviated only on a separator boundary, and whatever it keeps fits
+// the cells it was given whether the path is ASCII or double-width. It is
+// exercised from here because the launcher's panes are its oldest caller; the
+// switcher's heads now write their directories through the same function.
 func TestShortPathKeepsTheTailInCells(t *testing.T) {
 	for _, p := range []string{
 		"/home/u/src/webapp/compose.yaml",
@@ -1448,13 +1450,13 @@ func TestShortPathKeepsTheTailInCells(t *testing.T) {
 		"",
 	} {
 		for w := range 40 {
-			got := shortPath(p, w)
+			got := core.ShortPath(p, w)
 			if core.Cells.StringWidth(got) > w {
-				t.Errorf("shortPath(%q, %d) = %q, %d cells wide",
+				t.Errorf("core.ShortPath(%q, %d) = %q, %d cells wide",
 					p, w, got, core.Cells.StringWidth(got))
 			}
 			if core.Cells.StringWidth(got) != lipgloss.Width(got) {
-				t.Errorf("shortPath(%q, %d) = %q measures %d by cells and %d by lipgloss",
+				t.Errorf("core.ShortPath(%q, %d) = %q measures %d by cells and %d by lipgloss",
 					p, w, got, core.Cells.StringWidth(got), lipgloss.Width(got))
 			}
 		}
@@ -1474,13 +1476,13 @@ func TestAbbrevHomeNeedsAComponentBoundary(t *testing.T) {
 		{"/home/watagex", "/home/watagex"},
 		{"/var/tmp", "/var/tmp"},
 	} {
-		if got := abbrevHome(tc.path, home); got != tc.want {
-			t.Errorf("abbrevHome(%q, %q) = %q, want %q", tc.path, home, got, tc.want)
+		if got := core.AbbrevHome(tc.path, home); got != tc.want {
+			t.Errorf("core.AbbrevHome(%q, %q) = %q, want %q", tc.path, home, got, tc.want)
 		}
 	}
 	// No home to abbreviate against leaves every path alone.
-	if got := abbrevHome("/home/watage/x", ""); got != "/home/watage/x" {
-		t.Errorf("abbrevHome with no home = %q, want the path unchanged", got)
+	if got := core.AbbrevHome("/home/watage/x", ""); got != "/home/watage/x" {
+		t.Errorf("core.AbbrevHome with no home = %q, want the path unchanged", got)
 	}
 }
 
