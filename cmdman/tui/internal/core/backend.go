@@ -70,8 +70,9 @@ type ProjectInfo struct {
 // when no window carries that stamp yet.
 type SwitchTarget struct {
 	// Identity is the multiplexer ownership stamp carried from
-	// [ProjectInfo.Identity]. An empty Identity is not a switch: it would match
-	// every stamped window on the server, so the backend refuses it.
+	// [ProjectInfo.Identity]. An empty Identity is not a switch: the landing
+	// would fall back to the bare `cmdman-<project>` stamp, which a same-named
+	// project under another work directory can wear, so the backend refuses it.
 	Identity string
 	// WorkDir is the project's directory — where a created window's shell opens.
 	WorkDir string

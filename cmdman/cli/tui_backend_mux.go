@@ -41,11 +41,13 @@ func (b *serviceBackend) CycleMux(ctx context.Context, projectName, composeFile 
 // created window's shell opens — same directory, other spelling.
 func (b *serviceBackend) SwitchToProject(ctx context.Context, target tui.SwitchTarget) error {
 	if target.Identity == "" {
-		// An empty identity matches every stamped window on the server, so it is
-		// not a narrower search but a wrong one.
+		// mux.Land falls back to the window name when the identity is empty, so an
+		// empty one would land on whatever window carries the bare `cmdman-<project>`
+		// stamp — a same-named project under another work directory, brought up
+		// without an identity of its own, wears exactly that.
 		return errors.New("no project identity to switch to")
 	}
-	selection := compose.ProjectSelection{WorkDir: target.WorkDir, Project: target.Project}
+	selection := compose.ProjectSelection{Project: target.Project}
 	_, err := mux.Land(ctx, mux.LandOptions{
 		WindowName: selection.MuxWindowName(),
 		Identity:   target.Identity,
