@@ -43,12 +43,15 @@ it in any terminal or pane. Each widget is its own subcommand.
   directory to name — heads with its own name instead. A command that is one
   replica among several carries a `[i]` badge after its state — replicas of one
   command share its name, so the index is what tells them apart. `j`/`k` (or the
-  arrow keys) move the selection; `enter` and a left mouse click switch the
-  client to the selected project's window and mark that project's bells read;
-  `z` takes the frame around the current window down (a window with no frame up
-  is left alone); `q` quits. The switcher navigates only — starting, stopping
-  and removing commands stay in the full dashboard. A project with no window of
-  its own is reported on the hint line rather than brought up.
+  arrow keys) move the selection; `enter` and a left mouse click take the client
+  to the selected project's window and mark that project's bells read — a
+  project with no window up yet gets one opened at its directory and lands in
+  that. `z` takes the frame around the current window down (a window with no
+  frame up is left alone); `q` quits. Landing in a window is all a selection
+  does: it never brings the project up, and starting, stopping and removing
+  commands stay in the full dashboard. A project with no directory or name to
+  address a window by — one that has never run anywhere in particular — is
+  reported on the hint line instead.
 - `launcher`: quick-launch selector. The left pane lists target locations (the
   directories you have brought projects up in, most recent first, plus
   everything the filter reaches); the right pane lists the compose projects at
