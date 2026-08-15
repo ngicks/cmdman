@@ -16,9 +16,9 @@ func tuiWidgetSwitcherCmd(parent *cobra.Command, rf *rootFlags, noQuit *bool) {
 
 The switcher lists every known compose project — running, exited, and never
 run — each heading a group with its commands listed under it. j/k (or the
-arrow keys) move the selection, enter and a mouse click switch to the selected
-project's window, z takes the frame down, and q quits unless --no-quit was
-given.`,
+arrow keys) move the selection, enter and a mouse click take you to the
+selected project's window — opening one for a project that has none yet — z
+takes the frame down, and q quits unless --no-quit was given.`,
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {

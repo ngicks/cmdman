@@ -8,11 +8,12 @@ import "github.com/ngicks/cmdman/cmdman/tui/internal/core"
 // CLI, the frame layer and the widget subcommands name them as tui.X.
 
 type (
-	Backend     = core.Backend
-	CommandInfo = core.CommandInfo
-	ProjectInfo = core.ProjectInfo
-	LayoutsInfo = core.LayoutsInfo
-	Options     = core.Options
+	Backend      = core.Backend
+	CommandInfo  = core.CommandInfo
+	ProjectInfo  = core.ProjectInfo
+	LayoutsInfo  = core.LayoutsInfo
+	SwitchTarget = core.SwitchTarget
+	Options      = core.Options
 
 	EventSignal     = core.EventSignal
 	EventStream     = core.EventStream

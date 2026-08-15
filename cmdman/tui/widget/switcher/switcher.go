@@ -184,8 +184,8 @@ func (m Model) onEventSignal(msg core.EventSignalMsg) (tea.Model, tea.Cmd) {
 
 // onKey handles the widget key set: the switcher's cursor keys, the selection
 // that takes the client to a project's window (D6), and the collapse gesture
-// that takes the whole frame down (V8). The switcher is navigate-only — start,
-// stop and kill stay in the full TUI (V6).
+// that takes the whole frame down (V8). A selection lands in a window and
+// nothing more — start, stop and kill stay in the full TUI (V6).
 func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c", "ctrl+d":
@@ -227,9 +227,9 @@ func (m Model) clickAt(y int) (tea.Model, tea.Cmd) {
 	return m.switchToSelected()
 }
 
-// switchToSelected takes the client to the selected project's window and reads
-// that project's bells: selecting a project through the switcher is what
-// resolves them (D22).
+// switchToSelected takes the client to the selected project's window — built
+// for it first when none is up — and reads that project's bells: selecting a
+// project through the switcher is what resolves them (D22).
 func (m Model) switchToSelected() (tea.Model, tea.Cmd) {
 	g, ok := m.selectedGroup()
 	if !ok {
@@ -237,12 +237,14 @@ func (m Model) switchToSelected() (tea.Model, tea.Cmd) {
 	}
 	if g.Identity == "" {
 		// Nothing to address: a project the backend could not stamp an identity
-		// for has no window this switcher could be looking at.
+		// for has no window this switcher could look at, and none it could build
+		// one for either — the stamp is what a window would be created under.
 		m.status = fmt.Sprintf("%s: no window to switch to", groupLabel(g))
 		return m, nil
 	}
 	m = m.readBells(m.selected)
-	return m, core.SwitchProjectCmd(m.bgCtx(), m.backend, g.Identity, groupLabel(g))
+	target := core.SwitchTarget{Identity: g.Identity, WorkDir: g.Workdir, Project: g.Name}
+	return m, core.SwitchProjectCmd(m.bgCtx(), m.backend, target, groupLabel(g))
 }
 
 // onProjectSwitched reports a switch. Success needs no word — the client is
