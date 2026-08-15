@@ -17,8 +17,6 @@ const (
 	// WidgetSwitcher is the docked project switcher: projects with their
 	// commands listed under them.
 	WidgetSwitcher
-	// WidgetStatusbar is the one-line status bar.
-	WidgetStatusbar
 	// WidgetLauncher is the quick-launch selector: locations left, their compose
 	// projects right. It is the view a mux key binding summons as a popup (D3).
 	WidgetLauncher
@@ -36,7 +34,6 @@ type WidgetDef struct {
 // absent: it names no widget.
 var WidgetDefs = []WidgetDef{
 	{WidgetSwitcher, "switcher"},
-	{WidgetStatusbar, "statusbar"},
 	{WidgetLauncher, "launcher"},
 }
 

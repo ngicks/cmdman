@@ -1,146 +1,17 @@
-package panel
+package switcher
 
 import (
-	"cmp"
-	"math"
-	"slices"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
-
-// switcherGroups joins the global project list (the ListProjects merge:
-// store-known projects, never-run named defs, and the project discovered in the
-// working directory) with the command list, so a project with no commands still
-// gets a group and a running command lands under its project's head.
-//
-// Commands are matched on (workdir, project name) — both listings normalize the
-// path the same way — falling back to the project name alone for a ProjectInfo
-// carrying no workdir, which is how a never-run named def arrives. A command
-// group no project entry claims is appended, so a project the listing missed is
-// still on screen; standalone commands (no compose project) are dropped, having
-// no project window to switch to.
-func switcherGroups(
-	projs []core.ProjectInfo,
-	cmds []core.CommandInfo,
-	cwd string,
-	titles map[string]titleStamp,
-) []core.ProjectGroup {
-	cmdGroups := core.GroupFromInfos(cmds)
-	claimed := make([]bool, len(cmdGroups))
-	byKey := make(map[string]int, len(cmdGroups))
-	byName := make(map[string][]int, len(cmdGroups))
-	for i, g := range cmdGroups {
-		if g.Name == "" {
-			claimed[i] = true
-			continue
-		}
-		byKey[g.Key()] = i
-		byName[g.Name] = append(byName[g.Name], i)
-	}
-
-	out := make([]core.ProjectGroup, 0, len(projs)+len(cmdGroups))
-	for _, p := range projs {
-		g := core.ProjectGroup{Name: p.Name, Workdir: p.Workdir, Identity: p.Identity}
-		if i, ok := matchCommandGroup(p, byKey, byName, claimed); ok {
-			claimed[i] = true
-			g.Commands = cmdGroups[i].Commands
-			if g.Workdir == "" {
-				g.Workdir = cmdGroups[i].Workdir
-			}
-		}
-		out = append(out, g)
-	}
-	for i, g := range cmdGroups {
-		if !claimed[i] {
-			out = append(out, g)
-		}
-	}
-
-	for i := range out {
-		out[i].Active = out[i].Workdir != "" && out[i].Workdir == cwd
-		bucketSort(out[i].Commands, titles)
-	}
-	slices.SortStableFunc(out, func(a, b core.ProjectGroup) int {
-		if a.Active != b.Active {
-			return core.BoolFirst(a.Active)
-		}
-		return cmp.Compare(a.Name, b.Name)
-	})
-	return out
-}
-
-// matchCommandGroup finds the command group belonging to a project entry: the
-// exact (workdir, name) group, or — for an entry with no workdir — any
-// unclaimed group of that name. An entry that carries a workdir never claims a
-// group from another directory: same-named projects in different directories
-// are different projects.
-func matchCommandGroup(
-	p core.ProjectInfo,
-	byKey map[string]int,
-	byName map[string][]int,
-	claimed []bool,
-) (int, bool) {
-	if i, ok := byKey[p.Workdir+"\x00"+p.Name]; ok && !claimed[i] {
-		return i, true
-	}
-	if p.Workdir != "" {
-		return 0, false
-	}
-	for _, i := range byName[p.Name] {
-		if !claimed[i] {
-			return i, true
-		}
-	}
-	return 0, false
-}
 
 // switcherLine is one rendered line of the scrollable region together with the
 // group it belongs to, so the viewport can keep a whole group in view.
 type switcherLine struct {
 	text  string
 	group int
-}
-
-// titleStamp is a command's current title and when it was first seen carrying
-// it. The monitor serves no title timestamp, so "when the title changed" is
-// observed here: each load compares the title it fetched against the one the
-// last load saw. A title that arrived before the TUI started therefore dates
-// from the first load, which puts every project's commands in one bucket until
-// something actually retitles — the honest answer, since nothing else is known.
-type titleStamp struct {
-	title string
-	at    time.Time
-}
-
-// titleBucket chunks title-update times (D20). Two agents retitling every few
-// seconds land in the same bucket and order by name instead of trading places
-// on every refresh.
-const titleBucket = 5 * time.Second
-
-// bucketSort orders a project's commands newest-title-bucket-first, then by
-// name (then id) inside a bucket. Commands with no title sort last: "recently
-// active floats up" says nothing about a command that never said anything.
-func bucketSort(cmds []core.CommandRow, titles map[string]titleStamp) {
-	slices.SortFunc(cmds, func(a, b core.CommandRow) int {
-		return cmp.Or(
-			cmp.Compare(titleBucketOf(titles[b.ID]), titleBucketOf(titles[a.ID])),
-			cmp.Compare(a.Name, b.Name),
-			cmp.Compare(a.ID, b.ID),
-		)
-	})
-}
-
-// titleBucketOf is the bucket index of a stamp, with the zero stamp (no title
-// seen) pinned below every real one rather than converted, since the zero
-// time's Unix value is a large negative number that would merely look like one.
-func titleBucketOf(s titleStamp) int64 {
-	if s.at.IsZero() {
-		return math.MinInt64
-	}
-	return s.at.UnixNano() / int64(titleBucket)
 }
 
 // renderSwitcher renders the docked column: a grouped list, each project

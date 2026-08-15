@@ -67,13 +67,13 @@ frame:
     component: switcher
   - edge: bottom
     size: 2
-    component: statusbar
+    command: ["date"]
 `
 	barThenSide = `
 frame:
   - edge: bottom
     size: 2
-    component: statusbar
+    command: ["date"]
   - edge: left
     size: 20%
     component: switcher
@@ -81,17 +81,17 @@ frame:
 )
 
 // Order is the nesting: the same two entries in the other order give a
-// different tree, so the side column runs full height in one and the status bar
+// different tree, so the side column runs full height in one and the bottom bar
 // runs full width in the other.
 func TestCarve_OrderDependence(t *testing.T) {
 	// frame-0 is the first entry, frame-1 the second.
 	side := carveRects(t, sideThenBar, 200, 50)
 	assert.Equal(t, side["frame-0"], rect{w: 40, h: 50}, "switcher spans the full height")
-	assert.Equal(t, side["frame-1"], rect{w: 159, h: 2}, "status bar spans only the remainder")
+	assert.Equal(t, side["frame-1"], rect{w: 159, h: 2}, "the bar spans only the remainder")
 	assert.Equal(t, side["main"], rect{w: 159, h: 47})
 
 	bar := carveRects(t, barThenSide, 200, 50)
-	assert.Equal(t, bar["frame-0"], rect{w: 200, h: 2}, "status bar spans the full width")
+	assert.Equal(t, bar["frame-0"], rect{w: 200, h: 2}, "the bar spans the full width")
 	assert.Equal(t, bar["frame-1"], rect{w: 40, h: 47}, "switcher is shortened by the bar")
 	assert.Equal(t, bar["main"], rect{w: 159, h: 47})
 }

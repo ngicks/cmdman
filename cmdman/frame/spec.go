@@ -1,8 +1,7 @@
 // Package frame provides parsing, validation, discovery, and layout carving for
 // cmdman frame definitions — the user-level YAML files that dock display
-// components (a switcher column, a status bar, an arbitrary command) around the
-// screen edges, leaving the remaining rectangle to whatever the caller renders
-// in it.
+// components (a switcher column, an arbitrary command) around the screen edges,
+// leaving the remaining rectangle to whatever the caller renders in it.
 //
 // A def is a flat, ordered array of entries. Order is the nesting: each entry
 // carves its slice out of the rectangle left over by the entries before it, so
@@ -32,14 +31,13 @@ const (
 	EdgeRight  Edge = "right"
 )
 
-// Built-in component names a def may reference (D16). cmdman ships no default
-// frame; these are the components a def can name without declaring argv.
-const (
-	ComponentSwitcher  = "switcher"
-	ComponentStatusbar = "statusbar"
-)
+// ComponentSwitcher is the one built-in component name a def may reference,
+// now that the statusbar widget is removed (D16 introduced built-in
+// components; cmdman ships no default frame). This is the component a def can
+// name without declaring argv.
+const ComponentSwitcher = "switcher"
 
-var builtinComponents = []string{ComponentStatusbar, ComponentSwitcher}
+var builtinComponents = []string{ComponentSwitcher}
 
 // BuiltinComponents returns the built-in component names, sorted.
 func BuiltinComponents() []string {

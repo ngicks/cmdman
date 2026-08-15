@@ -31,7 +31,7 @@ frame:
     component: switcher
   - edge: bottom
     size: 2
-    component: statusbar
+    component: switcher
   - edge: right
     size: 30%
     command: ["btop"]
@@ -70,7 +70,7 @@ func TestNormalize_SizeSpellings(t *testing.T) {
 	} {
 		t.Run(tc.scalar, func(t *testing.T) {
 			spec, err := normalize(t, "frame:\n  - edge: top\n    size: "+tc.scalar+
-				"\n    component: statusbar\n")
+				"\n    component: switcher\n")
 			assert.NilError(t, err)
 			assert.Equal(t, spec.Entries[0].Size, tc.want)
 		})
@@ -95,22 +95,22 @@ func TestNormalize_Errors(t *testing.T) {
 		},
 		{
 			name:    "unknown edge",
-			content: "frame:\n  - edge: middle\n    size: 2\n    component: statusbar\n",
+			content: "frame:\n  - edge: middle\n    size: 2\n    component: switcher\n",
 			want:    `unknown edge "middle"`,
 		},
 		{
 			name:    "missing edge",
-			content: "frame:\n  - size: 2\n    component: statusbar\n",
+			content: "frame:\n  - size: 2\n    component: switcher\n",
 			want:    "edge is required",
 		},
 		{
 			name:    "missing size",
-			content: "frame:\n  - edge: top\n    component: statusbar\n",
+			content: "frame:\n  - edge: top\n    component: switcher\n",
 			want:    "size is required",
 		},
 		{
 			name: "both component and command",
-			content: "frame:\n  - edge: top\n    size: 2\n    component: statusbar\n" +
+			content: "frame:\n  - edge: top\n    size: 2\n    component: switcher\n" +
 				"    command: [btop]\n",
 			want: "mutually exclusive",
 		},
@@ -126,13 +126,13 @@ func TestNormalize_Errors(t *testing.T) {
 		},
 		{
 			name: "managed on a component entry",
-			content: "frame:\n  - edge: top\n    size: 2\n    component: statusbar\n" +
+			content: "frame:\n  - edge: top\n    size: 2\n    component: switcher\n" +
 				"    managed: true\n",
 			want: "managed: applies to command: entries only",
 		},
 		{
 			name:    "entry index in the message",
-			content: "frame:\n  - edge: top\n    size: 2\n    component: statusbar\n  - edge: top\n",
+			content: "frame:\n  - edge: top\n    size: 2\n    component: switcher\n  - edge: top\n",
 			want:    "entry 1",
 		},
 	} {
@@ -150,7 +150,7 @@ func TestNormalize_InvalidSizes(t *testing.T) {
 	for _, scalar := range []string{"0", "-1", "101%", "0%", "wide", `""`} {
 		t.Run(scalar, func(t *testing.T) {
 			_, err := frame.Decode(strings.NewReader(
-				"frame:\n  - edge: top\n    size: " + scalar + "\n    component: statusbar\n",
+				"frame:\n  - edge: top\n    size: " + scalar + "\n    component: switcher\n",
 			))
 			assert.Assert(t, err != nil, "expected a decode error")
 		})
@@ -163,7 +163,7 @@ name: mine
 frame:
   - edge: top
     size: 2
-    component: statusbar
+    component: switcher
     zorder: 3
     kolor: red
 `))
@@ -226,7 +226,7 @@ func TestNormalize_HooksWithoutManagedWarn(t *testing.T) {
 		},
 		{
 			name:  "component entry",
-			entry: "    component: statusbar\n",
+			entry: "    component: switcher\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -263,7 +263,7 @@ func TestNormalize_HooksInvalid(t *testing.T) {
 }
 
 func TestBuiltinComponents(t *testing.T) {
-	assert.DeepEqual(t, frame.BuiltinComponents(), []string{"statusbar", "switcher"})
+	assert.DeepEqual(t, frame.BuiltinComponents(), []string{"switcher"})
 	assert.Assert(t, frame.IsBuiltinComponent(frame.ComponentSwitcher))
 	assert.Assert(t, !frame.IsBuiltinComponent("clock"))
 }

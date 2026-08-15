@@ -843,7 +843,7 @@ func TestProjectHeaderShowsWorkdir(t *testing.T) {
 }
 
 // TestCommandsTabMarkerSlotIsFixedWidth pins the Commands tab to the same marker
-// slot the switcher and the statusbar use: 🔔 is two cells and ●/○ one, so the
+// slot the switcher uses: 🔔 is two cells and ●/○ one, so the
 // project names have to start at the same column whichever marker their row
 // carries.
 func TestCommandsTabMarkerSlotIsFixedWidth(t *testing.T) {

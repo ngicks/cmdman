@@ -18,7 +18,6 @@ import (
 
 	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 	"github.com/ngicks/cmdman/cmdman/tui/widget/launcher"
-	"github.com/ngicks/cmdman/cmdman/tui/widget/statusbar"
 	"github.com/ngicks/cmdman/cmdman/tui/widget/switcher"
 )
 
@@ -32,22 +31,18 @@ func Run(ctx context.Context, opts Options) error {
 }
 
 // newProgramModel picks the model Run drives: the one the widget package named
-// by Options.Widget builds, the full multi-tab model otherwise. The switcher
-// and the statusbar are two names for one panel model — they share the update
-// loop, with selection and mouse handling enabled only for the switcher —
-// while the launcher is a model of its
-// own: its keys are zoned (a bare letter types in the input and acts on a
-// list), so it shares no key handling with the docked widgets.
+// by Options.Widget builds, the full multi-tab model otherwise. Each widget is
+// a model of its own — the launcher's keys are zoned (a bare letter types in
+// the input and acts on a list), so it shares no key handling with the docked
+// switcher.
 func newProgramModel(ctx context.Context, opts Options) tea.Model {
 	switch opts.Widget {
 	case core.WidgetSwitcher:
 		return switcher.New(ctx, opts)
-	case core.WidgetStatusbar:
-		return statusbar.New(ctx, opts)
 	case core.WidgetLauncher:
 		return launcher.New(ctx, opts)
 	}
-	// No default case: a Widget outside the three constants is not producible
+	// No default case: a Widget outside the two constants is not producible
 	// by the CLI, and guessing a widget surface for one would be worse than
 	// falling back to the full TUI.
 	m := New(opts)

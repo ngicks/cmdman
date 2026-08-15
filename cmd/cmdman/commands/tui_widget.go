@@ -27,7 +27,6 @@ in the frame.`,
 		"Unbind the quit keys, so no keypress ends the widget")
 
 	tuiWidgetSwitcherCmd(cmd, rf, &flagNoQuit)
-	tuiWidgetStatusbarCmd(cmd, rf, &flagNoQuit)
 	tuiWidgetLauncherCmd(cmd, rf, &flagNoQuit)
 
 	parent.AddCommand(cmd)
