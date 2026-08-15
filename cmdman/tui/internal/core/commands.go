@@ -49,9 +49,14 @@ func ListProjectsCmd(ctx context.Context, backend Backend) tea.Cmd {
 // SwitchProjectCmd and HideFrameCmd stand free of a model for the same reason
 // the list commands do: the widget model issues them off the update loop with
 // no model of its own to carry.
-func SwitchProjectCmd(ctx context.Context, backend Backend, identity, name string) tea.Cmd {
+func SwitchProjectCmd(
+	ctx context.Context,
+	backend Backend,
+	target SwitchTarget,
+	name string,
+) tea.Cmd {
 	return func() tea.Msg {
-		return ProjectSwitchedMsg{Name: name, Err: backend.SwitchToProject(ctx, identity)}
+		return ProjectSwitchedMsg{Name: name, Err: backend.SwitchToProject(ctx, target)}
 	}
 }
 

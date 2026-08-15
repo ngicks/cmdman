@@ -43,6 +43,80 @@ func TestTUIWidget_SwitcherRendersAndQuits(t *testing.T) {
 	w.quit(t)
 }
 
+// TestTUIWidget_SwitcherSelectionLandsInProjectWindow is the selection gesture
+// end to end (D6): enter on a project with no window of its own opens one at the
+// project directory and takes the client there, and selecting it again comes
+// back to that same window instead of opening a second.
+//
+// Landing is only observable from inside the multiplexer, so the switcher runs
+// the way a frame pane runs it — as a window on a tmux server of the test's own
+// (TMUX_TMPDIR keeps the default socket private, and the switcher's own $TMUX
+// points the driver at that same server).
+func TestTUIWidget_SwitcherSelectionLandsInProjectWindow(t *testing.T) {
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	tmuxTmpdir := t.TempDir()
+	t.Cleanup(func() { killDefaultTmuxServer(t, tmuxTmpdir) })
+	tmuxRunWithTmpdir(t, tmuxTmpdir, "new-session", "-d", "-s", "work", "-n", "home")
+
+	wd := composeWorkdir(t)
+	const project = "swland"
+	composePath := writeComposeFile(t, wd, composeBasicYAML(project))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+	// create is what puts the project in the listing the switcher reads, and with
+	// it the identity a selection addresses. Nothing is brought up, so the project
+	// has no window until the selection builds one.
+	if _, stderr, err := env.muxExecWithTmpdir(
+		ctx, tmuxTmpdir, "compose", "--workdir", wd, "-f", composePath, "create",
+	); err != nil {
+		t.Fatalf("compose create failed: %v\nstderr:\n%s", err, stderr)
+	}
+
+	switcher := switcherWindow(t, env, tmuxTmpdir, wd)
+	window := "cmdman-" + project
+	selectInSwitcher(t, tmuxTmpdir, switcher)
+	waitForTmuxWindow(t, tmuxTmpdir, window, 30*time.Second)
+	waitForActiveWindow(t, tmuxTmpdir, "work", window, 30*time.Second)
+
+	// The window is the project's own: stamped with the identity the listing
+	// carried, which is what makes the next selection a find rather than a build.
+	// Which spelling of the work directory the stamp is hashed from is not what
+	// this pins — TestMergeProjectInfosStampsIdentity does that.
+	want := compose.ProjectSelection{WorkDir: wd, Project: project}.ProjectIdentity()
+	if got := tmuxWindowOptionTmpdir(t, tmuxTmpdir, window, "@cmdman_window"); got != want {
+		t.Errorf("window identity = %q, want %q", got, want)
+	}
+	wid := tmuxWindowIDTmpdir(t, tmuxTmpdir, window)
+	wantDir, err := filepath.EvalSymlinks(wd)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	if got := tmuxPanesTmpdir(t, tmuxTmpdir, wid, "#{pane_current_path}"); !slices.Equal(
+		got, []string{wantDir},
+	) {
+		t.Errorf("the window built for the project = %v, want one shell at %q", got, wantDir)
+	}
+
+	// Walk away and select again: the second selection lands in the window the
+	// first one built rather than adding another beside it.
+	tmuxRunWithTmpdir(t, tmuxTmpdir, "select-window", "-t", "=work:home")
+	selectInSwitcher(t, tmuxTmpdir, switcher)
+	waitForActiveWindow(t, tmuxTmpdir, "work", window, 30*time.Second)
+	// Both assertions are by id, because by name a reuse and a duplicate look
+	// alike: tmux holds any number of windows of one name, and a lookup by name
+	// answers with the first of them. So: the client landed on the very window the
+	// first selection built, and that window is still the only one of its name.
+	if got := activeWindowID(t, tmuxTmpdir, "work"); got != wid {
+		t.Errorf("the second selection landed on window %s, want %s", got, wid)
+	}
+	if got := tmuxWindowIDsTmpdir(t, tmuxTmpdir, window); !slices.Equal(got, []string{wid}) {
+		t.Errorf("the second selection built a new window: %q named %q, want only %s",
+			got, window, wid)
+	}
+}
+
 // TestTUIWidget_NoQuitSurvivesTheQuitKey is V6's flag end to end — the one a
 // frame pane always gets. A docked widget that exits on a keypress leaves a hole
 // in the fixture, so q must reach a widget that no longer has it bound, and the
@@ -211,6 +285,64 @@ func waitForTmuxWindow(t *testing.T, tmuxTmpdir, name string, deadline time.Dura
 		time.Sleep(200 * time.Millisecond)
 	}
 	t.Fatalf("window %q never appeared; last listing:\n%s", name, last)
+}
+
+// tmuxWindowIDsTmpdir returns the @ids of every window of that name across the
+// default-socket server under tmuxTmpdir. A name is not unique to tmux, so this
+// is what tells "the window is still the one it was" from "another one was built
+// beside it", which a lookup by name cannot see.
+func tmuxWindowIDsTmpdir(t *testing.T, tmuxTmpdir, window string) []string {
+	t.Helper()
+	listing := tmuxRunWithTmpdir(t, tmuxTmpdir,
+		"list-windows", "-a", "-F", "#{window_name}\t#{window_id}")
+	var ids []string
+	for line := range strings.SplitSeq(listing, "\n") {
+		if name, id, ok := strings.Cut(line, "\t"); ok && name == window {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// activeWindowID is activeWindowName in ids: which window the session is
+// showing, said in the one term that distinguishes same-named windows.
+func activeWindowID(t *testing.T, tmuxTmpdir, session string) string {
+	t.Helper()
+	listing := tmuxRunWithTmpdir(t, tmuxTmpdir,
+		"list-windows", "-t", "="+session, "-F", "#{window_id}\t#{window_active}")
+	for line := range strings.SplitSeq(listing, "\n") {
+		if id, active, ok := strings.Cut(line, "\t"); ok && active == "1" {
+			return id
+		}
+	}
+	t.Fatalf("session %s has no active window; listing:\n%s", session, listing)
+	return ""
+}
+
+// switcherWindow runs the switcher as a tmux window on the test's server — the
+// shape a frame pane gives it, and the only one where landing means anything —
+// and returns its window name. The -d keeps it off the session's focus, so a
+// selection is the only thing that can move focus onto the project's window.
+func switcherWindow(t *testing.T, env *testEnv, tmuxTmpdir, workDir string) string {
+	t.Helper()
+	name := fmt.Sprintf("switcher-%d", time.Now().UnixNano())
+	tmuxRunWithTmpdir(t, tmuxTmpdir,
+		"new-window", "-d", "-t", "=work", "-n", name,
+		"-e", cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
+		"-e", cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
+		"-e", cmdman.ENV_CMDMAN_CONF+"="+env.confPath,
+		cmdmanBin+" tui widget switcher --workdir "+workDir,
+	)
+	// --workdir makes the project the cwd-active one, so it heads the list and
+	// the switcher opens its cursor on it. Its directory is what the row shows.
+	waitForPane(t, tmuxTmpdir, name, filepath.Base(workDir), 20*time.Second)
+	return name
+}
+
+// selectInSwitcher presses enter on the group under the switcher's cursor.
+func selectInSwitcher(t *testing.T, tmuxTmpdir, window string) {
+	t.Helper()
+	tmuxRunWithTmpdir(t, tmuxTmpdir, "send-keys", "-t", "=work:"+window, "Enter")
 }
 
 // launcherMuxYAML is a project with a mux: section on tmux's default socket, so

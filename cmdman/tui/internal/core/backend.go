@@ -57,11 +57,27 @@ type ProjectInfo struct {
 	HasMux   bool
 	Modified string
 
-	// Identity is the project's multiplexer ownership stamp — the string
-	// [Backend.SwitchToProject] takes. It is opaque here: only the backend can
-	// derive it, and it is "" for a project whose window could never be found
-	// (a named def that has never run anywhere in particular).
+	// Identity is the project's multiplexer ownership stamp — the key
+	// [Backend.SwitchToProject] finds the project's window by, and stamps on the
+	// one it creates. It is opaque here: only the backend can derive it, and it
+	// is "" for a project no window could ever be addressed for (a named def
+	// that has never run anywhere in particular).
 	Identity string
+}
+
+// SwitchTarget is the project a switcher selection lands in. Identity addresses
+// the window; WorkDir and Project describe the project well enough to build one
+// when no window carries that stamp yet.
+type SwitchTarget struct {
+	// Identity is the multiplexer ownership stamp carried from
+	// [ProjectInfo.Identity]. An empty Identity is not a switch: the landing
+	// would fall back to the bare `cmdman-<project>` stamp, which a same-named
+	// project under another work directory can wear, so the backend refuses it.
+	Identity string
+	// WorkDir is the project's directory — where a created window's shell opens.
+	WorkDir string
+	// Project is the compose project name, which names a created window.
+	Project string
 }
 
 // LayoutsInfo is the Layout-tab data for the current project: its mux layout
@@ -144,11 +160,12 @@ type Backend interface {
 	// identify the project as resolved by ListLayouts.
 	ApplyLayout(ctx context.Context, projectName, composeFile, layoutName string) error
 
-	// SwitchToProject puts the client in front of the window carrying identity —
-	// the docked switcher's enter/click (D6). It never brings a project up and
-	// never creates a window: a project with no window of its own comes back as
-	// an error, which the switcher shows in place of its hint line.
-	SwitchToProject(ctx context.Context, identity string) error
+	// SwitchToProject puts the client in front of the target's window — the
+	// docked switcher's enter/click (D6). A project with no window of its own
+	// gets one built for it and lands in that; what it does not get is a
+	// bring-up, which stays the launcher's gesture. A landing that fails comes
+	// back as an error, which the switcher shows in place of its hint line.
+	SwitchToProject(ctx context.Context, target SwitchTarget) error
 	// HideFrame takes the frame down around the caller's current window — the
 	// docked switcher's collapse gesture (D16/V8). A window with no frame up is
 	// not an error: hiding what is already hidden is what was asked for.

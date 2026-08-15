@@ -693,14 +693,23 @@ func settle(t *testing.T, m Model, cmd tea.Cmd) Model {
 
 // TestSwitcherSelectionSwitches covers the two selection gestures (D6/D24):
 // enter on the cursor and a click on a row both take the client to that
-// project's window, addressed by the identity the backend stamped on it.
+// project's window, addressed by the identity the backend stamped on it and
+// described well enough — work directory and project name — for the backend to
+// build that window when none is up.
 func TestSwitcherSelectionSwitches(t *testing.T) {
 	m := seedWidget(32, 12)
 	fb := m.backend.(*coretest.FakeBackend)
 
+	localDev := core.SwitchTarget{
+		Identity: "id-local-dev", WorkDir: "/work/local-dev", Project: "local-dev",
+	}
+	apiStack := core.SwitchTarget{
+		Identity: "id-api-stack", WorkDir: "/work/api", Project: "api-stack",
+	}
+
 	m, cmd := updWidget(t, m, coretest.KEnter)
 	m = settle(t, m, cmd)
-	if !slices.Equal(fb.Switched, []string{"id-local-dev"}) {
+	if !slices.Equal(fb.Switched, []core.SwitchTarget{localDev}) {
 		t.Fatalf("enter switched to %v, want the cwd-active project", fb.Switched)
 	}
 	if m.status != "" {
@@ -714,7 +723,7 @@ func TestSwitcherSelectionSwitches(t *testing.T) {
 	if m.selected != 1 {
 		t.Errorf("a click should move the cursor to the row it hit, selected = %d", m.selected)
 	}
-	if want := []string{"id-local-dev", "id-api-stack"}; !slices.Equal(fb.Switched, want) {
+	if want := []core.SwitchTarget{localDev, apiStack}; !slices.Equal(fb.Switched, want) {
 		t.Errorf("switched = %v, want %v", fb.Switched, want)
 	}
 
@@ -730,18 +739,17 @@ func TestSwitcherSelectionSwitches(t *testing.T) {
 	}
 
 	// A switch that fails says so where the hint line is.
-	fb.SwitchErr = errors.New("no window is up for it")
+	fb.SwitchErr = errors.New("no multiplexer server is running")
 	m, cmd = updWidget(t, m, coretest.KEnter)
 	m = settle(t, m, cmd)
-	if !strings.Contains(m.status, "no window is up for it") {
+	if !strings.Contains(m.status, "no multiplexer server is running") {
 		t.Errorf("a failed switch should be reported, status = %q", m.status)
 	}
 }
 
-// TestSwitcherSelectionNeedsIdentity pins the navigate-only boundary (V6) at
-// its edge: a project the backend could not stamp an identity for has no window
-// to go to, and saying so is all the switcher does about it — it never brings
-// one up.
+// TestSwitcherSelectionNeedsIdentity pins the one project a selection cannot
+// reach: with no identity stamped there is no window to find and none to create
+// under, so saying so on the hint line is all the switcher does about it.
 func TestSwitcherSelectionNeedsIdentity(t *testing.T) {
 	m := seedWidget(32, 12)
 	fb := m.backend.(*coretest.FakeBackend)

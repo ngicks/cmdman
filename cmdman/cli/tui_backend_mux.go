@@ -27,28 +27,33 @@ func (b *serviceBackend) CycleMux(ctx context.Context, projectName, composeFile 
 	})
 }
 
-// SwitchToProject takes the client to the window carrying identity — the docked
-// switcher's enter/click (D6). It is navigate-only (V6): a project with no
-// window of its own is reported back rather than brought up, and rather than
-// given the synthesized window a landing would build for it (D9), which is the
-// launcher's gesture and not the switcher's.
-func (b *serviceBackend) SwitchToProject(ctx context.Context, identity string) error {
-	if identity == "" {
+// SwitchToProject takes the client to the target's window — the docked
+// switcher's enter/click (D6). The landing is [mux.Land]'s: the window carrying
+// the target's identity is focused, and a project with none yet gets the bare
+// shell window a landing synthesizes at its work directory (D9). What the
+// switcher still does not do is bring the project up — compose up stays the
+// launcher's `S` (V6).
+//
+// The identity travels with the target rather than being derived here: it is
+// hashed from the work directory as compose spells it, while the target's
+// WorkDir is symlink-resolved for cwd comparison (see projectIdentity) and would
+// address a window that does not exist. That resolved directory is still where a
+// created window's shell opens — same directory, other spelling.
+func (b *serviceBackend) SwitchToProject(ctx context.Context, target tui.SwitchTarget) error {
+	if target.Identity == "" {
+		// mux.Land falls back to the window name when the identity is empty, so an
+		// empty one would land on whatever window carries the bare `cmdman-<project>`
+		// stamp — a same-named project under another work directory, brought up
+		// without an identity of its own, wears exactly that.
 		return errors.New("no project identity to switch to")
 	}
-	// The listing is what keeps this navigate-only: mux.Land creates the window
-	// it cannot find, so the window has to be found before it is asked for.
-	windows, err := mux.List(ctx, mux.ListOptions{Identity: identity})
-	if err != nil {
-		return err
-	}
-	if len(windows) == 0 {
-		return errors.New("no window is up for it")
-	}
-	if _, err := mux.Land(ctx, mux.LandOptions{Identity: identity}); err != nil {
-		return err
-	}
-	return nil
+	selection := compose.ProjectSelection{Project: target.Project}
+	_, err := mux.Land(ctx, mux.LandOptions{
+		WindowName: selection.MuxWindowName(),
+		Identity:   target.Identity,
+		WorkDir:    target.WorkDir,
+	})
+	return err
 }
 
 // HideFrame takes the frame down around the caller's current window — the docked

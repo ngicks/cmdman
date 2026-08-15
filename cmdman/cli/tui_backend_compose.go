@@ -68,12 +68,14 @@ func appendCwdProject(infos []tui.ProjectInfo, workDir string) []tui.ProjectInfo
 }
 
 // projectIdentity is the multiplexer ownership stamp of a project's window, the
-// string the switcher hands back to [serviceBackend.SwitchToProject]. workDir is
-// the work directory as compose itself computes it — cleaned and absolute, but
-// NOT symlink-resolved: the hash mux stamped is over that form, while
-// tui.ProjectInfo.Workdir is resolved for cwd comparison and would hash into a
-// window that does not exist. A project with no directory to hash gets no
-// identity rather than one that would match some other project's window.
+// string the switcher hands back in [tui.SwitchTarget] for
+// [serviceBackend.SwitchToProject] to find that window by — or to stamp on the
+// one it creates. workDir is the work directory as compose itself computes it —
+// cleaned and absolute, but NOT symlink-resolved: the hash mux stamped is over
+// that form, while tui.ProjectInfo.Workdir is resolved for cwd comparison and
+// would hash into a window that does not exist. A project with no directory to
+// hash gets no identity rather than one that would match some other project's
+// window.
 func projectIdentity(workDir, project string) string {
 	if workDir == "" || project == "" {
 		return ""
