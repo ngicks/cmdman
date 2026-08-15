@@ -82,8 +82,8 @@ func TestTUIWidget_SwitcherSelectionLandsInProjectWindow(t *testing.T) {
 
 	// The window is the project's own: stamped with the identity the listing
 	// carried, which is what makes the next selection a find rather than a build.
-	// The stamp is hashed from the canonical work directory, so it also pins that
-	// the switcher never hands over the symlink-resolved spelling it displays.
+	// Which spelling of the work directory the stamp is hashed from is not what
+	// this pins — TestMergeProjectInfosStampsIdentity does that.
 	want := compose.ProjectSelection{WorkDir: wd, Project: project}.ProjectIdentity()
 	if got := tmuxWindowOptionTmpdir(t, tmuxTmpdir, window, "@cmdman_window"); got != want {
 		t.Errorf("window identity = %q, want %q", got, want)
@@ -104,8 +104,16 @@ func TestTUIWidget_SwitcherSelectionLandsInProjectWindow(t *testing.T) {
 	tmuxRunWithTmpdir(t, tmuxTmpdir, "select-window", "-t", "=work:home")
 	selectInSwitcher(t, tmuxTmpdir, switcher)
 	waitForActiveWindow(t, tmuxTmpdir, "work", window, 30*time.Second)
-	if got := tmuxWindowIDTmpdir(t, tmuxTmpdir, window); got != wid {
-		t.Errorf("the second selection built a new window: %s vs %s", wid, got)
+	// Both assertions are by id, because by name a reuse and a duplicate look
+	// alike: tmux holds any number of windows of one name, and a lookup by name
+	// answers with the first of them. So: the client landed on the very window the
+	// first selection built, and that window is still the only one of its name.
+	if got := activeWindowID(t, tmuxTmpdir, "work"); got != wid {
+		t.Errorf("the second selection landed on window %s, want %s", got, wid)
+	}
+	if got := tmuxWindowIDsTmpdir(t, tmuxTmpdir, window); !slices.Equal(got, []string{wid}) {
+		t.Errorf("the second selection built a new window: %q named %q, want only %s",
+			got, window, wid)
 	}
 }
 
@@ -277,6 +285,38 @@ func waitForTmuxWindow(t *testing.T, tmuxTmpdir, name string, deadline time.Dura
 		time.Sleep(200 * time.Millisecond)
 	}
 	t.Fatalf("window %q never appeared; last listing:\n%s", name, last)
+}
+
+// tmuxWindowIDsTmpdir returns the @ids of every window of that name across the
+// default-socket server under tmuxTmpdir. A name is not unique to tmux, so this
+// is what tells "the window is still the one it was" from "another one was built
+// beside it", which a lookup by name cannot see.
+func tmuxWindowIDsTmpdir(t *testing.T, tmuxTmpdir, window string) []string {
+	t.Helper()
+	listing := tmuxRunWithTmpdir(t, tmuxTmpdir,
+		"list-windows", "-a", "-F", "#{window_name}\t#{window_id}")
+	var ids []string
+	for line := range strings.SplitSeq(listing, "\n") {
+		if name, id, ok := strings.Cut(line, "\t"); ok && name == window {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// activeWindowID is activeWindowName in ids: which window the session is
+// showing, said in the one term that distinguishes same-named windows.
+func activeWindowID(t *testing.T, tmuxTmpdir, session string) string {
+	t.Helper()
+	listing := tmuxRunWithTmpdir(t, tmuxTmpdir,
+		"list-windows", "-t", "="+session, "-F", "#{window_id}\t#{window_active}")
+	for line := range strings.SplitSeq(listing, "\n") {
+		if id, active, ok := strings.Cut(line, "\t"); ok && active == "1" {
+			return id
+		}
+	}
+	t.Fatalf("session %s has no active window; listing:\n%s", session, listing)
+	return ""
 }
 
 // switcherWindow runs the switcher as a tmux window on the test's server — the
