@@ -18,11 +18,17 @@
 
 - **What**: `serviceBackend.SwitchToProject` (`cmdman/cli/tui_backend_mux.go`)
   passes no `Driver` to `mux.Land`, so the driver autodetects; a project
-  window living on a dedicated mux socket is missed and a duplicate is
-  created on the default socket. Pre-existing — the old navigate-only
-  implementation passed no driver either.
+  window living only on a dedicated mux socket is missed and a fresh window
+  is created on the caller's server. Pre-existing — the old navigate-only
+  implementation passed no driver either — but the consequence changed from
+  "no window is up for it" to silent creation. Kept deliberately: see
+  DECISION.md "Driver stays autodetected". Related: `LandResult.
+  AttachCommand` is discarded, so an outside-multiplexer caller gets a
+  window created while the switcher reports success (discard predates this
+  change; reachable cases widened).
 - **Follow-up**: resolving the compose file to learn the project's mux/driver
-  config; belongs with any future driver-plumbing work for the TUI backend.
+  config, and surfacing `AttachCommand` for outside-multiplexer callers;
+  belongs with any future driver-plumbing work for the TUI backend.
 
 ## `os.IsNotExist` lint trap in e2e (out-of-scope discovery)
 

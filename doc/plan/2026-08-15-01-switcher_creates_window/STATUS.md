@@ -1,7 +1,7 @@
 # Status — switcher creates the project window
 
-Current state: implemented; unit + e2e tests and lint green. A final review
-pass is in flight; findings (if any) land as follow-up commits.
+Current state: done. Implemented, reviewed, review findings fixed; unit +
+e2e tests and lint green.
 
 ## Checklist
 
@@ -22,6 +22,11 @@ pass is in flight; findings (if any) land as follow-up commits.
 - [x] `go build ./...`, `go vet ./...`
 - [x] `go test ./...` including e2e (~169s)
 - [x] `golangci-lint run`
-- [ ] Reviewer pass (in flight)
+- [x] Reviewer pass — verdict: change sound; one blocking finding (e2e
+  duplicate-window assertion was first-match-by-name and could not catch a
+  duplicate) fixed by id-based assertions, plus stale guard-rationale
+  comments corrected and a dead `ProjectSelection.WorkDir` field dropped.
+  Driver-autodetect question recorded as a DECISION.md entry instead of a
+  code change.
 
-Next action: fold in reviewer findings, then done.
+Next action: none — done.

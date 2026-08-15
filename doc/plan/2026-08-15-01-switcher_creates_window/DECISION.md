@@ -48,6 +48,20 @@ precedent), so no compose up is needed. Rejected: mirroring the launcher's
 full bring-up — selection would start commands as a side effect of
 navigation.
 
+## Driver stays autodetected, not resolved from the compose file [automatic]
+
+`SwitchToProject` passes no `Driver` to `mux.Land`, so the driver
+autodetects from the caller's environment — unlike the launcher path, which
+threads `selection.Spec.Mux.Driver` so a dashboard on a dedicated socket is
+found there. Kept deliberately: the switcher's client lives on the caller's
+own multiplexer server and cannot be switched to a window on a different
+socket, so landing on the caller's server is the usable outcome; resolving
+the compose file just to learn the driver would add I/O to a navigation
+gesture. Consequence: a project whose windows live only on a dedicated
+socket gets a fresh window on the caller's server instead of an error —
+recorded in HANDOFF.md for any future driver-plumbing work. Rejected:
+loading the compose spec per selection to thread `Mux.Driver`.
+
 ## No window cleanup / close logic [automatic]
 
 Per-project windows can accumulate, but close/cleanup is out of scope for
