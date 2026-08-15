@@ -16,7 +16,7 @@ frame:
     component: switcher
   - edge: bottom
     size: 2
-    component: statusbar
+    command: ["watch", "-n", "5", "date"]
   - edge: right
     size: 30%
     command: ["tail", "-f", "/var/log/app.log"]
@@ -87,9 +87,9 @@ Entries are carved in file order, and that order is the nesting: an entry
 divides the rectangle the entries before it left over, not the whole window.
 
 `[left 20%, bottom 2]` gives a side column running the full window height and a
-status bar spanning only the width that remains beside it. The same two entries
-written as `[bottom 2, left 20%]` give a status bar running the full window
-width and a side column shortened by it.
+bottom strip spanning only the width that remains beside it. The same two
+entries written as `[bottom 2, left 20%]` give a bottom strip running the full
+window width and a side column shortened by it.
 
 ## Sizes
 
@@ -112,10 +112,9 @@ half of what the first entry left, not half of the window.
 
 ## Components
 
-`component:` names a built-in widget:
+`component:` names a built-in widget. There is one:
 
 - `switcher`: the project switcher.
-- `statusbar`: the one-line status bar.
 
 A component entry runs `cmdman tui widget <name> --no-quit` in its pane, using
 the same cmdman binary that docked the frame. The widgets and their key
