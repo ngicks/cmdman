@@ -1,4 +1,4 @@
-package panel
+package switcher
 
 import (
 	"context"
@@ -73,7 +73,7 @@ func TestSwitcherGroupsJoin(t *testing.T) {
 // so the selected group is a solid block and nothing overflows the column.
 func TestSwitcherRenderAlignment(t *testing.T) {
 	const w, h = 32, 12
-	m := seedWidget(core.WidgetSwitcher, w, h)
+	m := seedWidget(w, h)
 
 	lines := m.switcherLines(w)
 	if len(lines) != 5 { // 2 projects + 3 commands
@@ -105,8 +105,8 @@ func TestSwitcherRenderAlignment(t *testing.T) {
 // all, whether or not there are projects to list.
 func TestSwitcherFitsShortPanes(t *testing.T) {
 	const w = 30
-	full := seedWidget(core.WidgetSwitcher, w, 12)
-	empty := seedWidget(core.WidgetSwitcher, w, 12)
+	full := seedWidget(w, 12)
+	empty := seedWidget(w, 12)
 	empty.groups = nil
 
 	for _, m := range []Model{full, empty} {
@@ -133,7 +133,7 @@ func TestSwitcherFitsShortPanes(t *testing.T) {
 // compose projects can run on one directory, so the name misidentifies the
 // place — and only the groups actually sharing one add their name back.
 func TestSwitcherHeadsNameTheirDirectory(t *testing.T) {
-	m := seedWidget(core.WidgetSwitcher, 60, 12)
+	m := seedWidget(60, 12)
 
 	out := m.viewContent()
 	for _, want := range []string{"/work/local-dev", "/work/api"} {
@@ -171,7 +171,7 @@ func TestSwitcherHeadsNameTheirDirectory(t *testing.T) {
 // that project. 40 cells is the width the frame fixtures dock a switcher at.
 func TestSwitcherActiveHeadKeepsItsMarker(t *testing.T) {
 	const w = 40
-	m := seedWidget(core.WidgetSwitcher, w, 12)
+	m := seedWidget(w, 12)
 	g := core.ProjectGroup{
 		Name:    "cmdman",
 		Workdir: "/work/aaaa/bbbb/cccc/dddd/eeee",
@@ -285,7 +285,7 @@ func TestSwitcherHeadAbbreviatesHome(t *testing.T) {
 // every line past its pane; the badge has to fit the same ruler.
 func TestSwitcherWidthsSurviveWidePathsAndBadges(t *testing.T) {
 	const dir = "/work/作業場/日本語のディレクトリ"
-	m := seedWidget(core.WidgetSwitcher, 24, 12)
+	m := seedWidget(24, 12)
 	m, _ = updWidget(t, m, core.ProjectsLoadedMsg{Infos: []core.ProjectInfo{
 		{Name: "アプリ", Workdir: dir, Identity: "id-app"},
 	}})
@@ -338,7 +338,7 @@ func TestScaleBadgeMarksReplicasOnly(t *testing.T) {
 // (core.GroupFromInfos) and a run that is over — D13 takes a command's words
 // away, not what it is — and an unscaled row says nothing new.
 func TestSwitcherRowsBadgeReplicas(t *testing.T) {
-	m := seedWidget(core.WidgetSwitcher, 60, 12)
+	m := seedWidget(60, 12)
 	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: []core.CommandInfo{
 		{
 			ID: "1", Name: "web", Project: "local-dev", Workdir: "/work/local-dev",
@@ -548,7 +548,7 @@ func TestStampTitlesDatesChangesOnly(t *testing.T) {
 // unread bell — and, for a run that is over, its exit state rather than any
 // report (D13).
 func TestSwitcherRowsShowRuntimeState(t *testing.T) {
-	m := seedWidget(core.WidgetSwitcher, 60, 12)
+	m := seedWidget(60, 12)
 	next, _ := m.Update(core.CommandsLoadedMsg{Infos: []core.CommandInfo{
 		{
 			ID: "1", Name: "agent", Project: "local-dev", Workdir: "/work/local-dev",
@@ -619,7 +619,7 @@ func TestSwitcherViewportFollowsSelection(t *testing.T) {
 }
 
 func TestSwitcherKeysMoveSelection(t *testing.T) {
-	m := seedWidget(core.WidgetSwitcher, 32, 12)
+	m := seedWidget(32, 12)
 	next, _ := m.Update(coretest.Kr("j"))
 	m = next.(Model)
 	if m.selected != 1 {
@@ -642,153 +642,9 @@ func TestSwitcherKeysMoveSelection(t *testing.T) {
 	}
 }
 
-// TestStatusbarRendersOneLine pins the shape a one-row pane needs: exactly one
-// line, exactly the pane width.
-func TestStatusbarRendersOneLine(t *testing.T) {
-	const w = 60
-	m := seedWidget(core.WidgetStatusbar, w, 1)
-
-	out := m.viewContent()
-	if strings.Contains(out, "\n") {
-		t.Fatalf("statusbar must render a single line, got:\n%q", out)
-	}
-	if got := lipgloss.Width(out); got != w {
-		t.Errorf("statusbar width = %d, want %d", got, w)
-	}
-	// The left segment names the place, not the project (D44).
-	for _, want := range []string{"/work/local-dev", "2 projects", "2 running"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("statusbar should contain %q: %q", want, out)
-		}
-	}
-	// A path is longer than the name it replaced, and 60 cells no longer hold
-	// both it and the version: the bar's own rule is that where you are outranks
-	// what version says it, so the version is what goes.
-	if strings.Contains(out, "v0.0.0-test") {
-		t.Errorf("a 60-cell bar has no room left for the version: %q", out)
-	}
-	if wide := seedWidget(core.WidgetStatusbar, 100, 1).viewContent(); !strings.Contains(
-		wide, "v0.0.0-test",
-	) {
-		t.Errorf("a bar with room to spare should still carry the version: %q", wide)
-	}
-
-	// A pane too narrow for the version keeps where-you-are and still fills
-	// its row exactly.
-	narrow := seedWidget(core.WidgetStatusbar, 14, 1)
-	line := narrow.viewContent()
-	if got := lipgloss.Width(line); got != 14 {
-		t.Errorf("narrow statusbar width = %d, want 14", got)
-	}
-
-	// The marker is the widest glyph there is when a bell is unread, and the
-	// bar's padding is computed against it: a two-cell marker must not push the
-	// row past its pane.
-	next, _ := m.Update(core.CommandsLoadedMsg{Infos: []core.CommandInfo{{
-		ID: "1", Name: "agent", Project: "local-dev", Workdir: "/work/local-dev",
-		State: model.EventTypeRunning, BellUnread: true,
-	}}})
-	belled := next.(Model).viewContent()
-	if !strings.Contains(belled, core.GlyphBell) {
-		t.Errorf("an unread bell should reach the statusbar marker: %q", belled)
-	}
-	if got := lipgloss.Width(belled); got != w {
-		t.Errorf("statusbar width with a bell = %d, want %d", got, w)
-	}
-}
-
-// TestStatusbarBudgetsWholeSegments covers what a long working directory used
-// to do to the row it shares. The bar laid its segments out and clipped what
-// overran, so a 60-cell path at 80 cells left the counts half-rendered ("2
-// runni", "2 pro") — a cut number reads as a smaller number rather than as a
-// cut, and the widget's e2e test lost the word it waits for whenever $TMPDIR
-// was long. The segments are budgeted whole now, and the path is what shortens.
-func TestStatusbarBudgetsWholeSegments(t *testing.T) {
-	// A temp directory under a long $TMPDIR — where the e2e widget test runs the
-	// bar — against the 80-cell terminal it renders into.
-	const dir = "/tmp/cmdman-e2e-aaaaaaaaaaaaaaaaaaaa/cmdman-e2e-compose-zzzz"
-	const counts = "2 projects · 2 running"
-
-	m := seedStatusbarAt(dir, 80)
-	line := core.StripANSI(m.viewContent())
-	if !strings.Contains(line, counts) {
-		t.Errorf("an 80-cell bar should carry the counts whole: %q", line)
-	}
-	if !strings.Contains(line, "running") {
-		t.Errorf("the word the e2e widget test waits for should be there: %q", line)
-	}
-	// What paid for them is the path's head: the end of a path is what says which
-	// directory it is.
-	if !strings.Contains(line, "compose-zzzz") {
-		t.Errorf("a shortened path should still end where it does: %q", line)
-	}
-	if got := lipgloss.Width(line); got != 80 {
-		t.Errorf("statusbar width = %d, want 80", got)
-	}
-
-	// Squeezed, the counts are there whole or not at all — never as a fragment of
-	// themselves — and the version, which ranks below them, cannot outlive them.
-	for w := 20; w <= 90; w++ {
-		next, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: 1})
-		line := core.StripANSI(next.(Model).viewContent())
-		whole := strings.Contains(line, counts)
-		if piece := strings.Contains(line, "pro") ||
-			strings.Contains(line, "run"); piece != whole {
-			t.Errorf("%d-cell bar rendered a piece of the counts: %q", w, line)
-		}
-		if !whole && strings.Contains(line, "v0.0.0-test") {
-			t.Errorf("%d-cell bar dropped the counts but kept the version: %q", w, line)
-		}
-		if got := lipgloss.Width(line); got != w {
-			t.Errorf("%d-cell bar rendered %d cells: %q", w, got, line)
-		}
-	}
-
-	// A short path leaves room the version would take once the counts are out of
-	// the way, which is the one width where the rank between those two shows: the
-	// version is the least of the three, so it cannot outlive what outranks it.
-	short := core.StripANSI(seedStatusbarAt("/w", 28).viewContent())
-	if strings.Contains(short, "2 projects") {
-		t.Errorf("a 28-cell bar has no room for the counts: %q", short)
-	}
-	if strings.Contains(short, "v0.0.0-test") {
-		t.Errorf("the version cannot outlive the counts it ranks below: %q", short)
-	}
-	if got := lipgloss.Width(short); got != 28 {
-		t.Errorf("28-cell bar rendered %d cells: %q", got, short)
-	}
-}
-
-// seedStatusbarAt is seedWidget's fixture with the cwd-tied project sitting in
-// dir: the bar's left segment is a path, so the path's length is the variable
-// its layout turns on.
-func seedStatusbarAt(dir string, width int) Model {
-	fb := &coretest.FakeBackend{
-		Dir: dir,
-		Cmds: []core.CommandInfo{
-			{ID: "1", Name: "watcher", Project: "local-dev", Workdir: dir,
-				State: model.EventTypeRunning},
-			{ID: "2", Name: "web", Project: "api-stack", Workdir: "/work/api",
-				State: model.EventTypeRunning},
-		},
-		Projs: []core.ProjectInfo{
-			{Name: "local-dev", Workdir: dir, Identity: "id-local-dev"},
-			{Name: "api-stack", Workdir: "/work/api", Identity: "id-api-stack"},
-		},
-	}
-	m := New(context.Background(), core.WidgetStatusbar,
-		core.Options{Backend: fb, Version: "v0.0.0-test"})
-	next, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 1})
-	m = next.(Model)
-	next, _ = m.Update(core.CommandsLoadedMsg{Infos: fb.Cmds})
-	m = next.(Model)
-	next, _ = m.Update(core.ProjectsLoadedMsg{Infos: fb.Projs})
-	return next.(Model)
-}
-
-// seedWidget builds a panel over two projects — local-dev is the cwd-tied one —
-// driven through the same load messages the program delivers.
-func seedWidget(w core.Widget, width, height int) Model {
+// seedWidget builds a switcher over two projects — local-dev is the cwd-tied
+// one — driven through the same load messages the program delivers.
+func seedWidget(width, height int) Model {
 	fb := &coretest.FakeBackend{
 		Dir: "/work/local-dev",
 		Cmds: []core.CommandInfo{
@@ -804,7 +660,7 @@ func seedWidget(w core.Widget, width, height int) Model {
 			{Name: "api-stack", Workdir: "/work/api", Identity: "id-api-stack"},
 		},
 	}
-	m := New(context.Background(), w, core.Options{Backend: fb, Version: "v0.0.0-test"})
+	m := New(context.Background(), core.Options{Backend: fb})
 	next, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: height})
 	m = next.(Model)
 	next, _ = m.Update(core.CommandsLoadedMsg{Infos: fb.Cmds})
@@ -839,7 +695,7 @@ func settle(t *testing.T, m Model, cmd tea.Cmd) Model {
 // enter on the cursor and a click on a row both take the client to that
 // project's window, addressed by the identity the backend stamped on it.
 func TestSwitcherSelectionSwitches(t *testing.T) {
-	m := seedWidget(core.WidgetSwitcher, 32, 12)
+	m := seedWidget(32, 12)
 	fb := m.backend.(*coretest.FakeBackend)
 
 	m, cmd := updWidget(t, m, coretest.KEnter)
@@ -887,7 +743,7 @@ func TestSwitcherSelectionSwitches(t *testing.T) {
 // to go to, and saying so is all the switcher does about it — it never brings
 // one up.
 func TestSwitcherSelectionNeedsIdentity(t *testing.T) {
-	m := seedWidget(core.WidgetSwitcher, 32, 12)
+	m := seedWidget(32, 12)
 	fb := m.backend.(*coretest.FakeBackend)
 	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: nil})
 	m, _ = updWidget(t, m, core.ProjectsLoadedMsg{Infos: []core.ProjectInfo{{Name: "never-run"}}})
@@ -919,7 +775,7 @@ func TestSwitcherSelectionResolvesBells(t *testing.T) {
 		State: model.EventTypeRunning,
 	}}
 
-	m := seedWidget(core.WidgetSwitcher, 32, 12)
+	m := seedWidget(32, 12)
 	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: belled})
 	if got := core.MarkerGlyph(m.groups[0]); got != core.GlyphBell {
 		t.Fatalf("precondition: the marker should be the bell, got %q", got)
@@ -948,7 +804,7 @@ func TestSwitcherSelectionResolvesBells(t *testing.T) {
 // is the service's business — hide is a no-op there — so what this pins is that
 // a hide reporting nothing stays quiet, and a failing one does not.
 func TestSwitcherCollapse(t *testing.T) {
-	m := seedWidget(core.WidgetSwitcher, 32, 12)
+	m := seedWidget(32, 12)
 	fb := m.backend.(*coretest.FakeBackend)
 
 	m, cmd := updWidget(t, m, coretest.Kr("z"))
@@ -966,24 +822,13 @@ func TestSwitcherCollapse(t *testing.T) {
 	if !strings.Contains(m.status, "not inside a multiplexer") {
 		t.Errorf("a failed hide should be reported, status = %q", m.status)
 	}
-
-	// The statusbar has neither a cursor to select with nor a collapse gesture.
-	sb := seedWidget(core.WidgetStatusbar, 60, 1)
-	for _, key := range []tea.KeyMsg{coretest.Kr("z"), coretest.KEnter} {
-		if _, cmd := updWidget(t, sb, key); cmd != nil {
-			t.Errorf("the statusbar should ignore %v", key)
-		}
-	}
-	if got := sb.backend.(*coretest.FakeBackend); got.Hidden != 0 || len(got.Switched) != 0 {
-		t.Errorf("the statusbar dispatched %d hides and %v switches", got.Hidden, got.Switched)
-	}
 }
 
 // TestWidgetNoQuit covers V6's flag: a widget docked in a frame pane must not
 // exit from a keypress, and stops advertising a key it no longer has. A
 // standalone run keeps quitting, which is what the flag is opt-in for.
 func TestWidgetNoQuit(t *testing.T) {
-	docked := seedWidget(core.WidgetSwitcher, 32, 12)
+	docked := seedWidget(32, 12)
 	docked.noQuit = true
 	for _, key := range []tea.KeyMsg{
 		coretest.Kr("q"),
@@ -1002,7 +847,7 @@ func TestWidgetNoQuit(t *testing.T) {
 		t.Errorf("a docked switcher should not hint at quitting: %q", hint)
 	}
 
-	standalone := seedWidget(core.WidgetSwitcher, 32, 12)
+	standalone := seedWidget(32, 12)
 	next, cmd := updWidget(t, standalone, coretest.Kr("q"))
 	if !next.quitting || cmd == nil || !coretest.MsgIsQuit(cmd()) {
 		t.Errorf("q should still quit a standalone widget")
@@ -1015,7 +860,7 @@ func TestWidgetNoQuit(t *testing.T) {
 func TestNewCarriesContext(t *testing.T) {
 	type ctxKey struct{}
 	ctx := context.WithValue(context.Background(), ctxKey{}, "threaded")
-	m := New(ctx, core.WidgetSwitcher, core.Options{Backend: &coretest.FakeBackend{}})
+	m := New(ctx, core.Options{Backend: &coretest.FakeBackend{}})
 	if m.ctx == nil || m.ctx.Value(ctxKey{}) == nil {
 		t.Errorf("New should carry the caller's context into the model")
 	}

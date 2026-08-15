@@ -357,14 +357,14 @@ func (m Model) renderCommandList(title string, width, height int) string {
 				glyph = ">"
 			}
 			// The project's one attention marker (D14/D23), the same one the
-			// switcher and the statusbar show, between the fold arrow and the
-			// name: whichever surface the user is looking at says the same thing
-			// about the project.
+			// switcher shows, between the fold arrow and the name: whichever
+			// surface the user is looking at says the same thing about the
+			// project.
 			mark := core.MarkerGlyph(g)
-			// The marker sits in the same fixed-width slot the switcher and the
-			// statusbar give it, measured off the glyph rather than assumed: 🔔 is
-			// two cells and ●/○ one, so a single space after it would move the name
-			// a column between rows.
+			// The marker sits in the same fixed-width slot the switcher gives it,
+			// measured off the glyph rather than assumed: 🔔 is two cells and ●/○
+			// one, so a single space after it would move the name a column between
+			// rows.
 			gap := strings.Repeat(" ", max(core.MarkerSlot-core.GlyphWidth(mark), 1))
 			plain = fmt.Sprintf("%s %s %s%s", glyph, projectMarker, mark, gap+g.Name)
 			styled = fmt.Sprintf("%s %s %s%s", glyph, projectMarker,

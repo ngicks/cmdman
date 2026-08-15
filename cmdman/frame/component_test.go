@@ -21,10 +21,11 @@ func TestWidgetArgv(t *testing.T) {
 	assert.DeepEqual(t, argv,
 		[]string{"/opt/bin/cmdman", "tui", "widget", "switcher", "--no-quit"})
 
-	argv, err = frame.WidgetArgv("")(frame.ComponentStatusbar)
+	// An empty exe falls back to the bare name, resolved through PATH.
+	argv, err = frame.WidgetArgv("")(frame.ComponentSwitcher)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, argv,
-		[]string{"cmdman", "tui", "widget", "statusbar", "--no-quit"})
+		[]string{"cmdman", "tui", "widget", "switcher", "--no-quit"})
 
 	_, err = resolve("nope")
 	assert.ErrorContains(t, err, "unknown component")
@@ -48,8 +49,8 @@ func TestWidgetArgvCarves(t *testing.T) {
 // TestBuiltinComponentsMatchWidgets pins the direction of the contract that
 // matters: every built-in component name a def may reference must be a widget
 // the entrypoint can actually run. The converse does not hold — a widget need
-// not be dockable chrome (the launcher is a popup selector, D16 names only the
-// switcher and the statusbar as built-in components).
+// not be dockable chrome (the launcher is a popup selector, and the switcher
+// is the sole built-in component since the statusbar widget's removal).
 func TestBuiltinComponentsMatchWidgets(t *testing.T) {
 	widgets := tui.WidgetKeys()
 	slices.Sort(widgets)

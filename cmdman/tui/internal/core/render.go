@@ -124,7 +124,6 @@ func (b RowBg) Plain(s string) string {
 var (
 	StyleWidgetTitle = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
 	StyleWidgetHead  = lipgloss.NewStyle().Bold(true)
-	StyleWidgetBar   = lipgloss.NewStyle().Foreground(ColorOnAcc)
 	// The traffic-light marker palette (D21): green nothing wants you, yellow
 	// something is working, red something is blocked on you. The status words in
 	// command rows share it, so a row and its project's dot say the same thing

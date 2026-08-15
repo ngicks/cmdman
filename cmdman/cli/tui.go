@@ -35,9 +35,8 @@ func RunTUI(ctx context.Context, svc *cmdman.Service, initialTab tui.Tab, workDi
 // `component:` resolves to. workDir mirrors RunTUI's override; noQuit unbinds
 // the widget's quit keys, which is how a frame pane always runs it (V6).
 //
-// Every widget but the statusbar takes the alternate screen: the switcher owns a
-// whole pane and the launcher a whole popup window, and both want it clean —
-// while the statusbar is a single line and has no screen to swap.
+// Every widget takes the alternate screen: the switcher owns a whole pane and
+// the launcher a whole popup window, and both want it clean.
 func RunTUIWidget(
 	ctx context.Context,
 	svc *cmdman.Service,
@@ -48,7 +47,7 @@ func RunTUIWidget(
 	return tui.Run(ctx, tui.Options{
 		Backend:   newServiceBackend(svc, workDir),
 		Version:   libver.Version,
-		AltScreen: widget != tui.WidgetStatusbar,
+		AltScreen: true,
 		Widget:    widget,
 		NoQuit:    noQuit,
 	})

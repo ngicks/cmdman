@@ -111,7 +111,7 @@ cmdman/                    Core "usecase" package — the Service
   compose/                 docker-compose-like: spec, DAG (graph.go), plan, reconcile engine
   config/                  canonical config: Config, PartialConfig, Apply, Load, paths, XDG, env
   eventlog/                append-only JSONL event log; inotify(linux)/poll watcher
-  frame/                   frame defs: dock components (switcher, status bar, command) around
+  frame/                   frame defs: dock components (switcher, command) around
                            the screen edges; ordered carve of the remaining rectangle
   logdriver/               structured log Writer/Reader; k8sfile/ = podman k8s-file format
   model/                   domain types: CommandConfig, CommandState, EventType, RestartPolicy

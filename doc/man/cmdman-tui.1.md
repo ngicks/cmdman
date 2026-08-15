@@ -10,7 +10,7 @@
 cmdman tui
 cmdman tui --popup[=tmux]
 cmdman tui --workdir DIR
-cmdman tui widget switcher|statusbar|launcher [--workdir DIR] [--no-quit]
+cmdman tui widget switcher|launcher [--workdir DIR] [--no-quit]
 ```
 
 ## Description
@@ -49,11 +49,6 @@ it in any terminal or pane. Each widget is its own subcommand.
   is left alone); `q` quits. The switcher navigates only — starting, stopping
   and removing commands stay in the full dashboard. A project with no window of
   its own is reported on the hint line rather than brought up.
-- `statusbar`: a single line — the working directory itself on the left, marked
-  with its compose project's marker, the counts across every project next to it,
-  and the cmdman version at the right edge. A bar too narrow for all three keeps
-  where you are: the version goes first, the counts then go whole or not at all,
-  and the path is what shortens for them. Sized for a one-row pane; `q` quits.
 - `launcher`: quick-launch selector. The left pane lists target locations (the
   directories you have brought projects up in, most recent first, plus
   everything the filter reaches); the right pane lists the compose projects at

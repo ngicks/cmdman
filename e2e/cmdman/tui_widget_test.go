@@ -43,20 +43,6 @@ func TestTUIWidget_SwitcherRendersAndQuits(t *testing.T) {
 	w.quit(t)
 }
 
-func TestTUIWidget_StatusbarRendersAndQuits(t *testing.T) {
-	ctx := testContext(t)
-	env := newTestEnv(t)
-
-	wd := composeWorkdir(t)
-	writeComposeFile(t, wd, composeBasicYAML("widgetsb"))
-
-	w := startWidget(t, ctx, env, wd, "statusbar")
-	// The bar names the work directory itself (D44) and the counts.
-	w.waitFor(t, filepath.Base(wd), 5*time.Second)
-	w.waitFor(t, "running", 5*time.Second)
-	w.quit(t)
-}
-
 // TestTUIWidget_NoQuitSurvivesTheQuitKey is V6's flag end to end — the one a
 // frame pane always gets. A docked widget that exits on a keypress leaves a hole
 // in the fixture, so q must reach a widget that no longer has it bound, and the

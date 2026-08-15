@@ -25,7 +25,7 @@ func writeFrameDef(t *testing.T, e *testEnv, name string) string {
 	t.Helper()
 	return writeFrameDefFile(
 		t, e, name,
-		"frame:\n  - edge: bottom\n    size: 2\n    component: statusbar\n",
+		"frame:\n  - edge: bottom\n    size: 2\n    component: switcher\n",
 	)
 }
 

@@ -65,23 +65,13 @@ func TestWidgetOptionSelectsModel(t *testing.T) {
 		t.Errorf("WidgetLauncher should run the launcher model, got %T", got)
 	}
 
-	// The switcher and the statusbar are one model — switcher.Model and
-	// statusbar.Model name the same panel — so the type says only that a docked
-	// widget runs. What tells the two branches apart from out here is what the
-	// panel was configured to be: only the switcher has rows to click.
-	for _, tc := range []struct {
-		widget core.Widget
-		mouse  tea.MouseMode
-	}{
-		{core.WidgetSwitcher, tea.MouseModeCellMotion},
-		{core.WidgetStatusbar, tea.MouseModeNone},
-	} {
-		got := newProgramModel(ctx, core.Options{Backend: fb, Widget: tc.widget})
-		if _, ok := got.(switcher.Model); !ok {
-			t.Fatalf("Widget %d should run the docked widget model, got %T", tc.widget, got)
-		}
-		if mode := got.View().MouseMode; mode != tc.mouse {
-			t.Errorf("widget %d renders MouseMode %v, want %v", tc.widget, mode, tc.mouse)
-		}
+	got = newProgramModel(ctx, core.Options{Backend: fb, Widget: core.WidgetSwitcher})
+	if _, ok := got.(switcher.Model); !ok {
+		t.Fatalf("WidgetSwitcher should run the switcher model, got %T", got)
+	}
+	// Clicking a project is one of the switcher's two selection gestures (D24),
+	// so the docked column asks for the mouse.
+	if mode := got.View().MouseMode; mode != tea.MouseModeCellMotion {
+		t.Errorf("the switcher renders MouseMode %v, want %v", mode, tea.MouseModeCellMotion)
 	}
 }
