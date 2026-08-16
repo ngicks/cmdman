@@ -47,6 +47,10 @@ It simply starts a monitor process and the monitor damonizes itself and starts s
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
+		// Hidden so that completing co<TAB> resolves among compose / config
+		// without the built-in completion command competing; `cmdman
+		// completion <shell>` still works.
+		CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: true},
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			if err := loggerfactory.ReadEnv(logConfig, "cmdman", os.Environ()); err != nil {
 				fmt.Fprintln(os.Stderr, "warning:", err)
