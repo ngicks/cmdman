@@ -25,6 +25,20 @@ which replica a scaled command's dashboard pane shows, and cycle or apply one of
 the project's mux layouts. Every action wraps the command that already does it,
 so nothing here is reachable only from the widget.
 
+Keys:
+
+  j/k, up/down     move in the focused list
+  tab              switch focus: services or layouts
+  +/=, -           services: replica count up / down
+  l/right, h/left  services: show the next / previous replica
+  enter            layouts: apply the selected layout
+  c                layouts: cycle to the next layout
+  r                reload
+  q, ctrl+c        quit (absent under --no-quit)
+
+Showing the previous replica needs the shown one to be known; where a project's
+dashboard windows disagree about it, only l/right applies.
+
 The project is the one the panel detects: the window --mux-token names, else the
 window the panel runs in, else the project of the working directory. --workdir,
 --file and --project-name name one explicitly.

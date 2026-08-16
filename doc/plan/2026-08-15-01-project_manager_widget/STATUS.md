@@ -50,8 +50,13 @@ Current state: **plan finalized; implementation not started.**
       (user request 2026-08-16) — done 2026-08-16, D16 contract deviations
       recorded; e2e for ProjectManager/SetScale/CycleScale deferred to
       step 5+ (no CLI surface until the widget acts)
-- [ ] Step 5 — widget model/view per PLAN.md key table; D14 "error line …
-      must not imply the cycle didn't happen"
+- [x] Step 5 — widget model/view per PLAN.md key table; D14 "error line …
+      must not imply the cycle didn't happen" ("cycle reported: …",
+      pinned by `TestManagerCycleFailureWording`) — done 2026-08-16; D18
+      backward-cycle/refusal semantics; `ctrl+d` not bound (key table lists
+      only `q`/`ctrl+c`; panel widgets still bind it — parity open to user);
+      16 model unit tests; manual pty launch verified against a real
+      project
 - [ ] Step 6 — switcher summon: D1 "same mux auto-detect + flags path", D5,
       D7 `m`, D9 "row under cursor", D4 inline popup-unavailable message;
       D17 "explicit compose target … skips the ambient identity/cwd chain"

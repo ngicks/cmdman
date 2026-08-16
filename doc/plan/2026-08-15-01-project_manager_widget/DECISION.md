@@ -240,6 +240,23 @@ surfaces with no explicit target.
 **Rejected**: leaving ambient-first for the summon path (breaks D9);
 re-ranking the whole TUI's precedence (HANDOFF follow-up, unchanged).
 
+## D18 — backward cycle = `set = Shown-1`; unknown/uncyclable rows refuse locally [automatic] (2026-08-16)
+
+**Choice**: `CycleScale` has no "previous" primitive, so the widget's
+`h`/`left` sends `set = Shown-1` (1-based select), wrapping to `Replicas`
+from replica 1. When `Shown == 0` (D14's unknown) or the row is not
+`Cyclable`, the key refuses with a local note and no backend call. Unknown
+shown position renders `[?]`; a custom `shownBadge` is used because
+`core.ScaleBadge` is `CommandRow`-shaped with no unknown state.
+
+**Rationale**: an unknown position has no predecessor to name — guessing
+one moves the pane somewhere unasked; a never-cyclable row would only
+exercise D14's awkward error wording for nothing.
+
+**Rejected**: omitting backward cycling (the key table promises it);
+forward-only wrap-around emulation of "previous" (N-1 pane flips flash the
+dashboard).
+
 ## D14 — `Shown` reports agreement only; disagreement renders unknown [automatic] (2026-08-16)
 
 **Choice**: `compose.Service.MuxScaleState` reports a service's shown-replica
