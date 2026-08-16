@@ -1,6 +1,6 @@
 # Status — tui_live_runtime_state
 
-State: **plan finalized 2026-08-16 — implementation not started.**
+State: **implementing — step 1 done, step 2 in progress.**
 
 ## Gate
 
@@ -22,8 +22,11 @@ State: **plan finalized 2026-08-16 — implementation not started.**
 
 ## Checklist (mirrors PLAN.md steps)
 
-- [ ] 1. `Service.WatchRuntimeState` client + monitor integration test
-      (D32: "subscribe → initial snapshot + push on change")
+- [x] 1. `Service.WatchRuntimeState` client + monitor integration test
+      (D32: "subscribe → initial snapshot + push on change") —
+      `cmdman/cmdman_runtime_state_watch.go` + `_test.go`; L6
+      [automatic] records the cancellation-is-clean call; HANDOFF.md
+      records a pre-existing monitor race found en route
 - [ ] 2. `Backend.WatchRuntimeState` contract + cli impl + coretest
       fake (D32: "Consumers: the TUI/switcher ... subscribe to
       streams")

@@ -7,6 +7,18 @@ in PLAN.md).
 
 ## Resolved
 
+- **L6 — cancellation is a clean stream end [automatic]** (agent,
+  2026-08-16, step 1). A `WatchRuntimeState` receive error observed
+  while the subscription's own context is cancelled (`Close()`, or the
+  caller's ctx ending) closes the Records channel with no `Err` record,
+  matching the sibling logs pump (`cmdman/cmdman_logs.go:331`); the
+  plan's contract named only EOF as clean, and classifying
+  self-inflicted cancellation as an error would hand every `Close` a
+  spurious record. Consequence: `codes.Unavailable` from a monitor
+  dying mid-stream still lands on the `Err` path; the watcher (step 3)
+  drops the stream either way. Rejected: treating every non-EOF error
+  uniformly as an error record.
+
 - **L1 — launcher is out of scope** (user, 2026-08-16; supersedes the
   same day's earlier "live markers only" answer). The user's operative
   words: "We don't need live update of launch target since it is only
