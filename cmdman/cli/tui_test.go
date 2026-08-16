@@ -57,6 +57,7 @@ func TestResolvePopupDriverInfersZellijReportsNotImplemented(t *testing.T) {
 
 func TestChildCommandForwardsDirs(t *testing.T) {
 	cfg := PopupConfig{
+		Child:      tuiChildArgs("", ""),
 		Executable: "/usr/bin/cmdman",
 		DataDir:    "/data",
 		RuntimeDir: "/run",
@@ -91,18 +92,69 @@ func TestChildCommandForwardsConfig(t *testing.T) {
 	}
 }
 
-func TestChildCommandForwardsTab(t *testing.T) {
-	// No Tab set: the popup child argv must not carry a --tab flag.
-	plain := PopupConfig{Executable: "/usr/bin/cmdman"}.childCommand("/tmp/ipc.sock")
-	if strings.Contains(strings.Join(plain, " "), "--tab") {
-		t.Errorf("childCommand without Tab should not forward --tab, got %v", plain)
+// TestChildCommandIPCOnlyForAReportingChild pins the seam's one asymmetry: the
+// full-TUI child reports its ending over the IPC socket, and a widget child —
+// which owns the popup for its whole life — is handed no --ipc it does not
+// understand.
+func TestChildCommandIPCOnlyForAReportingChild(t *testing.T) {
+	reporting := PopupConfig{
+		Child:      tuiChildArgs("", ""),
+		Executable: "/usr/bin/cmdman",
+	}.childCommand("/tmp/ipc.sock")
+	if !strings.Contains(strings.Join(reporting, " "), "--ipc /tmp/ipc.sock") {
+		t.Errorf("the reporting child should be handed the socket, got %v", reporting)
 	}
 
-	// Tab set: it is forwarded verbatim.
-	withTab := PopupConfig{Executable: "/usr/bin/cmdman", Tab: "layout"}.
-		childCommand("/tmp/ipc.sock")
-	if !strings.Contains(strings.Join(withTab, " "), "--tab layout") {
-		t.Errorf("childCommand should forward --tab layout, got %v", withTab)
+	widget := PopupConfig{
+		Child:      projectManagerChildArgs("", "api", "/work/cmd-compose.yaml"),
+		Executable: "/usr/bin/cmdman",
+	}.childCommand("")
+	if strings.Contains(strings.Join(widget, " "), "--ipc") {
+		t.Errorf("a widget child reports nothing and takes no --ipc, got %v", widget)
+	}
+}
+
+func TestTUIChildArgsForwardsTabAndWorkDir(t *testing.T) {
+	// Neither set: the popup child argv carries neither flag, so no empty value
+	// overrides a lower config layer.
+	plain := tuiChildArgs("", "")
+	if !slices.Equal(plain.Args, []string{"tui", "__child"}) {
+		t.Errorf("bare child argv = %v, want tui __child", plain.Args)
+	}
+	if !plain.ReportsStatus {
+		t.Error("the full-TUI child reports its ending over IPC")
+	}
+
+	full := tuiChildArgs("layout", "/work")
+	want := []string{"tui", "__child", "--tab", "layout", "--workdir", "/work"}
+	if !slices.Equal(full.Args, want) {
+		t.Errorf("child argv = %v, want %v", full.Args, want)
+	}
+}
+
+// TestProjectManagerChildArgsNamesTheProject is D9/D17 on the argv: the summon
+// hands the child the project it picked, so nothing about the window the popup
+// lands in can redirect it.
+func TestProjectManagerChildArgsNamesTheProject(t *testing.T) {
+	full := projectManagerChildArgs("/work", "api", "/work/cmd-compose.yaml")
+	want := []string{
+		"tui", "widget", "project-manager",
+		"--workdir", "/work",
+		"--file", "/work/cmd-compose.yaml",
+		"--project-name", "api",
+	}
+	if !slices.Equal(full.Args, want) {
+		t.Errorf("summon argv = %v, want %v", full.Args, want)
+	}
+	if full.ReportsStatus {
+		t.Error("a widget child has no IPC protocol to report over")
+	}
+
+	// A never-run named def has no file to name; the name alone travels.
+	named := projectManagerChildArgs("", "api", "")
+	if !slices.Equal(named.Args, []string{"tui", "widget", "project-manager",
+		"--project-name", "api"}) {
+		t.Errorf("summon argv without a file = %v", named.Args)
 	}
 }
 

@@ -212,7 +212,10 @@ type Backend interface {
 	// one project (see ProjectManagerInfo). The project is resolved the way
 	// ListLayouts resolves it — the project whose mux window the caller is in,
 	// then the cwd-active mux project, then projectName/composeFile (which may
-	// be empty when the caller has no selection of its own).
+	// be empty when the caller has no selection of its own) — unless the
+	// invocation named a compose target explicitly, which outranks all of it
+	// (D17): a widget summoned for one project must not resolve the project of
+	// the window its popup happens to open over.
 	ProjectManager(ctx context.Context, projectName, composeFile string) (ProjectManagerInfo, error)
 	// SetScale sets the replica count of one service, wrapping the compose
 	// scale path (ephemeral override + Up scoped to that service).
@@ -222,6 +225,14 @@ type Backend interface {
 	// reaches every dashboard window of the project, which is what keeps their
 	// positions in agreement (see ServiceScaleInfo.Shown).
 	CycleScale(ctx context.Context, projectName, composeFile, command string, set int) error
+	// SummonProjectManager opens the project-manager widget in a multiplexer
+	// floating pane targeting the given project — the switcher's m (D7/D9). The
+	// project is named explicitly rather than detected, so the panel manages the
+	// row the cursor was on and not the window the popup opened over. Where no
+	// floating pane is available (a plain terminal, or a multiplexer the popup
+	// seam does not support yet) the reason comes back as an error, which the
+	// switcher shows inline (D4).
+	SummonProjectManager(ctx context.Context, projectName, composeFile string) error
 
 	// SwitchToProject puts the client in front of the target's window — the
 	// docked switcher's enter/click (D6). A project with no window of its own

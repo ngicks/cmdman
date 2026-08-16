@@ -257,6 +257,31 @@ exercise D14's awkward error wording for nothing.
 forward-only wrap-around emulation of "previous" (N-1 pane flips flash the
 dashboard).
 
+## D19 — popup seam shape: `PopupChild` argv + `Silent` summon [automatic] (2026-08-16)
+
+**Choice**: the generalized popup seam takes
+`PopupChild{Args []string; ReportsStatus bool}` on `PopupConfig` (the old
+`Tab`/`WorkDir` fields are gone — each caller builds its own child flags;
+the full-TUI path builds them via `tuiChildArgs`). `SummonProjectManager`
+runs the popup `Silent`: stdio detached, stderr folded into the error —
+a summon fires while bubbletea holds the tty raw, so a second reader would
+steal keystrokes, and the captured stderr is what makes the D4 inline
+message say something real. The IPC endpoint is created only for a
+`ReportsStatus` child. The summon argv's `--workdir` carries the TUI's own
+override, not the row's workdir — the explicit `--file`/`--project-name`
+target (D9/D17) makes the row unambiguous. In the switcher, the cursor is
+group-granular, so head line and command row summon the same project
+(`enter`'s target); an unnamed group refuses locally
+(`no project to manage here`). No guard against repeat `m` while a popup
+is already up — `panel.Model` has no pending-action mechanism and adding
+one is wider than this step. A zellij summon surfaces the existing
+flag-shaped `--popup=zellij is not implemented yet` message unchanged.
+
+**Rejected**: keeping `Tab`/`WorkDir` on `PopupConfig` (child-specific
+knowledge in the shared seam); wiring `os.Std*` into the summon popup
+(keystroke theft, stderr over the rendered view); passing the row's workdir
+as `--workdir` (would repurpose the flag's cwd-override meaning).
+
 ## D14 — `Shown` reports agreement only; disagreement renders unknown [automatic] (2026-08-16)
 
 **Choice**: `compose.Service.MuxScaleState` reports a service's shown-replica

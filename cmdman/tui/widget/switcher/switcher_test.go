@@ -911,8 +911,14 @@ func seedWidget(t *testing.T, width, height int) Model {
 		Dir:  "/work/local-dev",
 		Cmds: seedInfos(),
 		Projs: []core.ProjectInfo{
-			{Name: "local-dev", Workdir: "/work/local-dev", Identity: "id-local-dev"},
-			{Name: "api-stack", Workdir: "/work/api", Identity: "id-api-stack"},
+			{
+				Name: "local-dev", Workdir: "/work/local-dev",
+				Path: "/work/local-dev/cmd-compose.yaml", Identity: "id-local-dev",
+			},
+			{
+				Name: "api-stack", Workdir: "/work/api",
+				Path: "/work/api/cmd-compose.yaml", Identity: "id-api-stack",
+			},
 		},
 	}
 	m := New(t.Context(), core.Options{Backend: fb})
@@ -1119,6 +1125,80 @@ func TestSwitcherCollapse(t *testing.T) {
 	m = settle(t, m, cmd)
 	if !strings.Contains(m.status, "not inside a multiplexer") {
 		t.Errorf("a failed hide should be reported, status = %q", m.status)
+	}
+}
+
+// TestSwitcherSummonsProjectManager covers D7/D9's `m`: the panel opens over
+// the project the cursor is on, named outright — file and all — so nothing
+// about the window the popup lands in can redirect it (D17). Where there is no
+// floating pane to open, the reason takes the hint line (D4).
+func TestSwitcherSummonsProjectManager(t *testing.T) {
+	m := seedWidget(t, 32, 12)
+	fb := m.backend.(*coretest.FakeBackend)
+	if hint := m.switcherFooter(); !strings.Contains(hint, "m manage") {
+		t.Errorf("the switcher should hint at the summon: %q", hint)
+	}
+
+	m, cmd := updWidget(t, m, coretest.Kr("m"))
+	m = settle(t, m, cmd)
+	want := []coretest.SummonCall{
+		{Project: "local-dev", Path: "/work/local-dev/cmd-compose.yaml"},
+	}
+	if !slices.Equal(fb.Summoned, want) {
+		t.Fatalf("m summoned %v, want %v", fb.Summoned, want)
+	}
+	if m.status != "" {
+		t.Errorf("a popup that ran has nothing to say: %q", m.status)
+	}
+
+	// The cursor addresses a whole group, head line and command rows alike, so
+	// moving it moves what m manages.
+	m, _ = updWidget(t, m, coretest.Kr("j"))
+	m, cmd = updWidget(t, m, coretest.Kr("m"))
+	m = settle(t, m, cmd)
+	want = append(want, coretest.SummonCall{
+		Project: "api-stack", Path: "/work/api/cmd-compose.yaml",
+	})
+	if !slices.Equal(fb.Summoned, want) {
+		t.Fatalf("m after j summoned %v, want %v", fb.Summoned, want)
+	}
+
+	fb.SummonErr = errors.New("popup driver \"zellij\" is not implemented yet")
+	m, cmd = updWidget(t, m, coretest.Kr("m"))
+	m = settle(t, m, cmd)
+	if !strings.Contains(m.status, "not implemented") ||
+		!strings.Contains(m.status, "api-stack") {
+		t.Errorf("an unavailable popup should be reported inline, status = %q", m.status)
+	}
+	// It lands where the hints were: the column is narrow, so what fits of it is
+	// the head of the line rather than the tail.
+	if !strings.Contains(m.renderSwitcher(m.size()), "manage api-stack") {
+		t.Errorf("the reason belongs where the hint line is:\n%q",
+			m.renderSwitcher(m.size()))
+	}
+}
+
+// TestSwitcherSummonNeedsAName pins the one row m cannot act on: a group the
+// project listing never claimed has only its commands' project name, and
+// without even that there is nothing to hand the child's command line.
+func TestSwitcherSummonNeedsAName(t *testing.T) {
+	m := seedWidget(t, 32, 12)
+	fb := m.backend.(*coretest.FakeBackend)
+	m, _ = updWidget(t, m, core.ProjectsLoadedMsg{Infos: nil})
+	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: []core.CommandInfo{
+		{ID: "1", Name: "solo", Workdir: "/work/solo", State: model.EventTypeRunning},
+	}})
+	m.groups = []core.ProjectGroup{{Workdir: "/work/solo"}}
+
+	m, cmd := updWidget(t, m, coretest.Kr("m"))
+	if cmd != nil {
+		t.Fatal("an unnamed group should dispatch nothing")
+	}
+	if !strings.Contains(m.status, "no project to manage") {
+		t.Errorf("the switcher should say why, status = %q", m.status)
+	}
+	if len(fb.Summoned) != 0 {
+		t.Errorf("backend was asked to summon %v", fb.Summoned)
 	}
 }
 

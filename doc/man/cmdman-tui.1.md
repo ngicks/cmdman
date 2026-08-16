@@ -52,11 +52,14 @@ it in any terminal or pane. Each widget is its own subcommand.
   to the selected project's window and mark that project's bells read — a
   project with no window up yet gets one opened at its directory and lands in
   that. `z` takes the frame around the current window down (a window with no
-  frame up is left alone); `q` quits. Landing in a window is all a selection
-  does: it never brings the project up, and starting, stopping and removing
-  commands stay in the full dashboard. A project with no directory or name to
-  address a window by — one that has never run anywhere in particular — is
-  reported on the hint line instead.
+  frame up is left alone); `m` opens the project-manager panel over the selected
+  project in a floating pane, and where there is no floating pane to open — a
+  plain terminal, or a multiplexer with no popup support — says so on the hint
+  line; `q` quits. Landing in a window is all a selection does: it never brings
+  the project up, and starting, stopping and removing commands stay in the full
+  dashboard. A project with no directory or name to address a window by — one
+  that has never run anywhere in particular — is reported on the hint line
+  instead.
 - `launcher`: quick-launch selector. The left pane lists target locations (the
   directories you have brought projects up in, most recent first, plus
   everything the filter reaches); the right pane lists the compose projects at

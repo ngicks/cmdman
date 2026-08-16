@@ -66,6 +66,8 @@ type FakeBackend struct {
 	SetScaleErr   error                   // error returned by SetScale
 	ScalesCycled  []CycleScaleCall        // calls taken by CycleScale
 	CycleScaleErr error                   // error returned by CycleScale
+	Summoned      []SummonCall            // calls taken by SummonProjectManager
+	SummonErr     error                   // error returned by SummonProjectManager
 
 	Definition     string   // text returned by ProjectDefinition
 	DefinitionErr  error    // error returned by ProjectDefinition
@@ -117,6 +119,14 @@ type CycleScaleCall struct {
 	Project string
 	Command string
 	Set     int
+}
+
+// SummonCall is one recorded [FakeBackend.SummonProjectManager] call: the
+// project the summon named, compose file and all, since naming it is the whole
+// of what the switcher's m does (D9).
+type SummonCall struct {
+	Project string
+	Path    string
 }
 
 var _ core.Backend = (*FakeBackend)(nil)
@@ -267,6 +277,14 @@ func (f *FakeBackend) CycleScale(
 		Set:     set,
 	})
 	return f.CycleScaleErr
+}
+
+func (f *FakeBackend) SummonProjectManager(
+	_ context.Context,
+	projectName, composeFile string,
+) error {
+	f.Summoned = append(f.Summoned, SummonCall{Project: projectName, Path: composeFile})
+	return f.SummonErr
 }
 
 func (f *FakeBackend) ProjectDefinition(_ context.Context, projectName, _ string) (string, error) {

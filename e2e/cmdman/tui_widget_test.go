@@ -295,6 +295,164 @@ func TestTUIWidget_SwitcherMarksWindowProject(t *testing.T) {
 	w.quit(t)
 }
 
+// TestTUIWidget_SwitcherSummonsProjectManager is the summon end to end (D7/D9),
+// and D17 with it. The switcher runs in a background window of the session whose
+// client is displaying project A's dashboard, so every ambient probe inside it
+// answers "A"; the cursor is moved to project B, and the panel `m` opens must be
+// B's. tmux draws a popup on the attached client, so the client's own terminal
+// is where the panel is read — and a client is required at all, since
+// display-popup with none does not run (NOTES Q1).
+func TestTUIWidget_SwitcherSummonsProjectManager(t *testing.T) {
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	tmuxTmpdir := t.TempDir()
+	t.Cleanup(func() { killDefaultTmuxServer(t, tmuxTmpdir) })
+
+	// The service names are what tell the two panels apart on screen: B's names
+	// nothing the client is already displaying, so reading it there is proof the
+	// popup is B's and not the enclosing window's.
+	const (
+		projectA, serviceA = "pmsuma", "alphasvc"
+		projectB, serviceB = "pmsumb", "bravosvc"
+	)
+	wdA := composeWorkdir(t)
+	pathA := writeComposeFile(t, wdA, summonMuxYAML(projectA, serviceA))
+	t.Cleanup(func() { cleanupProject(ctx, env, wdA, projectA) })
+	wdB := composeWorkdir(t)
+	pathB := writeComposeFile(t, wdB, summonMuxYAML(projectB, serviceB))
+	t.Cleanup(func() { cleanupProject(ctx, env, wdB, projectB) })
+
+	// A gets the dashboard the switcher will sit inside; B is only created, so it
+	// is listed with its compose file and has no window of its own anywhere —
+	// nothing about B is reachable through the multiplexer.
+	if _, stderr, err := env.muxExecWithTmpdir(
+		ctx, tmuxTmpdir, "compose", "--workdir", wdA, "-f", pathA, "up", "--mux",
+	); err != nil {
+		t.Fatalf("compose up --mux failed: %v\nstderr:\n%s", err, stderr)
+	}
+	if _, stderr, err := env.muxExecWithTmpdir(
+		ctx, tmuxTmpdir, "compose", "--workdir", wdB, "-f", pathB, "create",
+	); err != nil {
+		t.Fatalf("compose create failed: %v\nstderr:\n%s", err, stderr)
+	}
+	windowA := "cmdman-" + projectA
+	waitForTmuxWindow(t, tmuxTmpdir, windowA, 30*time.Second)
+
+	// What the client displays is what the ambient probe answers with, so it is
+	// put on A's dashboard before anything reads it.
+	sessionA := tmuxSessionOfWindow(t, tmuxTmpdir, windowA)
+	tmuxRunWithTmpdir(t, tmuxTmpdir, "select-window", "-t",
+		tmuxWindowIDTmpdir(t, tmuxTmpdir, windowA))
+	client := attachTmuxClient(t, ctx, tmuxTmpdir, sessionA)
+
+	// The switcher goes in a window of its own, left in the background so the
+	// client keeps looking at A: a switcher that believes it sits in project A,
+	// standing in a directory that is neither project's.
+	elsewhere := t.TempDir()
+	// -a puts it after the window the session is on rather than at that window's
+	// own index, which tmux refuses as "index in use".
+	pane := tmuxRunWithTmpdir(t, tmuxTmpdir,
+		"new-window", "-d", "-a", "-t", "="+sessionA+":", "-P", "-F", "#{pane_id}",
+		"-e", cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
+		"-e", cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
+		"-e", cmdman.ENV_CMDMAN_CONF+"="+env.confPath,
+		cmdmanBin+" tui widget switcher --workdir "+elsewhere,
+	)
+	waitForPaneText(t, tmuxTmpdir, pane, "active", 20*time.Second)
+	waitForPaneText(t, tmuxTmpdir, pane, filepath.Base(wdB), 10*time.Second)
+
+	if snap := client.snapshot(); strings.Contains(snap, serviceB) {
+		t.Fatalf("%s was on the client screen before the summon, so its presence "+
+			"proves nothing; got:\n%q", serviceB, snap)
+	}
+
+	// A is the active project, so it heads the list — and it is also the earlier
+	// name, so one row down is B either way.
+	tmuxRunWithTmpdir(t, tmuxTmpdir, "send-keys", "-t", pane, "j")
+	tmuxRunWithTmpdir(t, tmuxTmpdir, "send-keys", "-t", pane, "m")
+
+	deadline := time.Now().Add(20 * time.Second)
+	for !strings.Contains(client.snapshot(), serviceB) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the summoned panel never showed %q on the attached client.\n"+
+				"client:\n%q\nswitcher pane:\n%s",
+				serviceB, client.snapshot(), capturePane(t, tmuxTmpdir, pane))
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// The popup holds the keyboard while it is up, so the quit key reaches it
+	// through the client rather than through the switcher's pane.
+	client.send(t, "q")
+}
+
+// summonMuxYAML is a one-service project whose service name is unique to it, so
+// that name on a screen says which project's panel is being read.
+func summonMuxYAML(project, service string) string {
+	return fmt.Sprintf(`name: %s
+commands:
+  %s:
+    args: [sleep, "300"]
+mux:
+  layouts:
+    - name: solo
+      root:
+        command: %s
+`, project, service, service)
+}
+
+// tmuxSessionOfWindow names the session the window lives in on the
+// default-socket server under tmuxTmpdir.
+func tmuxSessionOfWindow(t *testing.T, tmuxTmpdir, window string) string {
+	t.Helper()
+	listing := tmuxRunWithTmpdir(t, tmuxTmpdir,
+		"list-windows", "-a", "-F", "#{window_name}\t#{session_name}")
+	for line := range strings.SplitSeq(listing, "\n") {
+		if name, session, ok := strings.Cut(line, "\t"); ok && name == window {
+			return session
+		}
+	}
+	t.Fatalf("window %q not found; listing:\n%s", window, listing)
+	return ""
+}
+
+// attachTmuxClient attaches a real client to the session under a pty and
+// captures what tmux draws on it.
+func attachTmuxClient(
+	t *testing.T,
+	ctx context.Context,
+	tmuxTmpdir, session string,
+) *widgetSession {
+	t.Helper()
+	cmd := exec.CommandContext(ctx, "tmux", "attach-session", "-t", "="+session)
+	cmd.Env = append(tmuxTmpdirEnv(tmuxTmpdir), "TERM=xterm-256color")
+	c := ptySession(t, cmd, 40, 140)
+	waitForSessionAttached(t, tmuxTmpdir, session, 10*time.Second)
+	return c
+}
+
+// waitForPaneText polls a pane until it renders what — waitForPane's job for a
+// pane addressed by id, since the session this one lives in is the project's
+// own rather than the landing tests' fixed "work".
+func waitForPaneText(t *testing.T, tmuxTmpdir, pane, what string, deadline time.Duration) {
+	t.Helper()
+	end := time.Now().Add(deadline)
+	var last string
+	for time.Now().Before(end) {
+		cmd := exec.Command("tmux", "capture-pane", "-p", "-t", pane)
+		cmd.Env = tmuxTmpdirEnv(tmuxTmpdir)
+		out, err := cmd.CombinedOutput()
+		last = string(out)
+		if err == nil && strings.Contains(last, what) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("pane %s never rendered %q; last capture:\n%s", pane, what, last)
+}
+
 // tmuxEnvValue builds the $TMUX value tmux exports into the panes of windowID's
 // session: "<socket path>,<server pid>,<session number>".
 func tmuxEnvValue(t *testing.T, tmuxTmpdir, windowID string) string {
@@ -472,9 +630,18 @@ func startWidgetEnv(
 		cmdman.ENV_CMDMAN_CONF+"="+env.confPath,
 		"TERM=xterm-256color")
 
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 20, Cols: 80})
+	return ptySession(t, cmd, 20, 80)
+}
+
+// ptySession starts cmd under a pty of the given size and captures everything
+// written to it. Both a widget under test and an attached tmux client are read
+// this way: a popup is drawn on the client's own terminal, so that terminal is
+// the only place its content can be read from.
+func ptySession(t *testing.T, cmd *exec.Cmd, rows, cols uint16) *widgetSession {
+	t.Helper()
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
 	if err != nil {
-		t.Fatalf("start %s widget pty: %v", name, err)
+		t.Fatalf("start %s under a pty: %v", cmd.Path, err)
 	}
 	t.Cleanup(func() { ptmx.Close() })
 

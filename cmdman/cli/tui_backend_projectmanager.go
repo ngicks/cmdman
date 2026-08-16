@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"slices"
 
 	"github.com/ngicks/cmdman/cmdman/compose"
@@ -9,16 +11,13 @@ import (
 	"github.com/ngicks/cmdman/cmdman/tui"
 )
 
-// ProjectManager loads the whole project-manager view for one project. The
-// project is resolved exactly as the Layout tab resolves it (identity first,
-// then the cwd-active mux project, then the caller's selection), so a widget
-// summoned with only a --mux-token still names the project it landed on — and
-// a project without a mux: section is out of reach here for the same reason it
-// is on the Layout tab: two of the three actions are mux actions.
+// ProjectManager loads the whole project-manager view for one project. A
+// project without a mux: section is out of reach here for the same reason it is
+// on the Layout tab: two of the three actions are mux actions.
 func (b *serviceBackend) ProjectManager(
 	ctx context.Context, projectName, composeFile string,
 ) (tui.ProjectManagerInfo, error) {
-	selection, err := b.resolveLayoutSelection(ctx, projectName, composeFile)
+	selection, err := b.resolveManagerSelection(ctx, projectName, composeFile)
 	if err != nil {
 		return tui.ProjectManagerInfo{}, err
 	}
@@ -51,6 +50,26 @@ func (b *serviceBackend) ProjectManager(
 		Services: serviceScaleInfos(selection.Spec, counts, shown),
 		Layouts:  layoutsOf(ctx, selection),
 	}, nil
+}
+
+// resolveManagerSelection resolves the project the panel manages: the compose
+// target the invocation named (--file/--project-name), and only failing that
+// the Layout tab's chain — identity first, then the cwd-active mux project,
+// then the caller's own selection.
+//
+// The explicit target has to outrank detection (D17). A popup always opens
+// inside some window, so the ambient identity probe always answers there, and
+// a panel summoned for the row under the switcher's cursor would manage the
+// project of the window it opened over instead. An explicit target that does
+// not resolve is an error rather than a reason to detect something else: the
+// caller named a project, so another one is not an improvement.
+func (b *serviceBackend) resolveManagerSelection(
+	ctx context.Context, projectName, composeFile string,
+) (compose.ProjectSelection, error) {
+	if b.file != "" || b.projectName != "" {
+		return compose.ResolveMuxSelectionByName(b.projectName, b.file)
+	}
+	return b.resolveLayoutSelection(ctx, projectName, composeFile)
 }
 
 // serviceScaleInfos builds the service rows: every compose command in
@@ -113,4 +132,58 @@ func (b *serviceBackend) CycleScale(
 		Position:  set,
 	})
 	return err
+}
+
+// SummonProjectManager opens the project-manager widget over the given project
+// in a multiplexer floating pane — the switcher's m (D7). It goes through the
+// one popup seam `cmdman tui --popup` uses (D1/D5), so driver autodetection
+// lives in a single place and a driver that grows a popup implementation lights
+// this up with it.
+//
+// The project travels as --file/--project-name rather than as a token: the
+// panel manages the row the cursor was on, not the window the popup opens over
+// (D9/D17). The store and config targets are this process's own, because the
+// child is started by the multiplexer server and inherits that server's
+// environment rather than the TUI's.
+//
+// The popup is the whole UI for as long as it is up, so this returns when it
+// closes; what the widget itself did is reported inside it, and only "there was
+// no popup to open" comes back here (D4).
+func (b *serviceBackend) SummonProjectManager(
+	ctx context.Context, projectName, composeFile string,
+) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("locate executable: %w", err)
+	}
+	cfg := b.svc.Config()
+	return RunTUIPopup(ctx, PopupConfig{
+		Child:      projectManagerChildArgs(b.workDir, projectName, composeFile),
+		Cwd:        b.cwd,
+		Executable: exe,
+		DataDir:    cfg.DataDir,
+		RuntimeDir: cfg.RuntimeDir,
+		ConfPath:   cfg.ConfigPath,
+		// The TUI that summoned this owns the terminal underneath the popup.
+		Silent: true,
+	})
+}
+
+// projectManagerChildArgs is the summoned widget's argv. --workdir carries the
+// summoning TUI's own override so the child stands where it does; the compose
+// pair is what actually names the project, and either half may be empty — a
+// never-run named def has no file path, and a group the project listing never
+// claimed has only its name.
+func projectManagerChildArgs(workDir, projectName, composeFile string) PopupChild {
+	args := []string{"tui", "widget", "project-manager"}
+	if workDir != "" {
+		args = append(args, "--workdir", workDir)
+	}
+	if composeFile != "" {
+		args = append(args, "--file", composeFile)
+	}
+	if projectName != "" {
+		args = append(args, "--project-name", projectName)
+	}
+	return PopupChild{Args: args}
 }

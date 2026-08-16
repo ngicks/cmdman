@@ -38,6 +38,13 @@ type FrameHiddenMsg struct {
 	Err error
 }
 
+// ProjectManagerSummonedMsg reports a summon: the popup ran to its end, or came
+// back with the reason there was no popup to run it in (D4).
+type ProjectManagerSummonedMsg struct {
+	Name string
+	Err  error
+}
+
 // ListCommandsCmd and ListProjectsCmd take their backend rather than a model so
 // the single-widget model issues the very same loads as the full model.
 func ListCommandsCmd(ctx context.Context, backend Backend) tea.Cmd {
@@ -81,5 +88,21 @@ func SwitchProjectCmd(
 func HideFrameCmd(ctx context.Context, backend Backend) tea.Cmd {
 	return func() tea.Msg {
 		return FrameHiddenMsg{Err: backend.HideFrame(ctx)}
+	}
+}
+
+// SummonProjectManagerCmd opens the project-manager popup for one project. The
+// popup owns the screen for as long as it is up, so the call blocks until it
+// closes — which is what makes the reply the cue to re-read what it changed.
+func SummonProjectManagerCmd(
+	ctx context.Context,
+	backend Backend,
+	projectName, composeFile, label string,
+) tea.Cmd {
+	return func() tea.Msg {
+		return ProjectManagerSummonedMsg{
+			Name: label,
+			Err:  backend.SummonProjectManager(ctx, projectName, composeFile),
+		}
 	}
 }

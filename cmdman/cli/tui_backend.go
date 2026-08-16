@@ -24,26 +24,47 @@ type serviceBackend struct {
 	// unset). It is the highest-priority active-project probe (D10); cmdman
 	// never parses it, the driver resolves it.
 	muxToken string
+	// file and projectName are the --file/--project-name the invocation named,
+	// "" when it named none. Either one set is an explicit compose target, which
+	// outranks every detection probe (D17): what the caller asked for is not a
+	// guess to be improved on.
+	file        string
+	projectName string
 }
 
-// newServiceBackend builds a tui.Backend over the given cmdman service. workDir
-// is the --workdir override: when set it replaces the process CWD as the
-// effective work directory for cwd-active grouping and project discovery.
-// muxToken is the --mux-token the invocation carried, "" when it carried none.
-func newServiceBackend(svc *cmdman.Service, workDir, muxToken string) tui.Backend {
+// backendTarget is what a `cmdman tui …` invocation says about the project its
+// TUI works on: the work directory to discover one in, the mux token to resolve
+// one from, and the compose file/name pair that names one outright.
+type backendTarget struct {
+	// WorkDir is the --workdir override: when set it replaces the process CWD as
+	// the effective work directory for cwd-active grouping and project
+	// discovery.
+	WorkDir string
+	// MuxToken is the --mux-token the invocation carried.
+	MuxToken string
+	// File and ProjectName are the --file/--project-name pair (compose's -f/-p).
+	File        string
+	ProjectName string
+}
+
+// newServiceBackend builds a tui.Backend over the given cmdman service, working
+// on the project the invocation named.
+func newServiceBackend(svc *cmdman.Service, target backendTarget) tui.Backend {
 	cwd := currentDir()
-	if workDir != "" {
-		cwd = normalizePath(workDir)
+	if target.WorkDir != "" {
+		cwd = normalizePath(target.WorkDir)
 	}
 	return &serviceBackend{
 		svc: svc,
 		// The frame seam travels with the compose service because the TUI's
 		// layout verbs go through MuxUp, whose default_frame auto-show may hold a
 		// managed entry.
-		compose:  compose.NewService(svc, compose.WithFrameSvc(NewFrameSvc(svc))),
-		cwd:      cwd,
-		workDir:  workDir,
-		muxToken: muxToken,
+		compose:     compose.NewService(svc, compose.WithFrameSvc(NewFrameSvc(svc))),
+		cwd:         cwd,
+		workDir:     target.WorkDir,
+		muxToken:    target.MuxToken,
+		file:        target.File,
+		projectName: target.ProjectName,
 	}
 }
 

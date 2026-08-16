@@ -368,6 +368,44 @@ func TestTUI_TopBarShowsCwd(t *testing.T) {
 	}
 }
 
+// TestTUI_PopupRunsTheFullTUI guards the other user of the popup seam: `cmdman
+// tui --popup` still opens the multi-tab TUI in a floating pane, over the same
+// launcher that now also carries the switcher's summon.
+func TestTUI_PopupRunsTheFullTUI(t *testing.T) {
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	tmuxTmpdir := t.TempDir()
+	t.Cleanup(func() { killDefaultTmuxServer(t, tmuxTmpdir) })
+
+	wd := composeWorkdir(t)
+	writeComposeFile(t, wd, composeBasicYAML("popupfull"))
+
+	tmuxRunWithTmpdir(t, tmuxTmpdir, "new-session", "-d", "-s", "popup", "-n", "shell")
+	client := attachTmuxClient(t, ctx, tmuxTmpdir, "popup")
+
+	pane := tmuxRunWithTmpdir(t, tmuxTmpdir,
+		"new-window", "-d", "-a", "-t", "=popup:", "-P", "-F", "#{pane_id}",
+		"-e", cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
+		"-e", cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
+		"-e", cmdman.ENV_CMDMAN_CONF+"="+env.confPath,
+		cmdmanBin+" tui --popup --workdir "+wd,
+	)
+
+	// The tab bar is the full TUI and nothing else: a widget popup has no tabs.
+	deadline := time.Now().Add(20 * time.Second)
+	for !strings.Contains(client.snapshot(), "Layout") {
+		if time.Now().After(deadline) {
+			t.Fatalf("the popup never rendered the full TUI.\nclient:\n%q\nlauncher pane:\n%s",
+				client.snapshot(), capturePane(t, tmuxTmpdir, pane))
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	client.send(t, "q")
+}
+
 // The popup geometry flags only apply with --popup; using one without it is
 // rejected in RunE before any tmux invocation, so this needs no tmux/terminal.
 func TestTUI_PopupGeometryRequiresPopup(t *testing.T) {

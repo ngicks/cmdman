@@ -42,6 +42,12 @@ type ProjectGroup struct {
 	// for a group the project listing never claimed, which is a group with no
 	// window to switch to.
 	Identity string
+	// Path is the project's compose file, carried from ProjectInfo so a summon
+	// can name the row's project explicitly (D9) instead of leaving the summoned
+	// widget to detect one of its own. It is empty for a group the project
+	// listing never claimed, and for a named def whose file was never resolved;
+	// the project name alone then has to name it.
+	Path     string
 	Active   bool
 	Commands []CommandRow
 }

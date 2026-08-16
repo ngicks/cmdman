@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,7 +23,7 @@ import (
 // discover the cwd-active compose project ("" keeps the process CWD).
 func RunTUI(ctx context.Context, svc *cmdman.Service, initialTab tui.Tab, workDir string) error {
 	return tui.Run(ctx, tui.Options{
-		Backend:    newServiceBackend(svc, workDir, ""),
+		Backend:    newServiceBackend(svc, backendTarget{WorkDir: workDir}),
 		Version:    libver.Version,
 		AltScreen:  true,
 		PopupMode:  false,
@@ -62,7 +63,12 @@ type TUIWidgetOptions struct {
 // want it clean.
 func RunTUIWidget(ctx context.Context, svc *cmdman.Service, opts TUIWidgetOptions) error {
 	return tui.Run(ctx, tui.Options{
-		Backend:   newServiceBackend(svc, opts.WorkDir, opts.MuxToken),
+		Backend: newServiceBackend(svc, backendTarget{
+			WorkDir:     opts.WorkDir,
+			MuxToken:    opts.MuxToken,
+			File:        opts.File,
+			ProjectName: opts.ProjectName,
+		}),
 		Version:   libver.Version,
 		AltScreen: true,
 		Widget:    opts.Widget,
@@ -95,7 +101,7 @@ func RunTUIChild(
 	}
 	send(ipcMessage{Kind: ipcStarted})
 	err := tui.Run(ctx, tui.Options{
-		Backend:    newServiceBackend(svc, workDir, ""),
+		Backend:    newServiceBackend(svc, backendTarget{WorkDir: workDir}),
 		Version:    libver.Version,
 		AltScreen:  true,
 		PopupMode:  true,
@@ -109,8 +115,25 @@ func RunTUIChild(
 	return nil
 }
 
-// PopupConfig describes how to launch the TUI as a multiplexer popup.
+// PopupChild is what a popup runs: a cmdman invocation of this same binary.
+// Args is the subcommand and the flags that belong to it — the root flags every
+// child needs (--data-dir/--runtime-dir/--config) are forwarded by the launcher
+// rather than named here.
+type PopupChild struct {
+	// Args is the child argv after the executable, e.g. {"tui", "__child"} or
+	// {"tui", "widget", "project-manager", "--file", "..."}.
+	Args []string
+	// ReportsStatus makes the launcher open its IPC endpoint and pass the child
+	// --ipc, then wait for the child's final status over it. Only the full-TUI
+	// child speaks that protocol; a widget child owns its popup for its whole
+	// life, so its ending is the popup's ending and there is nothing to report.
+	ReportsStatus bool
+}
+
+// PopupConfig describes how to launch a cmdman child as a multiplexer popup.
 type PopupConfig struct {
+	// Child is the cmdman invocation the popup runs. Required.
+	Child PopupChild
 	// Driver is the raw --popup value ("", "true", "tmux", or "zellij").
 	// Empty or "true" means infer from the environment.
 	Driver string
@@ -131,12 +154,13 @@ type PopupConfig struct {
 	// only consult the environment (config.ComposeConfigDir, FrameConfigDir).
 	// Empty is not forwarded.
 	ConfPath string
-	// Tab is the --tab token (tui.TabKeys() value) forwarded to the popup child
-	// so it opens the same startup tab. Empty is not forwarded.
-	Tab string
-	// WorkDir is the --workdir override forwarded to the popup child so it
-	// discovers the same cwd-active compose project. Empty is not forwarded.
-	WorkDir string
+	// Silent keeps the multiplexer command off the caller's terminal: it is
+	// given no stdio, and whatever it wrote to stderr comes back inside the
+	// error instead. The `cmdman tui --popup` launcher owns its terminal and
+	// leaves this false; a summon from inside a running TUI does not, and a
+	// stray "no server running" landing on the rendered view — or a second
+	// reader on the same tty — is not something the caller can undo.
+	Silent bool
 	// Width, Height, X and Y are explicit-percentage geometry values ("80%")
 	// forwarded to `tmux display-popup` as -w/-h/-x/-y. Empty values are omitted,
 	// leaving tmux's default geometry.
@@ -178,11 +202,11 @@ func (g PopupGeometry) Validate() error {
 }
 
 // LaunchTUIPopup gathers the launcher's process context (executable path,
-// working directory) and starts the popup. It is the entry point the cobra
-// command calls; gathering process/env state here keeps ./cmd thin. The dirs
-// and confPath come from the caller's already-resolved configuration instead,
-// so the popup child is handed what this process runs with rather than
-// re-resolving it.
+// working directory) and starts the popup running the full TUI. It is the entry
+// point the cobra command calls; gathering process/env state here keeps ./cmd
+// thin. The dirs and confPath come from the caller's already-resolved
+// configuration instead, so the popup child is handed what this process runs
+// with rather than re-resolving it.
 func LaunchTUIPopup(
 	ctx context.Context,
 	driverValue, dataDir, runtimeDir, confPath string,
@@ -199,19 +223,34 @@ func LaunchTUIPopup(
 	}
 	cwd, _ := os.Getwd()
 	return RunTUIPopup(ctx, PopupConfig{
+		Child:      tuiChildArgs(tabToken(initialTab), workDir),
 		Driver:     driverValue,
 		Cwd:        cwd,
 		Executable: exe,
 		DataDir:    dataDir,
 		RuntimeDir: runtimeDir,
 		ConfPath:   confPath,
-		Tab:        tabToken(initialTab),
-		WorkDir:    workDir,
 		Width:      geom.Width,
 		Height:     geom.Height,
 		X:          geom.X,
 		Y:          geom.Y,
 	})
+}
+
+// tuiChildArgs is the full-TUI popup child: `tui __child` with the startup tab
+// and the --workdir override the launcher itself was given, so the popup
+// discovers the same cwd-active compose project. Empty values are omitted
+// rather than passed as empty flags, which would override a lower config layer
+// with nothing.
+func tuiChildArgs(tab, workDir string) PopupChild {
+	args := []string{"tui", "__child"}
+	if tab != "" {
+		args = append(args, "--tab", tab)
+	}
+	if workDir != "" {
+		args = append(args, "--workdir", workDir)
+	}
+	return PopupChild{Args: args, ReportsStatus: true}
 }
 
 // tabToken maps a tui.Tab back to its --tab token so the popup child can be
@@ -224,10 +263,12 @@ func tabToken(t tui.Tab) string {
 	return keys[t]
 }
 
-// RunTUIPopup is the `cmdman tui --popup` launcher. It resolves the popup
-// driver, opens a multiplexer popup running `cmdman tui __child`, waits for the
-// child's final status over a Unix-socket IPC channel, and returns the child's
-// result.
+// RunTUIPopup opens a multiplexer popup running cfg.Child and returns when the
+// popup closes. It is the one popup seam in cmdman (D1/D5): the `cmdman tui
+// --popup` launcher runs the full TUI through it and waits for the child's
+// final status over a Unix-socket IPC channel, the switcher's summon runs the
+// project-manager widget through it, and a driver that grows a popup
+// implementation lights both up at once.
 func RunTUIPopup(ctx context.Context, cfg PopupConfig) error {
 	env := cfg.Env
 	if env == nil {
@@ -288,9 +329,16 @@ func envOf(env []string, key string) string {
 	return ""
 }
 
-// childCommand builds the argv for the popup child process.
+// childCommand builds the argv for the popup child process: this binary, the
+// child's own subcommand and flags, and the root flags every child needs — the
+// store and runtime targets and the config file this process resolved, so the
+// popup does not re-resolve them from an environment the multiplexer server
+// handed it. ipcPath is "" for a child that reports nothing.
 func (cfg PopupConfig) childCommand(ipcPath string) []string {
-	args := []string{cfg.Executable, "tui", "__child", "--ipc", ipcPath}
+	args := append([]string{cfg.Executable}, cfg.Child.Args...)
+	if ipcPath != "" {
+		args = append(args, "--ipc", ipcPath)
+	}
 	if cfg.DataDir != "" {
 		args = append(args, "--data-dir", cfg.DataDir)
 	}
@@ -299,12 +347,6 @@ func (cfg PopupConfig) childCommand(ipcPath string) []string {
 	}
 	if cfg.ConfPath != "" {
 		args = append(args, "--config", cfg.ConfPath)
-	}
-	if cfg.Tab != "" {
-		args = append(args, "--tab", cfg.Tab)
-	}
-	if cfg.WorkDir != "" {
-		args = append(args, "--workdir", cfg.WorkDir)
 	}
 	return args
 }
@@ -333,11 +375,25 @@ func tmuxPopupArgs(cfg PopupConfig, cmdStr string) []string {
 }
 
 func runTmuxPopup(ctx context.Context, cfg PopupConfig, env []string) error {
-	ipcPath, ln, cleanup, err := newIPCEndpoint()
-	if err != nil {
-		return err
+	var (
+		ipcPath   string
+		childErr  = make(chan error, 1)
+		waitChild = func() error { return nil }
+	)
+	if cfg.Child.ReportsStatus {
+		path, ln, cleanup, err := newIPCEndpoint()
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		ipcPath = path
+		go func() { childErr <- waitForChild(ln) }()
+		waitChild = func() error {
+			// Unblock the IPC accept if the child never connected.
+			_ = ln.Close()
+			return <-childErr
+		}
 	}
-	defer cleanup()
 
 	cmdStr := shellJoin(cfg.childCommand(ipcPath))
 	args := tmuxPopupArgs(cfg, cmdStr)
@@ -347,25 +403,33 @@ func runTmuxPopup(ctx context.Context, cfg PopupConfig, env []string) error {
 	if cfg.ConfPath != "" {
 		cmd.Env = append(cmd.Env, "CMDMAN_CONF="+cfg.ConfPath)
 	}
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	ipcResult := make(chan error, 1)
-	go func() { ipcResult <- waitForChild(ln) }()
+	var diag bytes.Buffer
+	if cfg.Silent {
+		cmd.Stderr = &diag
+	} else {
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
 
 	tmuxErr := cmd.Run()
-	// Unblock the IPC accept if the child never connected.
-	_ = ln.Close()
-	childErr := <-ipcResult
-
-	if childErr != nil {
-		return childErr
+	if err := waitChild(); err != nil {
+		return err
 	}
 	if tmuxErr != nil {
-		return fmt.Errorf("tui: tmux popup failed: %w", tmuxErr)
+		return fmt.Errorf("tui: tmux popup failed: %w", popupDiag(tmuxErr, diag.String()))
 	}
 	return nil
+}
+
+// popupDiag folds what tmux said into the error a silent caller reports, since
+// nothing else read its stderr — "no current client" is the whole answer to why
+// no popup opened, and an exit status alone is not.
+func popupDiag(err error, stderr string) error {
+	if s := strings.TrimSpace(stderr); s != "" {
+		return fmt.Errorf("%s (%w)", s, err)
+	}
+	return err
 }
 
 // ipcMessage is the small launcher<->child control payload. Normal rendered UI

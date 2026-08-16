@@ -57,17 +57,19 @@ Current state: **plan finalized; implementation not started.**
       only `q`/`ctrl+c`; panel widgets still bind it — parity open to user);
       16 model unit tests; manual pty launch verified against a real
       project
-- [ ] Step 6 — switcher summon: D1 "same mux auto-detect + flags path", D5,
+- [x] Step 6 — switcher summon: D1 "same mux auto-detect + flags path", D5,
       D7 `m`, D9 "row under cursor", D4 inline popup-unavailable message;
       D17 "explicit compose target … skips the ambient identity/cwd chain"
+      — done 2026-08-16; D19 seam shape (`PopupChild` argv, `Silent`
+      summon); e2e `TestTUIWidget_SwitcherSummonsProjectManager` (summon B
+      from inside A's window, negative control run) +
+      `TestTUI_PopupRunsTheFullTUI` regression guard; new upstream bug and
+      lint nit logged in HANDOFF.md
 - [ ] Step 7 — docs: man page + bind-key snippet with `--mux-token`; D12
       "wraps it in `run-shell`"
 - [ ] Step 8 — test sweep incl. new e2e (detection, summon, scale/cycle)
 
 ## Next action
 
-Step 5 (widget model/view). Step-5 constraint from step 4: `CycleScale`
-returns only `error`, so the widget's error line must satisfy D14's "must
-not imply the cycle didn't happen" from wording alone. User away for this
-run: unclear corners are decided automatically and tagged `[automatic]` in
-DECISION.md.
+Step 7 (docs). User away for this run: unclear corners are decided
+automatically and tagged `[automatic]` in DECISION.md.

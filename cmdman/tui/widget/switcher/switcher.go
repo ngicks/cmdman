@@ -191,6 +191,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 	case core.ProjectSwitchedMsg:
 		return m.onProjectSwitched(msg), nil
+	case core.ProjectManagerSummonedMsg:
+		return m.onProjectManagerSummoned(msg), nil
 	case core.FrameHiddenMsg:
 		if msg.Err != nil {
 			m.status = fmt.Sprintf("hide frame: %v", msg.Err)
@@ -341,9 +343,11 @@ func applyRuntime(groups []core.ProjectGroup, runtime map[string]core.RuntimeSta
 }
 
 // onKey handles the widget key set: the switcher's cursor keys, the selection
-// that takes the client to a project's window (D6), and the collapse gesture
-// that takes the whole frame down (V8). A selection lands in a window and
-// nothing more — start, stop and kill stay in the full TUI (V6).
+// that takes the client to a project's window (D6), the summon that opens the
+// project-manager panel over it (D7), and the collapse gesture that takes the
+// whole frame down (V8). A selection lands in a window and nothing more — start,
+// stop and kill stay in the full TUI (V6), and the panel the summon opens is a
+// separate program with its own keys.
 func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c", "ctrl+d":
@@ -362,6 +366,8 @@ func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.moveSelection(-1)
 	case "enter":
 		return m.switchToSelected()
+	case "m":
+		return m.summonSelected()
 	case "z":
 		return m, core.HideFrameCmd(m.bgCtx(), m.backend)
 	}
@@ -406,6 +412,35 @@ func (m Model) switchToSelected() (tea.Model, tea.Cmd) {
 	m = m.readBells(m.selected)
 	target := core.SwitchTarget{Identity: g.Identity, WorkDir: g.Workdir, Project: g.Name}
 	return m, core.SwitchProjectCmd(m.bgCtx(), m.backend, target, groupLabel(g))
+}
+
+// summonSelected opens the project-manager panel over the selected project
+// (D7/D9). The cursor addresses a whole group, head line and command rows
+// alike, so the project is the same one enter would switch to whichever of its
+// lines the cursor sits on.
+func (m Model) summonSelected() (tea.Model, tea.Cmd) {
+	g, ok := m.selectedGroup()
+	if !ok {
+		return m, nil
+	}
+	if g.Name == "" {
+		// The summon names its project on the child's command line, so an
+		// unnamed group has nothing to hand it.
+		m.status = "no project to manage here"
+		return m, nil
+	}
+	return m, core.SummonProjectManagerCmd(m.bgCtx(), m.backend, g.Name, g.Path, groupLabel(g))
+}
+
+// onProjectManagerSummoned reports a summon, the way onProjectSwitched reports
+// a switch: a popup that ran needs no word, and where there was no popup to run
+// it in the reason takes the hint line (D4).
+func (m Model) onProjectManagerSummoned(msg core.ProjectManagerSummonedMsg) Model {
+	m.status = ""
+	if msg.Err != nil {
+		m.status = fmt.Sprintf("manage %s: %v", msg.Name, msg.Err)
+	}
+	return m
 }
 
 // onProjectSwitched reports a switch. Success needs no word — the client is
@@ -529,7 +564,12 @@ func switcherGroups(
 
 	out := make([]core.ProjectGroup, 0, len(projs)+len(cmdGroups))
 	for _, p := range projs {
-		g := core.ProjectGroup{Name: p.Name, Workdir: p.Workdir, Identity: p.Identity}
+		g := core.ProjectGroup{
+			Name:     p.Name,
+			Workdir:  p.Workdir,
+			Identity: p.Identity,
+			Path:     p.Path,
+		}
 		if i, ok := matchCommandGroup(p, byKey, byName, claimed); ok {
 			claimed[i] = true
 			g.Commands = cmdGroups[i].Commands
