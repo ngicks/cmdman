@@ -33,7 +33,16 @@ errors.Is(err, fs.ErrNotExist)`, reported by the edit-hook linter on every
 touch of that package; predates this plan. **Follow-up**: one-line cleanup
 commit.
 
-## Explicit target drops `--workdir`, so the summoned panel manages a phantom project (out-of-scope discovery, 2026-08-16)
+## ~~Explicit target drops `--workdir`~~ — reclassified in-scope and FIXED (2026-08-16, D20)
+
+**Closed.** This was misfiled as out-of-scope: the dropping call sites are
+this plan's own steps-4/6 code and the harm broke UC1/UC2. Fixed per D20
+(workdir threaded into the loads; summon passes the row's `Workdir`;
+token-path read fixed via `selectionByIdentity`), verified reproduce-first
+by the count-asserting token and summon e2e. Two genuine residuals remain —
+see the next two entries. Original entry kept below for the record.
+
+### Original entry (historical)
 
 The explicit compose target (D17) never carries the work directory into the
 compose load, so the load falls back to the panel process's own CWD
@@ -58,6 +67,18 @@ name*, which comes from the spec rather than the store. Step 8's new token/e2e
 coverage therefore asserts names on the explicit/token paths and replica counts
 only on the cwd path. **Follow-up**: thread `b.workDir` into the three loads;
 deserves its own commit, and a summon e2e that asserts a count.
+
+## Summon workdir is symlink-resolved; symlinked `work_dir:` still misses (out-of-scope discovery, 2026-08-16)
+
+D20's summon passes `ProjectInfo.Workdir`, which is
+`normalizePath`/`EvalSymlinks`-resolved (`cmdman/cli/tui_backend.go:82-96`),
+while compose identity deliberately preserves symlinks
+(`cmdman/compose/normalize.go:118-119`). Right whenever the stored label is
+symlink-free (the normal case — labels come from `os.Getwd()` or an explicit
+`--workdir`); a project whose `work_dir:` goes through a symlink would still
+resolve wrong. **Follow-up**: carry a raw-workdir field through
+`ProjectInfo`/`ProjectGroup` (design change; pre-existing hazard also noted
+at `cmdman/cli/tui_backend_compose.go:70-76`).
 
 ## Full TUI Compose-tab Active mark is still cwd-only (out-of-scope discovery, 2026-08-16)
 

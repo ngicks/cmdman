@@ -132,9 +132,10 @@ func TestTUIChildArgsForwardsTabAndWorkDir(t *testing.T) {
 	}
 }
 
-// TestProjectManagerChildArgsNamesTheProject is D9/D17 on the argv: the summon
-// hands the child the project it picked, so nothing about the window the popup
-// lands in can redirect it.
+// TestProjectManagerChildArgsNamesTheProject is D9/D17/D20 on the argv: the
+// summon hands the child the project it picked — its file, its name and the
+// directory it stands in — so neither the window the popup lands in nor the
+// directory it opens in can redirect it.
 func TestProjectManagerChildArgsNamesTheProject(t *testing.T) {
 	full := projectManagerChildArgs("/work", "api", "/work/cmd-compose.yaml")
 	want := []string{
@@ -150,7 +151,8 @@ func TestProjectManagerChildArgsNamesTheProject(t *testing.T) {
 		t.Error("a widget child has no IPC protocol to report over")
 	}
 
-	// A never-run named def has no file to name; the name alone travels.
+	// A never-run named def has no file and no directory to name; the name alone
+	// travels.
 	named := projectManagerChildArgs("", "api", "")
 	if !slices.Equal(named.Args, []string{"tui", "widget", "project-manager",
 		"--project-name", "api"}) {

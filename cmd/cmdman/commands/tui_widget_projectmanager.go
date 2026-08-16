@@ -41,8 +41,10 @@ dashboard windows disagree about it, only l/right applies.
 
 The project is the one the panel detects: the window --mux-token names, else the
 window the panel runs in, else the project of the working directory. --file and
---project-name name one explicitly, skipping detection; --workdir only steers
-the working-directory probe.
+--project-name name one explicitly, skipping detection; --workdir says which
+directory that project stands in, and is part of the explicit target as much as
+of the working-directory probe — a compose file names a project only together
+with its work directory, which is where its commands are found.
 
 The panel fills its window, so the popup framing belongs to the multiplexer.
 tmux does not expand formats in a display-popup shell-command, so bind it

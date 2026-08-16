@@ -93,13 +93,20 @@ func TestResolveManagerSelectionPrefersTheExplicitTarget(t *testing.T) {
 	t.Chdir(here)
 
 	ctx := context.Background()
-	explicit := &serviceBackend{file: target, projectName: "elsewhere"}
+	explicit := &serviceBackend{file: target, projectName: "elsewhere", workDir: elsewhere}
 	sel, err := explicit.resolveManagerSelection(ctx, "", "")
 	if err != nil {
 		t.Fatalf("explicit target: %v", err)
 	}
 	if sel.Project != "elsewhere" {
 		t.Errorf("explicit target resolved %q, want elsewhere", sel.Project)
+	}
+	// The target names the project; --workdir is what says where it stands. Left
+	// out of the load, the work directory falls back to the process CWD — here,
+	// the other project's directory — and every store lookup keyed on it (replica
+	// counts, the identity the layout marker is read by) misses.
+	if sel.WorkDir != elsewhere {
+		t.Errorf("explicit target loaded work directory %q, want %q", sel.WorkDir, elsewhere)
 	}
 
 	// Without one, the ambient chain is untouched: the cwd project is the answer.

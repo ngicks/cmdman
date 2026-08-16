@@ -21,7 +21,7 @@ import (
 // surface (the TUI runs inside tmux, so mux prints nothing anyway); no
 // SessionName is passed, so the current tmux session is targeted.
 func (b *serviceBackend) CycleMux(ctx context.Context, projectName, composeFile string) error {
-	selection, err := compose.ResolveMuxSelectionByName(projectName, composeFile)
+	selection, err := compose.ResolveMuxSelectionByName(projectName, composeFile, b.workDir)
 	if err != nil {
 		return err
 	}
@@ -181,6 +181,11 @@ func identityOfWindow(windows []mux.OwnedWindow, windowID string) (identity stri
 // stamp is a hash and cannot be read backwards, and rebuilding one from a
 // listed workdir would hash the symlink-resolved form into a window that does
 // not exist (see projectIdentity).
+//
+// The matched row's directory travels into the load: the caller that owns this
+// stamp is a popup or a bind-key invocation standing somewhere else entirely, so
+// a load without it reads the file against that directory and finds none of the
+// project's commands (D20).
 func (b *serviceBackend) selectionByIdentity(
 	ctx context.Context, identity string,
 ) (compose.ProjectSelection, error) {
@@ -190,7 +195,7 @@ func (b *serviceBackend) selectionByIdentity(
 	}
 	for _, p := range infos {
 		if p.Identity != "" && p.Identity == identity {
-			return compose.ResolveMuxSelectionByName(p.Name, p.Path)
+			return compose.ResolveMuxSelectionByName(p.Name, p.Path, p.Workdir)
 		}
 	}
 	return compose.ProjectSelection{}, fmt.Errorf("no listed project carries identity %q", identity)
@@ -222,7 +227,7 @@ func (b *serviceBackend) resolveLayoutSelection(
 	if cwdErr == nil {
 		return sel, nil
 	}
-	sel, nameErr := compose.ResolveMuxSelectionByName(projectName, composeFile)
+	sel, nameErr := compose.ResolveMuxSelectionByName(projectName, composeFile, b.workDir)
 	if nameErr == nil {
 		return sel, nil
 	}
@@ -286,7 +291,7 @@ func layoutsOf(ctx context.Context, selection compose.ProjectSelection) tui.Layo
 func (b *serviceBackend) ApplyLayout(
 	ctx context.Context, projectName, composeFile, layoutName string,
 ) error {
-	selection, err := compose.ResolveMuxSelectionByName(projectName, composeFile)
+	selection, err := compose.ResolveMuxSelectionByName(projectName, composeFile, b.workDir)
 	if err != nil {
 		return err
 	}

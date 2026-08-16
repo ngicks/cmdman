@@ -159,8 +159,14 @@ On top of the two above:
 
 Either of `--file` and `--project-name` names the project outright, ahead of
 every detection probe — that is how the switcher's `m` targets the row under its
-cursor rather than the window its popup opens over. `--workdir` steers only the
-last probe, the working directory the cwd match runs against.
+cursor rather than the window its popup opens over. `--workdir` says where that
+project stands: it is part of the explicit target, not only of the working
+directory the cwd match runs against. A project is its work directory and its
+name together, and that pair is what its commands, its replica counts and its
+dashboard window are recorded under — so a `--file` given without it loads the
+named file against the panel's own directory and manages a project that is not
+the one on disk. The switcher's `m` passes the row's own directory for exactly
+that reason.
 
 ## See Also
 

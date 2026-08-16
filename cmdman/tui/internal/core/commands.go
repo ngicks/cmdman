@@ -97,12 +97,12 @@ func HideFrameCmd(ctx context.Context, backend Backend) tea.Cmd {
 func SummonProjectManagerCmd(
 	ctx context.Context,
 	backend Backend,
-	projectName, composeFile, label string,
+	projectName, composeFile, workDir, label string,
 ) tea.Cmd {
 	return func() tea.Msg {
 		return ProjectManagerSummonedMsg{
 			Name: label,
-			Err:  backend.SummonProjectManager(ctx, projectName, composeFile),
+			Err:  backend.SummonProjectManager(ctx, projectName, composeFile, workDir),
 		}
 	}
 }

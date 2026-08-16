@@ -1129,9 +1129,9 @@ func TestSwitcherCollapse(t *testing.T) {
 }
 
 // TestSwitcherSummonsProjectManager covers D7/D9's `m`: the panel opens over
-// the project the cursor is on, named outright — file and all — so nothing
-// about the window the popup lands in can redirect it (D17). Where there is no
-// floating pane to open, the reason takes the hint line (D4).
+// the project the cursor is on, named outright — file, work directory and all
+// — so nothing about the window the popup lands in can redirect it (D17/D20).
+// Where there is no floating pane to open, the reason takes the hint line (D4).
 func TestSwitcherSummonsProjectManager(t *testing.T) {
 	m := seedWidget(t, 32, 12)
 	fb := m.backend.(*coretest.FakeBackend)
@@ -1142,7 +1142,11 @@ func TestSwitcherSummonsProjectManager(t *testing.T) {
 	m, cmd := updWidget(t, m, coretest.Kr("m"))
 	m = settle(t, m, cmd)
 	want := []coretest.SummonCall{
-		{Project: "local-dev", Path: "/work/local-dev/cmd-compose.yaml"},
+		{
+			Project: "local-dev",
+			Path:    "/work/local-dev/cmd-compose.yaml",
+			Workdir: "/work/local-dev",
+		},
 	}
 	if !slices.Equal(fb.Summoned, want) {
 		t.Fatalf("m summoned %v, want %v", fb.Summoned, want)
@@ -1157,7 +1161,7 @@ func TestSwitcherSummonsProjectManager(t *testing.T) {
 	m, cmd = updWidget(t, m, coretest.Kr("m"))
 	m = settle(t, m, cmd)
 	want = append(want, coretest.SummonCall{
-		Project: "api-stack", Path: "/work/api/cmd-compose.yaml",
+		Project: "api-stack", Path: "/work/api/cmd-compose.yaml", Workdir: "/work/api",
 	})
 	if !slices.Equal(fb.Summoned, want) {
 		t.Fatalf("m after j summoned %v, want %v", fb.Summoned, want)

@@ -57,7 +57,7 @@ func TestResolveMuxSelectionByName(t *testing.T) {
 		path := filepath.Join(cwd, "custom.yaml")
 		writeFile(t, path, muxComposeYAML("named", ""))
 
-		sel, err := compose.ResolveMuxSelectionByName("named", path)
+		sel, err := compose.ResolveMuxSelectionByName("named", path, "")
 		assert.NilError(t, err)
 		assert.Assert(t, sel.Spec != nil && sel.Spec.Mux != nil)
 	})
@@ -67,8 +67,19 @@ func TestResolveMuxSelectionByName(t *testing.T) {
 		path := filepath.Join(cwd, "plain.yaml")
 		writeFile(t, path, plainComposeYAML("named", ""))
 
-		_, err := compose.ResolveMuxSelectionByName("named", path)
+		_, err := compose.ResolveMuxSelectionByName("named", path, "")
 		assert.Error(t, err, `mux: project "named" has no mux section`)
+	})
+
+	t.Run("work directory travels into the load", func(t *testing.T) {
+		_, cwd := muxTestEnv(t)
+		path := filepath.Join(cwd, "custom.yaml")
+		writeFile(t, path, muxComposeYAML("named", ""))
+		elsewhere := t.TempDir()
+
+		sel, err := compose.ResolveMuxSelectionByName("named", path, elsewhere)
+		assert.NilError(t, err)
+		assert.Equal(t, sel.WorkDir, elsewhere)
 	})
 
 	t.Run("no file and no name in a fileless dir has no compose file", func(t *testing.T) {
@@ -77,7 +88,7 @@ func TestResolveMuxSelectionByName(t *testing.T) {
 		// so the "no compose file found" branch is reached.
 		muxTestEnv(t)
 
-		_, err := compose.ResolveMuxSelectionByName("", "")
+		_, err := compose.ResolveMuxSelectionByName("", "", "")
 		assert.Error(t, err, `mux: no compose file found for project ""`)
 	})
 }

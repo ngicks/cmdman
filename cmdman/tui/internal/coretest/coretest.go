@@ -122,11 +122,12 @@ type CycleScaleCall struct {
 }
 
 // SummonCall is one recorded [FakeBackend.SummonProjectManager] call: the
-// project the summon named, compose file and all, since naming it is the whole
-// of what the switcher's m does (D9).
+// project the summon named — compose file and work directory and all, since
+// naming it is the whole of what the switcher's m does (D9/D20).
 type SummonCall struct {
 	Project string
 	Path    string
+	Workdir string
 }
 
 var _ core.Backend = (*FakeBackend)(nil)
@@ -281,9 +282,13 @@ func (f *FakeBackend) CycleScale(
 
 func (f *FakeBackend) SummonProjectManager(
 	_ context.Context,
-	projectName, composeFile string,
+	projectName, composeFile, workDir string,
 ) error {
-	f.Summoned = append(f.Summoned, SummonCall{Project: projectName, Path: composeFile})
+	f.Summoned = append(f.Summoned, SummonCall{
+		Project: projectName,
+		Path:    composeFile,
+		Workdir: workDir,
+	})
 	return f.SummonErr
 }
 

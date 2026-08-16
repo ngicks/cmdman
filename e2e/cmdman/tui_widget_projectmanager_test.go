@@ -44,7 +44,7 @@ func TestTUIWidget_ProjectManagerResolvesByToken(t *testing.T) {
 
 	const project, service = "pmtoken", "tokensvc"
 	wd := composeWorkdir(t)
-	composePath := writeComposeFile(t, wd, summonMuxYAML(project, service))
+	composePath := writeComposeFile(t, wd, summonMuxYAML(project, service, 3))
 	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
 
 	if _, stderr, err := env.muxExecWithTmpdir(
@@ -68,6 +68,11 @@ func TestTUIWidget_ProjectManagerResolvesByToken(t *testing.T) {
 	// stands.
 	w.waitFor(t, project, 20*time.Second)
 	w.waitFor(t, service, 20*time.Second)
+	// Both of those come off the spec, which loads the same whatever directory
+	// the panel stands in. The count does not: it is the project's own stored
+	// commands, so ×3 is what proves the load carried the resolved project's
+	// work directory rather than falling back to the panel's own.
+	w.waitFor(t, "×3", 20*time.Second)
 	if snap := w.snapshot(); strings.Contains(snap, "no project") {
 		t.Errorf("the token probe should have answered; got:\n%q", snap)
 	}
@@ -199,13 +204,16 @@ func TestTUIWidget_ProjectManagerCyclesShownReplica(t *testing.T) {
 	w.send(t, "l")
 
 	waitForPaneTitle(t, socket, wid, "web-2", 20*time.Second)
+	// The note is only drawn once the reload behind it has answered — while it
+	// runs the footer says so instead — which makes it the signal that the badge
+	// below has been rebuilt from the state the cycle just persisted. It is also
+	// what makes the state readable: the pane is respawned before the position is
+	// written (cmdman/mux/cycle_scale.go:237-252), so the title alone arrives
+	// while @cmdman_scale is still unset.
+	w.waitFor(t, "cycled shown replica of web", 20*time.Second)
 	if got := tmuxWindowOption(t, socket, wid, "@cmdman_scale"); !strings.Contains(got, "web=2") {
 		t.Fatalf("@cmdman_scale = %q, want it to carry web=2; panel:\n%q", got, w.snapshot())
 	}
-	// The note is only drawn once the reload behind it has answered — while it
-	// runs the footer says so instead — which makes it the signal that the badge
-	// below has been rebuilt from the state the cycle just persisted.
-	w.waitFor(t, "cycled shown replica of web", 20*time.Second)
 	w.resize(t, 24, 80)
 	w.waitFor(t, "[2]", 20*time.Second)
 	w.quit(t)

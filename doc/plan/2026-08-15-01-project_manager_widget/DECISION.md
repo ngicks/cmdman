@@ -282,6 +282,48 @@ knowledge in the shared seam); wiring `os.Std*` into the summon popup
 (keystroke theft, stderr over the rendered view); passing the row's workdir
 as `--workdir` (would repurpose the flag's cwd-override meaning).
 
+**Superseded in part by D20**: the "TUI's own override" / "row's workdir
+would repurpose the flag" reading rested on "the explicit file/name make it
+moot", which step 8's repro falsified — compose identity hashes the work
+directory, so a load without it resolves a different (phantom) project.
+
+## D20 — the work directory is part of the project target [automatic] (2026-08-16)
+
+**Choice**: every project-manager compose load carries the work directory.
+(a) `compose.ResolveMuxSelectionByName` gained a `workDir` parameter and the
+three explicit-target call sites in `cmdman/cli/tui_backend_projectmanager.go`
+pass `b.workDir`; `CycleMux`/`ApplyLayout`/`resolveLayoutSelection`'s name
+fallback pass it too (`""` for a bare full TUI — unchanged there).
+(b) `core.Backend.SummonProjectManager` gained a `workDir` parameter; the
+switcher passes the row's `ProjectGroup.Workdir` (NOT `.Path`, which is the
+compose file), and `projectManagerChildArgs` puts it in `--workdir` —
+superseding D19's "TUI's own override" reading. An empty row workdir omits
+the flag; no fallback to the TUI's own override, so the semantics never mix.
+(c) The token/ambient read path passes the identity-matched row's
+`p.Workdir` (`selectionByIdentity`).
+
+**Rationale**: step 8's repro — a summoned panel read `×0` and `+` created a
+phantom command under `cmdman.compose.workdir=<panel cwd>` while reporting
+success, because compose falls back to the process cwd
+(`cmdman/compose/normalize.go:104-109`) and identity hashes that directory.
+Reclassified in-scope: the dropping call sites are this plan's steps-4/6
+code and the harm breaks UC1/UC2's "takes effect on the live dashboard".
+Verified reproduce-first: token and summon e2e assert `×3` and failed
+before the fix, pass after.
+
+**Known residual** (accepted): the summon passes the symlink-*resolved*
+workdir (`ProjectInfo.Workdir` is `normalizePath`d) while compose identity
+deliberately preserves symlinks — a project whose `work_dir:` is written
+through a symlink would still miss. Carrying a raw-workdir field through
+`ProjectInfo`/`ProjectGroup` is a design change left to a follow-up
+(HANDOFF).
+
+**Rejected**: leaving the ambient `""` in the layout verbs (would let a
+summoned panel's layout apply build a phantom dashboard window); an
+options-struct rework of `ResolveMuxSelectionByName` (its `File ←
+projectName` fallback is its reason to exist; `NormalizeOpts.ProjectName`
+means a different thing).
+
 ## D14 — `Shown` reports agreement only; disagreement renders unknown [automatic] (2026-08-16)
 
 **Choice**: `compose.Service.MuxScaleState` reports a service's shown-replica

@@ -89,10 +89,15 @@ func ResolveMuxSelection(opts NormalizeOpts) (ProjectSelection, error) {
 
 // ResolveMuxSelectionByName resolves the compose project for a mux operation
 // driven by a project name (the TUI entry point). composeFile is used directly
-// when set; otherwise it is resolved on demand from projectName. The resolved
-// project must declare a "mux:" section.
-func ResolveMuxSelectionByName(projectName, composeFile string) (ProjectSelection, error) {
-	opts := NormalizeOpts{File: composeFile}
+// when set; otherwise it is resolved on demand from projectName. workDir is the
+// directory the project stands in, "" leaving the file's work_dir: and the
+// process CWD to answer: it is half of what identifies a project, so a caller
+// that knows it and leaves it out resolves the named file against wherever it
+// happens to be running. The resolved project must declare a "mux:" section.
+func ResolveMuxSelectionByName(
+	projectName, composeFile, workDir string,
+) (ProjectSelection, error) {
+	opts := NormalizeOpts{File: composeFile, WorkDir: workDir}
 	if composeFile == "" {
 		opts.File = projectName
 	}

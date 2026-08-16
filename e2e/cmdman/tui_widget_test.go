@@ -302,6 +302,10 @@ func TestTUIWidget_SwitcherMarksWindowProject(t *testing.T) {
 // B's. tmux draws a popup on the attached client, so the client's own terminal
 // is where the panel is read — and a client is required at all, since
 // display-popup with none does not run (NOTES Q1).
+//
+// It is also D20: the summon hands the child B's work directory, so the panel
+// reads B's replica count and not the zero a load in the popup's own directory
+// would find.
 func TestTUIWidget_SwitcherSummonsProjectManager(t *testing.T) {
 	requireTmux(t)
 	ctx := testContext(t)
@@ -318,10 +322,12 @@ func TestTUIWidget_SwitcherSummonsProjectManager(t *testing.T) {
 		projectB, serviceB = "pmsumb", "bravosvc"
 	)
 	wdA := composeWorkdir(t)
-	pathA := writeComposeFile(t, wdA, summonMuxYAML(projectA, serviceA))
+	pathA := writeComposeFile(t, wdA, summonMuxYAML(projectA, serviceA, 1))
 	t.Cleanup(func() { cleanupProject(ctx, env, wdA, projectA) })
+	// B is the scaled one: its ×3 is a count of B's own stored commands, so it
+	// can only be read by a panel whose load stands in B's work directory.
 	wdB := composeWorkdir(t)
-	pathB := writeComposeFile(t, wdB, summonMuxYAML(projectB, serviceB))
+	pathB := writeComposeFile(t, wdB, summonMuxYAML(projectB, serviceB, 3))
 	t.Cleanup(func() { cleanupProject(ctx, env, wdB, projectB) })
 
 	// A gets the dashboard the switcher will sit inside; B is only created, so it
@@ -363,9 +369,10 @@ func TestTUIWidget_SwitcherSummonsProjectManager(t *testing.T) {
 	waitForPaneText(t, tmuxTmpdir, pane, "active", 20*time.Second)
 	waitForPaneText(t, tmuxTmpdir, pane, filepath.Base(wdB), 10*time.Second)
 
-	if snap := client.snapshot(); strings.Contains(snap, serviceB) {
-		t.Fatalf("%s was on the client screen before the summon, so its presence "+
-			"proves nothing; got:\n%q", serviceB, snap)
+	if snap := client.snapshot(); strings.Contains(snap, serviceB) ||
+		strings.Contains(snap, "×3") {
+		t.Fatalf("%s or its replica count was on the client screen before the "+
+			"summon, so its presence proves nothing; got:\n%q", serviceB, snap)
 	}
 
 	// A is the active project, so it heads the list — and it is also the earlier
@@ -373,12 +380,19 @@ func TestTUIWidget_SwitcherSummonsProjectManager(t *testing.T) {
 	tmuxRunWithTmpdir(t, tmuxTmpdir, "send-keys", "-t", pane, "j")
 	tmuxRunWithTmpdir(t, tmuxTmpdir, "send-keys", "-t", pane, "m")
 
+	// The service name says the panel is B's; the count says its load stood in
+	// B's work directory. A summon that dropped the workdir renders the name off
+	// the spec all the same and the row reads ×0.
 	deadline := time.Now().Add(20 * time.Second)
-	for !strings.Contains(client.snapshot(), serviceB) {
+	for {
+		snap := client.snapshot()
+		if strings.Contains(snap, serviceB) && strings.Contains(snap, "×3") {
+			break
+		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the summoned panel never showed %q on the attached client.\n"+
-				"client:\n%q\nswitcher pane:\n%s",
-				serviceB, client.snapshot(), capturePane(t, tmuxTmpdir, pane))
+			t.Fatalf("the summoned panel never showed %q at ×3 on the attached "+
+				"client.\nclient:\n%q\nswitcher pane:\n%s",
+				serviceB, snap, capturePane(t, tmuxTmpdir, pane))
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -389,18 +403,25 @@ func TestTUIWidget_SwitcherSummonsProjectManager(t *testing.T) {
 }
 
 // summonMuxYAML is a one-service project whose service name is unique to it, so
-// that name on a screen says which project's panel is being read.
-func summonMuxYAML(project, service string) string {
+// that name on a screen says which project's panel is being read. replicas > 1
+// declares a scale:, which is what makes the panel's ×N a reading of the store:
+// the service name alone comes off the spec and is the same string whatever
+// directory the load ran in.
+func summonMuxYAML(project, service string, replicas int) string {
+	var scale string
+	if replicas > 1 {
+		scale = fmt.Sprintf("    scale: %d\n", replicas)
+	}
 	return fmt.Sprintf(`name: %s
 commands:
   %s:
     args: [sleep, "300"]
-mux:
+%smux:
   layouts:
     - name: solo
       root:
         command: %s
-`, project, service, service)
+`, project, service, scale, service)
 }
 
 // tmuxSessionOfWindow names the session the window lives in on the

@@ -63,11 +63,16 @@ func (b *serviceBackend) ProjectManager(
 // project of the window it opened over instead. An explicit target that does
 // not resolve is an error rather than a reason to detect something else: the
 // caller named a project, so another one is not an improvement.
+//
+// --workdir travels with the target (D20): a project is (work directory,
+// name), so a load that names only the file resolves it against the panel's own
+// directory — a popup opens wherever it was summoned from, which is where every
+// replica count and the layout marker's identity would then be looked up.
 func (b *serviceBackend) resolveManagerSelection(
 	ctx context.Context, projectName, composeFile string,
 ) (compose.ProjectSelection, error) {
 	if b.file != "" || b.projectName != "" {
-		return compose.ResolveMuxSelectionByName(b.projectName, b.file)
+		return compose.ResolveMuxSelectionByName(b.projectName, b.file, b.workDir)
 	}
 	return b.resolveLayoutSelection(ctx, projectName, composeFile)
 }
@@ -101,8 +106,9 @@ func (b *serviceBackend) SetScale(
 	ctx context.Context, projectName, composeFile, service string, replicas int,
 ) error {
 	opts := compose.ScaleOption{
-		File:   composeFile,
-		Scales: map[string]int{service: replicas},
+		File:    composeFile,
+		WorkDir: b.workDir,
+		Scales:  map[string]int{service: replicas},
 	}
 	if composeFile == "" {
 		opts.File = projectName
@@ -122,7 +128,7 @@ func (b *serviceBackend) SetScale(
 func (b *serviceBackend) CycleScale(
 	ctx context.Context, projectName, composeFile, command string, set int,
 ) error {
-	selection, err := compose.ResolveMuxSelectionByName(projectName, composeFile)
+	selection, err := compose.ResolveMuxSelectionByName(projectName, composeFile, b.workDir)
 	if err != nil {
 		return err
 	}
@@ -140,17 +146,19 @@ func (b *serviceBackend) CycleScale(
 // lives in a single place and a driver that grows a popup implementation lights
 // this up with it.
 //
-// The project travels as --file/--project-name rather than as a token: the
-// panel manages the row the cursor was on, not the window the popup opens over
-// (D9/D17). The store and config targets are this process's own, because the
-// child is started by the multiplexer server and inherits that server's
-// environment rather than the TUI's.
+// The project travels as --file/--project-name plus the row's own work
+// directory rather than as a token: the panel manages the row the cursor was
+// on, not the window the popup opens over (D9/D17), and a compose file names a
+// project only together with the directory it stands in (D20). The store and
+// config targets are this process's own, because the child is started by the
+// multiplexer server and inherits that server's environment rather than the
+// TUI's.
 //
 // The popup is the whole UI for as long as it is up, so this returns when it
 // closes; what the widget itself did is reported inside it, and only "there was
 // no popup to open" comes back here (D4).
 func (b *serviceBackend) SummonProjectManager(
-	ctx context.Context, projectName, composeFile string,
+	ctx context.Context, projectName, composeFile, workDir string,
 ) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -158,7 +166,7 @@ func (b *serviceBackend) SummonProjectManager(
 	}
 	cfg := b.svc.Config()
 	return RunTUIPopup(ctx, PopupConfig{
-		Child:      projectManagerChildArgs(b.workDir, projectName, composeFile),
+		Child:      projectManagerChildArgs(workDir, projectName, composeFile),
 		Cwd:        b.cwd,
 		Executable: exe,
 		DataDir:    cfg.DataDir,
@@ -170,10 +178,12 @@ func (b *serviceBackend) SummonProjectManager(
 }
 
 // projectManagerChildArgs is the summoned widget's argv. --workdir carries the
-// summoning TUI's own override so the child stands where it does; the compose
-// pair is what actually names the project, and either half may be empty — a
-// never-run named def has no file path, and a group the project listing never
-// claimed has only its name.
+// summoned row's own work directory, which is the half of the project's identity
+// the compose file cannot supply (D20): without it the child loads the named
+// file against the directory the popup opened in, and manages a project of that
+// directory's name instead. Any of the three may be empty — a never-run named
+// def has no file path, and a group the project listing never claimed has only
+// its name.
 func projectManagerChildArgs(workDir, projectName, composeFile string) PopupChild {
 	args := []string{"tui", "widget", "project-manager"}
 	if workDir != "" {

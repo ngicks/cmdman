@@ -168,7 +168,12 @@ target):
   probe (D10). cmdman never parses it; the driver resolves it.
 - `--workdir string` — as on sibling widgets, steers the cwd the fallback
   probe matches; it does not outrank the token or window probes (D17/D19
-  superseded the earlier "doubles as the explicit target" reading).
+  superseded the earlier "doubles as the explicit target" reading). It is
+  also part of the explicit target: the work directory travels into the
+  `--file`/`--project-name` load, because a project is (work directory,
+  name) and a load without it looks the project up under the panel's own
+  directory (D20; supersedes D19's "the TUI's own override" reading of the
+  summon argv).
 - `--file string`, `--project-name string` — compose-file path and project
   name, mirroring `cmdman compose`'s persistent `-f`/`-p` flags
   (`cmd/cmdman/commands/compose.go:33-48`). Setting either is the explicit

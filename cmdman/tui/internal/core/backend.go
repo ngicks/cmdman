@@ -228,11 +228,13 @@ type Backend interface {
 	// SummonProjectManager opens the project-manager widget in a multiplexer
 	// floating pane targeting the given project — the switcher's m (D7/D9). The
 	// project is named explicitly rather than detected, so the panel manages the
-	// row the cursor was on and not the window the popup opened over. Where no
-	// floating pane is available (a plain terminal, or a multiplexer the popup
-	// seam does not support yet) the reason comes back as an error, which the
-	// switcher shows inline (D4).
-	SummonProjectManager(ctx context.Context, projectName, composeFile string) error
+	// row the cursor was on and not the window the popup opened over. workDir is
+	// that row's own work directory, the half of the project's identity a compose
+	// file does not carry (D20); it is empty for a group the listing never placed
+	// anywhere. Where no floating pane is available (a plain terminal, or a
+	// multiplexer the popup seam does not support yet) the reason comes back as
+	// an error, which the switcher shows inline (D4).
+	SummonProjectManager(ctx context.Context, projectName, composeFile, workDir string) error
 
 	// SwitchToProject puts the client in front of the target's window — the
 	// docked switcher's enter/click (D6). A project with no window of its own

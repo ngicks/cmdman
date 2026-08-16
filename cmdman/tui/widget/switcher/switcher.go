@@ -417,7 +417,9 @@ func (m Model) switchToSelected() (tea.Model, tea.Cmd) {
 // summonSelected opens the project-manager panel over the selected project
 // (D7/D9). The cursor addresses a whole group, head line and command rows
 // alike, so the project is the same one enter would switch to whichever of its
-// lines the cursor sits on.
+// lines the cursor sits on. The row's directory travels with its name (D20):
+// the popup opens wherever the switcher stands, which is not where the project
+// does, and a project is (work directory, name).
 func (m Model) summonSelected() (tea.Model, tea.Cmd) {
 	g, ok := m.selectedGroup()
 	if !ok {
@@ -429,7 +431,8 @@ func (m Model) summonSelected() (tea.Model, tea.Cmd) {
 		m.status = "no project to manage here"
 		return m, nil
 	}
-	return m, core.SummonProjectManagerCmd(m.bgCtx(), m.backend, g.Name, g.Path, groupLabel(g))
+	return m, core.SummonProjectManagerCmd(
+		m.bgCtx(), m.backend, g.Name, g.Path, g.Workdir, groupLabel(g))
 }
 
 // onProjectManagerSummoned reports a summon, the way onProjectSwitched reports
