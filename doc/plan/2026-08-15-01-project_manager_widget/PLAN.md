@@ -166,13 +166,14 @@ target):
 
 - `--mux-token string` — opaque mux window token; highest-priority detection
   probe (D10). cmdman never parses it; the driver resolves it.
-- `--workdir string` — as on sibling widgets, overrides the cwd the fallback
-  probe matches — which is also how the switcher summon targets a row's
-  project explicitly (D9, amended: no separate `--project` flag).
+- `--workdir string` — as on sibling widgets, steers the cwd the fallback
+  probe matches; it does not outrank the token or window probes (D17/D19
+  superseded the earlier "doubles as the explicit target" reading).
 - `--file string`, `--project-name string` — compose-file path and project
   name, mirroring `cmdman compose`'s persistent `-f`/`-p` flags
-  (`cmd/cmdman/commands/compose.go:33-48`), for disambiguation when a
-  workdir holds more than one project.
+  (`cmd/cmdman/commands/compose.go:33-48`). Setting either is the explicit
+  target: resolution uses it directly and skips detection (D17); it is what
+  the switcher summon passes (D9).
 
 Documented tmux binding (`doc/man/cmdman-tui.1.md`, beside the launcher's).
 tmux does not format-expand `display-popup`'s shell-command (spike, NOTES.md
@@ -321,7 +322,7 @@ func (s *Service) MuxScaleState(ctx context.Context, opts MuxScaleStateOption) (
 
 | Key                 | Zone     | Action                                          |
 | ------------------- | -------- | ----------------------------------------------- |
-| `j`/`k`/arrows      | both     | move selection in the focused list              |
+| `j`/`k`/`up`/`down` | both     | move selection in the focused list              |
 | `tab`               | —        | switch focus: services ⇄ layouts                |
 | `+`/`=` , `-`       | services | replica count +1 / −1 (`SetScale`)              |
 | `l`/`right`, `h`/`left` | services | shown replica next / previous (`CycleScale`) |

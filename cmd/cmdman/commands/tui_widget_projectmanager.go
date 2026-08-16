@@ -40,8 +40,9 @@ Showing the previous replica needs the shown one to be known; where a project's
 dashboard windows disagree about it, only l/right applies.
 
 The project is the one the panel detects: the window --mux-token names, else the
-window the panel runs in, else the project of the working directory. --workdir,
---file and --project-name name one explicitly.
+window the panel runs in, else the project of the working directory. --file and
+--project-name name one explicitly, skipping detection; --workdir only steers
+the working-directory probe.
 
 The panel fills its window, so the popup framing belongs to the multiplexer.
 tmux does not expand formats in a display-popup shell-command, so bind it

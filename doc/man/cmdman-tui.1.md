@@ -11,6 +11,7 @@ cmdman tui
 cmdman tui --popup[=tmux]
 cmdman tui --workdir DIR
 cmdman tui widget switcher|launcher [--workdir DIR] [--no-quit]
+cmdman tui widget project-manager [--mux-token TOKEN] [-f FILE] [-p NAME]
 ```
 
 ## Description
@@ -69,11 +70,38 @@ it in any terminal or pane. Each widget is its own subcommand.
   launches and lands in one; in the input every key is text, so ctrl+c is the
   dismissal that works from anywhere (unless `--no-quit` took the quit keys
   away).
+- `project-manager`: shortcuts over one project — the replica count of each of
+  its services, which replica a scaled command's dashboard pane shows, and the
+  project's mux layouts. Every action wraps the command that already does it, so
+  nothing here is reachable only from the panel. Services are listed above,
+  layouts below, and `tab` moves the keyboard between the two; `j`/`k` (or the
+  up and down arrows) move in the focused list. On services, `+`/`=` and `-` set
+  the replica count one step either way, and `l`/`right` and `h`/`left` show the
+  next and the previous replica of a cycle target — the rows marked `↻`. Naming
+  the previous replica needs the shown one to be known: where a project's
+  dashboard windows disagree about it, or none is showing it, the badge reads
+  `[?]` and only `l` applies. On layouts, `enter` applies the one under the
+  cursor and `c` cycles to the next, with the running dashboard's own layout
+  marked. `r` reloads what the panel shows; `q` quits. The project it manages is
+  the one it detects — the window `--mux-token` names, else the window it runs
+  in, else the project of the working directory — and `--file` and
+  `--project-name` name one outright, ahead of all three; the project it lands
+  on must declare a `mux:` section. The switcher's `m` summons this panel over
+  the project under its own cursor.
 
 A widget fills its window, so popup framing belongs to the multiplexer:
 
 ```sh
 bind-key -n M-Space display-popup -E -w 80% -h 60% 'cmdman tui widget launcher'
+```
+
+The project-manager takes the window it was summoned from, which the binding
+has to hand it. tmux does not expand formats in a `display-popup`
+shell-command, so the binding goes through `run-shell`, which is expanded:
+
+```sh
+bind-key -n M-p run-shell 'tmux display-popup -E -w 80% -h 60% \
+  "cmdman tui widget project-manager --mux-token #{window_id}"'
 ```
 
 The launcher's input line is a path field as much as a filter. A leading `~` or
@@ -114,6 +142,25 @@ projects are there.
 - `--no-quit`: unbind the quit keys, so no keypress ends the widget. A widget
   invoked as a frame component always runs with it: a frame pane whose widget
   exited would stand empty until the frame is taken down and put back up.
+
+### widget project-manager
+
+On top of the two above:
+
+- `--mux-token TOKEN`: the multiplexer window to take the project from, spelled
+  the way the driver spells it — a tmux window id such as `@7`, which a
+  keybinding passes as `#{window_id}`. Pane ids are not resolved. This is the
+  highest-priority detection probe; a token naming no cmdman-owned window is not
+  an error, detection simply falls through to the probes under it.
+- `-f, --file PATH`: compose file of the project to manage, resolved the way
+  [cmdman-compose(1)](./cmdman-compose.1.md) resolves `-f`.
+- `-p, --project-name NAME`: project name to manage, overriding the file's
+  top-level `name:`. Given on its own it also names the project's file.
+
+Either of `--file` and `--project-name` names the project outright, ahead of
+every detection probe — that is how the switcher's `m` targets the row under its
+cursor rather than the window its popup opens over. `--workdir` steers only the
+last probe, the working directory the cwd match runs against.
 
 ## See Also
 

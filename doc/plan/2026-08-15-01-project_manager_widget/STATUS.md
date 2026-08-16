@@ -65,11 +65,15 @@ Current state: **plan finalized; implementation not started.**
       from inside A's window, negative control run) +
       `TestTUI_PopupRunsTheFullTUI` regression guard; new upstream bug and
       lint nit logged in HANDOFF.md
-- [ ] Step 7 — docs: man page + bind-key snippet with `--mux-token`; D12
-      "wraps it in `run-shell`"
+- [x] Step 7 — docs: man page + bind-key snippet with `--mux-token`; D12
+      "wraps it in `run-shell`" — done 2026-08-16; every public-surface
+      flag verified mentioned; frame.5 verified correct as-is; two stale
+      PLAN claims fixed (arrows row, `--workdir`-as-target superseded by
+      D17) and the cobra Long's `--workdir` sentence corrected to match
 - [ ] Step 8 — test sweep incl. new e2e (detection, summon, scale/cycle)
 
 ## Next action
 
-Step 7 (docs). User away for this run: unclear corners are decided
-automatically and tagged `[automatic]` in DECISION.md.
+Step 8 (test sweep), then the final review + test gate. User away for this
+run: unclear corners are decided automatically and tagged `[automatic]` in
+DECISION.md.
