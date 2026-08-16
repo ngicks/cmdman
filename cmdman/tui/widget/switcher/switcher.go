@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 	"image/color"
+	"maps"
 	"math"
 	"slices"
 	"time"
@@ -20,6 +21,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
 
@@ -45,12 +47,19 @@ type Model struct {
 	projs  []core.ProjectInfo
 	groups []core.ProjectGroup
 
-	// titles carries when each command's current title was first seen, which is
-	// what D20's bucket sort orders by (see titleStamp). now is the clock that
-	// stamps them; nil means time.Now, and tests set it to keep the buckets
+	// titles carries when each command's current title arrived, which is what
+	// D20's bucket sort orders by (see titleStamp). now is the clock that stamps
+	// them; nil means time.Now, and tests set it to keep the buckets
 	// deterministic.
 	titles map[string]titleStamp
 	now    func() time.Time
+
+	// watcher holds one runtime-state stream per live command and merges their
+	// pushes into one channel; runtime is what those pushes said, keyed by
+	// command id. A list load carries no runtime state (L3), so the cache is
+	// what the rows are dressed from between pushes.
+	watcher *core.RuntimeWatcher
+	runtime map[string]core.RuntimeStateView
 
 	selected int    // index into groups
 	cwd      string // normalized working directory for active detection
@@ -85,6 +94,9 @@ func New(ctx context.Context, opts core.Options) Model {
 		backend:   opts.Backend,
 		altScreen: opts.AltScreen,
 		noQuit:    opts.NoQuit,
+		titles:    map[string]titleStamp{},
+		watcher:   core.NewRuntimeWatcher(),
+		runtime:   map[string]core.RuntimeStateView{},
 	}
 }
 
@@ -96,13 +108,15 @@ func (m Model) bgCtx() context.Context {
 }
 
 // Init implements tea.Model: the two listings the groups are joined from, the
-// event subscription that reloads them, and the terminal's own colors, which
-// the command rows are shaded against (D26).
+// event subscription that reloads them, the runtime-state receive the rows are
+// kept live by, and the terminal's own colors, which the command rows are
+// shaded against (D26).
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		core.ListCommandsCmd(m.bgCtx(), m.backend),
 		core.ListProjectsCmd(m.bgCtx(), m.backend),
 		core.SubscribeCmd(m.bgCtx(), m.backend),
+		armRuntimeWatchCmd(),
 		tea.RequestForegroundColor,
 		tea.RequestBackgroundColor,
 	)
@@ -126,6 +140,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.cmds, m.status = msg.Infos, ""
+		// The list is what says which commands exist, so it is also what the held
+		// streams and everything cached from them are reconciled against.
+		m.watcher.Reconcile(m.bgCtx(), m.backend, msg.Infos)
+		m.sweepRuntime()
 		return m.rebuild(), nil
 	case core.ProjectsLoadedMsg:
 		if msg.Err != nil {
@@ -143,6 +161,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, core.WaitEventCmd(msg.Stream)
 	case core.EventSignalMsg:
 		return m.onEventSignal(msg)
+	case runtimeWatchReadyMsg:
+		return m, core.WaitRuntimeUpdateCmd(m.watcher)
+	case core.RuntimeUpdateMsg:
+		return m.onRuntimeUpdate(msg)
 	case core.ReloadTickMsg:
 		if msg.Gen != m.reloadGen {
 			return m, nil // a newer event arrived; let the latest tick win
@@ -182,6 +204,126 @@ func (m Model) onEventSignal(msg core.EventSignalMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(core.WaitEventCmd(m.events), core.DebounceCmd(m.reloadGen))
 }
 
+// --- live runtime state -----------------------------------------------------
+
+// runtimeWatchReadyMsg arms the merged runtime-state receive. Init hands the
+// arming over as a message so the receive — which only returns when a monitor
+// pushes — is started from an Update arm, the same shape the event subscription
+// has (SubscribeCmd → EventsSubscribedMsg → WaitEventCmd).
+type runtimeWatchReadyMsg struct{}
+
+func armRuntimeWatchCmd() tea.Cmd {
+	return func() tea.Msg { return runtimeWatchReadyMsg{} }
+}
+
+// onRuntimeUpdate folds one pushed runtime state into the widget and rearms the
+// receive. The watcher's own close is the one message that ends the loop: with
+// no id there is no stream left to hear from.
+func (m Model) onRuntimeUpdate(msg core.RuntimeUpdateMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Closed && msg.ID == "":
+		return m, nil
+	case msg.Closed:
+		// One command's monitor left an active state. Its row keeps what it last
+		// showed until the lifecycle re-list corrects it, and only a later
+		// Reconcile that still lists the command live redials.
+		return m, core.WaitRuntimeUpdateCmd(m.watcher)
+	case msg.Err != nil:
+		// A monitor that stopped answering is not the user's problem: the row
+		// stays as it was, exactly as it does for a monitor that was never
+		// dialable, and the stream's close follows this error.
+		return m, core.WaitRuntimeUpdateCmd(m.watcher)
+	case !m.listedLive(msg.ID):
+		// A straggler buffered before its stream was dropped: caching it would
+		// outlive the sweep that already ran.
+		return m, core.WaitRuntimeUpdateCmd(m.watcher)
+	}
+	m.runtime[msg.ID] = msg.State
+	m.stampTitle(msg.ID, msg.State.Title)
+	// Rebuilt rather than patched: the push is what D20 sorts by, and the bell it
+	// may carry is one D22 may already have answered for.
+	return m.rebuild(), core.WaitRuntimeUpdateCmd(m.watcher)
+}
+
+// stampTitle dates a title at the arrival of the push that carried it (L4). A
+// push repeating the title a command already carries keeps its stamp — the
+// bucket says when the title changed, not when it was last reported — and a
+// cleared title drops out, since a command saying nothing sorts below the ones
+// that do.
+func (m *Model) stampTitle(id, title string) {
+	if title == "" {
+		delete(m.titles, id)
+		return
+	}
+	if prev, ok := m.titles[id]; ok && prev.title == title {
+		return
+	}
+	at := time.Now
+	if m.now != nil {
+		at = m.now
+	}
+	m.titles[id] = titleStamp{title: title, at: at()}
+}
+
+// listedLive reports whether the loaded list has the id in a state whose monitor
+// serves a runtime-state stream, which is the gate an arriving push passes to be
+// cached at all.
+func (m Model) listedLive(id string) bool {
+	for _, ci := range m.cmds {
+		if ci.ID == id {
+			return liveMonitor(ci.State)
+		}
+	}
+	return false
+}
+
+// sweepRuntime bounds what the pushes left behind to the ids the freshly loaded
+// list still shows with a live monitor. Sweeping against the list rather than
+// against the ids a reconcile dropped is what forgets a command whose stream
+// ended on its own: the watcher drops such a stream itself, so no later
+// reconcile names it, and a run that came back would otherwise be shown wearing
+// the last run's title and bell (D13) until its first push.
+func (m *Model) sweepRuntime() {
+	live := make(map[string]struct{}, len(m.cmds))
+	for _, ci := range m.cmds {
+		if liveMonitor(ci.State) {
+			live[ci.ID] = struct{}{}
+		}
+	}
+	gone := func(id string) bool {
+		_, ok := live[id]
+		return !ok
+	}
+	maps.DeleteFunc(m.runtime, func(id string, _ core.RuntimeStateView) bool { return gone(id) })
+	maps.DeleteFunc(m.titles, func(id string, _ titleStamp) bool { return gone(id) })
+}
+
+// liveMonitor reports whether a listed command's state is one whose monitor
+// serves a runtime-state stream — the widget's own copy of what the watcher
+// subscribes by, and the one predicate its cached state is kept against.
+func liveMonitor(state model.EventType) bool {
+	return state == model.EventTypeStarting || state == model.EventTypeRunning
+}
+
+// applyRuntime lays the cached pushes over freshly built rows: a list load
+// carries none of it (L3), so without this a re-list would blank every title
+// until each monitor pushed again.
+func applyRuntime(groups []core.ProjectGroup, runtime map[string]core.RuntimeStateView) {
+	for gi := range groups {
+		cmds := groups[gi].Commands
+		for ci := range cmds {
+			v, ok := runtime[cmds[ci].ID]
+			if !ok {
+				continue
+			}
+			cmds[ci].Title = v.Title
+			cmds[ci].Status = v.Status
+			cmds[ci].Detail = v.Detail
+			cmds[ci].Bell = v.BellUnread
+		}
+	}
+}
+
 // onKey handles the widget key set: the switcher's cursor keys, the selection
 // that takes the client to a project's window (D6), and the collapse gesture
 // that takes the whole frame down (V8). A selection lands in a window and
@@ -194,6 +336,9 @@ func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.quitting = true
+		// The watcher keeps a stream per live command, and closing it here hands
+		// the monitors their disconnects instead of leaving them to process exit.
+		_ = m.watcher.Close()
 		return m, tea.Quit
 	case "j", "down":
 		m.moveSelection(1)
@@ -306,8 +451,9 @@ func groupLabel(g core.ProjectGroup) string {
 	return g.Name
 }
 
-// rebuild re-joins the two listings into the switcher's groups, keeping the
-// selection on the project it was on across a reload.
+// rebuild re-joins the two listings into the switcher's groups, dresses them in
+// what the monitors last pushed, and keeps the selection on the project it was
+// on across a reload.
 func (m Model) rebuild() Model {
 	if m.backend != nil {
 		m.cwd = m.backend.Cwd()
@@ -316,8 +462,11 @@ func (m Model) rebuild() Model {
 	if g, ok := m.selectedGroup(); ok {
 		prev = g.Key()
 	}
-	m.titles = m.stampTitles()
 	m.groups = switcherGroups(m.projs, m.cmds, m.cwd, m.titles)
+	// Before applyBellRead below: what a selection answered for is a bell the
+	// cache is still reporting unread (D22), so the suppression has to run over
+	// the rows the pushes wrote, not the empty ones the list built.
+	applyRuntime(m.groups, m.runtime)
 	m.selected = 0
 	for i, g := range m.groups {
 		if g.Key() == prev {
@@ -326,30 +475,6 @@ func (m Model) rebuild() Model {
 		}
 	}
 	return m.applyBellRead()
-}
-
-// stampTitles carries every still-current title stamp forward and dates the
-// rest at now: a command whose title is unchanged keeps the time it was first
-// seen with it, one that retitled starts a new bucket, and one that vanished
-// drops out with the map it is rebuilt into.
-func (m Model) stampTitles() map[string]titleStamp {
-	now := time.Now
-	if m.now != nil {
-		now = m.now
-	}
-	at := now()
-	out := make(map[string]titleStamp, len(m.cmds))
-	for _, ci := range m.cmds {
-		if ci.Title == "" {
-			continue
-		}
-		if prev, ok := m.titles[ci.ID]; ok && prev.title == ci.Title {
-			out[ci.ID] = prev
-			continue
-		}
-		out[ci.ID] = titleStamp{title: ci.Title, at: at}
-	}
-	return out
 }
 
 // switcherGroups joins the global project list (the ListProjects merge:
@@ -438,12 +563,13 @@ func matchCommandGroup(
 	return 0, false
 }
 
-// titleStamp is a command's current title and when it was first seen carrying
-// it. The monitor serves no title timestamp, so "when the title changed" is
-// observed here: each load compares the title it fetched against the one the
-// last load saw. A title that arrived before the TUI started therefore dates
-// from the first load, which puts every project's commands in one bucket until
-// something actually retitles — the honest answer, since nothing else is known.
+// titleStamp is a command's current title and when the monitor pushed it. The
+// monitor serves no title timestamp, so "when the title changed" is observed
+// here — but from the stream now, not from a poll: every change arrives as its
+// own push, and that arrival is the time (L4). A title a command was already
+// wearing when the TUI started dates from the snapshot the stream opens with,
+// which puts the commands subscribed together in one bucket until something
+// actually retitles — the honest answer, since nothing else is known.
 type titleStamp struct {
 	title string
 	at    time.Time
