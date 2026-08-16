@@ -111,7 +111,10 @@ main, final review addressed.**
 
 ## Next action
 
-None — done. Remaining follow-ups live in HANDOFF.md (upstream `--mux`
-window-index collision, symlink-workdir residual, Compose-tab cwd-only
-mark, layout-tab precedence UX). User away for this run: `[automatic]`
-decisions are D11–D14 amendments, D15–D23.
+None — done. Remaining follow-ups: three moved to `doc/plan/issue.md`
+(2026-08-17, user request — upstream `--mux` window-index collision,
+symlink-workdir residual, Compose-tab cwd-only mark, the last carrying the
+user's undecided lean toward dropping the TUI panel in favor of widgets);
+the layout-tab precedence UX stays in HANDOFF.md. User away for the
+implementation run: `[automatic]` decisions are D11–D14 amendments,
+D15–D23.

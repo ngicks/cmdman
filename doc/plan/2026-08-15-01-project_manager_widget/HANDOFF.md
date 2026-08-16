@@ -15,16 +15,9 @@ explicit selection, so this plan preserved that philosophy rather than
 redesigning it. **Follow-up**: a future plan may rank explicit user
 selection above ambient probes across the TUI; needs a UX decision.
 
-## `compose up --mux` collides on window index in a shared session (out-of-scope discovery, 2026-08-16)
+## `compose up --mux` collides on window index in a shared session — moved (2026-08-17)
 
-Bringing a *second* project up with `--mux` into a session that already
-holds one fails: `tmux new-window -d -t <session> …: create window failed:
-index 1 in use` — `-t <session>` resolves to the session's current window's
-*index*, so the insert collides once the current window is not the last
-(find-or-create path under `pkg/muxctl/tmux/`). Found while building the
-step-6 summon e2e (it forced the test's project B to be `create`d instead
-of brought up). **Follow-up**: fix window creation to append (`-a`) or pick
-an explicit free index; deserves its own small plan/commit.
+Moved to `doc/plan/issue.md` at the user's direction.
 
 ## ~~Pre-existing lint finding in e2e~~ — CLOSED, fixed upstream (2026-08-16)
 
@@ -66,22 +59,12 @@ coverage therefore asserts names on the explicit/token paths and replica counts
 only on the cwd path. **Follow-up**: thread `b.workDir` into the three loads;
 deserves its own commit, and a summon e2e that asserts a count.
 
-## Summon workdir is symlink-resolved; symlinked `work_dir:` still misses (out-of-scope discovery, 2026-08-16)
+## Summon workdir is symlink-resolved — moved (2026-08-17)
 
-D20's summon passes `ProjectInfo.Workdir`, which is
-`normalizePath`/`EvalSymlinks`-resolved (`cmdman/cli/tui_backend.go:82-96`),
-while compose identity deliberately preserves symlinks
-(`cmdman/compose/normalize.go:118-119`). Right whenever the stored label is
-symlink-free (the normal case — labels come from `os.Getwd()` or an explicit
-`--workdir`); a project whose `work_dir:` goes through a symlink would still
-resolve wrong. **Follow-up**: carry a raw-workdir field through
-`ProjectInfo`/`ProjectGroup` (design change; pre-existing hazard also noted
-at `cmdman/cli/tui_backend_compose.go:70-76`).
+Moved to `doc/plan/issue.md` at the user's direction.
 
-## Full TUI Compose-tab Active mark is still cwd-only (out-of-scope discovery, 2026-08-16)
+## Full TUI Compose-tab Active mark is still cwd-only — moved (2026-08-17)
 
-`cmdman/tui/state.go:371` marks the Compose tab's active project by cwd
-match only — it is not among D3's enumerated consumers (switcher Active
-mark, `resolveLayoutSelection`, project-manager), so step 3 deliberately did
-not convert it. **Follow-up**: fold it onto `ActiveIdentity` in a later
-change for full D3 consistency.
+Moved to `doc/plan/issue.md` at the user's direction, with the user's note
+that dropping the TUI panel from the `tui` subcommand in favor of new
+widgets is under consideration (undecided).
