@@ -5,6 +5,9 @@ or user-approved deferrals only.
 
 ## Pre-existing monitor data race (out-of-scope discovery, step 1)
 
+**Picked up 2026-08-16 by
+[../2026-08-16-02-monitor_proc_handle_race/](../2026-08-16-02-monitor_proc_handle_race/PLAN.md).**
+
 `Monitor.QueueStdin` (`cmdman/monitor/mon.go:421`), `SignalProcess`
 (`mon.go:464`) and `GetState` (`mon.go:484`) read `m.stdin` / `m.cmd`
 unguarded while `runOnce` nils both after `cmd.Wait()`
