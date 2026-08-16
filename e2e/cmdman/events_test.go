@@ -3,7 +3,11 @@ package cmdman_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +37,16 @@ func TestEvents_ReplayHistorical(t *testing.T) {
 			t.Errorf("expected event type %q in output, got types %v\nraw:\n%s",
 				w, sortedKeys(gotTypes), stdout)
 		}
+	}
+
+	// The event log lives in the runtime dir, not the data dir.
+	runtimePath := filepath.Join(env.runtimeDir, "events.log")
+	if _, err := os.Stat(runtimePath); err != nil {
+		t.Errorf("expected event log at %s, got err=%v", runtimePath, err)
+	}
+	dataPath := filepath.Join(env.dataHome, "events.log")
+	if _, err := os.Stat(dataPath); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected no event log at %s, got err=%v", dataPath, err)
 	}
 }
 
