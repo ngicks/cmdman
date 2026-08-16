@@ -413,6 +413,14 @@ at the new head. Note: local `main` had meanwhile advanced 18 commits past
 `864eca5` (live runtime-state feature); rebasing onto that tip is a
 separate, tree-changing step.
 
+**Completed 2026-08-17** (user confirmed): the branch was then rebased onto
+main's tip `a5c2dd7`. Main's runtime-state machinery is preserved intact;
+our switcher delta is purely additive on it, `ActiveIdentityCmd` stays on
+the list-refresh path (Init + ReloadTick) rather than the runtime-push
+path, and `core.Backend`/`FakeBackend` are the union of both features.
+Full suite green at the new head (225 e2e, 0 fail); backups
+`backup/pre-rebase-merge` and `backup/pre-rebase-tip` kept.
+
 ## D14 — `Shown` reports agreement only; disagreement renders unknown [automatic] (2026-08-16)
 
 **Choice**: `compose.Service.MuxScaleState` reports a service's shown-replica
