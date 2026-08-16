@@ -271,14 +271,19 @@ func (m Model) layout() (string, bool) {
 // The base is the row's live instance count (D11), which is why the reload
 // after every action matters — a `+` computed from a superseded count would
 // undo the scale before it.
+//
+// One replica is the floor because it is compose's own (applyScaleOverrides
+// rejects anything below 1): the step is refused here so the user reads a note
+// about their own keystroke rather than the reconciler's "invalid scale" — and
+// a row at 0 has nothing to take away either way.
 func (m Model) setScale(d int) (tea.Model, tea.Cmd) {
 	svc, ok := m.service()
 	if !ok {
 		return m, nil
 	}
 	want := svc.Replicas + d
-	if want < 0 {
-		m.note = svc.Name + " is already at 0 replicas"
+	if want < 1 {
+		m.note = svc.Name + " cannot scale below 1 replica"
 		return m, nil
 	}
 	m.pending = fmt.Sprintf("scaling %s to %d…", svc.Name, want)

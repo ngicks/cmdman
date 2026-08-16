@@ -13,8 +13,13 @@ import (
 )
 
 // managerWorkDir is the fixture project's work directory, the half of its
-// identity a compose file does not carry.
-const managerWorkDir = "/home/u/src/api"
+// identity a compose file does not carry; managerPath is the file itself, which
+// every action names beside the project's name so the backend loads the very
+// project the rows were read from.
+const (
+	managerWorkDir = "/home/u/src/api"
+	managerPath    = "/home/u/src/api/compose.yaml"
+)
 
 // managerFixture is the shape the widget was designed against: a cycle target
 // whose shown replica is known, one that is not a cycle target at all, a
@@ -23,7 +28,7 @@ const managerWorkDir = "/home/u/src/api"
 func managerFixture() core.ProjectManagerInfo {
 	return core.ProjectManagerInfo{
 		Project: "api",
-		Path:    "/home/u/src/api/compose.yaml",
+		Path:    managerPath,
 		// Not the directory the widget runs in: a summoned or token-bound panel
 		// stands somewhere else, and every action has to name this one (D20).
 		WorkDir: managerWorkDir,
@@ -34,7 +39,7 @@ func managerFixture() core.ProjectManagerInfo {
 		},
 		Layouts: core.LayoutsInfo{
 			Project: "api",
-			Path:    "/home/u/src/api/compose.yaml",
+			Path:    managerPath,
 			Names:   []string{"default", "wide", "debug"},
 			Current: 1,
 		},
@@ -100,8 +105,9 @@ func TestManagerLoadsOnOpen(t *testing.T) {
 		t.Errorf("an unanswered load should say so:\n%s", out)
 	}
 	msg := drainManagerCmd(t, m.Init())
-	if len(fb.ManagerReq) != 1 || fb.ManagerReq[0] != "" {
-		t.Fatalf("the opening load asked for %v, want one call with no project", fb.ManagerReq)
+	if len(fb.ManagerReq) != 1 || fb.ManagerReq[0] != "" || fb.ManagerPaths[0] != "" {
+		t.Fatalf("the opening load asked for project %v file %v, want one call naming neither",
+			fb.ManagerReq, fb.ManagerPaths)
 	}
 	m = updManager(t, m, msg)
 
@@ -174,7 +180,8 @@ func TestManagerMovementAndZone(t *testing.T) {
 }
 
 // TestManagerSetScale pins +/- : the count asked for is the row's live replica
-// count one step either way (D11's base), and 0 has no step down.
+// count one step either way (D11's base), named against the project's own file
+// and directory, and 1 is as low as the step goes.
 func TestManagerSetScale(t *testing.T) {
 	m, fb := seedManager(t, 80, 24)
 
@@ -183,7 +190,10 @@ func TestManagerSetScale(t *testing.T) {
 		t.Errorf("a scale in flight should show a pending line, got none")
 	}
 	m = updManager(t, m, msg)
-	want := coretest.ScaleCall{Project: "api", Workdir: managerWorkDir, Service: "web", Replicas: 4}
+	want := coretest.ScaleCall{
+		Project: "api", Path: managerPath, Workdir: managerWorkDir,
+		Service: "web", Replicas: 4,
+	}
 	if len(fb.ScalesSet) != 1 || fb.ScalesSet[0] != want {
 		t.Fatalf("+ recorded %v, want [%v]", fb.ScalesSet, want)
 	}
@@ -191,7 +201,10 @@ func TestManagerSetScale(t *testing.T) {
 	m = updManager(t, m, managerLoadedMsg{info: fb.ManagerInfo})
 	m, msg = pressManager(t, m, coretest.Kr("-"))
 	m = updManager(t, m, msg)
-	want = coretest.ScaleCall{Project: "api", Workdir: managerWorkDir, Service: "web", Replicas: 2}
+	want = coretest.ScaleCall{
+		Project: "api", Path: managerPath, Workdir: managerWorkDir,
+		Service: "web", Replicas: 2,
+	}
 	if len(fb.ScalesSet) != 2 || fb.ScalesSet[1] != want {
 		t.Fatalf("- recorded %v, want [.., %v]", fb.ScalesSet, want)
 	}
@@ -204,16 +217,37 @@ func TestManagerSetScale(t *testing.T) {
 		t.Fatalf("= recorded %v, want a third call to 4 replicas", fb.ScalesSet)
 	}
 
-	// worker has never been created: there is no replica to take away.
+	// db has one replica, which is compose's floor (applyScaleOverrides refuses
+	// anything below it): the step is refused here so the panel says so itself
+	// instead of relaying "invalid scale for db" from the reconciler.
 	m = updManager(t, m, managerLoadedMsg{info: fb.ManagerInfo})
 	m = updManager(t, m, coretest.Kr("j"))
+	m, _ = pressManager(t, m, coretest.Kr("-"))
+	if len(fb.ScalesSet) != 3 {
+		t.Fatalf("- at 1 replica should call nothing, got %v", fb.ScalesSet)
+	}
+	if !strings.Contains(m.note, "cannot scale below 1") {
+		t.Errorf("- at 1 replica should say so, note = %q", m.note)
+	}
+
+	// worker has never been created: there is no replica to take away either.
+	m = updManager(t, m, managerLoadedMsg{info: fb.ManagerInfo})
 	m = updManager(t, m, coretest.Kr("j"))
 	m, _ = pressManager(t, m, coretest.Kr("-"))
 	if len(fb.ScalesSet) != 3 {
 		t.Fatalf("- at 0 replicas should call nothing, got %v", fb.ScalesSet)
 	}
-	if !strings.Contains(m.note, "already at 0") {
+	if !strings.Contains(m.note, "cannot scale below 1") {
 		t.Errorf("- at 0 replicas should say so, note = %q", m.note)
+	}
+
+	// `+` off the floor is not blocked with it: a service at 0 is created by it.
+	m = updManager(t, m, managerLoadedMsg{info: fb.ManagerInfo})
+	m, msg = pressManager(t, m, coretest.Kr("+"))
+	m = updManager(t, m, msg)
+	if len(fb.ScalesSet) != 4 || fb.ScalesSet[3].Service != "worker" ||
+		fb.ScalesSet[3].Replicas != 1 {
+		t.Fatalf("+ at 0 replicas recorded %v, want a call scaling worker to 1", fb.ScalesSet)
 	}
 }
 
@@ -225,7 +259,9 @@ func TestManagerCycleScale(t *testing.T) {
 
 	m, msg := pressManager(t, m, coretest.Kr("l"))
 	m = updManager(t, m, msg)
-	want := coretest.CycleScaleCall{Project: "api", Workdir: managerWorkDir, Command: "web", Set: 0}
+	want := coretest.CycleScaleCall{
+		Project: "api", Path: managerPath, Workdir: managerWorkDir, Command: "web", Set: 0,
+	}
 	if len(fb.ScalesCycled) != 1 || fb.ScalesCycled[0] != want {
 		t.Fatalf("l recorded %v, want [%v]", fb.ScalesCycled, want)
 	}
@@ -233,7 +269,9 @@ func TestManagerCycleScale(t *testing.T) {
 	m = updManager(t, m, managerLoadedMsg{info: fb.ManagerInfo})
 	m, msg = pressManager(t, m, tea.KeyPressMsg{Code: tea.KeyLeft})
 	m = updManager(t, m, msg)
-	want = coretest.CycleScaleCall{Project: "api", Workdir: managerWorkDir, Command: "web", Set: 1}
+	want = coretest.CycleScaleCall{
+		Project: "api", Path: managerPath, Workdir: managerWorkDir, Command: "web", Set: 1,
+	}
 	if len(fb.ScalesCycled) != 2 || fb.ScalesCycled[1] != want {
 		t.Fatalf("left recorded %v, want [.., %v]", fb.ScalesCycled, want)
 	}
@@ -244,7 +282,9 @@ func TestManagerCycleScale(t *testing.T) {
 	m = updManager(t, m, managerLoadedMsg{info: wrapped})
 	m, msg = pressManager(t, m, coretest.Kr("h"))
 	m = updManager(t, m, msg)
-	want = coretest.CycleScaleCall{Project: "api", Workdir: managerWorkDir, Command: "web", Set: 3}
+	want = coretest.CycleScaleCall{
+		Project: "api", Path: managerPath, Workdir: managerWorkDir, Command: "web", Set: 3,
+	}
 	if len(fb.ScalesCycled) != 3 || fb.ScalesCycled[2] != want {
 		t.Fatalf("h at replica 1 recorded %v, want [.., %v]", fb.ScalesCycled, want)
 	}
@@ -286,6 +326,13 @@ func TestManagerLayoutKeys(t *testing.T) {
 	if len(fb.AppliedLayouts) != 1 || fb.AppliedLayouts[0] != "wide" {
 		t.Fatalf("enter applied %v, want [wide]", fb.AppliedLayouts)
 	}
+	// Both halves of the target travel with the layout: the file the panel
+	// loaded and the name it resolved to, so the layout is built on the
+	// dashboard the rows above were read from.
+	if fb.AppliedProjects[0] != "api" || fb.AppliedPaths[0] != managerPath {
+		t.Errorf("enter named project %q file %q, want api at %q",
+			fb.AppliedProjects[0], fb.AppliedPaths[0], managerPath)
+	}
 
 	m = updManager(t, m, managerLoadedMsg{info: fb.ManagerInfo})
 	m, msg = pressManager(t, m, coretest.Kr("c"))
@@ -293,47 +340,55 @@ func TestManagerLayoutKeys(t *testing.T) {
 	if len(fb.MuxCycled) != 1 || fb.MuxCycled[0] != "api" {
 		t.Fatalf("c cycled %v, want [api]", fb.MuxCycled)
 	}
+	if fb.MuxPaths[0] != managerPath {
+		t.Errorf("c named file %q, want %q", fb.MuxPaths[0], managerPath)
+	}
 }
 
-// TestManagerActionsNameTheLoadedWorkDir pins the other half of "the widget
-// acts on what it shows" (D20): the panel is summoned into, or bound to, a
-// window standing somewhere else entirely, so every one of the four actions has
-// to name the work directory the load resolved. One that leaves it out reaches
-// a project of the panel's own directory — a different project of the same
-// name, whose scale it would report as done.
-func TestManagerActionsNameTheLoadedWorkDir(t *testing.T) {
+// TestManagerActionsNameTheLoadedTarget pins the other half of "the widget acts
+// on what it shows" (D20/D21): the panel is summoned into, or bound to, a window
+// standing somewhere else entirely, so every one of the four actions has to name
+// the whole target the load resolved — the compose file and the work directory
+// it stands in. One that leaves the directory out reaches a project of the
+// panel's own directory instead, and one that leaves the file out is resolved
+// from the name alone, which is the panel's own probe chain all over again.
+func TestManagerActionsNameTheLoadedTarget(t *testing.T) {
 	m, fb := seedManager(t, 80, 24)
 
 	m, msg := pressManager(t, m, coretest.Kr("+"))
 	m = updManager(t, m, msg)
-	if len(fb.ScalesSet) != 1 || fb.ScalesSet[0].Workdir != managerWorkDir {
-		t.Fatalf("+ recorded %v, want the loaded work directory %q",
-			fb.ScalesSet, managerWorkDir)
+	if len(fb.ScalesSet) != 1 || fb.ScalesSet[0].Path != managerPath ||
+		fb.ScalesSet[0].Workdir != managerWorkDir {
+		t.Fatalf("+ recorded %v, want the loaded file %q in %q",
+			fb.ScalesSet, managerPath, managerWorkDir)
 	}
 
 	m = updManager(t, m, managerLoadedMsg{info: fb.ManagerInfo})
 	m, msg = pressManager(t, m, coretest.Kr("l"))
 	m = updManager(t, m, msg)
-	if len(fb.ScalesCycled) != 1 || fb.ScalesCycled[0].Workdir != managerWorkDir {
-		t.Fatalf("l recorded %v, want the loaded work directory %q",
-			fb.ScalesCycled, managerWorkDir)
+	if len(fb.ScalesCycled) != 1 || fb.ScalesCycled[0].Path != managerPath ||
+		fb.ScalesCycled[0].Workdir != managerWorkDir {
+		t.Fatalf("l recorded %v, want the loaded file %q in %q",
+			fb.ScalesCycled, managerPath, managerWorkDir)
 	}
 
 	m = updManager(t, m, managerLoadedMsg{info: fb.ManagerInfo})
 	m = updManager(t, m, coretest.KTab)
 	m, msg = pressManager(t, m, coretest.KEnter)
 	m = updManager(t, m, msg)
-	if len(fb.AppliedWorkdirs) != 1 || fb.AppliedWorkdirs[0] != managerWorkDir {
-		t.Fatalf("enter recorded %v, want the loaded work directory %q",
-			fb.AppliedWorkdirs, managerWorkDir)
+	if len(fb.AppliedWorkdirs) != 1 || fb.AppliedPaths[0] != managerPath ||
+		fb.AppliedWorkdirs[0] != managerWorkDir {
+		t.Fatalf("enter recorded file %v in %v, want %q in %q",
+			fb.AppliedPaths, fb.AppliedWorkdirs, managerPath, managerWorkDir)
 	}
 
 	m = updManager(t, m, managerLoadedMsg{info: fb.ManagerInfo})
 	m, msg = pressManager(t, m, coretest.Kr("c"))
 	updManager(t, m, msg)
-	if len(fb.MuxWorkdirs) != 1 || fb.MuxWorkdirs[0] != managerWorkDir {
-		t.Fatalf("c recorded %v, want the loaded work directory %q",
-			fb.MuxWorkdirs, managerWorkDir)
+	if len(fb.MuxWorkdirs) != 1 || fb.MuxPaths[0] != managerPath ||
+		fb.MuxWorkdirs[0] != managerWorkDir {
+		t.Fatalf("c recorded file %v in %v, want %q in %q",
+			fb.MuxPaths, fb.MuxWorkdirs, managerPath, managerWorkDir)
 	}
 }
 
@@ -362,9 +417,13 @@ func TestManagerReloadsAfterEveryAction(t *testing.T) {
 		if len(fb.ManagerReq) != before+1 {
 			t.Fatalf("%s: reload calls = %d, want %d", tc.name, len(fb.ManagerReq), before+1)
 		}
-		// The reload names the project the widget landed on, so it stays on it.
-		if got := fb.ManagerReq[before]; got != "api" {
-			t.Errorf("%s: reload asked for %q, want api", tc.name, got)
+		// The reload names the project the widget landed on, so it stays on it —
+		// its file with it, which is what makes the reload a re-read of the same
+		// project rather than of whatever the ambient probes now answer.
+		if got, gotPath := fb.ManagerReq[before], fb.ManagerPaths[before]; got != "api" ||
+			gotPath != managerPath {
+			t.Errorf("%s: reload asked for project %q file %q, want api at %q",
+				tc.name, got, gotPath, managerPath)
 		}
 	}
 }

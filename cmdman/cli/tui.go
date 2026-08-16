@@ -40,7 +40,9 @@ type TUIWidgetOptions struct {
 	Widget tui.Widget
 	// WorkDir overrides the effective work directory used to discover the
 	// cwd-active compose project ("" keeps the process CWD), as it does for
-	// RunTUI. It doubles as the explicit project target.
+	// RunTUI. It is not the explicit target — File/ProjectName are (D17) — but
+	// it travels with one: a project is (work directory, name), so it joins the
+	// explicit target's compose load too (D20).
 	WorkDir string
 	// NoQuit unbinds the widget's quit keys, which is how a frame pane always
 	// runs a widget (V6).

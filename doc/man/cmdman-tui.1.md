@@ -154,8 +154,12 @@ On top of the two above:
   an error, detection simply falls through to the probes under it.
 - `-f, --file PATH`: compose file of the project to manage, resolved the way
   [cmdman-compose(1)](./cmdman-compose.1.md) resolves `-f`.
-- `-p, --project-name NAME`: project name to manage, overriding the file's
-  top-level `name:`. Given on its own it also names the project's file.
+- `-p, --project-name NAME`: project name to manage. Given with `--file` it
+  overrides that file's top-level `name:`, as `cmdman compose`'s `-p` does.
+  Given on its own it names the project's file instead, resolved the way `-f`
+  resolves a bare name, and the file's own `name:` stands — the two spellings
+  would otherwise resolve one file into two differently named projects, only one
+  of which owns the stored commands.
 
 Either of `--file` and `--project-name` names the project outright, ahead of
 every detection probe — that is how the switcher's `m` targets the row under its

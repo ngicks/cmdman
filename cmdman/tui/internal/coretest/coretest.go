@@ -45,8 +45,13 @@ type FakeBackend struct {
 	AttachOut   string
 	AttachErr   error
 
-	MuxCycled   []string // project names passed to CycleMux
-	MuxWorkdirs []string // work directories passed to CycleMux, aligned with MuxCycled
+	// MuxCycled, MuxPaths and MuxWorkdirs are the project names, compose files
+	// and work directories passed to CycleMux, index-aligned. All three are
+	// recorded because all three are what name a project (D20): a call that
+	// dropped one would still look right against the name alone.
+	MuxCycled   []string
+	MuxPaths    []string
+	MuxWorkdirs []string
 	MuxErr      error
 
 	Switched  []core.SwitchTarget // targets passed to SwitchToProject
@@ -57,21 +62,27 @@ type FakeBackend struct {
 	LayoutsInfo core.LayoutsInfo // info returned by ListLayouts
 	LayoutsErr  error            // error returned by ListLayouts
 	LayoutsReq  []string         // project names passed to ListLayouts
-	// AppliedLayouts and AppliedWorkdirs are the layout names and work
-	// directories passed to ApplyLayout, index-aligned.
+	// AppliedLayouts, AppliedProjects, AppliedPaths and AppliedWorkdirs are the
+	// layout names, project names, compose files and work directories passed to
+	// ApplyLayout, index-aligned.
 	AppliedLayouts  []string
+	AppliedProjects []string
+	AppliedPaths    []string
 	AppliedWorkdirs []string
 	ApplyLayoutErr  error // error returned by ApplyLayout
 
-	ManagerInfo   core.ProjectManagerInfo // info returned by ProjectManager
-	ManagerErr    error                   // error returned by ProjectManager
-	ManagerReq    []string                // project names passed to ProjectManager
-	ScalesSet     []ScaleCall             // calls taken by SetScale
-	SetScaleErr   error                   // error returned by SetScale
-	ScalesCycled  []CycleScaleCall        // calls taken by CycleScale
-	CycleScaleErr error                   // error returned by CycleScale
-	Summoned      []SummonCall            // calls taken by SummonProjectManager
-	SummonErr     error                   // error returned by SummonProjectManager
+	ManagerInfo core.ProjectManagerInfo // info returned by ProjectManager
+	ManagerErr  error                   // error returned by ProjectManager
+	// ManagerReq and ManagerPaths are the project names and compose files
+	// passed to ProjectManager, index-aligned.
+	ManagerReq    []string
+	ManagerPaths  []string
+	ScalesSet     []ScaleCall      // calls taken by SetScale
+	SetScaleErr   error            // error returned by SetScale
+	ScalesCycled  []CycleScaleCall // calls taken by CycleScale
+	CycleScaleErr error            // error returned by CycleScale
+	Summoned      []SummonCall     // calls taken by SummonProjectManager
+	SummonErr     error            // error returned by SummonProjectManager
 
 	Definition     string   // text returned by ProjectDefinition
 	DefinitionErr  error    // error returned by ProjectDefinition
@@ -110,21 +121,23 @@ type FakeBackend struct {
 	WatchStreams map[string]*FakeRuntimeStateStream
 }
 
-// ScaleCall is one recorded [FakeBackend.SetScale] call. Workdir is the work
-// directory the caller named, which is half of the project the scale lands in
-// (D20).
+// ScaleCall is one recorded [FakeBackend.SetScale] call. Path is the compose
+// file the caller named and Workdir the work directory, which are the other
+// half of the project the scale lands in (D20).
 type ScaleCall struct {
 	Project  string
+	Path     string
 	Workdir  string
 	Service  string
 	Replicas int
 }
 
 // CycleScaleCall is one recorded [FakeBackend.CycleScale] call. Set is the
-// 1-based replica asked for, 0 meaning "advance to the next"; Workdir is what
-// it is on ScaleCall.
+// 1-based replica asked for, 0 meaning "advance to the next"; Path and Workdir
+// are what they are on ScaleCall.
 type CycleScaleCall struct {
 	Project string
+	Path    string
 	Workdir string
 	Command string
 	Set     int
@@ -227,8 +240,12 @@ func (f *FakeBackend) Attach(_ context.Context, id string) (string, error) {
 	return f.AttachOut, f.AttachErr
 }
 
-func (f *FakeBackend) CycleMux(_ context.Context, projectName, _, workDir string) error {
+func (f *FakeBackend) CycleMux(
+	_ context.Context,
+	projectName, composeFile, workDir string,
+) error {
 	f.MuxCycled = append(f.MuxCycled, projectName)
+	f.MuxPaths = append(f.MuxPaths, composeFile)
 	f.MuxWorkdirs = append(f.MuxWorkdirs, workDir)
 	return f.MuxErr
 }
@@ -251,27 +268,34 @@ func (f *FakeBackend) ListLayouts(
 	return f.LayoutsInfo, f.LayoutsErr
 }
 
-func (f *FakeBackend) ApplyLayout(_ context.Context, _, _, workDir, layoutName string) error {
+func (f *FakeBackend) ApplyLayout(
+	_ context.Context,
+	projectName, composeFile, workDir, layoutName string,
+) error {
 	f.AppliedLayouts = append(f.AppliedLayouts, layoutName)
+	f.AppliedProjects = append(f.AppliedProjects, projectName)
+	f.AppliedPaths = append(f.AppliedPaths, composeFile)
 	f.AppliedWorkdirs = append(f.AppliedWorkdirs, workDir)
 	return f.ApplyLayoutErr
 }
 
 func (f *FakeBackend) ProjectManager(
 	_ context.Context,
-	projectName, _ string,
+	projectName, composeFile string,
 ) (core.ProjectManagerInfo, error) {
 	f.ManagerReq = append(f.ManagerReq, projectName)
+	f.ManagerPaths = append(f.ManagerPaths, composeFile)
 	return f.ManagerInfo, f.ManagerErr
 }
 
 func (f *FakeBackend) SetScale(
 	_ context.Context,
-	projectName, _, workDir, service string,
+	projectName, composeFile, workDir, service string,
 	replicas int,
 ) error {
 	f.ScalesSet = append(f.ScalesSet, ScaleCall{
 		Project:  projectName,
+		Path:     composeFile,
 		Workdir:  workDir,
 		Service:  service,
 		Replicas: replicas,
@@ -281,11 +305,12 @@ func (f *FakeBackend) SetScale(
 
 func (f *FakeBackend) CycleScale(
 	_ context.Context,
-	projectName, _, workDir, command string,
+	projectName, composeFile, workDir, command string,
 	set int,
 ) error {
 	f.ScalesCycled = append(f.ScalesCycled, CycleScaleCall{
 		Project: projectName,
+		Path:    composeFile,
 		Workdir: workDir,
 		Command: command,
 		Set:     set,

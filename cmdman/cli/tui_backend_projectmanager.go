@@ -110,16 +110,21 @@ func serviceScaleInfos(
 // caller's directory, and the replicas are created in a project of that
 // directory's name — a scale reported as done that the panel's own counts never
 // move for.
+//
+// The name/file pair is read the way [compose.ResolveMuxSelectionByName] reads
+// it, so the scale lands in the project the panel loaded: alongside a file the
+// name overrides the file's name:, and on its own it is the file key.
 func (b *serviceBackend) SetScale(
 	ctx context.Context, projectName, composeFile, workDir, service string, replicas int,
 ) error {
 	opts := compose.ScaleOption{
-		File:    composeFile,
-		WorkDir: b.targetWorkDir(workDir),
-		Scales:  map[string]int{service: replicas},
+		File:        composeFile,
+		ProjectName: projectName,
+		WorkDir:     b.targetWorkDir(workDir),
+		Scales:      map[string]int{service: replicas},
 	}
 	if composeFile == "" {
-		opts.File = projectName
+		opts.File, opts.ProjectName = projectName, ""
 	}
 	result, err := b.compose.Scale(ctx, opts)
 	if err != nil {

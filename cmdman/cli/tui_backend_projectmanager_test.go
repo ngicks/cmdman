@@ -80,11 +80,15 @@ func TestResolveManagerSelectionPrefersTheExplicitTarget(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	// The target file declares a name of its own, different from the one the
+	// invocation passes: --project-name is `cmdman compose -p`, so it overrides
+	// the file's name: rather than merely repeating it, and a resolution that
+	// dropped the flag would answer with "onfile" here.
 	elsewhere := t.TempDir()
 	target := filepath.Join(elsewhere, "cmd-compose.yaml")
 	if err := os.WriteFile(
 		target,
-		[]byte(strings.Replace(muxComposeYAML, "name: tools", "name: elsewhere", 1)),
+		[]byte(strings.Replace(muxComposeYAML, "name: tools", "name: onfile", 1)),
 		0o644,
 	); err != nil {
 		t.Fatal(err)
@@ -99,7 +103,8 @@ func TestResolveManagerSelectionPrefersTheExplicitTarget(t *testing.T) {
 		t.Fatalf("explicit target: %v", err)
 	}
 	if sel.Project != "elsewhere" {
-		t.Errorf("explicit target resolved %q, want elsewhere", sel.Project)
+		t.Errorf("explicit target resolved %q, want the named project elsewhere "+
+			"(here is the cwd probe's answer, onfile the file's own name:)", sel.Project)
 	}
 	// The target names the project; --workdir is what says where it stands. Left
 	// out of the load, the work directory falls back to the process CWD — here,

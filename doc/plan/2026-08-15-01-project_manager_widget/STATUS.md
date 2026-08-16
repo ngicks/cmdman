@@ -1,6 +1,7 @@
 # STATUS — project-manager widget
 
-Current state: **plan finalized; implementation not started.**
+Current state: **implemented (steps 1–8 + D20/D21 fixes), merged with
+main, final review addressed.**
 
 ## Planning progress
 
@@ -19,6 +20,11 @@ Current state: **plan finalized; implementation not started.**
       (Replicas = live instance count). Verified unchanged: switcher keys
       (`m` free), `WidgetDefs`, `builtinComponents`, popup-path line refs,
       `compose_scale.go`, cited e2e test name.
+      **Correction (final review)**: this check compared the branch against
+      its own fork point, not main's tip — main was already 18 commits
+      ahead (statusbar removal, panel→switcher fold, `SwitchTarget`). The
+      drift surfaced at the final review gate and was resolved by the D22
+      merge; the D44-related conclusions above were unaffected.
 
 ## Implementation checklist (mirrors PLAN.md steps)
 
@@ -92,7 +98,20 @@ Current state: **plan finalized; implementation not started.**
       fixed (`TestTUIWidget_ProjectManagerActsOnTheProjectItShows`,
       reproduce-first)
 
+## Final gate (2026-08-16)
+
+- [x] Full sweep green pre-merge (build, vet, `go test ./... -count=1`
+      incl. tmux e2e, lint)
+- [x] ng-reviewer over the 11-commit diff: focus areas clean; one blocker
+      (stale fork point → resolved by the D22 merge with main) and six
+      minors — all addressed in the D23 batch (`-p` override semantics,
+      scale floor, D17-stale comment, coretest arg recording, outside-tmux
+      summon e2e; STATUS header fixed here)
+- [x] Post-merge + post-batch re-verification sweep
+
 ## Next action
 
-The final review + test gate. User away for this run: unclear corners are
-decided automatically and tagged `[automatic]` in DECISION.md.
+None — done. Remaining follow-ups live in HANDOFF.md (upstream `--mux`
+window-index collision, symlink-workdir residual, Compose-tab cwd-only
+mark, layout-tab precedence UX). User away for this run: `[automatic]`
+decisions are D11–D14 amendments, D15–D23.

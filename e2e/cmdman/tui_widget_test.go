@@ -402,6 +402,50 @@ func TestTUIWidget_SwitcherSummonsProjectManager(t *testing.T) {
 	client.send(t, "q")
 }
 
+// TestTUIWidget_SwitcherSummonWithNoPopupSaysWhy is the summon's other outcome
+// (D4/PLAN step 6): outside a multiplexer there is no popup to open, and the
+// switcher says so on its hint line rather than leaving m looking dead. Every
+// layer under the key is the real one here — SummonProjectManager, the popup
+// seam's driver inference, and tmux itself, whose complaint popupDiag folds
+// into the error the widget renders.
+func TestTUIWidget_SwitcherSummonWithNoPopupSaysWhy(t *testing.T) {
+	// The binary, not a server: the popup fails either way, but only a tmux that
+	// ran has something to say about it, and the folding of what it said is what
+	// this test pins.
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	wd := composeWorkdir(t)
+	const project = "swpopup"
+	writeComposeFile(t, wd, composeBasicYAML(project))
+
+	// tmuxTmpdirEnv over a fresh directory is both halves of "outside any
+	// multiplexer": $TMUX and $ZELLIJ are stripped, so nothing points the widget
+	// at a server, and TMUX_TMPDIR redirects the default socket to a directory
+	// that holds none — against the developer's own the popup would really open.
+	w := startWidgetEnv(t, ctx, env, wd, wd, "switcher", tmuxTmpdirEnv(t.TempDir()))
+	w.waitFor(t, filepath.Base(wd), 10*time.Second)
+
+	// The message is one line and wider than the default 80 columns. What the
+	// renderer clips is never written to the terminal at all, so the widening
+	// comes before the key rather than after it: a resize afterwards would redraw
+	// the view, but only if the widget still holds the message it clipped.
+	w.resize(t, 20, 200)
+	w.send(t, "m")
+
+	// The switcher's own framing, the seam the summon went through, and then the
+	// parentheses — popupDiag puts them there only when the popup process wrote
+	// to stderr and that output was folded into the error (cmdman/cli/tui.go:430).
+	// Which words tmux picks for a missing server is tmux's business and is not
+	// asserted.
+	for _, want := range []string{"manage " + project, "popup failed", "(exit status"} {
+		w.waitFor(t, want, 20*time.Second)
+	}
+	// A summon that found no popup is a message, not an ending.
+	w.quit(t)
+}
+
 // summonMuxYAML is a one-service project whose service name is unique to it, so
 // that name on a screen says which project's panel is being read. replicas > 1
 // declares a scale:, which is what makes the panel's ×N a reading of the store:

@@ -94,12 +94,20 @@ func ResolveMuxSelection(opts NormalizeOpts) (ProjectSelection, error) {
 // process CWD to answer: it is half of what identifies a project, so a caller
 // that knows it and leaves it out resolves the named file against wherever it
 // happens to be running. The resolved project must declare a "mux:" section.
+//
+// projectName means what `cmdman compose -p` means once composeFile names the
+// file: it overrides the file's top-level name:, so a caller holding both is
+// answered with the project it named rather than the one the file declares.
+// Without a file the name is the file key instead and the declared name: stands
+// — overriding it there would make `-f <name>` and `-p <name>` resolve the same
+// file into two differently named projects, and only one of them owns the
+// stored commands.
 func ResolveMuxSelectionByName(
 	projectName, composeFile, workDir string,
 ) (ProjectSelection, error) {
-	opts := NormalizeOpts{File: composeFile, WorkDir: workDir}
+	opts := NormalizeOpts{File: composeFile, ProjectName: projectName, WorkDir: workDir}
 	if composeFile == "" {
-		opts.File = projectName
+		opts.File, opts.ProjectName = projectName, ""
 	}
 	selection, err := LoadOrProject(opts)
 	if err != nil {

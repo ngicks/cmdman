@@ -205,6 +205,10 @@ Active naming (it reads the same `Active` flag) — accepted as D3's
 precedence redesign beyond this plan's scope; recorded in HANDOFF.md as a
 possible follow-up instead.
 
+**Amended by D22**: the statusbar clause is moot — main removed the
+statusbar widget (`c41a66c`) before this branch merged; the identity-first
+Active mark lives on in the merged switcher only.
+
 ## D16 — step-4 contract deviations from the fenced delta [automatic] (2026-08-16)
 
 **Choice**: two signatures diverge from PLAN's fenced Base-layer block, and
@@ -324,6 +328,36 @@ options-struct rework of `ResolveMuxSelectionByName` (its `File ←
 projectName` fallback is its reason to exist; `NormalizeOpts.ProjectName`
 means a different thing).
 
+**Amended by D23**: the parenthetical's second clause no longer holds —
+D23 wires `NormalizeOpts.ProjectName` after all (conditionally, when a
+file accompanies the name). The options-struct rejection itself stands.
+
+## D23 — `-p` overrides `name:` for the widget, matching compose [automatic] (2026-08-16)
+
+**Choice**: `ResolveMuxSelectionByName` seeds `NormalizeOpts.ProjectName`
+with the given project name — but only when a compose file accompanies it;
+a bare `-p` stays a file key (its `File ← projectName` fallback). `SetScale`
+mirrors it on `ScaleOption`. The final review found the flag help and man
+page promised compose's `-p` semantics ("overrides YAML `name:`") while the
+widget's resolver never honored it; compose's own chain
+(`compose.go:41-47` → `normalize.go:121-124`) does override, so the code
+was the bug and the docs stood.
+
+**Consequence, intended**: the switcher summon passes the row's stored
+label as `--project-name`, so a compose file whose `name:` was edited after
+its commands were created resolves to the stored label — the one the row's
+identity and counts are keyed by.
+
+**Rejected**: doc-side fix (would leave the widget's `-p` a decoy diverging
+from the compose family); unconditional override (a bare `-p foo` names the
+file stem — forcing it as the project label would manufacture the
+phantom-project class D20/D21 eliminated). Also fixed in this batch per the
+review: widget scale floor `< 1` matching compose's, coretest fakes
+recording project/file on all verbs, the D17-stale `WorkDir` comment, and
+the plan-promised outside-tmux summon e2e
+(`TestTUIWidget_SwitcherSummonWithNoPopupSaysWhy`, exercising `popupDiag`
+for real).
+
 ## D21 — the widget acts on the project it shows [automatic] (2026-08-16)
 
 **Choice**: `ProjectManagerInfo` carries `WorkDir` (the resolved selection's
@@ -349,6 +383,24 @@ directory on writes, matching the read path.
 context can change between load and keypress — the widget must act on what
 it rendered, not on where the client sits now); a stateful cached selection
 on `serviceBackend` (races with reloads).
+
+## D22 — merge main into the branch; re-land on the restructured tree [automatic] (2026-08-16)
+
+**Choice**: `git merge main` into the feature branch (merge commit
+`ead94bb`), preserving the per-step commit history the user asked for. The
+final review found the branch's fork point 18 commits behind main —
+including `c41a66c` (statusbar widget removed; `panel` folded into
+`switcher`) and `6f773b7` (`SwitchToProject` takes `tui.SwitchTarget`) —
+both merged to main hours before this branch's first commit; the branch's
+own "re-grounding" had compared against its fork point, not main's tip.
+Resolution: the identity mark, `m` summon, and hints re-landed in
+`cmdman/tui/widget/switcher/switcher.go`; statusbar edits dropped
+(`AltScreen` is main's unconditional `true`); `core.Backend` is the union
+of main's `SwitchTarget` method and this plan's five methods with their
+D20/D21 `workDir` parameters. Full suite verified at the merged tree.
+
+**Rejected**: rebasing (rewrites the 11 per-step commits); leaving the
+reconciliation to the user (a branch that cannot merge is not done).
 
 ## D14 — `Shown` reports agreement only; disagreement renders unknown [automatic] (2026-08-16)
 

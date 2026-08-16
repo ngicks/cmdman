@@ -73,7 +73,7 @@ through run-shell, which is expanded, to pass the window it was summoned from:
 	cmd.Flags().StringVarP(&flagFile, "file", "f", "",
 		"Compose file path of the project to manage")
 	cmd.Flags().StringVarP(&flagProjectName, "project-name", "p", "",
-		"Project name to manage (overrides YAML name:)")
+		"Project name to manage (with --file, overrides YAML name:; alone, names the file)")
 	_ = cmd.RegisterFlagCompletionFunc("file", completeComposeFile)
 
 	parent.AddCommand(cmd)

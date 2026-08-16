@@ -71,6 +71,31 @@ func TestResolveMuxSelectionByName(t *testing.T) {
 		assert.Error(t, err, `mux: project "named" has no mux section`)
 	})
 
+	t.Run("a name given beside a file overrides the file's name:", func(t *testing.T) {
+		_, cwd := muxTestEnv(t)
+		path := filepath.Join(cwd, "custom.yaml")
+		writeFile(t, path, muxComposeYAML("declared", ""))
+
+		// `-f FILE -p OTHER` is what it is for `cmdman compose`: the file is the
+		// file and the name is the project's, so the commands, the replica counts
+		// and the dashboard identity are OTHER's.
+		sel, err := compose.ResolveMuxSelectionByName("override", path, "")
+		assert.NilError(t, err)
+		assert.Equal(t, sel.Project, "override")
+	})
+
+	t.Run("a name standing in for the file leaves name: alone", func(t *testing.T) {
+		composeDir, _ := muxTestEnv(t)
+		writeFile(t, filepath.Join(composeDir, "byfile.yaml"), muxComposeYAML("declared", ""))
+
+		// Here the name is how the file is found at all. Overriding with it too
+		// would make this project a different one than `-f byfile` resolves —
+		// and the stored commands belong to that one.
+		sel, err := compose.ResolveMuxSelectionByName("byfile", "", "")
+		assert.NilError(t, err)
+		assert.Equal(t, sel.Project, "declared")
+	})
+
 	t.Run("work directory travels into the load", func(t *testing.T) {
 		_, cwd := muxTestEnv(t)
 		path := filepath.Join(cwd, "custom.yaml")
