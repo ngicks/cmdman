@@ -68,8 +68,12 @@ func NewRuntimeWatcher() *RuntimeWatcher {
 // Reconcile brings the held streams in line with a freshly loaded list:
 // commands listed in a state whose monitor serves a stream and not yet held are
 // subscribed, and streams for ids that vanished from the list or left those
-// states are dropped. It returns the dropped ids in sorted order so the caller
-// can evict what it cached for them without restating the state predicate.
+// states are dropped. It returns the ids this call dropped, in sorted order.
+//
+// The models do not evict against that return: it names only what a list load
+// dropped, and a stream that ended on its own was dropped inside the watcher
+// without any Reconcile ever naming it. They sweep their cache against the
+// freshly loaded list instead, which covers both.
 //
 // A subscribe that fails is silent: the row keeps the state it last showed and
 // the next Reconcile retries. ctx fathers every pump's context, so it must be
@@ -133,8 +137,10 @@ func (w *RuntimeWatcher) Close() error {
 	if !w.beginClose() {
 		return nil
 	}
-	// Every pump is cancelled by now, so none can park on a send or a receive.
-	// Waiting for them is what makes closing the merged channel safe.
+	// Every pump's context is cancelled by now — by beginClose while the sub was
+	// held, or by the pump itself before the send that outlives its drop — so
+	// none can park on a send or a receive. Waiting for them is what makes
+	// closing the merged channel safe.
 	_ = w.pumps.Wait()
 	close(w.updates)
 	return nil
@@ -171,6 +177,11 @@ func (w *RuntimeWatcher) pump(ctx context.Context, id string, sub *runtimeSub) e
 			return nil
 		case u, ok := <-sub.stream.Updates():
 			if !ok {
+				// Stopped before the drop, because dropping takes this sub out of
+				// the set Close cancels: without its own cancellation the final
+				// send below would be the one park nothing can end, and Close —
+				// which runs on the Update goroutine — would hang the TUI on it.
+				sub.stop()
 				w.dropEnded(id, sub)
 				w.send(ctx, RuntimeUpdateMsg{ID: id, Closed: true})
 				return nil
@@ -184,7 +195,18 @@ func (w *RuntimeWatcher) pump(ctx context.Context, id string, sub *runtimeSub) e
 
 // send hands one update to the merged channel, reporting whether it landed. The
 // lock is never held here: a parked send must not block a Reconcile or a Close.
+//
+// Room wins over a cancelled context, which is what the first offer is for: the
+// final Closed push comes from a pump that cancelled itself to stay closable, so
+// leaving both cases to one select would deliver it only about half the time
+// (the two-ready pick is random). A push that finds no room still parks; only
+// cancellation ends that park, dropping the push.
 func (w *RuntimeWatcher) send(ctx context.Context, msg RuntimeUpdateMsg) bool {
+	select {
+	case w.updates <- msg:
+		return true
+	default:
+	}
 	select {
 	case w.updates <- msg:
 		return true

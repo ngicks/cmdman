@@ -282,3 +282,94 @@ func TestRuntimeWatcherCloseWithParkedPush(t *testing.T) {
 	}
 	fb.WatchStreams["a"].WaitClosed(t)
 }
+
+// TestRuntimeWatcherCloseWithParkedEndedPush is the same teardown for the pump
+// of a stream that ended on its own. That pump has already left the held set, so
+// Close has nothing to cancel it by: its final Closed push must carry its own
+// cancellation, or quitting the TUI hangs on it (Close runs on the Update
+// goroutine).
+func TestRuntimeWatcherCloseWithParkedEndedPush(t *testing.T) {
+	fb := &coretest.FakeBackend{}
+	w := core.NewRuntimeWatcher()
+
+	live := []core.CommandInfo{cmdInfo("a", model.EventTypeRunning)}
+	w.Reconcile(t.Context(), fb, live)
+	ended := fb.WatchStreams["a"]
+	// Exactly what the merged channel buffers (runtimeUpdateBuffer), with nobody
+	// reading it: the pump forwards all of them, fills the channel, and only then
+	// finds the stream ended — so the push that parks is the Closed one.
+	for range 16 {
+		ended.PushState(core.RuntimeStateView{Title: "spam"})
+	}
+	ended.EndStream()
+
+	// A redial is the drop's only outward sign, and it can only happen once the
+	// pump forwarded all 16 and dropped its entry — which is to say once it is on
+	// the Closed push, with the channel full.
+	deadline := time.Now().Add(time.Second)
+	for len(fb.WatchIDs) < 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("the ended stream's pump never dropped its entry")
+		}
+		time.Sleep(time.Millisecond)
+		w.Reconcile(t.Context(), fb, live)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- w.Close() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("Close deadlocked against the ended stream's parked Closed push")
+	}
+	// Close waits for every pump, so the ended pump's release already ran.
+	ended.WaitClosed(t)
+}
+
+// TestRuntimeWatcherReloadChurnHoldsOneStream covers a reload loop against a
+// monitor that keeps ending its stream: each redial replaces the previous stream
+// rather than stacking another one, so a long session cannot accumulate pumps
+// (or streams) for a single command.
+func TestRuntimeWatcherReloadChurnHoldsOneStream(t *testing.T) {
+	fb := &coretest.FakeBackend{}
+	w := core.NewRuntimeWatcher()
+	t.Cleanup(func() { _ = w.Close() })
+
+	live := []core.CommandInfo{cmdInfo("a", model.EventTypeRunning)}
+	const rounds = 5
+	var ended []*coretest.FakeRuntimeStateStream
+	for i := range rounds {
+		w.Reconcile(t.Context(), fb, live)
+		if len(fb.WatchIDs) != i+1 {
+			t.Fatalf("subscribed %v on round %d, want one dial per reload", fb.WatchIDs, i)
+		}
+		stream := fb.WatchStreams["a"]
+		stream.EndStream()
+		// The Closed push is the pump's report that it dropped its entry, so the
+		// next round's Reconcile redials instead of seeing the id as still held.
+		if msg := recvUpdate(t, w); msg.ID != "a" || !msg.Closed {
+			t.Fatalf("update on round %d = %+v, want a's stream reported closed", i, msg)
+		}
+		ended = append(ended, stream)
+	}
+	for _, stream := range ended {
+		stream.WaitClosed(t) // a leaked pump would be a stream nobody released
+	}
+
+	// One live stream is what the churn leaves behind: the latest subscribe is
+	// held (open, still pushing), every earlier one is gone.
+	w.Reconcile(t.Context(), fb, live)
+	if len(fb.WatchIDs) != rounds+1 {
+		t.Fatalf("subscribed %v across the churn, want one dial per reload", fb.WatchIDs)
+	}
+	if got := fb.WatchClosed(); got != nil {
+		t.Errorf("held stream for %v is closed, want the last subscribe still open", got)
+	}
+	fb.WatchStreams["a"].PushState(core.RuntimeStateView{Title: "live again"})
+	if msg := recvUpdate(t, w); msg.ID != "a" || msg.State.Title != "live again" {
+		t.Errorf("update = %+v, want the surviving stream's push", msg)
+	}
+}
