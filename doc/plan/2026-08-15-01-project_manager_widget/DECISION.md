@@ -144,3 +144,59 @@ correct where both the label and a running-only count would drift.
 
 **Rejected**: `LabelScale`/`ScaleCount` (stale per D44); counting only
 running replicas (drifts low when a replica exits).
+
+## D12 — bind-key snippet wraps display-popup in run-shell [automatic] (2026-08-16)
+
+**Choice**: the documented binding is
+`bind-key -n M-p run-shell 'tmux display-popup -E … "cmdman tui widget
+project-manager --mux-token #{window_id}"'` — not a bare `display-popup`
+binding.
+
+**Rationale**: spike (NOTES.md Q1): tmux 3.7b does not format-expand
+`display-popup`'s shell-command (nor `-e VAR=…`); triggered from a real
+binding the child received the literal `#{window_id}`. `run-shell` **is**
+expanded; the run-shell form was verified end-to-end (token arrived `@1`,
+resolved to the project identity).
+
+**Rejected**: bare `display-popup` binding (broken); `-e` env carrier (not
+expanded either).
+
+## D13 — token resolves via ListWindows; window probe gated on `$TMUX` [automatic] (2026-08-16)
+
+**Choice**: `ActiveIdentity`'s token probe resolves the token by matching it
+against `ListWindows` rows (`Window.WindowID`), yielding identity and
+staleness in one call with no new driver surface. The enclosing-window probe
+runs `CurrentWindowID` only when the process is actually inside a mux
+(`$TMUX`/`$ZELLIJ` present — same guard as `cmdman/mux/frame.go:384-390`).
+
+**Rationale**: spike (NOTES.md Q1/Q2): `CurrentWindowID` is
+**client-relative**, not process-relative — it reports the attached client's
+displayed window, returns `ok=true` even outside tmux entirely, and with two
+clients silently returns the other client's window. Raw `@N`/`%N` tokens
+resolve server-globally as-is; on a stale token `ReadWindowState` swallows
+the error (`"", nil`) while `ListWindows` matching distinguishes
+"window gone" from "no identity".
+
+**Rejected**: `ReadWindowState(token, "window")` (`window` is not a declared
+`StateKey`; swallows staleness); a new driver `ResolveWindow` primitive (not
+needed); trusting `CurrentWindowID`'s `ok` (it has no honest "don't know").
+
+## D14 — `Shown` reports agreement only; disagreement renders unknown [automatic] (2026-08-16)
+
+**Choice**: `compose.Service.MuxScaleState` reports a service's shown-replica
+position only when every dashboard window of the project agrees; on
+disagreement the service is omitted from the map, so
+`ServiceScaleInfo.Shown=0` renders as unknown. The widget's error line for a
+failed cycle must not imply the cycle didn't happen (a stray identity-stamped
+window makes `cycle-scale` exit non-zero even when every real dashboard
+succeeded — `cmdman/mux/cycle_scale.go:145-151`).
+
+**Rationale**: spike (NOTES.md Q3): agreement is invocation-dependent, not an
+invariant — a session-scoped `cycle-scale -s sessA` left windows at `web=3`
+vs `web=2`, and the merged `ReadScaleState` read is last-row-wins
+(`cycle_scale.go:317-323`), silently contradicting what one session shows.
+Rendering a possibly-wrong number is worse than rendering unknown.
+
+**Rejected**: last-row-wins passthrough (silently wrong for one of the
+sessions); erroring on disagreement (blocks the whole view over one stale
+window).

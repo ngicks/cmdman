@@ -174,11 +174,13 @@ target):
   (`cmd/cmdman/commands/compose.go:33-48`), for disambiguation when a
   workdir holds more than one project.
 
-Documented tmux binding (`doc/man/cmdman-tui.1.md`, beside the launcher's):
+Documented tmux binding (`doc/man/cmdman-tui.1.md`, beside the launcher's).
+tmux does not format-expand `display-popup`'s shell-command (spike, NOTES.md
+Q1), so the binding wraps it in `run-shell`, which is expanded (D12):
 
 ```tmux
-bind-key -n M-p display-popup -E -w 80% -h 60% \
-  'cmdman tui widget project-manager --mux-token "#{window_id}"'
+bind-key -n M-p run-shell 'tmux display-popup -E -w 80% -h 60% \
+  "cmdman tui widget project-manager --mux-token #{window_id}"'
 ```
 
 ### core.Backend delta
@@ -233,9 +235,10 @@ type ProjectManagerInfo struct {
 // Replicas as the SetScale base.
 //
 // Shown comes from the project's persisted @cmdman_scale state via
-// compose.Service.MuxScaleState (cycle-scale writes every matching dashboard
-// window, so the windows' states should agree — the step-1 spike confirms
-// that consistency).
+// compose.Service.MuxScaleState. The spike (NOTES.md Q3) showed window
+// agreement is invocation-dependent, not an invariant, so per D14
+// MuxScaleState reports a service only when every dashboard window agrees;
+// disagreement omits it and Shown=0 renders as unknown.
 type ServiceScaleInfo struct {
     Name     string
     Replicas int
@@ -282,8 +285,10 @@ func (s *Service) Scale(ctx context.Context, opts ScaleOption) error
 // cmdman/compose — NEW: exported read of the shown-replica positions the
 // dashboards persist as @cmdman_scale state — today read only internally by
 // MuxUp (cmdman/compose/mux.go:70 via mux.ReadScaleState). Feeds
-// ServiceScaleInfo.Shown. Selection fields mirror the other Mux* ops; exact
-// shape aligned with MuxLsOption at implementation.
+// ServiceScaleInfo.Shown; agreement-only semantics per D14 (the raw merged
+// read is last-row-wins, mux/cycle_scale.go:317-323). Selection fields
+// mirror the other Mux* ops; exact shape aligned with MuxLsOption at
+// implementation.
 type MuxScaleStateOption struct {
     File        string
     ProjectName string
@@ -353,8 +358,11 @@ func (s *Service) MuxScaleState(ctx context.Context, opts MuxScaleStateOption) (
    `cmdman tui widget project-manager` launches a stub view; `frame` still
    rejects `component: project-manager`.
 3. **Detection.** Implement `ActiveIdentity` in `cmdman/cli/tui_backend*.go`
-   (token probe per step-1 findings, then enclosing-window probe via
-   `CurrentWindowID` + identity read); thread `MuxToken` from
+   per the spike findings: token probe matches the token against
+   `ListWindows` rows (D13 — identity + staleness in one call); the
+   enclosing-window probe runs `CurrentWindowID` only when `$TMUX`/`$ZELLIJ`
+   is present (D13 — it is client-relative with no honest "don't know",
+   NOTES.md Q1); thread `MuxToken` from
    `TUIWidgetOptions` into `serviceBackend` construction. Consume TUI-wide:
    switcher Active mark (`panel/switcher.go:62-63` becomes identity-first,
    workdir-equality fallback) and `resolveLayoutSelection`
@@ -405,14 +413,16 @@ func (s *Service) MuxScaleState(ctx context.Context, opts MuxScaleStateOption) (
 
 ## Risks
 
-- **`CurrentWindowID` inside `display-popup` / frame panes is unverified.**
-  Step 1 resolves this before anything builds on it; the token path (D10)
-  is the designed mitigation for popups.
-- **Token form vs driver expectations.** The token is a driver-native window
-  id, which existing `ReadWindowState`/`ListWindows` already accept — the
-  residual risk is only the failure mode of a stale/bogus token (window
-  closed between bind-time expansion and use); step 1 pins the observed
-  behavior, step 3 turns it into the D4 failure message.
+- ~~`CurrentWindowID` inside `display-popup` / frame panes is unverified.~~
+  Resolved by the spike (NOTES.md Q1): it is client-relative with no honest
+  failure mode — D13 gates it on `$TMUX`/`$ZELLIJ`; the token (D10) remains
+  the reliable carrier. `display-popup` with zero clients fails outright, so
+  the step-6 e2e must attach a client.
+- ~~Token form vs driver expectations.~~ Resolved by the spike (NOTES.md
+  Q2): raw `@N`/`%N` resolve server-globally as-is; stale tokens are
+  detected via `ListWindows` matching (D13) and feed the D4 message.
+- **Scale-state disagreement across windows** (NOTES.md Q3): handled by
+  D14's agreement-only `MuxScaleState` contract; step 4 owns it.
 - `RunTUIWidget` signature change fans out to frame/component argv and the
   `tui widget` subcommands — step 2 updates all callers in one commit.
 
@@ -432,6 +442,9 @@ func (s *Service) MuxScaleState(ctx context.Context, opts MuxScaleStateOption) (
 | D9 summon targets row under cursor                     | step 6       |
 | D10 token = highest-priority probe, opaque to cmdman   | steps 1, 3   |
 | D11 Replicas = live instance count, not `LabelScale`   | step 4       |
+| D12 bind-key snippet wraps display-popup in run-shell  | step 7       |
+| D13 token via `ListWindows`; window probe gated `$TMUX` | step 3      |
+| D14 Shown = agreement-only; cycle error wording        | steps 4, 5   |
 | IDEA UC1 (direct + bind-key run)                       | steps 2, 3, 4, 5, 7 |
 | IDEA UC2 (switcher summon)                             | step 6       |
 | IDEA UC3 (window-aware detection TUI-wide)             | step 3       |
