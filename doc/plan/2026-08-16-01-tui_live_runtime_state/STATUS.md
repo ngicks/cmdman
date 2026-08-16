@@ -1,6 +1,6 @@
 # Status — tui_live_runtime_state
 
-State: **implementing — step 1 done, step 2 in progress.**
+State: **implementing — steps 1-2 done, step 3 in progress.**
 
 ## Gate
 
@@ -27,9 +27,11 @@ State: **implementing — step 1 done, step 2 in progress.**
       `cmdman/cmdman_runtime_state_watch.go` + `_test.go`; L6
       [automatic] records the cancellation-is-clean call; HANDOFF.md
       records a pre-existing monitor race found en route
-- [ ] 2. `Backend.WatchRuntimeState` contract + cli impl + coretest
+- [x] 2. `Backend.WatchRuntimeState` contract + cli impl + coretest
       fake (D32: "Consumers: the TUI/switcher ... subscribe to
-      streams")
+      streams") — core/backend.go + alias.go + cli adapter
+      (park-not-drop pump, deviating from eventStream's drop since
+      updates carry rendered state) + coretest FakeRuntimeStateStream
 - [ ] 3. `core.RuntimeWatcher` reconcile/fan-in + unit tests (L2:
       "streams only carry ... for already-known commands, reconciled
       against each list reload")
