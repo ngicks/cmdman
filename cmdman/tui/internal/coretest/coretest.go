@@ -45,19 +45,23 @@ type FakeBackend struct {
 	AttachOut   string
 	AttachErr   error
 
-	MuxCycled []string // project names passed to CycleMux
-	MuxErr    error
+	MuxCycled   []string // project names passed to CycleMux
+	MuxWorkdirs []string // work directories passed to CycleMux, aligned with MuxCycled
+	MuxErr      error
 
 	Switched  []core.SwitchTarget // targets passed to SwitchToProject
 	SwitchErr error               // error returned by SwitchToProject
 	Hidden    int                 // HideFrame calls
 	HideErr   error               // error returned by HideFrame
 
-	LayoutsInfo    core.LayoutsInfo // info returned by ListLayouts
-	LayoutsErr     error            // error returned by ListLayouts
-	LayoutsReq     []string         // project names passed to ListLayouts
-	AppliedLayouts []string         // layout names passed to ApplyLayout
-	ApplyLayoutErr error            // error returned by ApplyLayout
+	LayoutsInfo core.LayoutsInfo // info returned by ListLayouts
+	LayoutsErr  error            // error returned by ListLayouts
+	LayoutsReq  []string         // project names passed to ListLayouts
+	// AppliedLayouts and AppliedWorkdirs are the layout names and work
+	// directories passed to ApplyLayout, index-aligned.
+	AppliedLayouts  []string
+	AppliedWorkdirs []string
+	ApplyLayoutErr  error // error returned by ApplyLayout
 
 	ManagerInfo   core.ProjectManagerInfo // info returned by ProjectManager
 	ManagerErr    error                   // error returned by ProjectManager
@@ -106,17 +110,22 @@ type FakeBackend struct {
 	WatchStreams map[string]*FakeRuntimeStateStream
 }
 
-// ScaleCall is one recorded [FakeBackend.SetScale] call.
+// ScaleCall is one recorded [FakeBackend.SetScale] call. Workdir is the work
+// directory the caller named, which is half of the project the scale lands in
+// (D20).
 type ScaleCall struct {
 	Project  string
+	Workdir  string
 	Service  string
 	Replicas int
 }
 
 // CycleScaleCall is one recorded [FakeBackend.CycleScale] call. Set is the
-// 1-based replica asked for, 0 meaning "advance to the next".
+// 1-based replica asked for, 0 meaning "advance to the next"; Workdir is what
+// it is on ScaleCall.
 type CycleScaleCall struct {
 	Project string
+	Workdir string
 	Command string
 	Set     int
 }
@@ -218,8 +227,9 @@ func (f *FakeBackend) Attach(_ context.Context, id string) (string, error) {
 	return f.AttachOut, f.AttachErr
 }
 
-func (f *FakeBackend) CycleMux(_ context.Context, projectName, _ string) error {
+func (f *FakeBackend) CycleMux(_ context.Context, projectName, _, workDir string) error {
 	f.MuxCycled = append(f.MuxCycled, projectName)
+	f.MuxWorkdirs = append(f.MuxWorkdirs, workDir)
 	return f.MuxErr
 }
 
@@ -241,8 +251,9 @@ func (f *FakeBackend) ListLayouts(
 	return f.LayoutsInfo, f.LayoutsErr
 }
 
-func (f *FakeBackend) ApplyLayout(_ context.Context, _, _, layoutName string) error {
+func (f *FakeBackend) ApplyLayout(_ context.Context, _, _, workDir, layoutName string) error {
 	f.AppliedLayouts = append(f.AppliedLayouts, layoutName)
+	f.AppliedWorkdirs = append(f.AppliedWorkdirs, workDir)
 	return f.ApplyLayoutErr
 }
 
@@ -256,11 +267,12 @@ func (f *FakeBackend) ProjectManager(
 
 func (f *FakeBackend) SetScale(
 	_ context.Context,
-	projectName, _, service string,
+	projectName, _, workDir, service string,
 	replicas int,
 ) error {
 	f.ScalesSet = append(f.ScalesSet, ScaleCall{
 		Project:  projectName,
+		Workdir:  workDir,
 		Service:  service,
 		Replicas: replicas,
 	})
@@ -269,11 +281,12 @@ func (f *FakeBackend) SetScale(
 
 func (f *FakeBackend) CycleScale(
 	_ context.Context,
-	projectName, _, command string,
+	projectName, _, workDir, command string,
 	set int,
 ) error {
 	f.ScalesCycled = append(f.ScalesCycled, CycleScaleCall{
 		Project: projectName,
+		Workdir: workDir,
 		Command: command,
 		Set:     set,
 	})

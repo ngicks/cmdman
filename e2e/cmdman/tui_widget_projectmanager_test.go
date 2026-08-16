@@ -79,6 +79,93 @@ func TestTUIWidget_ProjectManagerResolvesByToken(t *testing.T) {
 	w.quit(t)
 }
 
+// TestTUIWidget_ProjectManagerActsOnTheProjectItShows is the write half of the
+// token binding: `--mux-token <id>` and nothing else, the panel standing in a
+// directory that holds no project of its own. The read resolves the token's
+// project (D20), so every count on the screen is that project's — and `+` and
+// `l` have to reach the same one. A write that falls back to the panel's own
+// directory scales a project of that directory into existence instead and
+// reports it as done, leaving the project on screen untouched.
+func TestTUIWidget_ProjectManagerActsOnTheProjectItShows(t *testing.T) {
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	// The dashboard goes on tmux's default socket, kept private by TMUX_TMPDIR,
+	// so the widget's driver autodetection reaches the same server.
+	tmuxTmpdir := t.TempDir()
+	t.Cleanup(func() { killDefaultTmuxServer(t, tmuxTmpdir) })
+
+	const project, service = "pmwrite", "writesvc"
+	wd := composeWorkdir(t)
+	composePath := writeComposeFile(t, wd, summonMuxYAML(project, service, 3))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	if _, stderr, err := env.muxExecWithTmpdir(
+		ctx, tmuxTmpdir, "compose", "--workdir", wd, "-f", composePath, "up", "--mux",
+	); err != nil {
+		t.Fatalf("compose up --mux failed: %v\nstderr:\n%s", err, stderr)
+	}
+	window := "cmdman-" + project
+	waitForTmuxWindow(t, tmuxTmpdir, window, 30*time.Second)
+	wid := tmuxWindowIDTmpdir(t, tmuxTmpdir, window)
+
+	// No --workdir: the documented binding sends the token alone, so the panel's
+	// own directory is the only one the invocation carries — and it is not the
+	// project's. Its own commands are cleaned up too: a write that lands there
+	// leaves running replicas behind.
+	elsewhere := t.TempDir()
+	t.Cleanup(func() { cleanupProject(ctx, env, elsewhere, project) })
+	w := startWidgetEnv(t, ctx, env, "", elsewhere, "project-manager",
+		tmuxTmpdirEnv(tmuxTmpdir), "--mux-token", wid)
+
+	// The count has to be on screen before the key is sent: a key that arrives
+	// while the list is still loading selects no row and does nothing.
+	w.waitFor(t, "×3", 20*time.Second)
+	w.send(t, "+")
+	w.waitFor(t, service+" scaled to 4", 60*time.Second)
+
+	// Read the moment the scale reported back, before the row is expected to
+	// redraw: a scale that went elsewhere never redraws the row at all, and the
+	// store is what says which project it went to. The third count catches a
+	// phantom filed under any other label than the panel's own directory.
+	atProject := len(env.lsJSON(ctx,
+		"-l", "cmdman.compose.workdir="+wd,
+		"-l", "cmdman.compose.project="+project,
+	))
+	atPanel := len(env.lsJSON(ctx, "-l", "cmdman.compose.workdir="+elsewhere))
+	anywhere := len(env.lsJSON(ctx, "-l", "cmdman.compose.project="+project))
+	if atProject != 4 || atPanel != 0 || anywhere != 4 {
+		t.Fatalf("+ on the token path: the project holds %d replicas (want 4), "+
+			"the panel's own directory holds %d commands (want 0), and %d commands "+
+			"carry the project label anywhere (want 4); panel:\n%q",
+			atProject, atPanel, anywhere, w.snapshot())
+	}
+
+	// The count is redrawn in place, one cell of an otherwise unchanged row, so
+	// the row only reaches the captured stream whole once the widget repaints —
+	// and the repaint is also what says the reload behind the key has answered,
+	// which is what unblocks the next action key.
+	w.resize(t, 24, 80)
+	w.waitFor(t, "×4", 20*time.Second)
+
+	// The cycle is the same question asked of the dashboard: the position is
+	// persisted on the project's own window, which a cycle resolved against the
+	// panel's directory would never even find (it identifies a project that has
+	// no window). The note is drawn only once the reload behind it answered,
+	// which is what makes the state below readable — the pane is respawned
+	// before the position is written (cmdman/mux/cycle_scale.go:237-252).
+	w.send(t, "l")
+	w.waitFor(t, "cycled shown replica of "+service, 30*time.Second)
+	if got := tmuxWindowOptionTmpdir(t, tmuxTmpdir, window, "@cmdman_scale"); !strings.Contains(
+		got, service+"=2",
+	) {
+		t.Fatalf("@cmdman_scale = %q, want it to carry %s=2; panel:\n%q",
+			got, service, w.snapshot())
+	}
+	w.quit(t)
+}
+
 // TestTUIWidget_ProjectManagerBogusTokenNamesEveryProbe is D4 as amended by
 // D10: with a token that matches no window, no multiplexer around the process
 // and no project in its directory, the body is the trail of every probe that

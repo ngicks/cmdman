@@ -20,8 +20,17 @@ import (
 // none. Stdout is discarded so mux's attach hint never bleeds into the TUI
 // surface (the TUI runs inside tmux, so mux prints nothing anyway); no
 // SessionName is passed, so the current tmux session is targeted.
-func (b *serviceBackend) CycleMux(ctx context.Context, projectName, composeFile string) error {
-	selection, err := compose.ResolveMuxSelectionByName(projectName, composeFile, b.workDir)
+//
+// An empty workDir is the Compose tab's: its project came from the directory
+// this TUI works on, so the invocation's own override is the right one. The
+// project-manager widget names the loaded project's instead, which is the
+// directory its dashboard window is identified by (D20).
+func (b *serviceBackend) CycleMux(
+	ctx context.Context, projectName, composeFile, workDir string,
+) error {
+	selection, err := compose.ResolveMuxSelectionByName(
+		projectName, composeFile, b.targetWorkDir(workDir),
+	)
 	if err != nil {
 		return err
 	}
@@ -287,11 +296,13 @@ func layoutsOf(ctx context.Context, selection compose.ProjectSelection) tui.Layo
 
 // ApplyLayout applies the named layout to the project's running dashboard,
 // starting one at that layout when none is running (D6). It reuses CycleMux's
-// MuxUp path with an explicit layout selector.
+// MuxUp path with an explicit layout selector, workDir included.
 func (b *serviceBackend) ApplyLayout(
-	ctx context.Context, projectName, composeFile, layoutName string,
+	ctx context.Context, projectName, composeFile, workDir, layoutName string,
 ) error {
-	selection, err := compose.ResolveMuxSelectionByName(projectName, composeFile, b.workDir)
+	selection, err := compose.ResolveMuxSelectionByName(
+		projectName, composeFile, b.targetWorkDir(workDir),
+	)
 	if err != nil {
 		return err
 	}

@@ -282,7 +282,9 @@ func (m Model) setScale(d int) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.pending = fmt.Sprintf("scaling %s to %d…", svc.Name, want)
-	return m, setScaleCmd(m.bgCtx(), m.backend, m.info.Project, m.info.Path, svc.Name, want)
+	return m, setScaleCmd(
+		m.bgCtx(), m.backend, m.info.Project, m.info.Path, m.info.WorkDir, svc.Name, want,
+	)
 }
 
 // cycleScale is `l`/`h`: which replica the service's dashboard pane shows.
@@ -312,7 +314,9 @@ func (m Model) cycleScale(d int) (tea.Model, tea.Cmd) {
 		}
 	}
 	m.pending = "cycling shown replica of " + svc.Name + "…"
-	return m, cycleScaleCmd(m.bgCtx(), m.backend, m.info.Project, m.info.Path, svc.Name, set)
+	return m, cycleScaleCmd(
+		m.bgCtx(), m.backend, m.info.Project, m.info.Path, m.info.WorkDir, svc.Name, set,
+	)
 }
 
 func (m Model) applyLayout() (tea.Model, tea.Cmd) {
@@ -321,7 +325,9 @@ func (m Model) applyLayout() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.pending = "applying layout " + name + "…"
-	return m, applyLayoutCmd(m.bgCtx(), m.backend, m.info.Project, m.info.Path, name)
+	return m, applyLayoutCmd(
+		m.bgCtx(), m.backend, m.info.Project, m.info.Path, m.info.WorkDir, name,
+	)
 }
 
 func (m Model) cycleLayout() (tea.Model, tea.Cmd) {
@@ -333,7 +339,7 @@ func (m Model) cycleLayout() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.pending = "cycling layout…"
-	return m, cycleLayoutCmd(m.bgCtx(), m.backend, m.info.Project, m.info.Path)
+	return m, cycleLayoutCmd(m.bgCtx(), m.backend, m.info.Project, m.info.Path, m.info.WorkDir)
 }
 
 func (m Model) projectLabel() string {

@@ -630,6 +630,10 @@ func startWidget(
 // test drives (TMUX_TMPDIR), and for one whose resolution must be shown not to
 // ride on the process directory happening to be the target directory — a popup
 // runs wherever it was summoned from.
+//
+// An empty workDir omits --workdir entirely, which is the documented token
+// binding: the key sends nothing but --mux-token, so the process directory is
+// the only work directory the invocation carries.
 func startWidgetEnv(
 	t *testing.T,
 	ctx context.Context,
@@ -640,7 +644,11 @@ func startWidgetEnv(
 ) *widgetSession {
 	t.Helper()
 
-	args := append([]string{"tui", "widget", name, "--workdir", workDir}, extraArgs...)
+	args := []string{"tui", "widget", name}
+	if workDir != "" {
+		args = append(args, "--workdir", workDir)
+	}
+	args = append(args, extraArgs...)
 	cmd := exec.CommandContext(ctx, cmdmanBin, args...)
 	cmd.Dir = runDir
 	// The same three the test env pins for every other invocation: without the

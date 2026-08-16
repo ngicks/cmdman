@@ -82,6 +82,16 @@ Current state: **plan finalized; implementation not started.**
       (explicit compose target drops `--workdir`, so a summoned panel reads
       `×0` and its `+` creates a phantom command under the panel's own cwd).
 
+## Post-sweep fixes (in-scope defects found by step 8)
+
+- [x] D20 — work directory carried into the project-manager loads; summon
+      passes the row's `Workdir`; token-path read fixed (reproduce-first
+      e2e, HANDOFF entry closed; symlink residual ledgered)
+- [x] D21 — write verbs (`SetScale`/`CycleScale`/`ApplyLayout`/`CycleMux`)
+      act on the shown project's `info.WorkDir`; token-path phantom write
+      fixed (`TestTUIWidget_ProjectManagerActsOnTheProjectItShows`,
+      reproduce-first)
+
 ## Next action
 
 The final review + test gate. User away for this run: unclear corners are

@@ -110,6 +110,13 @@ type ProjectManagerInfo struct {
 	// so an action can target the same project the listing came from.
 	Project string
 	Path    string
+	// WorkDir is the resolved project's work directory — the other half of its
+	// identity, since a compose file names a project only together with the
+	// directory it stands in (D20). It is carried for the same reason Path is,
+	// and matters more: the widget is summoned into, or bound to, a window
+	// somewhere else entirely, so an action that leaves it out targets a project
+	// of the panel's own directory instead of the one on screen.
+	WorkDir string
 	// Services are the project's compose commands in definition order.
 	Services []ServiceScaleInfo
 	// Layouts is the same layout projection the Layout tab renders.
@@ -192,9 +199,12 @@ type Backend interface {
 
 	// CycleMux cycles the mux layout for a compose project by invoking the
 	// existing compose mux path. The TUI does not track layout state; mux owns
-	// its persisted tmux window marker. projectName identifies the project and
-	// composeFile (may be empty) is its compose file path.
-	CycleMux(ctx context.Context, projectName, composeFile string) error
+	// its persisted tmux window marker. projectName identifies the project,
+	// composeFile (may be empty) is its compose file path and workDir its work
+	// directory — empty means "the backend's own", which is what a caller whose
+	// project came from its own directory passes (see ProjectManagerInfo.WorkDir
+	// for the caller that does not).
+	CycleMux(ctx context.Context, projectName, composeFile, workDir string) error
 
 	// ListLayouts returns the current project's mux layouts in definition order
 	// plus the running dashboard's current layout marker (see LayoutsInfo). The
@@ -204,9 +214,10 @@ type Backend interface {
 	ListLayouts(ctx context.Context, projectName, composeFile string) (LayoutsInfo, error)
 	// ApplyLayout applies the named layout to the project's running dashboard,
 	// starting one at that layout when none is running. It wraps the same compose
-	// mux path as CycleMux with an explicit layout selector. projectName/composeFile
-	// identify the project as resolved by ListLayouts.
-	ApplyLayout(ctx context.Context, projectName, composeFile, layoutName string) error
+	// mux path as CycleMux with an explicit layout selector.
+	// projectName/composeFile/workDir identify the project the way CycleMux's do,
+	// as resolved by ListLayouts.
+	ApplyLayout(ctx context.Context, projectName, composeFile, workDir, layoutName string) error
 
 	// ProjectManager returns everything the project-manager widget renders for
 	// one project (see ProjectManagerInfo). The project is resolved the way
@@ -218,13 +229,22 @@ type Backend interface {
 	// the window its popup happens to open over.
 	ProjectManager(ctx context.Context, projectName, composeFile string) (ProjectManagerInfo, error)
 	// SetScale sets the replica count of one service, wrapping the compose
-	// scale path (ephemeral override + Up scoped to that service).
-	SetScale(ctx context.Context, projectName, composeFile, service string, replicas int) error
+	// scale path (ephemeral override + Up scoped to that service). The project
+	// is named the way CycleMux names it, and the widget passes the loaded
+	// view's own WorkDir: a scale that leaves it out creates the service in a
+	// project of the caller's directory and reports that as done.
+	SetScale(
+		ctx context.Context, projectName, composeFile, workDir, service string, replicas int,
+	) error
 	// CycleScale changes which replica the command's dashboard pane shows:
 	// set > 0 selects that 1-based replica, set == 0 advances to the next. It
 	// reaches every dashboard window of the project, which is what keeps their
-	// positions in agreement (see ServiceScaleInfo.Shown).
-	CycleScale(ctx context.Context, projectName, composeFile, command string, set int) error
+	// positions in agreement (see ServiceScaleInfo.Shown). The project is named
+	// as SetScale names it — the work directory is part of the identity the
+	// dashboard windows are found by.
+	CycleScale(
+		ctx context.Context, projectName, composeFile, workDir, command string, set int,
+	) error
 	// SummonProjectManager opens the project-manager widget in a multiplexer
 	// floating pane targeting the given project — the switcher's m (D7/D9). The
 	// project is named explicitly rather than detected, so the panel manages the

@@ -112,11 +112,13 @@ func (m Model) applySelectedLayout() (tea.Model, tea.Cmd) {
 	return m, m.applyLayoutCmd(m.layout.project, m.layout.path, name)
 }
 
+// applyLayoutCmd names no work directory: the Layout tab's project came from the
+// directory this TUI itself works on, which is what the backend falls back to.
 func (m Model) applyLayoutCmd(project, composeFile, layoutName string) tea.Cmd {
 	backend := m.backend
 	ctx := m.bgCtx()
 	return func() tea.Msg {
-		err := backend.ApplyLayout(ctx, project, composeFile, layoutName)
+		err := backend.ApplyLayout(ctx, project, composeFile, "", layoutName)
 		return layoutDoneMsg{project: project, layout: layoutName, err: err}
 	}
 }

@@ -43,6 +43,11 @@ type layoutCycledMsg struct {
 // The commands take their backend and the project rather than a model, the way
 // core's own do: the widget issues them off the update loop and the reply is
 // matched against what was asked for, not against the model that asked.
+//
+// Every action names the project the load resolved — file, name and work
+// directory all three (D20). The panel is summoned into, or bound to, a window
+// that stands somewhere else entirely, so an action that named less than the
+// load did would act on a different project than the one it is showing.
 func loadCmd(ctx context.Context, backend core.Backend, project, path string) tea.Cmd {
 	return func() tea.Msg {
 		info, err := backend.ProjectManager(ctx, project, path)
@@ -53,14 +58,14 @@ func loadCmd(ctx context.Context, backend core.Backend, project, path string) te
 func setScaleCmd(
 	ctx context.Context,
 	backend core.Backend,
-	project, path, service string,
+	project, path, workDir, service string,
 	replicas int,
 ) tea.Cmd {
 	return func() tea.Msg {
 		return scaleSetMsg{
 			service:  service,
 			replicas: replicas,
-			err:      backend.SetScale(ctx, project, path, service, replicas),
+			err:      backend.SetScale(ctx, project, path, workDir, service, replicas),
 		}
 	}
 }
@@ -68,25 +73,36 @@ func setScaleCmd(
 func cycleScaleCmd(
 	ctx context.Context,
 	backend core.Backend,
-	project, path, service string,
+	project, path, workDir, service string,
 	set int,
 ) tea.Cmd {
 	return func() tea.Msg {
 		return scaleCycledMsg{
 			service: service,
-			err:     backend.CycleScale(ctx, project, path, service, set),
+			err:     backend.CycleScale(ctx, project, path, workDir, service, set),
 		}
 	}
 }
 
-func applyLayoutCmd(ctx context.Context, backend core.Backend, project, path, name string) tea.Cmd {
+func applyLayoutCmd(
+	ctx context.Context,
+	backend core.Backend,
+	project, path, workDir, name string,
+) tea.Cmd {
 	return func() tea.Msg {
-		return layoutAppliedMsg{layout: name, err: backend.ApplyLayout(ctx, project, path, name)}
+		return layoutAppliedMsg{
+			layout: name,
+			err:    backend.ApplyLayout(ctx, project, path, workDir, name),
+		}
 	}
 }
 
-func cycleLayoutCmd(ctx context.Context, backend core.Backend, project, path string) tea.Cmd {
+func cycleLayoutCmd(
+	ctx context.Context,
+	backend core.Backend,
+	project, path, workDir string,
+) tea.Cmd {
 	return func() tea.Msg {
-		return layoutCycledMsg{err: backend.CycleMux(ctx, project, path)}
+		return layoutCycledMsg{err: backend.CycleMux(ctx, project, path, workDir)}
 	}
 }

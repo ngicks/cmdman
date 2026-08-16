@@ -45,8 +45,11 @@ func (b *serviceBackend) ProjectManager(
 	shown, _ := b.compose.MuxScaleState(ctx, compose.MuxScaleStateOption{Selection: selection})
 
 	return tui.ProjectManagerInfo{
-		Project:  selection.Project,
-		Path:     selection.Spec.ComposeFile,
+		Project: selection.Project,
+		Path:    selection.Spec.ComposeFile,
+		// The resolved directory, not the invocation's: the panel's actions have
+		// to reach the project the rows below were counted in (D20).
+		WorkDir:  selection.WorkDir,
 		Services: serviceScaleInfos(selection.Spec, counts, shown),
 		Layouts:  layoutsOf(ctx, selection),
 	}, nil
@@ -102,12 +105,17 @@ func serviceScaleInfos(
 // to that service. The per-replica outcomes are aggregated the way the CLI
 // aggregates them, so a scale that only partly landed is reported as a failure
 // rather than as done.
+//
+// workDir is the project's own (D20). Without it the file loads against the
+// caller's directory, and the replicas are created in a project of that
+// directory's name — a scale reported as done that the panel's own counts never
+// move for.
 func (b *serviceBackend) SetScale(
-	ctx context.Context, projectName, composeFile, service string, replicas int,
+	ctx context.Context, projectName, composeFile, workDir, service string, replicas int,
 ) error {
 	opts := compose.ScaleOption{
 		File:    composeFile,
-		WorkDir: b.workDir,
+		WorkDir: b.targetWorkDir(workDir),
 		Scales:  map[string]int{service: replicas},
 	}
 	if composeFile == "" {
@@ -126,9 +134,11 @@ func (b *serviceBackend) SetScale(
 // project moves together — a session-narrowed cycle is what makes the windows
 // disagree and their shown replica unknowable (D14).
 func (b *serviceBackend) CycleScale(
-	ctx context.Context, projectName, composeFile, command string, set int,
+	ctx context.Context, projectName, composeFile, workDir, command string, set int,
 ) error {
-	selection, err := compose.ResolveMuxSelectionByName(projectName, composeFile, b.workDir)
+	selection, err := compose.ResolveMuxSelectionByName(
+		projectName, composeFile, b.targetWorkDir(workDir),
+	)
 	if err != nil {
 		return err
 	}

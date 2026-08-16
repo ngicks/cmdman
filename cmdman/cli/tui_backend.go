@@ -70,6 +70,21 @@ func newServiceBackend(svc *cmdman.Service, target backendTarget) tui.Backend {
 
 func (b *serviceBackend) Cwd() string { return b.cwd }
 
+// targetWorkDir is the work directory a project-targeting action loads against:
+// the one the caller named, falling back to the invocation's own --workdir
+// override when it named none. A project is (work directory, name), so the two
+// travel together (D20) — the caller that names one is the project-manager
+// widget, whose project was resolved from a mux token or a summon and stands
+// wherever it stands, not where the panel does. The full TUI's layout verbs name
+// none: their project came from the directory the TUI itself works on, which is
+// what the fallback is.
+func (b *serviceBackend) targetWorkDir(workDir string) string {
+	if workDir != "" {
+		return workDir
+	}
+	return b.workDir
+}
+
 // currentDir returns the normalized working directory, or "" if unavailable.
 func currentDir() string {
 	wd, err := os.Getwd()

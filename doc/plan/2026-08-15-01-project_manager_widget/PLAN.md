@@ -207,25 +207,31 @@ type Backend interface {
     ProjectManager(ctx context.Context, projectName, composeFile string) (ProjectManagerInfo, error)
 
     // SetScale sets the replica count of one service, wrapping the compose
-    // scale path (ephemeral override + Up scoped to that service).
-    SetScale(ctx context.Context, projectName, composeFile, service string, replicas int) error
+    // scale path (ephemeral override + Up scoped to that service). workDir
+    // is the shown project's directory (D21); "" falls back to the
+    // backend's own workdir. CycleMux/ApplyLayout gained the same
+    // parameter.
+    SetScale(ctx context.Context, projectName, composeFile, workDir, service string, replicas int) error
 
     // CycleScale changes which replica the command's dashboard pane shows,
     // wrapping compose.Service.MuxCycleScale: set > 0 selects that 1-based
-    // replica; set == 0 advances to the next.
-    CycleScale(ctx context.Context, projectName, composeFile, command string, set int) error
+    // replica; set == 0 advances to the next. workDir as on SetScale (D21).
+    CycleScale(ctx context.Context, projectName, composeFile, workDir, command string, set int) error
 
     // SummonProjectManager opens the project-manager widget in a mux
     // floating pane targeting the given project — the switcher's m (D7/D9).
+    // workDir is the row's work directory (D20): compose identity hashes
+    // it, so the pair (composeFile, workDir) is the project's address.
     // Where no popup support exists the error is shown inline (D4).
-    SummonProjectManager(ctx context.Context, projectName, composeFile string) error
+    SummonProjectManager(ctx context.Context, projectName, composeFile, workDir string) error
 }
 
 // ProjectManagerInfo aggregates the project-manager view data, following the
 // LayoutsInfo projection convention.
 type ProjectManagerInfo struct {
     Project  string
-    Path     string
+    Path     string // compose file
+    WorkDir  string // resolved selection's work directory (D21)
     Services []ServiceScaleInfo
     Layouts  LayoutsInfo
 }

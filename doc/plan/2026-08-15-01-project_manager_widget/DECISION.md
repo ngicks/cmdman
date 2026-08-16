@@ -324,6 +324,32 @@ options-struct rework of `ResolveMuxSelectionByName` (its `File ←
 projectName` fallback is its reason to exist; `NormalizeOpts.ProjectName`
 means a different thing).
 
+## D21 — the widget acts on the project it shows [automatic] (2026-08-16)
+
+**Choice**: `ProjectManagerInfo` carries `WorkDir` (the resolved selection's
+work directory — the same one the counts were read from), and all four
+widget write verbs take a `workDir` parameter the widget fills from
+`info.WorkDir`: `SetScale`, `CycleScale`, `ApplyLayout`, `CycleMux`. The cli
+impls route through `(*serviceBackend).targetWorkDir`, which falls back to
+`b.workDir` when the parameter is empty — the full TUI's Layout tab passes
+`""` and keeps byte-identical behavior.
+
+**Rationale**: D20 fixed the token-path *read*, but the write verbs still
+built their compose loads from `b.workDir` (`""` on the documented
+token-only binding), so `+` scaled a phantom project into the panel's own
+cwd while reporting success. Reproduce-first e2e
+(`TestTUIWidget_ProjectManagerActsOnTheProjectItShows`): pre-fix, `+` left
+the real project at 3 replicas and put 4 commands under the panel's
+directory; post-fix the real project gains the replica and the panel's
+directory holds none. Read-your-writes on one directory also means an
+explicit `--workdir` on a token-bound panel loses to the shown project's
+directory on writes, matching the read path.
+
+**Rejected**: re-resolving the selection inside each write verb (ambient
+context can change between load and keypress — the widget must act on what
+it rendered, not on where the client sits now); a stateful cached selection
+on `serviceBackend` (races with reloads).
+
 ## D14 — `Shown` reports agreement only; disagreement renders unknown [automatic] (2026-08-16)
 
 **Choice**: `compose.Service.MuxScaleState` reports a service's shown-replica
