@@ -160,6 +160,64 @@ func (e *eventStream) pump() {
 func (e *eventStream) Signals() <-chan tui.EventSignal { return e.ch }
 func (e *eventStream) Close() error                    { return e.sub.Close() }
 
+// WatchRuntimeState subscribes to one command's monitor runtime-state stream:
+// the monitor answers with a snapshot and then pushes on change, until it
+// leaves an active state and the channel closes.
+func (b *serviceBackend) WatchRuntimeState(
+	ctx context.Context,
+	id string,
+) (tui.RuntimeStateStream, error) {
+	sub, err := b.svc.WatchRuntimeState(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	rs := &runtimeStateStream{
+		sub:  sub,
+		ch:   make(chan tui.RuntimeStateUpdate, 16),
+		done: make(chan struct{}),
+	}
+	go rs.pump()
+	return rs, nil
+}
+
+// Unlike eventStream, which may drop a coalesced re-list cue, every runtime
+// state carries what a row renders — so the pump parks on a full channel like
+// logStream's and lets Close unblock it, rather than dropping the push that
+// would have corrected the row.
+type runtimeStateStream struct {
+	sub       *cmdman.RuntimeStateSubscription
+	ch        chan tui.RuntimeStateUpdate
+	done      chan struct{}
+	closeOnce sync.Once
+}
+
+func (r *runtimeStateStream) pump() {
+	defer close(r.ch)
+	for rec := range r.sub.Records() {
+		update := tui.RuntimeStateUpdate{
+			State: tui.RuntimeStateView{
+				Title:      rec.State.Title,
+				Status:     rec.State.Status,
+				Detail:     rec.State.Detail,
+				BellUnread: rec.State.BellUnread,
+			},
+			Err: rec.Err,
+		}
+		select {
+		case r.ch <- update:
+		case <-r.done:
+			return
+		}
+	}
+}
+
+func (r *runtimeStateStream) Updates() <-chan tui.RuntimeStateUpdate { return r.ch }
+
+func (r *runtimeStateStream) Close() error {
+	r.closeOnce.Do(func() { close(r.done) })
+	return r.sub.Close()
+}
+
 // Logs opens a sticky Tail+Follow reader and streams its lines. Sticky keeps
 // the preview live across command restarts: when the running instance exits, a
 // meta line records it and the reader resumes on the next start — so the
