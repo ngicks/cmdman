@@ -125,6 +125,13 @@ func TestNormalize_Errors(t *testing.T) {
 			want:    `unknown component "clock"`,
 		},
 		{
+			// A widget is not a component: project-manager is popup-summoned
+			// only, so a def naming it is as unknown as a clock (D6).
+			name:    "widget that is not a built-in component",
+			content: "frame:\n  - edge: top\n    size: 2\n    component: project-manager\n",
+			want:    `unknown component "project-manager"`,
+		},
+		{
 			name: "managed on a component entry",
 			content: "frame:\n  - edge: top\n    size: 2\n    component: switcher\n" +
 				"    managed: true\n",

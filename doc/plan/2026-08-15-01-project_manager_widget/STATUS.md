@@ -27,8 +27,11 @@ Current state: **plan finalized; implementation not started.**
       (2026-08-16; findings recorded as D12–D14 [automatic], plan amended:
       run-shell bind-key form, ListWindows token resolution + `$TMUX` gate,
       agreement-only Shown)
-- [ ] Step 2 — registration plumbing; D6 "does **not** join
-      `builtinComponents`" held; D8 `--mux-token` flag lands
+- [x] Step 2 — registration plumbing; D6 "does **not** join
+      `builtinComponents`" held (spec_test.go rejection row); D8
+      `--mux-token` flag lands (2026-08-16; stub model until step 5;
+      `tui.WidgetProjectManager` alias re-export added beyond the fenced
+      delta — cmd layer names widgets via alias.go like every sibling)
 - [ ] Step 3 — detection: D3 "TUI-wide … cwd fallback"; D10 "highest-priority
       detection probe"; D4 "message naming both probes that failed"; D13
       "token probe … against `ListWindows` rows … only when
@@ -49,5 +52,5 @@ Current state: **plan finalized; implementation not started.**
 
 ## Next action
 
-Step 2 (registration plumbing). User away for this run: unclear corners are
-decided automatically and tagged `[automatic]` in DECISION.md.
+Step 3 (detection). User away for this run: unclear corners are decided
+automatically and tagged `[automatic]` in DECISION.md.

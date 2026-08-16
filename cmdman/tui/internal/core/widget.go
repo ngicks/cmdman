@@ -20,6 +20,10 @@ const (
 	// WidgetLauncher is the quick-launch selector: locations left, their compose
 	// projects right. It is the view a mux key binding summons as a popup (D3).
 	WidgetLauncher
+	// WidgetProjectManager is the project-manager shortcut panel: scale,
+	// shown-replica cycling, and layout cycling for one project. Popup-
+	// summoned like the launcher; never a frame component (D6).
+	WidgetProjectManager
 )
 
 // WidgetDef is one row of WidgetDefs.
@@ -35,6 +39,7 @@ type WidgetDef struct {
 var WidgetDefs = []WidgetDef{
 	{WidgetSwitcher, "switcher"},
 	{WidgetLauncher, "launcher"},
+	{WidgetProjectManager, "project-manager"},
 }
 
 // WidgetKeys returns the widget CLI tokens in declaration order.

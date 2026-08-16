@@ -4,7 +4,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ngicks/cmdman/cmdman/cli"
-	"github.com/ngicks/cmdman/cmdman/tui"
 )
 
 func tuiWidgetCmd(parent *cobra.Command, rf *rootFlags) {
@@ -28,19 +27,18 @@ in the frame.`,
 
 	tuiWidgetSwitcherCmd(cmd, rf, &flagNoQuit)
 	tuiWidgetLauncherCmd(cmd, rf, &flagNoQuit)
+	tuiWidgetProjectManagerCmd(cmd, rf, &flagNoQuit)
 
 	parent.AddCommand(cmd)
 }
 
-// runTuiWidget is shared by every widget subcommand: they differ only in which
-// widget they name.
+// runTuiWidget is shared by every widget subcommand: they differ only in the
+// options they name.
 func runTuiWidget(
 	cmd *cobra.Command,
 	_ []string,
 	rf *rootFlags,
-	widget tui.Widget,
-	workDir string,
-	noQuit bool,
+	opts cli.TUIWidgetOptions,
 ) error {
 	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
@@ -48,5 +46,5 @@ func runTuiWidget(
 	}
 	defer svc.Close()
 
-	return cli.RunTUIWidget(cmd.Context(), svc, widget, workDir, noQuit)
+	return cli.RunTUIWidget(cmd.Context(), svc, opts)
 }

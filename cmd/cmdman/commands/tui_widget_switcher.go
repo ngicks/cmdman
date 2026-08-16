@@ -3,6 +3,7 @@ package commands
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/tui"
 )
 
@@ -22,7 +23,11 @@ takes the frame down, and q quits unless --no-quit was given.`,
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTuiWidget(cmd, args, rf, tui.WidgetSwitcher, flagWorkDir, *noQuit)
+			return runTuiWidget(cmd, args, rf, cli.TUIWidgetOptions{
+				Widget:  tui.WidgetSwitcher,
+				WorkDir: flagWorkDir,
+				NoQuit:  *noQuit,
+			})
 		},
 	}
 

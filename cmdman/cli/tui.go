@@ -30,26 +30,43 @@ func RunTUI(ctx context.Context, svc *cmdman.Service, initialTab tui.Tab, workDi
 	})
 }
 
+// TUIWidgetOptions is what a `cmdman tui widget <name>` invocation carries into
+// RunTUIWidget: the widget to run plus the flags that name the project it works
+// on.
+type TUIWidgetOptions struct {
+	// Widget is the widget mode to run. Required: WidgetNone would run the full
+	// TUI, which is RunTUI's job.
+	Widget tui.Widget
+	// WorkDir overrides the effective work directory used to discover the
+	// cwd-active compose project ("" keeps the process CWD), as it does for
+	// RunTUI. It doubles as the explicit project target.
+	WorkDir string
+	// NoQuit unbinds the widget's quit keys, which is how a frame pane always
+	// runs a widget (V6).
+	NoQuit bool
+	// MuxToken is the opaque mux window token the caller was summoned from
+	// (D10), "" when unset. cmdman never parses it; the driver resolves it.
+	MuxToken string
+	// File and ProjectName name the compose file and the project, mirroring
+	// `cmdman compose`'s -f/-p, for a workdir holding more than one project.
+	File        string
+	ProjectName string
+}
+
 // RunTUIWidget runs a single TUI widget standalone in the current terminal —
 // the `cmdman tui widget <name>` entry point, which is also what a frame def's
-// `component:` resolves to. workDir mirrors RunTUI's override; noQuit unbinds
-// the widget's quit keys, which is how a frame pane always runs it (V6).
+// `component:` resolves to.
 //
 // Every widget takes the alternate screen: the switcher owns a whole pane and
-// the launcher a whole popup window, and both want it clean.
-func RunTUIWidget(
-	ctx context.Context,
-	svc *cmdman.Service,
-	widget tui.Widget,
-	workDir string,
-	noQuit bool,
-) error {
+// the launcher and the project manager a whole popup window, and all of them
+// want it clean.
+func RunTUIWidget(ctx context.Context, svc *cmdman.Service, opts TUIWidgetOptions) error {
 	return tui.Run(ctx, tui.Options{
-		Backend:   newServiceBackend(svc, workDir),
+		Backend:   newServiceBackend(svc, opts.WorkDir),
 		Version:   libver.Version,
 		AltScreen: true,
-		Widget:    widget,
-		NoQuit:    noQuit,
+		Widget:    opts.Widget,
+		NoQuit:    opts.NoQuit,
 	})
 }
 

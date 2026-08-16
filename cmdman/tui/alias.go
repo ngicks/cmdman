@@ -69,9 +69,10 @@ func NumTabs() int { return core.NumTabs() }
 type Widget = core.Widget
 
 const (
-	WidgetNone     = core.WidgetNone
-	WidgetSwitcher = core.WidgetSwitcher
-	WidgetLauncher = core.WidgetLauncher
+	WidgetNone           = core.WidgetNone
+	WidgetSwitcher       = core.WidgetSwitcher
+	WidgetLauncher       = core.WidgetLauncher
+	WidgetProjectManager = core.WidgetProjectManager
 )
 
 // WidgetKeys returns the widget CLI tokens in declaration order.

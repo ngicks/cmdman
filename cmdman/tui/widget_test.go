@@ -9,6 +9,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 	"github.com/ngicks/cmdman/cmdman/tui/internal/coretest"
 	"github.com/ngicks/cmdman/cmdman/tui/widget/launcher"
+	"github.com/ngicks/cmdman/cmdman/tui/widget/projectmanager"
 	"github.com/ngicks/cmdman/cmdman/tui/widget/switcher"
 )
 
@@ -63,6 +64,11 @@ func TestWidgetOptionSelectsModel(t *testing.T) {
 	got := newProgramModel(ctx, core.Options{Backend: fb, Widget: core.WidgetLauncher})
 	if _, ok := got.(launcher.Model); !ok {
 		t.Errorf("WidgetLauncher should run the launcher model, got %T", got)
+	}
+
+	got = newProgramModel(ctx, core.Options{Backend: fb, Widget: core.WidgetProjectManager})
+	if _, ok := got.(projectmanager.Model); !ok {
+		t.Errorf("WidgetProjectManager should run the project-manager model, got %T", got)
 	}
 
 	got = newProgramModel(ctx, core.Options{Backend: fb, Widget: core.WidgetSwitcher})
