@@ -1,6 +1,6 @@
 # Status — tui_live_runtime_state
 
-State: **implementing — steps 1-2 done, step 3 in progress.**
+State: **implementing — steps 1-3 done, step 4 in progress.**
 
 ## Gate
 
@@ -32,9 +32,11 @@ State: **implementing — steps 1-2 done, step 3 in progress.**
       streams") — core/backend.go + alias.go + cli adapter
       (park-not-drop pump, deviating from eventStream's drop since
       updates carry rendered state) + coretest FakeRuntimeStateStream
-- [ ] 3. `core.RuntimeWatcher` reconcile/fan-in + unit tests (L2:
+- [x] 3. `core.RuntimeWatcher` reconcile/fan-in + unit tests (L2:
       "streams only carry ... for already-known commands, reconciled
-      against each list reload")
+      against each list reload") — core/runtime_watch.go + _test.go;
+      full verify matrix incl. failed-subscribe-silent (criterion 5);
+      Reconcile returns dropped ids for step 4's cache eviction
 - [ ] 4. Root TUI wiring + cache; drop TUI one-shot fan-out (L3: "drop
       the one-shot `RuntimeStates` fan-out from the TUI's list path")
 - [ ] 5. Switcher wiring; restamp on push (L4: "stamps title-change
