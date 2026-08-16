@@ -1,6 +1,6 @@
 # Status — tui_live_runtime_state
 
-State: **implementing — steps 1-4 done, step 5 in progress.**
+State: **implementing — steps 1-5 done, steps 6-7 in progress.**
 
 ## Gate
 
@@ -43,8 +43,11 @@ State: **implementing — steps 1-4 done, step 5 in progress.**
       closes watcher, ListCommands passes nil runtime; eviction via
       merge-time sweep (L7 [automatic]); no-flash + ignore-unknown-id
       tests in runtime_test.go
-- [ ] 5. Switcher wiring; restamp on push (L4: "stamps title-change
+- [x] 5. Switcher wiring; restamp on push (L4: "stamps title-change
       time when the pushed update arrives"); D22 bell suppression holds
+      — watcher + cache in switcher Model, stampTitle on push arrival
+      replaces load-time stampTitles; bucket-move / bell-read /
+      no-flash / unknown-id tests, mutation-checked
 - [ ] 6. Docs + stale-comment cleanup (tui man page; the
       `tui_backend_commands.go:26` "later phase" note)
 - [ ] 7. e2e: title change with no lifecycle event reaches the TUI
