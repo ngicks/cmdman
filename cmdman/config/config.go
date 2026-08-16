@@ -144,13 +144,14 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// EventLogPath returns the configured event log file path. It lives next
-// to the SQLite database.
+// EventLogPath returns the configured event log file path. It lives in the
+// runtime dir, so it is ephemeral: it is cleared with the runtime dir, e.g. on
+// reboot.
 func (c Config) EventLogPath() (string, error) {
-	if c.DataDir == "" {
-		return "", errors.New("cmdman config: data dir is empty")
+	if c.RuntimeDir == "" {
+		return "", errors.New("cmdman config: runtime dir is empty")
 	}
-	return filepath.Join(c.DataDir, "events.log"), nil
+	return filepath.Join(c.RuntimeDir, "events.log"), nil
 }
 
 // DBPath returns the configured SQLite database path.

@@ -23,7 +23,7 @@ The value passed to --format has this shape (Go field name, type, JSON key):
 
   Config
   ├─ .DataDir                 string       # database and command dirs  (data_dir)
-  ├─ .RuntimeDir              string       # sockets and pid files      (runtime_dir)
+  ├─ .RuntimeDir              string       # sockets, pids, event log   (runtime_dir)
   ├─ .DefaultWorkingDir       string       # cwd for new commands       (default_working_dir)
   ├─ .DefaultEnvironment      []string     # env handed to commands     (not serialized)
   ├─ .DefaultScrollbackBytes  int          # scrollback ring size       (default_scrollback_bytes)

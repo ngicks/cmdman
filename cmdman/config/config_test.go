@@ -130,6 +130,21 @@ func TestPartialConfig_Apply(t *testing.T) {
 	})
 }
 
+// The event log is runtime state: it lives in the runtime dir, not beside the
+// SQLite database.
+func TestConfig_EventLogPath(t *testing.T) {
+	t.Run("under the runtime dir", func(t *testing.T) {
+		got, err := Config{RuntimeDir: "/base/runtime"}.EventLogPath()
+		assert.NilError(t, err)
+		assert.Equal(t, got, filepath.Join("/base/runtime", "events.log"))
+	})
+
+	t.Run("empty runtime dir errors", func(t *testing.T) {
+		_, err := Config{DataDir: "/base/data"}.EventLogPath()
+		assert.ErrorContains(t, err, "runtime dir is empty")
+	})
+}
+
 func TestLoad_ConfigFileBeatsDefaults(t *testing.T) {
 	home := configTestEnv(t)
 
