@@ -70,10 +70,19 @@ Current state: **plan finalized; implementation not started.**
       flag verified mentioned; frame.5 verified correct as-is; two stale
       PLAN claims fixed (arrows row, `--workdir`-as-target superseded by
       D17) and the cobra Long's `--workdir` sentence corrected to match
-- [ ] Step 8 — test sweep incl. new e2e (detection, summon, scale/cycle)
+- [x] Step 8 — test sweep incl. new e2e — done 2026-08-16. Four e2e added in
+      `e2e/cmdman/tui_widget_projectmanager_test.go`: D10 token detection from
+      outside the project's window and directory (with a negative control run:
+      dropping `--mux-token` fails), the D4 probe trail under a bogus token,
+      `+` scaling a live service through the widget (row and store both), and
+      `l` cycling the shown replica (pane title, `@cmdman_scale`, badge).
+      Sweep green: `go test ./... -count=1`, `go test ./e2e/cmdman -count=1`,
+      `golangci-lint run ./...` (0 issues); e2e ran three times without a
+      flake. One out-of-scope product bug found and logged in HANDOFF.md
+      (explicit compose target drops `--workdir`, so a summoned panel reads
+      `×0` and its `+` creates a phantom command under the panel's own cwd).
 
 ## Next action
 
-Step 8 (test sweep), then the final review + test gate. User away for this
-run: unclear corners are decided automatically and tagged `[automatic]` in
-DECISION.md.
+The final review + test gate. User away for this run: unclear corners are
+decided automatically and tagged `[automatic]` in DECISION.md.

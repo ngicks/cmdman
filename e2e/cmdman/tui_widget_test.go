@@ -689,6 +689,17 @@ func (w *widgetSession) send(t *testing.T, keys string) {
 	}
 }
 
+// resize changes the widget's terminal size. The renderer only writes the cells
+// that changed, so a value updated in place never reaches the captured stream as
+// the whole row it sits in; a resize is what makes the widget draw the screen it
+// is currently showing rather than the difference from the last one.
+func (w *widgetSession) resize(t *testing.T, rows, cols uint16) {
+	t.Helper()
+	if err := pty.Setsize(w.ptmx, &pty.Winsize{Rows: rows, Cols: cols}); err != nil {
+		t.Fatalf("resize the widget's terminal to %dx%d: %v", rows, cols, err)
+	}
+}
+
 func (w *widgetSession) quit(t *testing.T) {
 	t.Helper()
 	w.quitWith(t, "q")
