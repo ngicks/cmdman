@@ -1,6 +1,6 @@
 # Status — tui_live_runtime_state
 
-State: **implementing — steps 1-3 done, step 4 in progress.**
+State: **implementing — steps 1-4 done, step 5 in progress.**
 
 ## Gate
 
@@ -37,8 +37,12 @@ State: **implementing — steps 1-3 done, step 4 in progress.**
       against each list reload") — core/runtime_watch.go + _test.go;
       full verify matrix incl. failed-subscribe-silent (criterion 5);
       Reconcile returns dropped ids for step 4's cache eviction
-- [ ] 4. Root TUI wiring + cache; drop TUI one-shot fan-out (L3: "drop
+- [x] 4. Root TUI wiring + cache; drop TUI one-shot fan-out (L3: "drop
       the one-shot `RuntimeStates` fan-out from the TUI's list path")
+      — watcher + runtime cache in Model, RuntimeUpdateMsg arm, quit
+      closes watcher, ListCommands passes nil runtime; eviction via
+      merge-time sweep (L7 [automatic]); no-flash + ignore-unknown-id
+      tests in runtime_test.go
 - [ ] 5. Switcher wiring; restamp on push (L4: "stamps title-change
       time when the pushed update arrives"); D22 bell suppression holds
 - [ ] 6. Docs + stale-comment cleanup (tui man page; the

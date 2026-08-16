@@ -7,6 +7,19 @@ in PLAN.md).
 
 ## Resolved
 
+- **L7 — cache eviction is a merge-time sweep, not the dropped-ids
+  return [automatic]** (agent, 2026-08-16, step 4). The plan said
+  "evict cache entries for ids the reconcile dropped", but a stream
+  that ends on its own is dropped inside the watcher and no later
+  `Reconcile` ever names it — consuming only the return would leave a
+  re-started command wearing its previous run's title/bell (D13
+  violation). Instead `mergeRuntime` sweeps the cache against each
+  freshly loaded list (`cmdman/tui/runtime.go:145-160`), which covers
+  everything the return would have named plus that case; pinned by
+  `TestSelfEndedStreamLeavesNothingForTheNextRun`. Rejected: evicting
+  on `Closed{ID}` (races a redial's snapshot across two pumps and can
+  blank a live row). `Reconcile`'s dropped-ids return stays but is
+  unused by the models.
 - **L6 — cancellation is a clean stream end [automatic]** (agent,
   2026-08-16, step 1). A `WatchRuntimeState` receive error observed
   while the subscription's own context is cancelled (`Close()`, or the
