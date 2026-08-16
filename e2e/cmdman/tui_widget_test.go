@@ -244,6 +244,71 @@ func TestTUIWidget_LauncherStartsFromAnywhere(t *testing.T) {
 	w.quitWith(t, "\x03")
 }
 
+// TestTUIWidget_SwitcherMarksWindowProject is D3's detection end to end: the
+// switcher run inside a project's dashboard window must mark that project
+// active even though the process is standing somewhere else entirely. No cwd
+// match can produce the mark here — the ownership stamp on the enclosing window
+// is the only thing that says where the user is.
+func TestTUIWidget_SwitcherMarksWindowProject(t *testing.T) {
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	// The dashboard goes on tmux's default socket, kept private by TMUX_TMPDIR,
+	// so the widget's driver autodetection reaches the same server.
+	tmuxTmpdir := t.TempDir()
+	t.Cleanup(func() { killDefaultTmuxServer(t, tmuxTmpdir) })
+
+	wd := composeWorkdir(t)
+	const project = "swwindow"
+	composePath := writeComposeFile(t, wd, launcherMuxYAML(project))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	if _, stderr, err := env.muxExecWithTmpdir(
+		ctx, tmuxTmpdir, "compose", "--workdir", wd, "-f", composePath, "up", "--mux",
+	); err != nil {
+		t.Fatalf("compose up --mux failed: %v\nstderr:\n%s", err, stderr)
+	}
+	window := "cmdman-" + project
+	waitForTmuxWindow(t, tmuxTmpdir, window, 30*time.Second)
+	wid := tmuxWindowIDTmpdir(t, tmuxTmpdir, window)
+
+	// The dashboard window is built detached, so it is not its session's current
+	// one — and the window probe is client-relative, answering with whatever the
+	// session currently displays. Selecting it is what puts the probe in the
+	// position a process running in one of its panes would be in.
+	tmuxRunWithTmpdir(t, tmuxTmpdir, "select-window", "-t", wid)
+
+	// $TMUX is the whole of what a pane process inherits that says which window
+	// it is in: the driver passes no target and never reads $TMUX_PANE, so the
+	// answer follows the session named here (verified against a live tmux).
+	inWindow := append(tmuxTmpdirEnv(tmuxTmpdir), "TMUX="+tmuxEnvValue(t, tmuxTmpdir, wid))
+
+	// Unrelated on both counts the cwd probe could match: the process directory
+	// and the --workdir override.
+	elsewhere := t.TempDir()
+	w := startWidgetEnv(t, ctx, env, elsewhere, elsewhere, "switcher", inWindow)
+	// The head is the project's own directory, so its presence proves the row is
+	// the project's — and "active" beside it is the mark under test.
+	w.waitFor(t, filepath.Base(wd), 10*time.Second)
+	w.waitFor(t, "active", 10*time.Second)
+	w.quit(t)
+}
+
+// tmuxEnvValue builds the $TMUX value tmux exports into the panes of windowID's
+// session: "<socket path>,<server pid>,<session number>".
+func tmuxEnvValue(t *testing.T, tmuxTmpdir, windowID string) string {
+	t.Helper()
+	out := tmuxRunWithTmpdir(t, tmuxTmpdir, "display-message", "-p", "-t", windowID,
+		"#{socket_path}\t#{pid}\t#{session_id}")
+	fields := strings.Split(out, "\t")
+	if len(fields) != 3 {
+		t.Fatalf("unexpected tmux display-message output %q", out)
+	}
+	// #{session_id} renders as "$0"; $TMUX carries the bare number.
+	return fields[0] + "," + fields[1] + "," + strings.TrimPrefix(fields[2], "$")
+}
+
 // tmuxWindowOptionTmpdir reads a window option from the default-socket server
 // under tmuxTmpdir, addressing the window by name.
 func tmuxWindowOptionTmpdir(t *testing.T, tmuxTmpdir, windowName, option string) string {

@@ -20,12 +20,17 @@ type serviceBackend struct {
 	// workDir is the raw --workdir override ("" when not given). It overrides the
 	// effective work directory used for cwd-active compose project discovery.
 	workDir string
+	// muxToken is the opaque --mux-token the caller was summoned with ("" when
+	// unset). It is the highest-priority active-project probe (D10); cmdman
+	// never parses it, the driver resolves it.
+	muxToken string
 }
 
 // newServiceBackend builds a tui.Backend over the given cmdman service. workDir
 // is the --workdir override: when set it replaces the process CWD as the
 // effective work directory for cwd-active grouping and project discovery.
-func newServiceBackend(svc *cmdman.Service, workDir string) tui.Backend {
+// muxToken is the --mux-token the invocation carried, "" when it carried none.
+func newServiceBackend(svc *cmdman.Service, workDir, muxToken string) tui.Backend {
 	cwd := currentDir()
 	if workDir != "" {
 		cwd = normalizePath(workDir)
@@ -35,9 +40,10 @@ func newServiceBackend(svc *cmdman.Service, workDir string) tui.Backend {
 		// The frame seam travels with the compose service because the TUI's
 		// layout verbs go through MuxUp, whose default_frame auto-show may hold a
 		// managed entry.
-		compose: compose.NewService(svc, compose.WithFrameSvc(NewFrameSvc(svc))),
-		cwd:     cwd,
-		workDir: workDir,
+		compose:  compose.NewService(svc, compose.WithFrameSvc(NewFrameSvc(svc))),
+		cwd:      cwd,
+		workDir:  workDir,
+		muxToken: muxToken,
 	}
 }
 

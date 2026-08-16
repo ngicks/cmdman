@@ -32,10 +32,14 @@ Current state: **plan finalized; implementation not started.**
       `--mux-token` flag lands (2026-08-16; stub model until step 5;
       `tui.WidgetProjectManager` alias re-export added beyond the fenced
       delta — cmd layer names widgets via alias.go like every sibling)
-- [ ] Step 3 — detection: D3 "TUI-wide … cwd fallback"; D10 "highest-priority
-      detection probe"; D4 "message naming both probes that failed"; D13
-      "token probe … against `ListWindows` rows … only when
-      `$TMUX`/`$ZELLIJ` is present"
+- [x] Step 3 — detection: D3 "TUI-wide … cwd fallback"; D10 "highest-priority
+      detection probe"; D4 "message naming both probes that failed" (token ·
+      window · cwd trail); D13 "token probe … against `ListWindows` rows …
+      only when `$TMUX`/`$ZELLIJ` is present" (2026-08-16; e2e
+      `TestTUIWidget_SwitcherMarksWindowProject` with negative control;
+      D15 [automatic] precedence call; statusbar inherits identity-first
+      Active; two discoveries in HANDOFF.md; `mux.CurrentWindowID` wrapper
+      per D13 amendment)
 - [ ] Step 4 — backend ops: D2 mapping (SetScale = replica count,
       CycleScale = shown replica, layouts = existing methods); D11 "Replicas
       … is the per-service instance count … not `LabelScale`"; D14 "reports
@@ -52,5 +56,5 @@ Current state: **plan finalized; implementation not started.**
 
 ## Next action
 
-Step 3 (detection). User away for this run: unclear corners are decided
+Step 4 (backend ops). User away for this run: unclear corners are decided
 automatically and tagged `[automatic]` in DECISION.md.

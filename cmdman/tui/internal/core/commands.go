@@ -18,6 +18,14 @@ type ProjectsLoadedMsg struct {
 	Err   error
 }
 
+// ActiveIdentityLoadedMsg carries the active project's mux ownership stamp (see
+// Backend.ActiveIdentity). OK false means no probe answered and the consumer is
+// back to matching the working directory.
+type ActiveIdentityLoadedMsg struct {
+	Identity string
+	OK       bool
+}
+
 // ProjectSwitchedMsg reports a switcher selection: the client either moved to
 // the project's window or came back with the reason it did not.
 type ProjectSwitchedMsg struct {
@@ -43,6 +51,16 @@ func ListProjectsCmd(ctx context.Context, backend Backend) tea.Cmd {
 	return func() tea.Msg {
 		infos, err := backend.ListProjects(ctx)
 		return ProjectsLoadedMsg{Infos: infos, Err: err}
+	}
+}
+
+// ActiveIdentityCmd asks which project the caller is sitting in (D3). The probe
+// talks to the multiplexer, so it runs off the update loop beside the listings
+// rather than as the plain accessor Cwd() is.
+func ActiveIdentityCmd(ctx context.Context, backend Backend) tea.Cmd {
+	return func() tea.Msg {
+		identity, ok := backend.ActiveIdentity(ctx)
+		return ActiveIdentityLoadedMsg{Identity: identity, OK: ok}
 	}
 }
 

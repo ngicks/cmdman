@@ -181,6 +181,30 @@ the error (`"", nil`) while `ListWindows` matching distinguishes
 `StateKey`; swallows staleness); a new driver `ResolveWindow` primitive (not
 needed); trusting `CurrentWindowID`'s `ok` (it has no honest "don't know").
 
+**Amended 2026-08-16 [automatic]** (step-3 implementation): pane-form tokens
+(`%N`) do **not** resolve — `ListWindows` rows carry window ids only. D10's
+"maybe pane id" open detail closes as unsupported; the documented binding
+uses `#{window_id}`, so nothing documented breaks. Also: token resolution
+required a new thin exported wrapper `mux.CurrentWindowID`
+(`cmdman/mux/current.go`, mirroring `mux.List`) because `resolveServer` is
+unexported — a scoped deviation from PLAN's "`cmdman/mux`: no change" line,
+which was written about the scale ops.
+
+## D15 — layout-tab probe precedence kept; statusbar inherits identity [automatic] (2026-08-16)
+
+**Choice**: `resolveLayoutSelection` puts the identity probe ahead of its
+existing cwd → by-name chain exactly as PLAN step 3 states, even though that
+means an explicit Compose-tab selection is overridden whenever the user sits
+in any cmdman-owned window. The pre-existing chain already preferred ambient
+context (cwd) over the explicit selection, so this preserves, not changes,
+the precedence philosophy. The docked statusbar also inherits identity-first
+Active naming (it reads the same `Active` flag) — accepted as D3's
+"TUI-wide" working as intended.
+
+**Rejected**: ranking the explicit selection above ambient detection — a
+precedence redesign beyond this plan's scope; recorded in HANDOFF.md as a
+possible follow-up instead.
+
 ## D14 — `Shown` reports agreement only; disagreement renders unknown [automatic] (2026-08-16)
 
 **Choice**: `compose.Service.MuxScaleState` reports a service's shown-replica

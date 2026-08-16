@@ -121,6 +121,11 @@ type Backend interface {
 	// active-project detection. It returns "" when the working directory
 	// cannot be determined.
 	Cwd() string
+	// ActiveIdentity resolves the active project's mux ownership stamp
+	// (ProjectInfo.Identity) from, in order, the explicit mux token the
+	// backend was constructed with, then the enclosing mux window. ok=false
+	// means neither probe answered; callers fall back to Cwd() matching.
+	ActiveIdentity(ctx context.Context) (identity string, ok bool)
 
 	// Start starts a command that is not currently running or starting.
 	Start(ctx context.Context, id string) error

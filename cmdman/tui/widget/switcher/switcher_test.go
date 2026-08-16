@@ -42,7 +42,7 @@ func TestSwitcherGroupsJoin(t *testing.T) {
 
 	// No title stamps: every command falls into the no-title bucket, so the
 	// ordering under test is the one inside a bucket (by name).
-	groups := switcherGroups(projs, cmds, "/work/blog", nil)
+	groups := switcherGroups(projs, cmds, "/work/blog", "", nil)
 
 	var got []string
 	for _, g := range groups {
@@ -65,6 +65,74 @@ func TestSwitcherGroupsJoin(t *testing.T) {
 	}
 	if !groups[0].Active {
 		t.Errorf("the cwd project should be marked active")
+	}
+}
+
+// TestSwitcherGroupsActiveIdentityFirst is D3's mark: the window the caller sits
+// in names the project, and the working directory only answers when no window
+// did. The two disagree here on purpose — a popup or a docked pane runs wherever
+// it was summoned from, which is exactly the case a cwd match gets wrong.
+func TestSwitcherGroupsActiveIdentityFirst(t *testing.T) {
+	projs := []core.ProjectInfo{
+		{Name: "api", Workdir: "/work/api", Identity: "h1-api"},
+		{Name: "blog", Workdir: "/work/blog", Identity: "h2-blog"},
+	}
+
+	for _, tc := range []struct {
+		name     string
+		cwd      string
+		identity string
+		want     string // name of the group expected to carry the mark, "" for none
+	}{
+		{"identity wins over an unrelated cwd", "/elsewhere", "h1-api", "api"},
+		{"identity wins over a cwd naming another project", "/work/blog", "h1-api", "api"},
+		{"no identity falls back to the cwd", "/work/blog", "", "blog"},
+		{"an identity no listed project carries marks nothing", "/work/blog", "h9-gone", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			groups := switcherGroups(projs, nil, tc.cwd, tc.identity, nil)
+			var marked []string
+			for _, g := range groups {
+				if g.Active {
+					marked = append(marked, g.Name)
+				}
+			}
+			var want []string
+			if tc.want != "" {
+				want = []string{tc.want}
+			}
+			if !slices.Equal(marked, want) {
+				t.Errorf("marked active = %v, want %v", marked, want)
+			}
+		})
+	}
+}
+
+// TestSwitcherActiveIdentityMsgRebuilds pins the wiring the mark rides on: the
+// probe answers off the update loop, and its message is what re-marks the rows.
+func TestSwitcherActiveIdentityMsgRebuilds(t *testing.T) {
+	m := New(context.Background(), core.Options{
+		Backend: &coretest.FakeBackend{Dir: "/elsewhere"},
+	})
+	next, _ := m.Update(core.ProjectsLoadedMsg{Infos: []core.ProjectInfo{
+		{Name: "api", Workdir: "/work/api", Identity: "h1-api"},
+	}})
+	m = next.(Model)
+	if g, _ := m.selectedGroup(); g.Active {
+		t.Fatalf("nothing is active before a probe answers: %+v", g)
+	}
+
+	next, _ = m.Update(core.ActiveIdentityLoadedMsg{Identity: "h1-api", OK: true})
+	m = next.(Model)
+	if g, _ := m.selectedGroup(); !g.Active {
+		t.Errorf("the probed project should be marked active: %+v", g)
+	}
+
+	// A later probe that does not answer must not leave the old claim standing.
+	next, _ = m.Update(core.ActiveIdentityLoadedMsg{})
+	m = next.(Model)
+	if g, _ := m.selectedGroup(); g.Active {
+		t.Errorf("an unanswered probe should drop back to cwd matching: %+v", g)
 	}
 }
 

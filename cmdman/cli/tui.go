@@ -22,7 +22,7 @@ import (
 // discover the cwd-active compose project ("" keeps the process CWD).
 func RunTUI(ctx context.Context, svc *cmdman.Service, initialTab tui.Tab, workDir string) error {
 	return tui.Run(ctx, tui.Options{
-		Backend:    newServiceBackend(svc, workDir),
+		Backend:    newServiceBackend(svc, workDir, ""),
 		Version:    libver.Version,
 		AltScreen:  true,
 		PopupMode:  false,
@@ -62,7 +62,7 @@ type TUIWidgetOptions struct {
 // want it clean.
 func RunTUIWidget(ctx context.Context, svc *cmdman.Service, opts TUIWidgetOptions) error {
 	return tui.Run(ctx, tui.Options{
-		Backend:   newServiceBackend(svc, opts.WorkDir),
+		Backend:   newServiceBackend(svc, opts.WorkDir, opts.MuxToken),
 		Version:   libver.Version,
 		AltScreen: true,
 		Widget:    opts.Widget,
@@ -95,7 +95,7 @@ func RunTUIChild(
 	}
 	send(ipcMessage{Kind: ipcStarted})
 	err := tui.Run(ctx, tui.Options{
-		Backend:    newServiceBackend(svc, workDir),
+		Backend:    newServiceBackend(svc, workDir, ""),
 		Version:    libver.Version,
 		AltScreen:  true,
 		PopupMode:  true,

@@ -26,6 +26,12 @@ type FakeBackend struct {
 	Projs []core.ProjectInfo
 	// Dir is what Cwd reports; the accessor owns the name Cwd.
 	Dir string
+	// Identity and IdentityOK are what ActiveIdentity answers: the mux
+	// ownership stamp of the project the caller sits in, and whether any probe
+	// answered at all. The zero value is "no probe answered", which is the
+	// cwd-matching fallback every pre-existing test was written against.
+	Identity   string
+	IdentityOK bool
 
 	Started     []string
 	Stopped     []string
@@ -101,6 +107,10 @@ func (f *FakeBackend) ListProjects(context.Context) ([]core.ProjectInfo, error) 
 }
 
 func (f *FakeBackend) Cwd() string { return f.Dir }
+
+func (f *FakeBackend) ActiveIdentity(context.Context) (string, bool) {
+	return f.Identity, f.IdentityOK
+}
 
 func (f *FakeBackend) Start(_ context.Context, id string) error {
 	f.Started = append(f.Started, id)

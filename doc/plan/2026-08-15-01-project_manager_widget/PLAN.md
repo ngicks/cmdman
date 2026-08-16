@@ -310,9 +310,11 @@ func (s *Service) MuxScaleState(ctx context.Context, opts MuxScaleStateOption) (
   and `ReadWindowState`/`FindPane`/`ListWindows` already accept
   (driver.go:206-224). Token resolution is therefore existing surface; the
   step-1 spike only confirms error behavior for a stale/bogus token.
-- **`cmdman/mux`: no change.** `CycleScale`, `ReadScaleState`,
+- **`cmdman/mux`: scale ops unchanged.** `CycleScale`, `ReadScaleState`,
   `CollectCycleTargets` are already exported (`cmdman/mux/cycle_scale.go`,
-  `targets.go`).
+  `targets.go`). Step 3 added one thin wrapper, `mux.CurrentWindowID`
+  (`cmdman/mux/current.go`), because `resolveServer` is unexported (D13
+  amendment).
 
 ### Widget keys (project-manager)
 

@@ -3,7 +3,11 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"os"
+	"strconv"
+	"strings"
 
 	"github.com/ngicks/cmdman/cmdman/compose"
 	"github.com/ngicks/cmdman/cmdman/mux"
@@ -66,29 +70,178 @@ func (b *serviceBackend) HideFrame(ctx context.Context) error {
 	})
 }
 
-// resolveLayoutSelection resolves the "current" mux project for the Layout tab
-// (D5): the cwd-active mux project, falling back to the Compose-tab selection
-// identified by projectName/composeFile. The resolved project must declare a
-// mux: section.
-func resolveLayoutSelection(
-	projectName, composeFile, workDir string,
+// identityProbe is one active-project detection probe that did not answer: what
+// was asked and why it came back empty. D4 (as amended by D10) wants the
+// failure message to name every probe rather than only the last, so the user
+// learns which questions were even asked.
+type identityProbe struct {
+	probe  string
+	reason string
+}
+
+func (p identityProbe) String() string { return p.probe + ": " + p.reason }
+
+// joinProbes renders the probe trail for a D4 failure message. The separator is
+// the TUI's own " · " rather than a semicolon: the reasons are wrapped errors
+// and several of them carry semicolons of their own.
+func joinProbes(probes []identityProbe) string {
+	parts := make([]string, len(probes))
+	for i, p := range probes {
+		parts[i] = p.String()
+	}
+	return strings.Join(parts, " · ")
+}
+
+// ActiveIdentity resolves the active project's mux ownership stamp from the
+// explicit --mux-token the backend was constructed with (D10), then from the
+// window the caller is sitting in (D13). ok=false hands the caller back to
+// Cwd() matching, so nothing here is an error: a missing server, a driver
+// without an implementation and a stale token all read as "no answer" instead
+// of taking the whole view down.
+func (b *serviceBackend) ActiveIdentity(ctx context.Context) (string, bool) {
+	identity, _ := b.probeActiveIdentity(ctx)
+	return identity, identity != ""
+}
+
+// probeActiveIdentity is ActiveIdentity plus the trail D4's message is built
+// from: every probe that was tried and did not answer, in probe order.
+func (b *serviceBackend) probeActiveIdentity(ctx context.Context) (string, []identityProbe) {
+	var tried []identityProbe
+	env := os.Environ()
+
+	const windowProbe = "enclosing window"
+	// CurrentWindowID is client-relative, not process-relative, and has no honest
+	// "don't know" (NOTES Q1): outside a multiplexer it still answers ok=true
+	// with some other client's window. Same guard as the frame verbs'
+	// frameWindowID (D13). Asked before the listing because with no token either,
+	// there is nothing to look up and the listing is a multiplexer round trip.
+	inMux := envOf(env, "TMUX") != "" || envOf(env, "ZELLIJ") != ""
+	if b.muxToken == "" && !inMux {
+		return "", []identityProbe{{windowProbe, "not inside a multiplexer"}}
+	}
+
+	// One listing serves both probes: its rows carry WindowID and Identity
+	// together, so matching a window id against them yields the project and the
+	// token's staleness in a single call — no undeclared muxctl state key, and
+	// no window accepted that carries no ownership stamp (D13).
+	windows, listErr := mux.List(ctx, mux.ListOptions{Env: env})
+
+	if b.muxToken != "" {
+		probe := "mux token " + strconv.Quote(b.muxToken)
+		identity, found := identityOfWindow(windows, b.muxToken)
+		switch {
+		case listErr != nil:
+			tried = append(tried, identityProbe{probe, listErr.Error()})
+		case !found:
+			// Not "no such window": a missing server and a live-but-unstamped
+			// window produce no matching row either (NOTES Q2).
+			tried = append(tried, identityProbe{probe, "matches no cmdman-owned window"})
+		case identity == "":
+			tried = append(tried, identityProbe{probe, "that window holds no project"})
+		default:
+			return identity, tried
+		}
+	}
+
+	if !inMux {
+		return "", append(tried, identityProbe{windowProbe, "not inside a multiplexer"})
+	}
+	if listErr != nil {
+		return "", append(tried, identityProbe{windowProbe, listErr.Error()})
+	}
+	windowID, ok, err := mux.CurrentWindowID(ctx, mux.CurrentWindowOptions{Env: env})
+	switch {
+	case err != nil:
+		tried = append(tried, identityProbe{windowProbe, err.Error()})
+	case !ok:
+		tried = append(tried, identityProbe{windowProbe, "cannot tell which window you are in"})
+	default:
+		if identity, found := identityOfWindow(windows, windowID); found && identity != "" {
+			return identity, tried
+		}
+		tried = append(tried, identityProbe{windowProbe, windowID + " holds no project"})
+	}
+	return "", tried
+}
+
+// identityOfWindow reports the ownership stamp of the listed window with this
+// id. found says the id named a listed window at all, which is what tells a
+// stale token apart from one naming a window that holds no project.
+func identityOfWindow(windows []mux.OwnedWindow, windowID string) (identity string, found bool) {
+	for _, w := range windows {
+		if w.WindowID == windowID {
+			return w.Identity, true
+		}
+	}
+	return "", false
+}
+
+// selectionByIdentity resolves an ownership stamp back to the project that
+// carries it, by matching the project listing's own precomputed Identity. The
+// stamp is a hash and cannot be read backwards, and rebuilding one from a
+// listed workdir would hash the symlink-resolved form into a window that does
+// not exist (see projectIdentity).
+func (b *serviceBackend) selectionByIdentity(
+	ctx context.Context, identity string,
 ) (compose.ProjectSelection, error) {
-	// Prefer the cwd-active mux project. SelectMuxProject errors when no (or an
+	infos, err := b.ListProjects(ctx)
+	if err != nil {
+		return compose.ProjectSelection{}, err
+	}
+	for _, p := range infos {
+		if p.Identity != "" && p.Identity == identity {
+			return compose.ResolveMuxSelectionByName(p.Name, p.Path)
+		}
+	}
+	return compose.ProjectSelection{}, fmt.Errorf("no listed project carries identity %q", identity)
+}
+
+// resolveLayoutSelection resolves the "current" mux project for the Layout tab,
+// identity first (D3/D5): the project whose mux window the caller is in — or
+// whose token it was handed — then the cwd-active mux project, then the
+// Compose-tab selection identified by projectName/composeFile. The resolved
+// project must declare a mux: section.
+func (b *serviceBackend) resolveLayoutSelection(
+	ctx context.Context, projectName, composeFile string,
+) (compose.ProjectSelection, error) {
+	identity, tried := b.probeActiveIdentity(ctx)
+	if identity != "" {
+		sel, err := b.selectionByIdentity(ctx, identity)
+		if err == nil {
+			return sel, nil
+		}
+		tried = append(tried, identityProbe{
+			"project identity " + strconv.Quote(identity), err.Error(),
+		})
+	}
+
+	// The cwd-active mux project. SelectMuxProject errors when no (or an
 	// ambiguous set of) mux compose is associated with the cwd; in that case fall
 	// back to the explicit Compose-tab selection.
-	if sel, err := compose.SelectMuxProject(compose.NormalizeOpts{WorkDir: workDir}); err == nil {
+	sel, cwdErr := compose.SelectMuxProject(compose.NormalizeOpts{WorkDir: b.workDir})
+	if cwdErr == nil {
 		return sel, nil
 	}
-	return compose.ResolveMuxSelectionByName(projectName, composeFile)
+	sel, nameErr := compose.ResolveMuxSelectionByName(projectName, composeFile)
+	if nameErr == nil {
+		return sel, nil
+	}
+
+	tried = append(tried,
+		identityProbe{"working directory " + strconv.Quote(b.cwd), cwdErr.Error()},
+		identityProbe{"compose selection " + strconv.Quote(projectName), nameErr.Error()},
+	)
+	return compose.ProjectSelection{}, fmt.Errorf("no active project: %s", joinProbes(tried))
 }
 
 // ListLayouts returns the current project's mux layouts in definition order plus
-// the running dashboard's current layout marker. The project is resolved per D5
-// (cwd-active mux project, falling back to the Compose-tab selection).
+// the running dashboard's current layout marker. The project is resolved per
+// D3/D5 (the project whose mux window the caller is in, then the cwd-active mux
+// project, then the Compose-tab selection).
 func (b *serviceBackend) ListLayouts(
 	ctx context.Context, projectName, composeFile string,
 ) (tui.LayoutsInfo, error) {
-	selection, err := resolveLayoutSelection(projectName, composeFile, b.workDir)
+	selection, err := b.resolveLayoutSelection(ctx, projectName, composeFile)
 	if err != nil {
 		return tui.LayoutsInfo{}, err
 	}

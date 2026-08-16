@@ -159,8 +159,8 @@ func sharedWorkdirs(groups []core.ProjectGroup) map[string]bool {
 	return dup
 }
 
-// headActive is the word the rest of the TUI marks the cwd project with, with
-// the gap that sets it off from the head.
+// headActive is the word the rest of the TUI marks the project the user is in
+// with (see activeMark), with the gap that sets it off from the head.
 const headActive = "  active"
 
 // headLine is a project's head: its marker in a fixed-width slot — so heads

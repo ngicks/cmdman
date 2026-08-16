@@ -65,6 +65,11 @@ type Model struct {
 	cwd      string // normalized working directory for active detection
 	status   string // transient error text, shown in place of the hint line
 
+	// activeIdentity is the mux ownership stamp of the project the caller is
+	// sitting in (D3), "" when no probe answered — which is when the active mark
+	// falls back to the working directory.
+	activeIdentity string
+
 	// bellRead carries the command ids whose bell was resolved by selecting
 	// their project (D22). The monitor keeps reporting such a bell as unread —
 	// inside it only an attach reads one (D11) — so the switcher remembers what
@@ -108,13 +113,14 @@ func (m Model) bgCtx() context.Context {
 }
 
 // Init implements tea.Model: the two listings the groups are joined from, the
-// event subscription that reloads them, the runtime-state receive the rows are
-// kept live by, and the terminal's own colors, which the command rows are
-// shaded against (D26).
+// probe naming the project the caller sits in (D3), the event subscription that
+// reloads them, the runtime-state receive the rows are kept live by, and the
+// terminal's own colors, which the command rows are shaded against (D26).
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		core.ListCommandsCmd(m.bgCtx(), m.backend),
 		core.ListProjectsCmd(m.bgCtx(), m.backend),
+		core.ActiveIdentityCmd(m.bgCtx(), m.backend),
 		core.SubscribeCmd(m.bgCtx(), m.backend),
 		armRuntimeWatchCmd(),
 		tea.RequestForegroundColor,
@@ -152,6 +158,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.projs, m.status = msg.Infos, ""
 		return m.rebuild(), nil
+	case core.ActiveIdentityLoadedMsg:
+		// A probe that did not answer clears the stamp rather than keeping the
+		// last one: the window the caller sits in is what the mark claims, and a
+		// stale claim is worse than falling back to the working directory.
+		m.activeIdentity = ""
+		if msg.OK {
+			m.activeIdentity = msg.Identity
+		}
+		return m.rebuild(), nil
 	case core.EventsSubscribedMsg:
 		if msg.Err != nil {
 			m.status = fmt.Sprintf("events: %v", msg.Err)
@@ -172,6 +187,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(
 			core.ListCommandsCmd(m.bgCtx(), m.backend),
 			core.ListProjectsCmd(m.bgCtx(), m.backend),
+			core.ActiveIdentityCmd(m.bgCtx(), m.backend),
 		)
 	case core.ProjectSwitchedMsg:
 		return m.onProjectSwitched(msg), nil
@@ -462,7 +478,7 @@ func (m Model) rebuild() Model {
 	if g, ok := m.selectedGroup(); ok {
 		prev = g.Key()
 	}
-	m.groups = switcherGroups(m.projs, m.cmds, m.cwd, m.titles)
+	m.groups = switcherGroups(m.projs, m.cmds, m.cwd, m.activeIdentity, m.titles)
 	// Before applyBellRead below: what a selection answered for is a bell the
 	// cache is still reporting unread (D22), so the suppression has to run over
 	// the rows the pushes wrote, not the empty ones the list built.
@@ -488,10 +504,14 @@ func (m Model) rebuild() Model {
 // group no project entry claims is appended, so a project the listing missed is
 // still on screen; standalone commands (no compose project) are dropped, having
 // no project window to switch to.
+//
+// cwd and activeIdentity are what the joined groups are marked "you are here"
+// with; see activeMark for which of the two answers.
 func switcherGroups(
 	projs []core.ProjectInfo,
 	cmds []core.CommandInfo,
 	cwd string,
+	activeIdentity string,
 	titles map[string]titleStamp,
 ) []core.ProjectGroup {
 	cmdGroups := core.GroupFromInfos(cmds)
@@ -526,7 +546,7 @@ func switcherGroups(
 	}
 
 	for i := range out {
-		out[i].Active = out[i].Workdir != "" && out[i].Workdir == cwd
+		out[i].Active = activeMark(out[i], cwd, activeIdentity)
 		bucketSort(out[i].Commands, titles)
 	}
 	slices.SortStableFunc(out, func(a, b core.ProjectGroup) int {
@@ -536,6 +556,19 @@ func switcherGroups(
 		return cmp.Compare(a.Name, b.Name)
 	})
 	return out
+}
+
+// activeMark is "you are here" for one group (D3). The mux window the caller
+// sits in — or was handed a token for — holds exactly one project, so its
+// ownership stamp answers for every group and a group without that stamp is not
+// where the user is. Only when no window answered at all does the mark fall
+// back to the directory the caller is standing in, the older question, which a
+// popup summoned from somewhere else cannot answer.
+func activeMark(g core.ProjectGroup, cwd, activeIdentity string) bool {
+	if activeIdentity != "" {
+		return g.Identity == activeIdentity
+	}
+	return g.Workdir != "" && g.Workdir == cwd
 }
 
 // matchCommandGroup finds the command group belonging to a project entry: the
