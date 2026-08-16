@@ -1,6 +1,6 @@
 # Status — tui_live_runtime_state
 
-State: **implementing — steps 1-5 done, steps 6-7 in progress.**
+State: **steps 1-7 done — final review/test gate in progress.**
 
 ## Gate
 
@@ -53,8 +53,10 @@ State: **implementing — steps 1-5 done, steps 6-7 in progress.**
       found no falsified claims; one liveness sentence added to
       cmdman-tui.1.md (L8 [automatic]); the stale comment fell in
       step 4
-- [ ] 7. e2e: title change with no lifecycle event reaches the TUI
-      (criterion 1)
+- [x] 7. e2e: title change with no lifecycle event reaches the TUI
+      (criterion 1) — e2e/cmdman/tui_switcher_live_title_test.go:
+      PTY-driven switcher shows the retitle while the eventlog stays
+      byte-for-byte unchanged; mutation-checked both halves
 
 ## Next action
 
