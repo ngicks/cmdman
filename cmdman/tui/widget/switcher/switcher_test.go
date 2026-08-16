@@ -73,7 +73,7 @@ func TestSwitcherGroupsJoin(t *testing.T) {
 // so the selected group is a solid block and nothing overflows the column.
 func TestSwitcherRenderAlignment(t *testing.T) {
 	const w, h = 32, 12
-	m := seedWidget(w, h)
+	m := seedWidget(t, w, h)
 
 	lines := m.switcherLines(w)
 	if len(lines) != 5 { // 2 projects + 3 commands
@@ -105,8 +105,8 @@ func TestSwitcherRenderAlignment(t *testing.T) {
 // all, whether or not there are projects to list.
 func TestSwitcherFitsShortPanes(t *testing.T) {
 	const w = 30
-	full := seedWidget(w, 12)
-	empty := seedWidget(w, 12)
+	full := seedWidget(t, w, 12)
+	empty := seedWidget(t, w, 12)
 	empty.groups = nil
 
 	for _, m := range []Model{full, empty} {
@@ -133,7 +133,7 @@ func TestSwitcherFitsShortPanes(t *testing.T) {
 // compose projects can run on one directory, so the name misidentifies the
 // place — and only the groups actually sharing one add their name back.
 func TestSwitcherHeadsNameTheirDirectory(t *testing.T) {
-	m := seedWidget(60, 12)
+	m := seedWidget(t, 60, 12)
 
 	out := m.viewContent()
 	for _, want := range []string{"/work/local-dev", "/work/api"} {
@@ -171,7 +171,7 @@ func TestSwitcherHeadsNameTheirDirectory(t *testing.T) {
 // that project. 40 cells is the width the frame fixtures dock a switcher at.
 func TestSwitcherActiveHeadKeepsItsMarker(t *testing.T) {
 	const w = 40
-	m := seedWidget(w, 12)
+	m := seedWidget(t, w, 12)
 	g := core.ProjectGroup{
 		Name:    "cmdman",
 		Workdir: "/work/aaaa/bbbb/cccc/dddd/eeee",
@@ -285,7 +285,7 @@ func TestSwitcherHeadAbbreviatesHome(t *testing.T) {
 // every line past its pane; the badge has to fit the same ruler.
 func TestSwitcherWidthsSurviveWidePathsAndBadges(t *testing.T) {
 	const dir = "/work/作業場/日本語のディレクトリ"
-	m := seedWidget(24, 12)
+	m := seedWidget(t, 24, 12)
 	m, _ = updWidget(t, m, core.ProjectsLoadedMsg{Infos: []core.ProjectInfo{
 		{Name: "アプリ", Workdir: dir, Identity: "id-app"},
 	}})
@@ -338,7 +338,7 @@ func TestScaleBadgeMarksReplicasOnly(t *testing.T) {
 // (core.GroupFromInfos) and a run that is over — D13 takes a command's words
 // away, not what it is — and an unscaled row says nothing new.
 func TestSwitcherRowsBadgeReplicas(t *testing.T) {
-	m := seedWidget(60, 12)
+	m := seedWidget(t, 60, 12)
 	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: []core.CommandInfo{
 		{
 			ID: "1", Name: "web", Project: "local-dev", Workdir: "/work/local-dev",
@@ -497,49 +497,40 @@ func TestBucketSortOrdersByTitleBucket(t *testing.T) {
 	}
 }
 
-// TestStampTitlesDatesChangesOnly covers where the bucket times come from: the
-// monitor serves no title timestamp, so a title that did not change must keep
-// the time it was first seen with — otherwise every refresh would restamp
-// everything into one bucket and the sort would say nothing.
-func TestStampTitlesDatesChangesOnly(t *testing.T) {
+// TestStampTitleDatesPushArrival covers where the bucket times come from (L4):
+// the monitor serves no title timestamp, so the push that carried a title is
+// what dates it — and a push repeating the title a command already carries must
+// keep the old stamp, or a talkative monitor would restamp everything into one
+// bucket and the sort would say nothing.
+func TestStampTitleDatesPushArrival(t *testing.T) {
 	t0 := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
 	now := t0
-	m := Model{now: func() time.Time { return now }}
+	m := Model{now: func() time.Time { return now }, titles: map[string]titleStamp{}}
 
-	m.cmds = []core.CommandInfo{
-		{ID: "1", Title: "first"},
-		{ID: "2", Title: ""},
-		{ID: "3", Title: "gone soon"},
-	}
-	m.titles = m.stampTitles()
+	m.stampTitle("1", "first")
 	if got := m.titles["1"]; got.at != t0 || got.title != "first" {
-		t.Fatalf("first load stamp = %+v, want first@%v", got, t0)
+		t.Fatalf("the first push's stamp = %+v, want first@%v", got, t0)
 	}
-	if _, ok := m.titles["2"]; ok {
-		t.Errorf("a command with no title should carry no stamp")
+	m.stampTitle("2", "")
+	if len(m.titles) != 1 {
+		t.Errorf("a command reporting no title should carry no stamp, got %v", m.titles)
 	}
 
 	now = t0.Add(30 * time.Second)
-	m.cmds = []core.CommandInfo{
-		{ID: "1", Title: "first"},
-		{ID: "2", Title: "now titled"},
-	}
-	m.titles = m.stampTitles()
+	m.stampTitle("1", "first")
 	if got := m.titles["1"].at; got != t0 {
-		t.Errorf("an unchanged title should keep its stamp, got %v want %v", got, t0)
+		t.Errorf("a repeated title should keep its stamp, got %v want %v", got, t0)
 	}
-	if got := m.titles["2"].at; got != now {
-		t.Errorf("a new title should be stamped now, got %v want %v", got, now)
-	}
-	if _, ok := m.titles["3"]; ok {
-		t.Errorf("a command that disappeared should drop out of the stamps")
-	}
-
-	now = t0.Add(60 * time.Second)
-	m.cmds = []core.CommandInfo{{ID: "1", Title: "retitled"}}
-	m.titles = m.stampTitles()
+	m.stampTitle("1", "retitled")
 	if got := m.titles["1"].at; got != now {
 		t.Errorf("a retitle should start a new bucket, got %v want %v", got, now)
+	}
+
+	// A monitor clearing the title (a restart resets the runtime state) takes the
+	// command back below the ones that are saying something.
+	m.stampTitle("1", "")
+	if _, ok := m.titles["1"]; ok {
+		t.Errorf("a cleared title should drop its stamp, got %v", m.titles)
 	}
 }
 
@@ -548,7 +539,7 @@ func TestStampTitlesDatesChangesOnly(t *testing.T) {
 // unread bell — and, for a run that is over, its exit state rather than any
 // report (D13).
 func TestSwitcherRowsShowRuntimeState(t *testing.T) {
-	m := seedWidget(60, 12)
+	m := seedWidget(t, 60, 12)
 	next, _ := m.Update(core.CommandsLoadedMsg{Infos: []core.CommandInfo{
 		{
 			ID: "1", Name: "agent", Project: "local-dev", Workdir: "/work/local-dev",
@@ -573,6 +564,192 @@ func TestSwitcherRowsShowRuntimeState(t *testing.T) {
 	}
 	if strings.Contains(out, core.StatusWorking) {
 		t.Errorf("an exited command must not show its last report (D13):\n%s", out)
+	}
+}
+
+// --- live runtime state -----------------------------------------------------
+
+// TestSwitcherInitArmsRuntimeWatch covers the arming hop: Init hands the merged
+// receive over as a message, so the receive — which returns only when a monitor
+// pushes — is started from an Update arm.
+func TestSwitcherInitArmsRuntimeWatch(t *testing.T) {
+	m := seedWidget(t, 32, 12)
+	batch, ok := m.Init()().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("Init should batch its startup commands")
+	}
+	armed := false
+	for _, c := range batch {
+		if _, is := c().(runtimeWatchReadyMsg); is {
+			armed = true
+		}
+	}
+	if !armed {
+		t.Fatalf("Init should arm the runtime-state receive")
+	}
+	if _, cmd := updWidget(t, m, runtimeWatchReadyMsg{}); cmd == nil {
+		t.Fatalf("the arming message should start the merged receive")
+	}
+}
+
+// TestLoadSubscribesLiveCommands pins the wiring the pushes arrive over: a load
+// subscribes the commands whose monitors serve a stream and nobody else, and
+// quitting hands those monitors their disconnects.
+func TestLoadSubscribesLiveCommands(t *testing.T) {
+	m := seedWidget(t, 32, 12)
+	fb, ok := m.backend.(*coretest.FakeBackend)
+	if !ok {
+		t.Fatalf("seedWidget should carry the fake backend, got %T", m.backend)
+	}
+	// seed-db (id 2) has exited: it has no monitor left to dial.
+	if want := []string{"1", "3"}; !slices.Equal(fb.WatchIDs, want) {
+		t.Fatalf("subscribed %v, want %v", fb.WatchIDs, want)
+	}
+	stream := fb.WatchStreams["1"]
+	if stream == nil {
+		t.Fatalf("the running command should have been handed a stream")
+	}
+
+	m, _ = updWidget(t, m, coretest.Kr("q"))
+	if !m.quitting {
+		t.Fatalf("q should quit a standalone widget")
+	}
+	stream.WaitClosed(t)
+}
+
+// TestPushedRetitleMovesTheBucket is D20 fed by L4: the arrival of a retitle is
+// what dates it, so a command that just said something floats above the ones
+// that spoke a bucket ago — with no re-list anywhere in between.
+func TestPushedRetitleMovesTheBucket(t *testing.T) {
+	base := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	now := base
+	m := seedWidget(t, 60, 12)
+	m.now = func() time.Time { return now }
+	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: []core.CommandInfo{
+		{ID: "1", Name: "alpha", Project: "local-dev", Workdir: "/work/local-dev",
+			State: model.EventTypeRunning},
+		{ID: "2", Name: "beta", Project: "local-dev", Workdir: "/work/local-dev",
+			State: model.EventTypeRunning},
+	}})
+
+	// Both titled inside one bucket: there the order is the stable one, by name.
+	m = pushState(t, m, "1", core.RuntimeStateView{Title: "building"})
+	m = pushState(t, m, "2", core.RuntimeStateView{Title: "idle"})
+	if got, want := rowNames(m.groups[0]), []string{"alpha", "beta"}; !slices.Equal(got, want) {
+		t.Fatalf("commands titled in one bucket = %v, want %v", got, want)
+	}
+
+	now = base.Add(2 * titleBucket)
+	m = pushState(t, m, "2", core.RuntimeStateView{Title: "running tests"})
+	if got, want := rowNames(m.groups[0]), []string{"beta", "alpha"}; !slices.Equal(got, want) {
+		t.Errorf("a pushed retitle should float its command up, got %v want %v", got, want)
+	}
+}
+
+// TestPushedBellRespectsRead is D22 fed by pushes: the monitor keeps reporting
+// a bell unread — only an attach reads one there (D11) — so a push must not
+// re-ring the bell a selection already answered for, and must ring again once
+// the monitor's own flag went down and the command rang anew.
+func TestPushedBellRespectsRead(t *testing.T) {
+	m := seedWidget(t, 32, 12)
+	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: []core.CommandInfo{
+		{ID: "1", Name: "watcher", Project: "local-dev", Workdir: "/work/local-dev",
+			State: model.EventTypeRunning},
+	}})
+
+	m = pushState(t, m, "1", core.RuntimeStateView{BellUnread: true})
+	if got := core.MarkerGlyph(m.groups[0]); got != core.GlyphBell {
+		t.Fatalf("precondition: a pushed bell should take the marker slot, got %q", got)
+	}
+
+	m, cmd := updWidget(t, m, coretest.KEnter)
+	m = settle(t, m, cmd)
+	if got := core.MarkerGlyph(m.groups[0]); got == core.GlyphBell {
+		t.Fatalf("selecting the project should have read its bell")
+	}
+
+	m = pushState(t, m, "1", core.RuntimeStateView{BellUnread: true})
+	if got := core.MarkerGlyph(m.groups[0]); got == core.GlyphBell {
+		t.Errorf("the monitor's still-unread flag should not re-ring a read bell")
+	}
+
+	m = pushState(t, m, "1", core.RuntimeStateView{})
+	m = pushState(t, m, "1", core.RuntimeStateView{BellUnread: true})
+	if got := core.MarkerGlyph(m.groups[0]); got != core.GlyphBell {
+		t.Errorf("a bell that rang again is news again, marker = %q", got)
+	}
+}
+
+// TestRelistKeepsPushedState is what the cache is for: a list load carries no
+// runtime state at all (L3), so without it every re-list would flash the rows
+// back to empty titles until each monitor pushed again.
+func TestRelistKeepsPushedState(t *testing.T) {
+	m := seedWidget(t, 60, 12)
+	fb := m.backend.(*coretest.FakeBackend)
+	m = pushState(t, m, "1", core.RuntimeStateView{
+		Title: "make build", Status: core.StatusWorking, Detail: "step 2/3",
+	})
+
+	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: seedInfos()})
+	row := rowByID(t, m, "1")
+	if row.Title != "make build" || row.Status != core.StatusWorking {
+		t.Errorf("a re-list should keep the pushed state, got %+v", row)
+	}
+	if want := []string{"1", "3"}; !slices.Equal(fb.WatchIDs, want) {
+		t.Errorf("a held stream should not be redialed, subscribed %v", fb.WatchIDs)
+	}
+
+	// The command exits: its stream is dropped, and what it said goes with it —
+	// a run that is over says nothing (D13), including to the next run.
+	infos := seedInfos()
+	infos[0].State = model.EventTypeExited
+	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: infos})
+	if len(m.runtime) != 0 || len(m.titles) != 0 {
+		t.Errorf("an exited command should keep nothing: %v / %v", m.runtime, m.titles)
+	}
+	if row := rowByID(t, m, "1"); row.Title != "" {
+		t.Errorf("an exited command should not keep its last title, got %q", row.Title)
+	}
+}
+
+// TestPushForUnwatchedCommandIgnored covers the stragglers: an update the
+// merged channel buffered before its stream was dropped, and one for a command
+// this widget never listed at all. Neither may be cached — the sweep that
+// forgets them has already run — and both keep the receive armed.
+func TestPushForUnwatchedCommandIgnored(t *testing.T) {
+	m := seedWidget(t, 60, 12)
+	for _, id := range []string{"ghost", "2"} {
+		m = pushState(t, m, id, core.RuntimeStateView{Title: "stale"})
+	}
+	if len(m.runtime) != 0 || len(m.titles) != 0 {
+		t.Errorf("an ignored push should leave nothing behind: %v / %v", m.runtime, m.titles)
+	}
+	if row := rowByID(t, m, "2"); row.Title != "" {
+		t.Errorf("an exited command's row should not take a straggler, got %q", row.Title)
+	}
+}
+
+// TestRuntimeStreamEndAndErrorStayQuiet is criterion 5 at the widget: a monitor
+// that died or stopped answering leaves the row as it was and says nothing,
+// while the merged receive stays armed for every other command. Only the
+// watcher's own close — which carries no id — ends the loop.
+func TestRuntimeStreamEndAndErrorStayQuiet(t *testing.T) {
+	m := seedWidget(t, 32, 12)
+	for _, msg := range []core.RuntimeUpdateMsg{
+		{ID: "1", Closed: true},
+		{ID: "1", Err: errors.New("monitor went away")},
+	} {
+		next, cmd := updWidget(t, m, msg)
+		if cmd == nil {
+			t.Fatalf("%+v should keep the merged receive armed", msg)
+		}
+		m = next
+		if m.status != "" {
+			t.Errorf("a broken stream should not reach the hint line, got %q", m.status)
+		}
+	}
+	if _, cmd := updWidget(t, m, core.RuntimeUpdateMsg{Closed: true}); cmd != nil {
+		t.Fatalf("a closed watcher should stop the receive loop")
 	}
 }
 
@@ -619,7 +796,7 @@ func TestSwitcherViewportFollowsSelection(t *testing.T) {
 }
 
 func TestSwitcherKeysMoveSelection(t *testing.T) {
-	m := seedWidget(32, 12)
+	m := seedWidget(t, 32, 12)
 	next, _ := m.Update(coretest.Kr("j"))
 	m = next.(Model)
 	if m.selected != 1 {
@@ -642,31 +819,76 @@ func TestSwitcherKeysMoveSelection(t *testing.T) {
 	}
 }
 
+// seedInfos is the command list seedWidget loads: two live commands and one
+// that has exited. It is rebuilt per call, so a test that edits an entry cannot
+// reach the fixture the fake backend answers a re-list with.
+func seedInfos() []core.CommandInfo {
+	return []core.CommandInfo{
+		{ID: "1", Name: "watcher", Project: "local-dev", Workdir: "/work/local-dev",
+			State: model.EventTypeRunning},
+		{ID: "2", Name: "seed-db", Project: "local-dev", Workdir: "/work/local-dev",
+			State: model.EventTypeExited},
+		{ID: "3", Name: "web", Project: "api-stack", Workdir: "/work/api",
+			State: model.EventTypeRunning},
+	}
+}
+
 // seedWidget builds a switcher over two projects — local-dev is the cwd-tied
-// one — driven through the same load messages the program delivers.
-func seedWidget(width, height int) Model {
+// one — driven through the same load messages the program delivers. The load
+// subscribes the live commands' runtime-state streams, so the watcher is torn
+// down with the test rather than left pumping.
+func seedWidget(t *testing.T, width, height int) Model {
+	t.Helper()
 	fb := &coretest.FakeBackend{
-		Dir: "/work/local-dev",
-		Cmds: []core.CommandInfo{
-			{ID: "1", Name: "watcher", Project: "local-dev", Workdir: "/work/local-dev",
-				State: model.EventTypeRunning},
-			{ID: "2", Name: "seed-db", Project: "local-dev", Workdir: "/work/local-dev",
-				State: model.EventTypeExited},
-			{ID: "3", Name: "web", Project: "api-stack", Workdir: "/work/api",
-				State: model.EventTypeRunning},
-		},
+		Dir:  "/work/local-dev",
+		Cmds: seedInfos(),
 		Projs: []core.ProjectInfo{
 			{Name: "local-dev", Workdir: "/work/local-dev", Identity: "id-local-dev"},
 			{Name: "api-stack", Workdir: "/work/api", Identity: "id-api-stack"},
 		},
 	}
-	m := New(context.Background(), core.Options{Backend: fb})
+	m := New(t.Context(), core.Options{Backend: fb})
+	t.Cleanup(func() { _ = m.watcher.Close() })
 	next, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: height})
 	m = next.(Model)
 	next, _ = m.Update(core.CommandsLoadedMsg{Infos: fb.Cmds})
 	m = next.(Model)
 	next, _ = m.Update(core.ProjectsLoadedMsg{Infos: fb.Projs})
 	return next.(Model)
+}
+
+// rowByID returns the rendered row for a command id.
+func rowByID(t *testing.T, m Model, id string) core.CommandRow {
+	t.Helper()
+	for _, g := range m.groups {
+		for _, c := range g.Commands {
+			if c.ID == id {
+				return c
+			}
+		}
+	}
+	t.Fatalf("no row for command %q", id)
+	return core.CommandRow{}
+}
+
+// rowNames lists a group's commands in the order they are drawn in.
+func rowNames(g core.ProjectGroup) []string {
+	out := make([]string, 0, len(g.Commands))
+	for _, c := range g.Commands {
+		out = append(out, c.Name)
+	}
+	return out
+}
+
+// pushState delivers one runtime-state push as the watcher's merged receive
+// would, without going through a stream: the model arm is what is under test.
+func pushState(t *testing.T, m Model, id string, v core.RuntimeStateView) Model {
+	t.Helper()
+	m, cmd := updWidget(t, m, core.RuntimeUpdateMsg{ID: id, State: v})
+	if cmd == nil {
+		t.Fatalf("a runtime update should rearm the receive")
+	}
+	return m
 }
 
 // updWidget drives one message through the widget model.
@@ -697,7 +919,7 @@ func settle(t *testing.T, m Model, cmd tea.Cmd) Model {
 // described well enough — work directory and project name — for the backend to
 // build that window when none is up.
 func TestSwitcherSelectionSwitches(t *testing.T) {
-	m := seedWidget(32, 12)
+	m := seedWidget(t, 32, 12)
 	fb := m.backend.(*coretest.FakeBackend)
 
 	localDev := core.SwitchTarget{
@@ -751,7 +973,7 @@ func TestSwitcherSelectionSwitches(t *testing.T) {
 // reach: with no identity stamped there is no window to find and none to create
 // under, so saying so on the hint line is all the switcher does about it.
 func TestSwitcherSelectionNeedsIdentity(t *testing.T) {
-	m := seedWidget(32, 12)
+	m := seedWidget(t, 32, 12)
 	fb := m.backend.(*coretest.FakeBackend)
 	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: nil})
 	m, _ = updWidget(t, m, core.ProjectsLoadedMsg{Infos: []core.ProjectInfo{{Name: "never-run"}}})
@@ -783,7 +1005,7 @@ func TestSwitcherSelectionResolvesBells(t *testing.T) {
 		State: model.EventTypeRunning,
 	}}
 
-	m := seedWidget(32, 12)
+	m := seedWidget(t, 32, 12)
 	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: belled})
 	if got := core.MarkerGlyph(m.groups[0]); got != core.GlyphBell {
 		t.Fatalf("precondition: the marker should be the bell, got %q", got)
@@ -812,7 +1034,7 @@ func TestSwitcherSelectionResolvesBells(t *testing.T) {
 // is the service's business — hide is a no-op there — so what this pins is that
 // a hide reporting nothing stays quiet, and a failing one does not.
 func TestSwitcherCollapse(t *testing.T) {
-	m := seedWidget(32, 12)
+	m := seedWidget(t, 32, 12)
 	fb := m.backend.(*coretest.FakeBackend)
 
 	m, cmd := updWidget(t, m, coretest.Kr("z"))
@@ -836,7 +1058,7 @@ func TestSwitcherCollapse(t *testing.T) {
 // exit from a keypress, and stops advertising a key it no longer has. A
 // standalone run keeps quitting, which is what the flag is opt-in for.
 func TestWidgetNoQuit(t *testing.T) {
-	docked := seedWidget(32, 12)
+	docked := seedWidget(t, 32, 12)
 	docked.noQuit = true
 	for _, key := range []tea.KeyMsg{
 		coretest.Kr("q"),
@@ -855,7 +1077,7 @@ func TestWidgetNoQuit(t *testing.T) {
 		t.Errorf("a docked switcher should not hint at quitting: %q", hint)
 	}
 
-	standalone := seedWidget(32, 12)
+	standalone := seedWidget(t, 32, 12)
 	next, cmd := updWidget(t, standalone, coretest.Kr("q"))
 	if !next.quitting || cmd == nil || !coretest.MsgIsQuit(cmd()) {
 		t.Errorf("q should still quit a standalone widget")

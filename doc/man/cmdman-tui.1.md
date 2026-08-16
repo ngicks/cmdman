@@ -19,6 +19,11 @@ Starts the terminal UI over the same data and runtime directories used by the
 CLI. The TUI focuses on compose projects and their managed commands, providing
 project navigation, command actions, previews, and mux layout cycling.
 
+Rows are live: every command with a running monitor is subscribed to, so the
+title it sets, the status it reports and the bell it rings reach the screen as
+they happen, while commands appearing and disappearing follow cmdman's event
+log.
+
 The TUI can also be launched in a multiplexer popup. Driver inference uses the
 current environment; v1 implements tmux only. The popup launcher and child
 communicate over an internal IPC endpoint.

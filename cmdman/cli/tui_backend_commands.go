@@ -21,37 +21,32 @@ import (
 // project and workdir labels) are grouped by project; standalone commands keep
 // an empty project and group under their working directory.
 //
-// Each entry's runtime state is dialed from its monitor as the listing is
-// built. This is the same one-shot fan-out `ls` does, repeated on the TUI's
-// refresh cadence: a live subscription to the monitors' WatchRuntimeState
-// stream is a later phase, and a poll per reload is what the model's
-// load-and-rebuild shape already supports.
+// The listing carries no runtime state: the TUI subscribes to every live
+// command's monitor through WatchRuntimeState and keeps what those streams
+// push, so dialing each monitor once more per reload would only add a second
+// writer racing the pushes. `ls` / `ps`, which have no subscription to fill
+// their columns, keep the one-shot fan-out.
 func (b *serviceBackend) ListCommands(ctx context.Context) ([]tui.CommandInfo, error) {
 	entries, err := b.svc.List(ctx, cmdman.ListRequest{AllStates: true})
 	if err != nil {
 		return nil, err
 	}
-	// A refresh that stalls is worse than one showing last cycle's titles, so
-	// the whole fan-out is bounded, not only each dial inside it.
-	return commandInfos(entries, RuntimeStates(ctx, b.svc, entries)), nil
+	return commandInfos(entries), nil
 }
 
-// commandInfos projects store entries to command rows, merging in the runtime
-// state keyed by command ID. A compose-managed command (carrying both the
-// project and workdir labels) reports its compose project name and the labelled
-// workdir; a standalone command reports an empty project and falls back to its
-// configured working directory, so it still appears in the TUI rather than
-// being dropped. A command whose monitor did not answer keeps the zero runtime
-// fields.
+// commandInfos projects store entries to command rows. A compose-managed
+// command (carrying both the project and workdir labels) reports its compose
+// project name and the labelled workdir; a standalone command reports an empty
+// project and falls back to its configured working directory, so it still
+// appears in the TUI rather than being dropped. The runtime fields are left
+// zero: no store entry speaks for them, and the TUI's watcher lays what the
+// monitors push over the rows.
 //
 // Scale is projected only for a command that is one replica among several:
 // every compose-created command carries a scale index (an unscaled command's
 // sole instance has index 1), so the single-replica case is collapsed to the
 // zero value here rather than reported as replica 1 of 1.
-func commandInfos(
-	entries []store.CommandEntry,
-	runtime map[string]cmdman.RuntimeState,
-) []tui.CommandInfo {
+func commandInfos(entries []store.CommandEntry) []tui.CommandInfo {
 	var out []tui.CommandInfo
 	for _, e := range entries {
 		var labels map[string]string
@@ -77,7 +72,6 @@ func commandInfos(
 		if scaleIndex <= 0 || scaleCount <= 1 {
 			scaleIndex, scaleCount = 0, 0
 		}
-		rs := runtime[e.ID]
 		out = append(out, tui.CommandInfo{
 			ID:         e.ID,
 			Name:       name,
@@ -89,10 +83,6 @@ func commandInfos(
 			Tty:        tty,
 			ScaleIndex: scaleIndex,
 			ScaleCount: scaleCount,
-			Title:      rs.Title,
-			Status:     rs.Status,
-			Detail:     rs.Detail,
-			BellUnread: rs.BellUnread,
 		})
 	}
 	return out
@@ -159,6 +149,64 @@ func (e *eventStream) pump() {
 
 func (e *eventStream) Signals() <-chan tui.EventSignal { return e.ch }
 func (e *eventStream) Close() error                    { return e.sub.Close() }
+
+// WatchRuntimeState subscribes to one command's monitor runtime-state stream:
+// the monitor answers with a snapshot and then pushes on change, until it
+// leaves an active state and the channel closes.
+func (b *serviceBackend) WatchRuntimeState(
+	ctx context.Context,
+	id string,
+) (tui.RuntimeStateStream, error) {
+	sub, err := b.svc.WatchRuntimeState(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	rs := &runtimeStateStream{
+		sub:  sub,
+		ch:   make(chan tui.RuntimeStateUpdate, 16),
+		done: make(chan struct{}),
+	}
+	go rs.pump()
+	return rs, nil
+}
+
+// Unlike eventStream, which may drop a coalesced re-list cue, every runtime
+// state carries what a row renders — so the pump parks on a full channel like
+// logStream's and lets Close unblock it, rather than dropping the push that
+// would have corrected the row.
+type runtimeStateStream struct {
+	sub       *cmdman.RuntimeStateSubscription
+	ch        chan tui.RuntimeStateUpdate
+	done      chan struct{}
+	closeOnce sync.Once
+}
+
+func (r *runtimeStateStream) pump() {
+	defer close(r.ch)
+	for rec := range r.sub.Records() {
+		update := tui.RuntimeStateUpdate{
+			State: tui.RuntimeStateView{
+				Title:      rec.State.Title,
+				Status:     rec.State.Status,
+				Detail:     rec.State.Detail,
+				BellUnread: rec.State.BellUnread,
+			},
+			Err: rec.Err,
+		}
+		select {
+		case r.ch <- update:
+		case <-r.done:
+			return
+		}
+	}
+}
+
+func (r *runtimeStateStream) Updates() <-chan tui.RuntimeStateUpdate { return r.ch }
+
+func (r *runtimeStateStream) Close() error {
+	r.closeOnce.Do(func() { close(r.done) })
+	return r.sub.Close()
+}
 
 // Logs opens a sticky Tail+Follow reader and streams its lines. Sticky keeps
 // the preview live across command restarts: when the running instance exits, a

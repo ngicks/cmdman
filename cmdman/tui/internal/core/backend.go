@@ -32,12 +32,17 @@ type CommandInfo struct {
 	ScaleIndex int
 	ScaleCount int
 
-	// Title, Status, Detail and BellUnread are the runtime state the command's
-	// monitor holds for the current run: the title it set, the status it
-	// reported (working/waiting/done, "" when it reported none) with its
-	// detail, and whether a bell is still unread. They are zero for a command
-	// with no live monitor, which reads as "nothing said so far" rather than as
-	// a claim about the command.
+	// Title, Status, Detail and BellUnread are the runtime state a command
+	// reports about its current run: the title it set, the status it reported
+	// (working/waiting/done, "" when it reported none) with its detail, and
+	// whether a bell is still unread.
+	//
+	// The production listing leaves all four zero — no store entry speaks for
+	// them, and rows get them from the runtime-state streams the watcher holds
+	// (see [RuntimeWatcher]). They are here so a Backend that does serve a
+	// snapshot — the test fakes — can seed a row without a stream, and the zero
+	// value reads as "nothing said so far" rather than as a claim about the
+	// command.
 	Title      string
 	Status     string
 	Detail     string
@@ -130,6 +135,10 @@ type Backend interface {
 	// Events subscribes to lifecycle change signals. Each signal is a cue to
 	// re-list; the stream is a local event-log tail, not a network stream.
 	Events(ctx context.Context) (EventStream, error)
+	// WatchRuntimeState subscribes to one command's monitor runtime-state
+	// stream: an initial snapshot, then a push per change. The stream closes
+	// when the monitor leaves an active state.
+	WatchRuntimeState(ctx context.Context, id string) (RuntimeStateStream, error)
 	// Logs opens a Tail+Follow reader for the preview pane. tail sizes the
 	// initial snapshot.
 	Logs(ctx context.Context, id string, tail int) (LogStream, error)
@@ -228,6 +237,28 @@ type EventSignal struct {
 // EventStream delivers lifecycle change signals until closed.
 type EventStream interface {
 	Signals() <-chan EventSignal
+	Close() error
+}
+
+// RuntimeStateView is the pushed runtime state, mirroring the
+// Title/Status/Detail/BellUnread fields on CommandInfo.
+type RuntimeStateView struct {
+	Title      string
+	Status     string
+	Detail     string
+	BellUnread bool
+}
+
+// RuntimeStateUpdate is one stream message; a non-nil Err is a terminal read
+// error (the channel closes after it).
+type RuntimeStateUpdate struct {
+	State RuntimeStateView
+	Err   error
+}
+
+// RuntimeStateStream delivers runtime-state updates until closed.
+type RuntimeStateStream interface {
+	Updates() <-chan RuntimeStateUpdate
 	Close() error
 }
 

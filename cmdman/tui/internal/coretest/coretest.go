@@ -9,6 +9,7 @@ package coretest
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -81,6 +82,12 @@ type FakeBackend struct {
 	RawChunks  [][]byte         // chunks pre-loaded into each RawView stream
 	RawErr     error            // error returned by RawView (open failure)
 	RawStreams []*FakeRawStream // one per RawView call
+
+	WatchIDs []string // ids passed to WatchRuntimeState, in call order
+	WatchErr error    // error returned by WatchRuntimeState (subscribe failure)
+	// WatchStreams holds the stream handed out per id — the latest one when a
+	// dropped id is subscribed again; every subscribe is in WatchIDs.
+	WatchStreams map[string]*FakeRuntimeStateStream
 }
 
 var _ core.Backend = (*FakeBackend)(nil)
@@ -124,6 +131,36 @@ func (f *FakeBackend) Events(context.Context) (core.EventStream, error) {
 		f.EventStream = &FakeEventStream{Ch: make(chan core.EventSignal, 1)}
 	}
 	return f.EventStream, nil
+}
+
+func (f *FakeBackend) WatchRuntimeState(
+	_ context.Context,
+	id string,
+) (core.RuntimeStateStream, error) {
+	f.WatchIDs = append(f.WatchIDs, id)
+	if f.WatchErr != nil {
+		return nil, f.WatchErr
+	}
+	s := NewFakeRuntimeStateStream(id)
+	if f.WatchStreams == nil {
+		f.WatchStreams = map[string]*FakeRuntimeStateStream{}
+	}
+	f.WatchStreams[id] = s
+	return s, nil
+}
+
+// WatchClosed reports the ids whose runtime-state stream the consumer closed,
+// in id order. Only the latest stream per id is held, so an id that was closed
+// and subscribed again reports as open.
+func (f *FakeBackend) WatchClosed() []string {
+	var ids []string
+	for id, s := range f.WatchStreams {
+		if s.IsClosed() {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids
 }
 
 func (f *FakeBackend) Logs(_ context.Context, _ string, _ int) (core.LogStream, error) {
@@ -278,6 +315,91 @@ func (s *FakeRawStream) WaitClosed(t *testing.T) {
 	case <-s.closedCh:
 	case <-time.After(time.Second):
 		t.Fatalf("raw stream was not closed")
+	}
+}
+
+// FakeRuntimeStateStream is the runtime-state stream the fake backend hands out
+// per command id. A test drives both ends: Push delivers what a monitor would
+// have pushed, EndStream is the monitor leaving an active state, and
+// IsClosed/WaitClosed observe the consumer's Close. Its close state is
+// mutex-guarded because the watcher may close a dropped stream off the update
+// loop.
+type FakeRuntimeStateStream struct {
+	// ID is the command id the stream was subscribed for, carried so a test
+	// holding one stream can name it.
+	ID string
+	Ch chan core.RuntimeStateUpdate
+
+	closedCh chan struct{}
+
+	mu     sync.Mutex
+	closed bool
+	ended  bool
+}
+
+func NewFakeRuntimeStateStream(id string) *FakeRuntimeStateStream {
+	return &FakeRuntimeStateStream{
+		ID:       id,
+		Ch:       make(chan core.RuntimeStateUpdate, 16),
+		closedCh: make(chan struct{}),
+	}
+}
+
+func (s *FakeRuntimeStateStream) Updates() <-chan core.RuntimeStateUpdate { return s.Ch }
+
+// Close is the consumer's close: it records the close and ends the channel.
+func (s *FakeRuntimeStateStream) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.closed {
+		s.closed = true
+		close(s.closedCh)
+	}
+	s.end()
+	return nil
+}
+
+// Push delivers one update, as a monitor's snapshot or change push would.
+func (s *FakeRuntimeStateStream) Push(u core.RuntimeStateUpdate) { s.Ch <- u }
+
+// PushState delivers one pushed view, the shape of every update but the
+// terminal error.
+func (s *FakeRuntimeStateStream) PushState(v core.RuntimeStateView) {
+	s.Push(core.RuntimeStateUpdate{State: v})
+}
+
+// EndStream ends the stream from the monitor's side — the command left an
+// active state — without the consumer having closed it.
+func (s *FakeRuntimeStateStream) EndStream() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.end()
+}
+
+// end closes the update channel once. The caller holds mu.
+func (s *FakeRuntimeStateStream) end() {
+	if !s.ended {
+		s.ended = true
+		close(s.Ch)
+	}
+}
+
+// IsClosed reports whether the consumer closed the stream, without racing a
+// close that runs off the update loop.
+func (s *FakeRuntimeStateStream) IsClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
+}
+
+// WaitClosed blocks briefly for an async Close, failing the test if it never
+// happens.
+func (s *FakeRuntimeStateStream) WaitClosed(t *testing.T) {
+	t.Helper()
+	select {
+	case <-s.closedCh:
+	case <-time.After(time.Second):
+		t.Fatalf("runtime state stream for %q was not closed", s.ID)
 	}
 }
 

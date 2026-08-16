@@ -62,6 +62,8 @@ func New(opts Options) Model {
 			fold:  map[string]bool{},
 			focus: paneList,
 		},
+		watcher: core.NewRuntimeWatcher(),
+		runtime: map[string]core.RuntimeStateView{},
 		// -1 = no dashboard marker known until the first ListLayouts load.
 		layout: layoutTab{current: -1},
 	}

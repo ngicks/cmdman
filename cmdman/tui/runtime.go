@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"io"
+	"maps"
 	"strings"
 	"time"
 
@@ -65,6 +66,117 @@ func (m Model) onReloadTick(msg core.ReloadTickMsg) (tea.Model, tea.Cmd) {
 		return m, nil // a newer event arrived; let the latest tick win
 	}
 	return m, tea.Batch(m.loadCommandsCmd(), m.loadProjectsCmd())
+}
+
+// --- live runtime state -----------------------------------------------------
+
+// runtimeWatchReadyMsg arms the merged runtime-state receive. Init hands the
+// arming over as a message so the receive — which only returns when a monitor
+// pushes — is started from an Update arm, the same shape the event
+// subscription has (SubscribeCmd → EventsSubscribedMsg → WaitEventCmd).
+type runtimeWatchReadyMsg struct{}
+
+func armRuntimeWatchCmd() tea.Cmd {
+	return func() tea.Msg { return runtimeWatchReadyMsg{} }
+}
+
+// onRuntimeUpdate folds one pushed runtime state into the model and rearms the
+// receive. The watcher's own close is the one message that ends the loop: with
+// no id there is no stream left to hear from.
+func (m Model) onRuntimeUpdate(msg core.RuntimeUpdateMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Closed && msg.ID == "":
+		return m, nil
+	case msg.Closed:
+		// One command's monitor left an active state. Its row keeps what it last
+		// showed until the lifecycle re-list corrects it, and only a later
+		// Reconcile that still lists the command live redials.
+		return m, core.WaitRuntimeUpdateCmd(m.watcher)
+	case msg.Err != nil:
+		// A monitor that stopped answering is not the user's problem: the row
+		// stays as it was, exactly as it does for a monitor that was never
+		// dialable, and the stream's close follows this error.
+		return m, core.WaitRuntimeUpdateCmd(m.watcher)
+	}
+	m.applyRuntimeState(msg.ID, msg.State)
+	return m, core.WaitRuntimeUpdateCmd(m.watcher)
+}
+
+// applyRuntimeState caches a pushed view and patches its row in place. An
+// update for a command the list no longer shows with a live monitor is
+// dropped, cache included: it was buffered before the watcher dropped the
+// stream, and caching it again would outlive the eviction that already ran.
+func (m *Model) applyRuntimeState(id string, v core.RuntimeStateView) {
+	row := m.liveRow(id)
+	if row == nil {
+		return
+	}
+	m.runtime[id] = v
+	applyRuntimeView(row, v)
+}
+
+// liveRow returns the row for id when the list has it in a state whose monitor
+// serves a runtime-state stream, and nil otherwise.
+func (m *Model) liveRow(id string) *core.CommandRow {
+	for gi := range m.commands.groups {
+		cmds := m.commands.groups[gi].Commands
+		for ci := range cmds {
+			if cmds[ci].ID != id {
+				continue
+			}
+			if !liveMonitor(cmds[ci].State) {
+				return nil
+			}
+			return &cmds[ci]
+		}
+	}
+	return nil
+}
+
+// mergeRuntime lays the cached pushes over freshly grouped rows: a list load
+// carries none, so without this a re-list would blank every title until each
+// monitor pushed again.
+//
+// The same walk is what bounds the cache — it holds only ids the list still
+// shows with a live monitor. Sweeping against the list rather than against the
+// ids the reconcile dropped is what forgets a command whose stream ended on its
+// own: the watcher drops such a stream itself, so no later reconcile names it,
+// and a run that came back would otherwise be painted with the last run's words
+// (D13) until its first push.
+func (m *Model) mergeRuntime(groups []core.ProjectGroup) {
+	live := make(map[string]struct{}, len(m.runtime))
+	for gi := range groups {
+		cmds := groups[gi].Commands
+		for ci := range cmds {
+			if !liveMonitor(cmds[ci].State) {
+				continue
+			}
+			live[cmds[ci].ID] = struct{}{}
+			if v, ok := m.runtime[cmds[ci].ID]; ok {
+				applyRuntimeView(&cmds[ci], v)
+			}
+		}
+	}
+	maps.DeleteFunc(m.runtime, func(id string, _ core.RuntimeStateView) bool {
+		_, ok := live[id]
+		return !ok
+	})
+}
+
+// liveMonitor reports whether a row's state is one whose monitor serves a
+// runtime-state stream — the model's own copy of what the watcher subscribes
+// by, and the one predicate the cache is kept against.
+func liveMonitor(state model.EventType) bool {
+	return state == model.EventTypeStarting || state == model.EventTypeRunning
+}
+
+// applyRuntimeView writes a pushed view onto a row: the four fields a command
+// reports about itself, and nothing the store speaks for.
+func applyRuntimeView(row *core.CommandRow, v core.RuntimeStateView) {
+	row.Title = v.Title
+	row.Status = v.Status
+	row.Detail = v.Detail
+	row.Bell = v.BellUnread
 }
 
 // --- preview ----------------------------------------------------------------

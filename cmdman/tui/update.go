@@ -13,6 +13,7 @@ func (m Model) Init() tea.Cmd {
 		m.loadCommandsCmd(),
 		m.loadProjectsCmd(),
 		m.subscribeEventsCmd(),
+		armRuntimeWatchCmd(),
 		m.maybeLoadLayoutsCmd(),
 	)
 }
@@ -40,6 +41,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onEventSignal(msg)
 	case core.ReloadTickMsg:
 		return m.onReloadTick(msg)
+	case runtimeWatchReadyMsg:
+		return m, core.WaitRuntimeUpdateCmd(m.watcher)
+	case core.RuntimeUpdateMsg:
+		return m.onRuntimeUpdate(msg)
 	case previewOpenedMsg:
 		return m.onPreviewOpened(msg)
 	case previewLineMsg:
@@ -96,7 +101,15 @@ func (m Model) onCommandsLoaded(msg core.CommandsLoadedMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	prevID, _ := m.commands.selectedCommand()
-	m.setGroups(core.GroupFromInfos(msg.Infos))
+	// The list is what says which commands exist, so it is also what the held
+	// streams are reconciled against. The ids it reports dropping are not read:
+	// the merge below evicts every one of them and, beyond them, the entries
+	// whose stream ended on its own — those the watcher already forgot, so a
+	// reconcile can no longer name them.
+	m.watcher.Reconcile(m.bgCtx(), m.backend, msg.Infos)
+	groups := core.GroupFromInfos(msg.Infos)
+	m.mergeRuntime(groups)
+	m.setGroups(groups)
 	if prevID.ID != "" {
 		m.selectCommandByID(prevID.ID)
 	}

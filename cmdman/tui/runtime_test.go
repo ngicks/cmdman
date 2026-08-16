@@ -68,6 +68,245 @@ func TestEventStreamClosedStopsListening(t *testing.T) {
 	}
 }
 
+// --- live runtime state -----------------------------------------------------
+
+// listedInfos is what a list load reports for the seeded local-dev project:
+// one running command and one exited one, with no runtime state on either —
+// the TUI's listing stopped carrying it once the streams took over (L3).
+func listedInfos() []core.CommandInfo {
+	return []core.CommandInfo{
+		{
+			ID:      "1",
+			Name:    "watcher",
+			Project: "local-dev",
+			Workdir: "/work/local-dev",
+			State:   model.EventTypeRunning,
+		},
+		{
+			ID:      "2",
+			Name:    "seed-db",
+			Project: "local-dev",
+			Workdir: "/work/local-dev",
+			State:   model.EventTypeExited,
+		},
+	}
+}
+
+// watchingModel is a model that has loaded listedInfos once, so the watcher
+// holds a stream for the running command. The watcher is closed with the test.
+func watchingModel(t *testing.T) (Model, *coretest.FakeBackend) {
+	t.Helper()
+	m := seed()
+	m.ctx = t.Context()
+	fb, ok := m.backend.(*coretest.FakeBackend)
+	if !ok {
+		t.Fatalf("seed should carry the fake backend, got %T", m.backend)
+	}
+	t.Cleanup(func() { _ = m.watcher.Close() })
+	m, _ = m.onCommandsLoaded(core.CommandsLoadedMsg{Infos: listedInfos()})
+	return m, fb
+}
+
+// recvRuntimeUpdate runs the merged receive off the test goroutine, so a push
+// that never arrives fails the test instead of hanging it.
+func recvRuntimeUpdate(t *testing.T, w *core.RuntimeWatcher) core.RuntimeUpdateMsg {
+	t.Helper()
+	ch := make(chan tea.Msg, 1)
+	go func() { ch <- core.WaitRuntimeUpdateCmd(w)() }()
+	select {
+	case msg := <-ch:
+		u, ok := msg.(core.RuntimeUpdateMsg)
+		if !ok {
+			t.Fatalf("WaitRuntimeUpdateCmd delivered %T, want core.RuntimeUpdateMsg", msg)
+		}
+		return u
+	case <-time.After(time.Second):
+		t.Fatalf("no runtime update arrived")
+		return core.RuntimeUpdateMsg{}
+	}
+}
+
+// commandRow returns the row for a command id from the Commands tab.
+func commandRow(t *testing.T, m Model, id string) core.CommandRow {
+	t.Helper()
+	for _, g := range m.commands.groups {
+		for _, c := range g.Commands {
+			if c.ID == id {
+				return c
+			}
+		}
+	}
+	t.Fatalf("no row for command %q", id)
+	return core.CommandRow{}
+}
+
+func TestInitArmsRuntimeWatch(t *testing.T) {
+	m := seed()
+	armed := false
+	for _, msg := range drain(m.Init()) {
+		if _, ok := msg.(runtimeWatchReadyMsg); ok {
+			armed = true
+		}
+	}
+	if !armed {
+		t.Fatalf("Init should arm the runtime-state receive")
+	}
+	// The arming message is what starts the (blocking) merged receive.
+	if _, cmd := upd(m, runtimeWatchReadyMsg{}); cmd == nil {
+		t.Fatalf("the arming message should start the merged receive")
+	}
+}
+
+func TestRuntimePushPatchesRowWithoutRelist(t *testing.T) {
+	m, fb := watchingModel(t)
+	stream := fb.WatchStreams["1"]
+	if stream == nil {
+		t.Fatalf("the running command should be watched, subscribed %v", fb.WatchIDs)
+	}
+	stream.PushState(core.RuntimeStateView{
+		Title:      "make build",
+		Status:     "working",
+		Detail:     "step 2/3",
+		BellUnread: true,
+	})
+
+	// No list load happens between the push and the row: the update travels the
+	// watcher's merged channel straight into Update.
+	m, cmd := upd(m, recvRuntimeUpdate(t, m.watcher))
+	if cmd == nil {
+		t.Fatalf("a runtime update should rearm the receive")
+	}
+	row := commandRow(t, m, "1")
+	if row.Title != "make build" || row.Status != "working" || row.Detail != "step 2/3" {
+		t.Errorf("pushed state should patch the row, got %+v", row)
+	}
+	if !row.Bell {
+		t.Errorf("a pushed unread bell should light the row's glyph")
+	}
+}
+
+func TestRelistKeepsPushedRuntimeState(t *testing.T) {
+	m, fb := watchingModel(t)
+	fb.WatchStreams["1"].PushState(core.RuntimeStateView{Title: "make build", Status: "working"})
+	m, _ = upd(m, recvRuntimeUpdate(t, m.watcher))
+
+	// The re-list carries no runtime state; the cache is what keeps the row
+	// from flashing back to an empty title.
+	m, _ = m.onCommandsLoaded(core.CommandsLoadedMsg{Infos: listedInfos()})
+	row := commandRow(t, m, "1")
+	if row.Title != "make build" || row.Status != "working" {
+		t.Errorf("a re-list should keep the pushed state, got %+v", row)
+	}
+	if len(fb.WatchIDs) != 1 {
+		t.Errorf("a held stream should not be redialed, subscribed %v", fb.WatchIDs)
+	}
+}
+
+func TestExitedCommandDropsCachedRuntimeState(t *testing.T) {
+	m, fb := watchingModel(t)
+	fb.WatchStreams["1"].PushState(core.RuntimeStateView{Title: "make build"})
+	m, _ = upd(m, recvRuntimeUpdate(t, m.watcher))
+
+	infos := listedInfos()
+	infos[0].State = model.EventTypeExited
+	m, _ = m.onCommandsLoaded(core.CommandsLoadedMsg{Infos: infos})
+	if len(m.runtime) != 0 {
+		t.Errorf("a dropped stream should evict its cached state, cached %v", m.runtime)
+	}
+	if row := commandRow(t, m, "1"); row.Title != "" {
+		t.Errorf("an exited command should not keep its last title, got %q", row.Title)
+	}
+}
+
+func TestSelfEndedStreamLeavesNothingForTheNextRun(t *testing.T) {
+	m, fb := watchingModel(t)
+	fb.WatchStreams["1"].PushState(core.RuntimeStateView{Title: "make build"})
+	m, _ = upd(m, recvRuntimeUpdate(t, m.watcher))
+
+	// The monitor left an active state, so the stream ended on its own: the
+	// watcher forgets it without a reconcile ever naming it dropped.
+	fb.WatchStreams["1"].EndStream()
+	ended := recvRuntimeUpdate(t, m.watcher)
+	if !ended.Closed || ended.ID != "1" {
+		t.Fatalf("a stream that ends should report its own close, got %+v", ended)
+	}
+	m, _ = upd(m, ended)
+
+	infos := listedInfos()
+	infos[0].State = model.EventTypeExited
+	m, _ = m.onCommandsLoaded(core.CommandsLoadedMsg{Infos: infos})
+	if len(m.runtime) != 0 {
+		t.Errorf("a command that left a live state should keep nothing cached, got %v", m.runtime)
+	}
+
+	// The command runs again: its row carries the new run's state only, and the
+	// watcher redials now that the list names it live once more.
+	m, _ = m.onCommandsLoaded(core.CommandsLoadedMsg{Infos: listedInfos()})
+	if row := commandRow(t, m, "1"); row.Title != "" {
+		t.Errorf("a run that came back should not wear the last run's title, got %q", row.Title)
+	}
+	if len(fb.WatchIDs) != 2 {
+		t.Errorf("the returning command should be redialed, subscribed %v", fb.WatchIDs)
+	}
+}
+
+func TestRuntimeUpdateForUnwatchedCommandIgnored(t *testing.T) {
+	m, _ := watchingModel(t)
+	// An id that is not listed at all, and one listed without a live monitor:
+	// both are stragglers buffered before their stream was dropped.
+	for _, id := range []string{"ghost", "2"} {
+		nm, cmd := upd(m, core.RuntimeUpdateMsg{
+			ID:    id,
+			State: core.RuntimeStateView{Title: "stale"},
+		})
+		if cmd == nil {
+			t.Fatalf("an ignored update should still rearm the receive")
+		}
+		m = nm
+	}
+	if len(m.runtime) != 0 {
+		t.Errorf("an ignored update should not be cached, cached %v", m.runtime)
+	}
+	if row := commandRow(t, m, "2"); row.Title != "" {
+		t.Errorf("an exited command's row should not take a straggler, got %q", row.Title)
+	}
+}
+
+func TestRuntimeStreamEndAndErrorKeepListening(t *testing.T) {
+	m, _ := watchingModel(t)
+	for _, msg := range []core.RuntimeUpdateMsg{
+		{ID: "1", Closed: true},
+		{ID: "1", Err: errors.New("monitor went away")},
+	} {
+		nm, cmd := upd(m, msg)
+		if cmd == nil {
+			t.Fatalf("%+v should keep the merged receive armed", msg)
+		}
+		m = nm
+		if m.status != "" {
+			t.Errorf("a broken stream should not reach the footer, got %q", m.status)
+		}
+	}
+}
+
+func TestRuntimeWatcherClosedStopsListening(t *testing.T) {
+	m := seed()
+	// The watcher's own close carries no id: nothing is left to hear from.
+	if _, cmd := upd(m, core.RuntimeUpdateMsg{Closed: true}); cmd != nil {
+		t.Fatalf("a closed watcher should stop the receive loop")
+	}
+}
+
+func TestQuitClosesRuntimeWatcher(t *testing.T) {
+	m, fb := watchingModel(t)
+	stream := fb.WatchStreams["1"]
+	m, _ = upd(m, coretest.Kr("q"))
+	if !m.quitting {
+		t.Fatalf("q should quit")
+	}
+	stream.WaitClosed(t)
+}
+
 func TestRefreshPreservesFoldFilterAndTab(t *testing.T) {
 	m := seed()
 	m.commands.setFolded(0, true) // fold local-dev

@@ -15,15 +15,18 @@ type (
 	SwitchTarget = core.SwitchTarget
 	Options      = core.Options
 
-	EventSignal     = core.EventSignal
-	EventStream     = core.EventStream
-	LogLine         = core.LogLine
-	LogStream       = core.LogStream
-	RawChunk        = core.RawChunk
-	RawSize         = core.RawSize
-	RawStream       = core.RawStream
-	ComposeUpEvent  = core.ComposeUpEvent
-	ComposeUpStream = core.ComposeUpStream
+	EventSignal        = core.EventSignal
+	EventStream        = core.EventStream
+	RuntimeStateView   = core.RuntimeStateView
+	RuntimeStateUpdate = core.RuntimeStateUpdate
+	RuntimeStateStream = core.RuntimeStateStream
+	LogLine            = core.LogLine
+	LogStream          = core.LogStream
+	RawChunk           = core.RawChunk
+	RawSize            = core.RawSize
+	RawStream          = core.RawStream
+	ComposeUpEvent     = core.ComposeUpEvent
+	ComposeUpStream    = core.ComposeUpStream
 
 	LaunchTarget   = core.LaunchTarget
 	LaunchProject  = core.LaunchProject
