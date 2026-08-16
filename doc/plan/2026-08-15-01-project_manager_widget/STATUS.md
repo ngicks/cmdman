@@ -40,21 +40,29 @@ Current state: **plan finalized; implementation not started.**
       D15 [automatic] precedence call; statusbar inherits identity-first
       Active; two discoveries in HANDOFF.md; `mux.CurrentWindowID` wrapper
       per D13 amendment)
-- [ ] Step 4 — backend ops: D2 mapping (SetScale = replica count,
+- [x] Step 4 — backend ops: D2 mapping (SetScale = replica count,
       CycleScale = shown replica, layouts = existing methods); D11 "Replicas
       … is the per-service instance count … not `LabelScale`"; D14 "reports
-      … only when every dashboard window … agrees"; incl.
-      refactoring `cmd/.../compose_scale.go` onto the hoisted
-      `compose.Service.Scale` (user request 2026-08-16)
+      … only when every dashboard window … agrees" (+ abstention amendment,
+      pinned by `TestAgreedScalePositions` and e2e
+      `TestComposeMuxScaleState_AgreementOnly`); incl. refactoring
+      `cmd/.../compose_scale.go` onto the hoisted `compose.Service.Scale`
+      (user request 2026-08-16) — done 2026-08-16, D16 contract deviations
+      recorded; e2e for ProjectManager/SetScale/CycleScale deferred to
+      step 5+ (no CLI surface until the widget acts)
 - [ ] Step 5 — widget model/view per PLAN.md key table; D14 "error line …
       must not imply the cycle didn't happen"
 - [ ] Step 6 — switcher summon: D1 "same mux auto-detect + flags path", D5,
-      D7 `m`, D9 "row under cursor", D4 inline popup-unavailable message
+      D7 `m`, D9 "row under cursor", D4 inline popup-unavailable message;
+      D17 "explicit compose target … skips the ambient identity/cwd chain"
 - [ ] Step 7 — docs: man page + bind-key snippet with `--mux-token`; D12
       "wraps it in `run-shell`"
 - [ ] Step 8 — test sweep incl. new e2e (detection, summon, scale/cycle)
 
 ## Next action
 
-Step 4 (backend ops). User away for this run: unclear corners are decided
-automatically and tagged `[automatic]` in DECISION.md.
+Step 5 (widget model/view). Step-5 constraint from step 4: `CycleScale`
+returns only `error`, so the widget's error line must satisfy D14's "must
+not imply the cycle didn't happen" from wording alone. User away for this
+run: unclear corners are decided automatically and tagged `[automatic]` in
+DECISION.md.

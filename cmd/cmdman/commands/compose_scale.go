@@ -49,14 +49,6 @@ func runComposeScale(
 		return err
 	}
 
-	spec, err := compose.LoadAndNormalize(cf.normalizeOpts())
-	if err != nil {
-		return err
-	}
-	if err := applyScaleOverrides(&spec, scales); err != nil {
-		return err
-	}
-
 	svc, err := cmdmanService(cmd, rf)
 	if err != nil {
 		return err
@@ -69,15 +61,12 @@ func runComposeScale(
 	}
 	defer prog.Close()
 
-	names := make([]string, 0, len(scales))
-	for name := range scales {
-		names = append(names, name)
-	}
-
-	result, err := compose.NewService(svc, compose.WithReporter(prog)).Up(
-		cmd.Context(), spec, compose.UpOption{
-			CreateOption: compose.CreateOption{CommandNames: names},
-			StartOption:  compose.StartOption{CommandNames: names},
+	result, err := compose.NewService(svc, compose.WithReporter(prog)).Scale(
+		cmd.Context(), compose.ScaleOption{
+			File:        cf.File,
+			ProjectName: cf.ProjectName,
+			WorkDir:     cf.WorkDir,
+			Scales:      scales,
 		})
 	if err != nil {
 		return err
@@ -107,21 +96,4 @@ func parseScaleArgs(args []string) (map[string]int, error) {
 		scales[name] = num
 	}
 	return scales, nil
-}
-
-// applyScaleOverrides sets the requested replica counts on the matching spec
-// commands, erroring when a named service is not declared in the compose file.
-func applyScaleOverrides(spec *compose.ComposeSpec, scales map[string]int) error {
-	index := make(map[string]int, len(spec.Commands))
-	for i, c := range spec.Commands {
-		index[c.Name] = i
-	}
-	for name, num := range scales {
-		i, ok := index[name]
-		if !ok {
-			return fmt.Errorf("unknown compose command %q", name)
-		}
-		spec.Commands[i].Scale = num
-	}
-	return nil
 }

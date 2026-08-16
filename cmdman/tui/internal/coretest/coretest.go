@@ -59,6 +59,14 @@ type FakeBackend struct {
 	AppliedLayouts []string         // layout names passed to ApplyLayout
 	ApplyLayoutErr error            // error returned by ApplyLayout
 
+	ManagerInfo   core.ProjectManagerInfo // info returned by ProjectManager
+	ManagerErr    error                   // error returned by ProjectManager
+	ManagerReq    []string                // project names passed to ProjectManager
+	ScalesSet     []ScaleCall             // calls taken by SetScale
+	SetScaleErr   error                   // error returned by SetScale
+	ScalesCycled  []CycleScaleCall        // calls taken by CycleScale
+	CycleScaleErr error                   // error returned by CycleScale
+
 	Definition     string   // text returned by ProjectDefinition
 	DefinitionErr  error    // error returned by ProjectDefinition
 	DefRequested   []string // project names passed to ProjectDefinition
@@ -94,6 +102,21 @@ type FakeBackend struct {
 	// WatchStreams holds the stream handed out per id — the latest one when a
 	// dropped id is subscribed again; every subscribe is in WatchIDs.
 	WatchStreams map[string]*FakeRuntimeStateStream
+}
+
+// ScaleCall is one recorded [FakeBackend.SetScale] call.
+type ScaleCall struct {
+	Project  string
+	Service  string
+	Replicas int
+}
+
+// CycleScaleCall is one recorded [FakeBackend.CycleScale] call. Set is the
+// 1-based replica asked for, 0 meaning "advance to the next".
+type CycleScaleCall struct {
+	Project string
+	Command string
+	Set     int
 }
 
 var _ core.Backend = (*FakeBackend)(nil)
@@ -210,6 +233,40 @@ func (f *FakeBackend) ListLayouts(
 func (f *FakeBackend) ApplyLayout(_ context.Context, _, _, layoutName string) error {
 	f.AppliedLayouts = append(f.AppliedLayouts, layoutName)
 	return f.ApplyLayoutErr
+}
+
+func (f *FakeBackend) ProjectManager(
+	_ context.Context,
+	projectName, _ string,
+) (core.ProjectManagerInfo, error) {
+	f.ManagerReq = append(f.ManagerReq, projectName)
+	return f.ManagerInfo, f.ManagerErr
+}
+
+func (f *FakeBackend) SetScale(
+	_ context.Context,
+	projectName, _, service string,
+	replicas int,
+) error {
+	f.ScalesSet = append(f.ScalesSet, ScaleCall{
+		Project:  projectName,
+		Service:  service,
+		Replicas: replicas,
+	})
+	return f.SetScaleErr
+}
+
+func (f *FakeBackend) CycleScale(
+	_ context.Context,
+	projectName, _, command string,
+	set int,
+) error {
+	f.ScalesCycled = append(f.ScalesCycled, CycleScaleCall{
+		Project: projectName,
+		Command: command,
+		Set:     set,
+	})
+	return f.CycleScaleErr
 }
 
 func (f *FakeBackend) ProjectDefinition(_ context.Context, projectName, _ string) (string, error) {

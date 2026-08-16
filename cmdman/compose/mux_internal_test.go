@@ -137,4 +137,66 @@ func TestServiceMuxLs_NilServiceDegrades(t *testing.T) {
 	assert.Equal(t, len(res.Windows), 0)
 	assert.Equal(t, len(res.ReplicaCounts), 0)
 	assert.DeepEqual(t, res.CycleTargets, []string{"web"})
+
+	// MuxScaleState reads the same listing and needs no service either.
+	positions, err := NewService(nil).MuxScaleState(
+		context.Background(), MuxScaleStateOption{Selection: sel},
+	)
+	assert.NilError(t, err)
+	assert.Equal(t, len(positions), 0)
+}
+
+// TestAgreedScalePositions is D14's contract: a position is reported only when
+// the windows holding one agree, a window holding none abstains rather than
+// voting for replica 1, and a command knocked out by a disagreement stays out
+// however many later windows match the first.
+func TestAgreedScalePositions(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		windows []mux.OwnedWindow
+		want    map[string]int
+	}{
+		{
+			name: "unanimous",
+			windows: []mux.OwnedWindow{
+				{WindowID: "@1", ScalePositions: map[string]int{"web": 2}},
+				{WindowID: "@3", ScalePositions: map[string]int{"web": 2}},
+			},
+			want: map[string]int{"web": 2},
+		},
+		{
+			name: "disagreement omits only the command that diverged",
+			windows: []mux.OwnedWindow{
+				{WindowID: "@1", ScalePositions: map[string]int{"web": 3, "api": 1}},
+				{WindowID: "@3", ScalePositions: map[string]int{"web": 2, "api": 1}},
+			},
+			want: map[string]int{"api": 1},
+		},
+		{
+			name: "a window with no state abstains",
+			windows: []mux.OwnedWindow{
+				{WindowID: "@1", ScalePositions: map[string]int{"web": 2}},
+				{WindowID: "@4"},
+			},
+			want: map[string]int{"web": 2},
+		},
+		{
+			name: "a later match does not resurrect a diverged command",
+			windows: []mux.OwnedWindow{
+				{WindowID: "@1", ScalePositions: map[string]int{"web": 3}},
+				{WindowID: "@3", ScalePositions: map[string]int{"web": 2}},
+				{WindowID: "@5", ScalePositions: map[string]int{"web": 3}},
+			},
+			want: nil,
+		},
+		{
+			name:    "no windows",
+			windows: nil,
+			want:    nil,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.DeepEqual(t, agreedScalePositions(tc.windows), tc.want)
+		})
+	}
 }

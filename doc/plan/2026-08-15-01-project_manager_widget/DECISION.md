@@ -205,6 +205,41 @@ Active naming (it reads the same `Active` flag) — accepted as D3's
 precedence redesign beyond this plan's scope; recorded in HANDOFF.md as a
 possible follow-up instead.
 
+## D16 — step-4 contract deviations from the fenced delta [automatic] (2026-08-16)
+
+**Choice**: two signatures diverge from PLAN's fenced Base-layer block, and
+the block is updated to match. (a) `compose.Service.Scale` returns
+`(*UpResult, error)`, not bare `error` — with `error` only, per-replica
+start failures would stop reaching `cli.UpResultErr` and a failed replica
+would exit 0. (b) `MuxScaleStateOption` is
+`{Selection ProjectSelection; SessionName string}` per the plan's own
+"exact shape aligned with MuxLsOption at implementation" clause.
+`MuxScaleState` needed no `cmdman/mux` change — it folds `mux.List`'s
+per-window `ScalePositions` (`cmdman/mux/list.go:111`).
+
+**Rejected**: bare-`error` `Scale` (silently green failed replicas); the
+flat File/ProjectName/WorkDir option (no sibling op is shaped that way).
+
+## D17 — explicit project target outranks ambient identity in `ProjectManager` [automatic] (2026-08-16)
+
+**Choice**: when the widget is invoked with an explicit compose target
+(`--file`/`--project-name`, as the switcher summon passes per D9),
+`ProjectManager` resolution uses that selection directly and skips the
+ambient identity/cwd chain. Only a bare invocation (or `--mux-token`) uses
+detection. **Owned by step 6**, which wires the summon.
+
+**Rationale**: step 4's `ProjectManager` reuses `resolveLayoutSelection`,
+so ambient identity would override the summon's explicit flags whenever the
+popup opens inside any cmdman-owned window (a popup always does — `$TMUX`
+is set), resolving the *enclosing* project instead of the row the user
+picked. That inverts D9's "targets the project row the cursor is on" and
+IDEA's "From the switcher, it targets the project under the cursor."
+Explicit intent beats ambient default; D15's precedence call governs only
+surfaces with no explicit target.
+
+**Rejected**: leaving ambient-first for the summon path (breaks D9);
+re-ranking the whole TUI's precedence (HANDOFF follow-up, unchanged).
+
 ## D14 — `Shown` reports agreement only; disagreement renders unknown [automatic] (2026-08-16)
 
 **Choice**: `compose.Service.MuxScaleState` reports a service's shown-replica
@@ -224,3 +259,11 @@ Rendering a possibly-wrong number is worse than rendering unknown.
 **Rejected**: last-row-wins passthrough (silently wrong for one of the
 sessions); erroring on disagreement (blocks the whole view over one stale
 window).
+
+**Amended 2026-08-16 [automatic]** (step-4 implementation): a window holding
+*no* position **abstains** rather than voting for replica 1 — `MuxUp` seeds a
+new window from the merged read without writing state back
+(`cmdman/compose/mux.go:70-77`), so an unset window is most likely showing
+the agreed position, and the opposite reading would let one stray
+identity-stamped window blank the whole view (the outcome this entry already
+rejected). Pinned by `TestAgreedScalePositions`.

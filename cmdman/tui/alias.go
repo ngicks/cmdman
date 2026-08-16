@@ -15,6 +15,9 @@ type (
 	SwitchTarget = core.SwitchTarget
 	Options      = core.Options
 
+	ProjectManagerInfo = core.ProjectManagerInfo
+	ServiceScaleInfo   = core.ServiceScaleInfo
+
 	EventSignal        = core.EventSignal
 	EventStream        = core.EventStream
 	RuntimeStateView   = core.RuntimeStateView

@@ -103,6 +103,40 @@ type LayoutsInfo struct {
 	Current int
 }
 
+// ProjectManagerInfo aggregates the project-manager view data for one project,
+// following the LayoutsInfo projection convention.
+type ProjectManagerInfo struct {
+	// Project is the resolved project name and Path its compose file, carried
+	// so an action can target the same project the listing came from.
+	Project string
+	Path    string
+	// Services are the project's compose commands in definition order.
+	Services []ServiceScaleInfo
+	// Layouts is the same layout projection the Layout tab renders.
+	Layouts LayoutsInfo
+}
+
+// ServiceScaleInfo is one service row: its replica count, the 1-based replica
+// its dashboard pane currently shows (0 = unknown / not cycling), and whether
+// the mux leaf is an unpinned cycle target.
+//
+// Replicas is the live per-service instance count in the store — the number of
+// the project's commands carrying that service's labels, compose-ps style,
+// exited replicas included — NOT CommandInfo.ScaleCount, which goes stale after
+// a compose scale (D11). It is the base the widget's +/- apply to, so a service
+// that has never been created reads 0.
+//
+// Shown comes from the project's persisted mux scale state, which reports a
+// service only when every dashboard window of the project agrees on its
+// position (D14): agreement is invocation-dependent rather than an invariant,
+// and disagreement renders as unknown instead of as one window's answer.
+type ServiceScaleInfo struct {
+	Name     string
+	Replicas int
+	Shown    int
+	Cyclable bool
+}
+
 // Backend abstracts the cmdman/compose services the TUI talks to. It exists so
 // the model can be exercised without a live service. Methods that perform I/O
 // take a context and run off the bubbletea update loop; their results are
@@ -173,6 +207,21 @@ type Backend interface {
 	// mux path as CycleMux with an explicit layout selector. projectName/composeFile
 	// identify the project as resolved by ListLayouts.
 	ApplyLayout(ctx context.Context, projectName, composeFile, layoutName string) error
+
+	// ProjectManager returns everything the project-manager widget renders for
+	// one project (see ProjectManagerInfo). The project is resolved the way
+	// ListLayouts resolves it — the project whose mux window the caller is in,
+	// then the cwd-active mux project, then projectName/composeFile (which may
+	// be empty when the caller has no selection of its own).
+	ProjectManager(ctx context.Context, projectName, composeFile string) (ProjectManagerInfo, error)
+	// SetScale sets the replica count of one service, wrapping the compose
+	// scale path (ephemeral override + Up scoped to that service).
+	SetScale(ctx context.Context, projectName, composeFile, service string, replicas int) error
+	// CycleScale changes which replica the command's dashboard pane shows:
+	// set > 0 selects that 1-based replica, set == 0 advances to the next. It
+	// reaches every dashboard window of the project, which is what keeps their
+	// positions in agreement (see ServiceScaleInfo.Shown).
+	CycleScale(ctx context.Context, projectName, composeFile, command string, set int) error
 
 	// SwitchToProject puts the client in front of the target's window — the
 	// docked switcher's enter/click (D6). A project with no window of its own

@@ -280,7 +280,9 @@ type ScaleOption struct {
     WorkDir     string
     Scales      map[string]int // service name -> desired replica count
 }
-func (s *Service) Scale(ctx context.Context, opts ScaleOption) error
+// Returns (*UpResult, error) — not bare error — so per-replica start
+// failures keep reaching cli.UpResultErr (D16).
+func (s *Service) Scale(ctx context.Context, opts ScaleOption) (*UpResult, error)
 
 // cmdman/compose — NEW: exported read of the shown-replica positions the
 // dashboards persist as @cmdman_scale state — today read only internally by
@@ -289,10 +291,9 @@ func (s *Service) Scale(ctx context.Context, opts ScaleOption) error
 // read is last-row-wins, mux/cycle_scale.go:317-323). Selection fields
 // mirror the other Mux* ops; exact shape aligned with MuxLsOption at
 // implementation.
-type MuxScaleStateOption struct {
-    File        string
-    ProjectName string
-    WorkDir     string
+type MuxScaleStateOption struct { // aligned with MuxLsOption (D16)
+    Selection   ProjectSelection
+    SessionName string
 }
 func (s *Service) MuxScaleState(ctx context.Context, opts MuxScaleStateOption) (map[string]int, error)
 ```
@@ -447,6 +448,8 @@ func (s *Service) MuxScaleState(ctx context.Context, opts MuxScaleStateOption) (
 | D12 bind-key snippet wraps display-popup in run-shell  | step 7       |
 | D13 token via `ListWindows`; window probe gated `$TMUX` | step 3      |
 | D14 Shown = agreement-only; cycle error wording        | steps 4, 5   |
+| D16 Scale returns (*UpResult, error); MuxLs-shaped opt | step 4       |
+| D17 explicit target skips ambient chain in ProjectManager | step 6    |
 | IDEA UC1 (direct + bind-key run)                       | steps 2, 3, 4, 5, 7 |
 | IDEA UC2 (switcher summon)                             | step 6       |
 | IDEA UC3 (window-aware detection TUI-wide)             | step 3       |

@@ -303,3 +303,85 @@ func (s *Service) MuxCycleScale(
 		Position:    opts.Position,
 	})
 }
+
+// MuxScaleStateOption configures [Service.MuxScaleState].
+type MuxScaleStateOption struct {
+	// Selection is the resolved compose project; it must declare a "mux:" section.
+	Selection ProjectSelection
+	// SessionName narrows the read to a single session. Empty is server-wide.
+	SessionName string
+}
+
+// MuxScaleState reports which replica each of the project's commands is
+// currently showing in its dashboard panes — the positions cycle-scale persists
+// as [muxctl.StateKeyScale] window state. A command absent from the map has no
+// answer; the caller renders it as unknown rather than as replica 1.
+//
+// A command is reported only when every window that holds a position for it
+// holds the same one (D14). Agreement is not an invariant: a session-narrowed
+// cycle-scale leaves the windows it did not visit behind, and the merged read
+// [mux.ReadScaleState] performs is last-row-wins, which would answer for one
+// session with the other session's position.
+//
+// A window holding no position for a command abstains instead of counting as
+// replica 1: [Service.MuxUp] seeds a window it builds from the read below
+// without writing the state back, so an unset window is most likely displaying
+// the very position the others recorded — and one stray identity-stamped window
+// would otherwise render the whole project unknown.
+//
+// Like [Service.MuxDown] and [Service.MuxLs] it never touches the underlying
+// cmdman service, so it is safe to invoke on a Service built with
+// NewService(nil).
+func (s *Service) MuxScaleState(
+	ctx context.Context,
+	opts MuxScaleStateOption,
+) (map[string]int, error) {
+	selection := opts.Selection
+	spec := *selection.Spec.Mux
+
+	// For an unnamed project (identity ""), fall back to the window name
+	// ("cmdman") so the filter still matches what up stamped, as [Service.MuxLs]
+	// does.
+	identity := selection.ProjectIdentity()
+	if identity == "" {
+		identity = selection.MuxWindowName()
+	}
+
+	windows, err := mux.List(ctx, mux.ListOptions{
+		Driver:      spec.Driver,
+		SessionName: opts.SessionName,
+		Identity:    identity,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return agreedScalePositions(windows), nil
+}
+
+// agreedScalePositions folds the per-window scale positions into the ones every
+// window that holds an opinion agrees on. A command whose windows disagree is
+// dropped and stays dropped — a third window matching the first must not
+// resurrect it. Returns nil when nothing is agreed, mirroring
+// [mux.ReadScaleState]'s empty answer.
+func agreedScalePositions(windows []mux.OwnedWindow) map[string]int {
+	agreed := make(map[string]int)
+	diverged := make(map[string]struct{})
+	for _, w := range windows {
+		for command, pos := range w.ScalePositions {
+			if _, bad := diverged[command]; bad {
+				continue
+			}
+			switch prev, seen := agreed[command]; {
+			case !seen:
+				agreed[command] = pos
+			case prev != pos:
+				delete(agreed, command)
+				diverged[command] = struct{}{}
+			}
+		}
+	}
+	if len(agreed) == 0 {
+		return nil
+	}
+	return agreed
+}
