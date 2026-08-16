@@ -7,6 +7,15 @@ in PLAN.md).
 
 ## Resolved
 
+- **L8 — man-page liveness is one added sentence [automatic]** (agent,
+  2026-08-16, step 6). A full sweep of `doc/man` found no claim the
+  change falsified — no page ever described a refresh cadence — so
+  step 6's "update where refresh behavior is described" is satisfied
+  by adding one in-voice sentence to `cmdman-tui.1.md`'s Description
+  ("Rows are live: ..."), quantifying nothing (the page never states
+  internals; 150ms reads as immediate). Rejected: documenting the D20
+  recency ordering there — the page describes no list's ordering, and
+  starting now would be a voice expansion beyond this plan.
 - **L7 — cache eviction is a merge-time sweep, not the dropped-ids
   return [automatic]** (agent, 2026-08-16, step 4). The plan said
   "evict cache entries for ids the reconcile dropped", but a stream

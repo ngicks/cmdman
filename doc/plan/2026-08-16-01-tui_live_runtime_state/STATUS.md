@@ -48,8 +48,11 @@ State: **implementing — steps 1-5 done, steps 6-7 in progress.**
       — watcher + cache in switcher Model, stampTitle on push arrival
       replaces load-time stampTitles; bucket-move / bell-read /
       no-flash / unknown-id tests, mutation-checked
-- [ ] 6. Docs + stale-comment cleanup (tui man page; the
-      `tui_backend_commands.go:26` "later phase" note)
+- [x] 6. Docs + stale-comment cleanup (tui man page; the
+      `tui_backend_commands.go:26` "later phase" note) — man sweep
+      found no falsified claims; one liveness sentence added to
+      cmdman-tui.1.md (L8 [automatic]); the stale comment fell in
+      step 4
 - [ ] 7. e2e: title change with no lifecycle event reaches the TUI
       (criterion 1)
 
