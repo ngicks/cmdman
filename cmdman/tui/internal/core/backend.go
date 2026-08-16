@@ -32,12 +32,17 @@ type CommandInfo struct {
 	ScaleIndex int
 	ScaleCount int
 
-	// Title, Status, Detail and BellUnread are the runtime state the command's
-	// monitor holds for the current run: the title it set, the status it
-	// reported (working/waiting/done, "" when it reported none) with its
-	// detail, and whether a bell is still unread. They are zero for a command
-	// with no live monitor, which reads as "nothing said so far" rather than as
-	// a claim about the command.
+	// Title, Status, Detail and BellUnread are the runtime state a command
+	// reports about its current run: the title it set, the status it reported
+	// (working/waiting/done, "" when it reported none) with its detail, and
+	// whether a bell is still unread.
+	//
+	// The production listing leaves all four zero — no store entry speaks for
+	// them, and rows get them from the runtime-state streams the watcher holds
+	// (see [RuntimeWatcher]). They are here so a Backend that does serve a
+	// snapshot — the test fakes — can seed a row without a stream, and the zero
+	// value reads as "nothing said so far" rather than as a claim about the
+	// command.
 	Title      string
 	Status     string
 	Detail     string

@@ -34,7 +34,7 @@ func TestCommandInfosIncludesStandalone(t *testing.T) {
 			ConfigJSON: &model.CommandConfig{Dir: "/work/tool"},
 		},
 	}
-	got := commandInfos(entries, nil)
+	got := commandInfos(entries)
 	if len(got) != 2 {
 		t.Fatalf("expected compose + standalone commands, got %d", len(got))
 	}
@@ -102,7 +102,7 @@ func TestCommandInfosScale(t *testing.T) {
 	}
 
 	byID := map[string]tui.CommandInfo{}
-	for _, c := range commandInfos(entries, nil) {
+	for _, c := range commandInfos(entries) {
 		byID[c.ID] = c
 	}
 

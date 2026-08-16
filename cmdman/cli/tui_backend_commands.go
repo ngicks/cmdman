@@ -31,26 +31,22 @@ func (b *serviceBackend) ListCommands(ctx context.Context) ([]tui.CommandInfo, e
 	if err != nil {
 		return nil, err
 	}
-	return commandInfos(entries, nil), nil
+	return commandInfos(entries), nil
 }
 
-// commandInfos projects store entries to command rows, merging in the runtime
-// state keyed by command ID. A compose-managed command (carrying both the
-// project and workdir labels) reports its compose project name and the labelled
-// workdir; a standalone command reports an empty project and falls back to its
-// configured working directory, so it still appears in the TUI rather than
-// being dropped. The runtime map is what a monitor answered with: a command
-// missing from it — every command when the caller passes none, as the TUI's
-// listing does — keeps the zero runtime fields.
+// commandInfos projects store entries to command rows. A compose-managed
+// command (carrying both the project and workdir labels) reports its compose
+// project name and the labelled workdir; a standalone command reports an empty
+// project and falls back to its configured working directory, so it still
+// appears in the TUI rather than being dropped. The runtime fields are left
+// zero: no store entry speaks for them, and the TUI's watcher lays what the
+// monitors push over the rows.
 //
 // Scale is projected only for a command that is one replica among several:
 // every compose-created command carries a scale index (an unscaled command's
 // sole instance has index 1), so the single-replica case is collapsed to the
 // zero value here rather than reported as replica 1 of 1.
-func commandInfos(
-	entries []store.CommandEntry,
-	runtime map[string]cmdman.RuntimeState,
-) []tui.CommandInfo {
+func commandInfos(entries []store.CommandEntry) []tui.CommandInfo {
 	var out []tui.CommandInfo
 	for _, e := range entries {
 		var labels map[string]string
@@ -76,7 +72,6 @@ func commandInfos(
 		if scaleIndex <= 0 || scaleCount <= 1 {
 			scaleIndex, scaleCount = 0, 0
 		}
-		rs := runtime[e.ID]
 		out = append(out, tui.CommandInfo{
 			ID:         e.ID,
 			Name:       name,
@@ -88,10 +83,6 @@ func commandInfos(
 			Tty:        tty,
 			ScaleIndex: scaleIndex,
 			ScaleCount: scaleCount,
-			Title:      rs.Title,
-			Status:     rs.Status,
-			Detail:     rs.Detail,
-			BellUnread: rs.BellUnread,
 		})
 	}
 	return out
