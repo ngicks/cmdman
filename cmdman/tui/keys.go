@@ -15,8 +15,7 @@ func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// the attach implementation, not handled here.
 	switch msg.String() {
 	case "ctrl+c", "ctrl+d":
-		m.quitting = true
-		return m, tea.Quit
+		return m.quit()
 	}
 
 	if m.popup.open() {
@@ -34,6 +33,15 @@ func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.onNormalKey(msg)
 }
 
+// quit ends the program, releasing what the model holds open first: the runtime
+// watcher keeps a stream per live command, and closing it here hands the
+// monitors their disconnects instead of leaving them to process exit.
+func (m Model) quit() (tea.Model, tea.Cmd) {
+	m.quitting = true
+	_ = m.watcher.Close()
+	return m, tea.Quit
+}
+
 // activeFiltering reports whether the active tab's filter input has focus.
 func (m Model) activeFiltering() bool {
 	switch m.active {
@@ -49,8 +57,7 @@ func (m Model) activeFiltering() bool {
 func (m Model) onPopupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
-		m.quitting = true
-		return m, tea.Quit
+		return m.quit()
 	case "esc":
 		m.popup = popupState{}
 		return m, nil
@@ -97,8 +104,7 @@ func (m Model) confirmPopup() (tea.Model, tea.Cmd) {
 func (m Model) onHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
-		m.quitting = true
-		return m, tea.Quit
+		return m.quit()
 	case "?", "esc":
 		m.helpOpen = false
 		return m, nil
@@ -167,8 +173,7 @@ func (m *Model) appendFilter(s string) {
 func (m Model) onNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
-		m.quitting = true
-		return m, tea.Quit
+		return m.quit()
 	case "?":
 		m.helpOpen = true
 		return m, nil

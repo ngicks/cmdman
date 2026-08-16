@@ -21,19 +21,17 @@ import (
 // project and workdir labels) are grouped by project; standalone commands keep
 // an empty project and group under their working directory.
 //
-// Each entry's runtime state is dialed from its monitor as the listing is
-// built. This is the same one-shot fan-out `ls` does, repeated on the TUI's
-// refresh cadence: a live subscription to the monitors' WatchRuntimeState
-// stream is a later phase, and a poll per reload is what the model's
-// load-and-rebuild shape already supports.
+// The listing carries no runtime state: the TUI subscribes to every live
+// command's monitor through WatchRuntimeState and keeps what those streams
+// push, so dialing each monitor once more per reload would only add a second
+// writer racing the pushes. `ls` / `ps`, which have no subscription to fill
+// their columns, keep the one-shot fan-out.
 func (b *serviceBackend) ListCommands(ctx context.Context) ([]tui.CommandInfo, error) {
 	entries, err := b.svc.List(ctx, cmdman.ListRequest{AllStates: true})
 	if err != nil {
 		return nil, err
 	}
-	// A refresh that stalls is worse than one showing last cycle's titles, so
-	// the whole fan-out is bounded, not only each dial inside it.
-	return commandInfos(entries, RuntimeStates(ctx, b.svc, entries)), nil
+	return commandInfos(entries, nil), nil
 }
 
 // commandInfos projects store entries to command rows, merging in the runtime
@@ -41,8 +39,9 @@ func (b *serviceBackend) ListCommands(ctx context.Context) ([]tui.CommandInfo, e
 // project and workdir labels) reports its compose project name and the labelled
 // workdir; a standalone command reports an empty project and falls back to its
 // configured working directory, so it still appears in the TUI rather than
-// being dropped. A command whose monitor did not answer keeps the zero runtime
-// fields.
+// being dropped. The runtime map is what a monitor answered with: a command
+// missing from it — every command when the caller passes none, as the TUI's
+// listing does — keeps the zero runtime fields.
 //
 // Scale is projected only for a command that is one replica among several:
 // every compose-created command carries a scale index (an unscaled command's

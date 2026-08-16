@@ -52,6 +52,13 @@ type Model struct {
 	events    core.EventStream // lifecycle change-signal subscription
 	reloadGen int              // debounce generation for event-triggered re-list
 
+	// watcher holds one runtime-state stream per live command and merges their
+	// pushes; runtime is what they last pushed, keyed by command id. A list load
+	// carries no runtime state at all, so the cache is what a re-list lays back
+	// over its rows instead of flashing them empty until the next push.
+	watcher *core.RuntimeWatcher
+	runtime map[string]core.RuntimeStateView
+
 	previewGen int // monotonic generation for terminal-preview drain/tick loops
 
 	// termPreviewDisabled turns off the vt terminal-view preview for the rest of
