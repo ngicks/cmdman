@@ -50,9 +50,13 @@ nothing rather than failing.
 ## Storage And Runtime Directories
 
 `--data-dir` selects persistent state: command definitions, the state database,
-event history, and command data directories. `--runtime-dir` selects ephemeral
-IPC endpoints used to communicate with live monitors. Every command that needs
-to address the same cmdman installation must use the same pair.
+and command data directories. `--runtime-dir` selects ephemeral state: the IPC
+endpoints used to communicate with live monitors, and the event log. Every
+command that needs to address the same cmdman installation must use the same
+pair.
+
+The event log is cleared with the runtime dir, e.g. on reboot, so
+`events --since` cannot reach history recorded before it was cleared.
 
 Commands persist the environment captured at creation time. Supplying one or
 more explicit environment entries replaces the default inherited environment;

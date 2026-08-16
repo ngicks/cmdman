@@ -1,7 +1,8 @@
 // Package eventlog implements a process-wide append-only JSON-lines event
-// log that sits next to the SQLite database. Both the service and per-
-// command monitor processes append state-change events to a single file
-// guarded by an advisory file lock. Subscribers watch the active file via
+// log that lives in the runtime dir, so it is ephemeral: it is cleared
+// with the runtime dir, e.g. on reboot. Both the service and per-command
+// monitor processes append state-change events to a single file guarded
+// by an advisory file lock. Subscribers watch the active file via
 // inotify (Linux) or stat-polling and follow it across the writer's
 // in-place rotation (one archive: events.log.1).
 package eventlog
