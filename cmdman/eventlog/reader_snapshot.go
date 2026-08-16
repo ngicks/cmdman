@@ -18,9 +18,9 @@ func (r *Reader) openSnapshot() (archive, active *os.File, err error) {
 	lockPath := filepath.Join(dir, "."+base+".lock")
 
 	// Failure here also degrades to an uncoordinated snapshot.
-	_ = os.MkdirAll(dir, 0o755)
+	_ = os.MkdirAll(dir, 0o700)
 
-	if lockF, lerr := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, 0o644); lerr == nil {
+	if lockF, lerr := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, 0o600); lerr == nil {
 		// Lock errors are non-fatal on unsupported platforms.
 		_ = flock.LockShared(lockF)
 		defer func() {

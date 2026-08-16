@@ -37,7 +37,7 @@ func NewWriter(path string) (*Writer, error) {
 		return nil, fmt.Errorf("eventlog: log path is empty")
 	}
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("eventlog: create log dir: %w", err)
 	}
 	return &Writer{
@@ -66,7 +66,7 @@ func (w *Writer) Append(e model.Event) error {
 		return fmt.Errorf("eventlog: marshal event: %w", err)
 	}
 
-	lockF, err := os.OpenFile(w.lockPath, os.O_RDWR|os.O_CREATE, 0o644)
+	lockF, err := os.OpenFile(w.lockPath, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return fmt.Errorf("eventlog: open lock file: %w", err)
 	}
@@ -79,7 +79,7 @@ func (w *Writer) Append(e model.Event) error {
 	}
 
 	// Open after locking to observe any preceding rotation.
-	f, err := os.OpenFile(w.path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(w.path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("eventlog: open log file: %w", err)
 	}
@@ -131,7 +131,7 @@ func (w *Writer) rotateLocked(f *os.File) (*os.File, error) {
 	if err := os.Rename(w.path, archive); err != nil {
 		return nil, fmt.Errorf("eventlog: rename %s -> %s: %w", w.path, archive, err)
 	}
-	newF, err := os.OpenFile(w.path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
+	newF, err := os.OpenFile(w.path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("eventlog: reopen log file after rotate: %w", err)
 	}

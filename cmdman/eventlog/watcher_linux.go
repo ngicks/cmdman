@@ -40,7 +40,7 @@ func (w *inotifyWatcher) Events() <-chan struct{} {
 func (w *inotifyWatcher) Run(ctx context.Context) error {
 	defer close(w.events)
 
-	if err := os.MkdirAll(w.dir, 0o755); err != nil {
+	if err := os.MkdirAll(w.dir, 0o700); err != nil {
 		return fmt.Errorf("eventlog: ensure log dir for inotify: %w", err)
 	}
 
