@@ -7,6 +7,19 @@ in PLAN.md).
 
 ## Resolved
 
+- **L9 — no cli pump unit test; accepted review nits [automatic]**
+  (agent, 2026-08-16, review gate). PLAN step 2's verify line promised
+  "a backend pump test", but `runtimeStateStream`'s pump wraps a
+  concrete `*cmdman.RuntimeStateSubscription` with unexported fields —
+  unit-testing it would mean restructuring the adapter around an
+  injected channel, deviating from the file's shape, and its siblings
+  (`eventStream`/`logStream`/`rawStream`) are equally untested house
+  practice. Coverage instead comes from the service-level integration
+  test (step 1) plus the e2e (step 7), which exercise the pump
+  end-to-end. Also accepted as-is from the review: `Reconcile` holding
+  the watcher lock across the (cheap: store resolve + lazy client)
+  subscribe on the Update goroutine — revisit only if it measurably
+  stalls.
 - **L8 — man-page liveness is one added sentence [automatic]** (agent,
   2026-08-16, step 6). A full sweep of `doc/man` found no claim the
   change falsified — no page ever described a refresh cadence — so

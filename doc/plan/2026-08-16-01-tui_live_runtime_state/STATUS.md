@@ -1,6 +1,14 @@
 # Status — tui_live_runtime_state
 
-State: **steps 1-7 done — final review/test gate in progress.**
+State: **done 2026-08-16 — steps 1-7 implemented, review gate passed.**
+
+Review gate: full-suite ng-test-runner green (build, all tests incl.
+e2e, vet, lint). ng-reviewer found one blocking defect — a self-ended
+pump escaping Close()'s cancellation could wedge the TUI on quit —
+fixed with two new watcher tests (Close-during-self-ended-parked-push,
+reload-churn-holds-one-stream), both mutation-verified. Accepted nits
+recorded in L9; reviewer confirmed D20/D22 semantics, L3's TUI-only
+scope, and the e2e's criterion-1 proof.
 
 ## Gate
 
@@ -17,8 +25,8 @@ State: **steps 1-7 done — final review/test gate in progress.**
       1–5 with the launcher deviation recorded beside the quote;
       D20/D22 → step 5 tests; D35 → constraint only. IDEA use cases
       1–3 → steps 1–5 + e2e step 7; use case 4 → L2/steps 3–4;
-      launcher non-case → Non-goals. No HANDOFF.md — nothing left
-      behind.
+      launcher non-case → Non-goals. (HANDOFF.md was created later,
+      during step 1, for an out-of-scope discovery — see below.)
 
 ## Checklist (mirrors PLAN.md steps)
 
@@ -60,4 +68,5 @@ State: **steps 1-7 done — final review/test gate in progress.**
 
 ## Next action
 
-Start step 1 (`cmdman/cmdman_runtime_state_watch.go`).
+None — the plan is delivered. HANDOFF.md carries the one item leaving
+the plan (pre-existing monitor data race).
