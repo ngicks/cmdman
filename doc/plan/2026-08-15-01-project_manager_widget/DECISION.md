@@ -402,6 +402,17 @@ D20/D21 `workDir` parameters. Full suite verified at the merged tree.
 **Rejected**: rebasing (rewrites the 11 per-step commits); leaving the
 reconciliation to the user (a branch that cannot merge is not done).
 
+**Superseded 2026-08-17 (user decision — no tag)**: the user rejected the
+merge commit and chose linear history. The branch was rebased with
+`git rebase --onto 864eca5 864eca5` — 13 linear commits replaying the
+feature (panel-era hunks re-landed in `switcher/` per the merge's own
+resolutions), merge commit dropped, end tree byte-identical to the
+pre-rebase state (`git diff` empty against `backup/pre-rebase-merge`,
+kept at `cb1f54b`), every intermediate commit building, full suite green
+at the new head. Note: local `main` had meanwhile advanced 18 commits past
+`864eca5` (live runtime-state feature); rebasing onto that tip is a
+separate, tree-changing step.
+
 ## D14 — `Shown` reports agreement only; disagreement renders unknown [automatic] (2026-08-16)
 
 **Choice**: `compose.Service.MuxScaleState` reports a service's shown-replica
