@@ -40,6 +40,30 @@ func (b *serviceBackend) CycleMux(
 	})
 }
 
+// MuxDown tears the project's dashboard windows down via
+// compose.Service.MuxDown, the same path `cmdman compose mux down` takes. The
+// supervised commands keep running: only the disposable viewer goes away.
+//
+// The project is named as CycleMux names it, resolution included — a project
+// whose file declares no mux: section never reaches the teardown, and the
+// resolver's complaint is what the caller shows. No SessionName is passed, so
+// every session's windows for the project are torn down rather than only the
+// caller's; stdout is discarded for the reason CycleMux discards it.
+func (b *serviceBackend) MuxDown(
+	ctx context.Context, projectName, composeFile, workDir string,
+) error {
+	selection, err := compose.ResolveMuxSelectionByName(
+		projectName, composeFile, b.targetWorkDir(workDir),
+	)
+	if err != nil {
+		return err
+	}
+	return b.compose.MuxDown(ctx, compose.MuxDownOption{
+		Selection: selection,
+		Stdout:    io.Discard,
+	})
+}
+
 // SwitchToProject takes the client to the target's window — the docked
 // switcher's enter/click (D6). The landing is [mux.Land]'s: the window carrying
 // the target's identity is focused, and a project with none yet gets the bare

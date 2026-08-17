@@ -74,6 +74,40 @@ func TestListLayoutsProjectsNamesInOrder(t *testing.T) {
 	}
 }
 
+// muxlessComposeYAML is the same project without a mux: section — a project
+// there is no dashboard to tear down for.
+const muxlessComposeYAML = `name: tools
+commands:
+  web:
+    args: [echo, web]
+`
+
+// TestMuxDownWithoutMuxSection pins what a teardown of a project that declares
+// no dashboard answers with: the resolver's complaint, which the widget shows in
+// its status line, rather than a silent success that tore nothing down.
+func TestMuxDownWithoutMuxSection(t *testing.T) {
+	outsideMux(t)
+	conf := t.TempDir()
+	t.Setenv("CMDMAN_CONF", filepath.Join(conf, "config.json"))
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cmd-compose.yaml")
+	if err := os.WriteFile(path, []byte(muxlessComposeYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	// Resolution fails before the compose service is reached, so a backend
+	// carrying none is all this asks for.
+	b := &serviceBackend{}
+	err := b.MuxDown(context.Background(), "tools", path, "")
+	if err == nil {
+		t.Fatal("tearing down the dashboard of a project with no mux: section should fail")
+	}
+	if !strings.Contains(err.Error(), "has no mux section") {
+		t.Fatalf("error = %v, want it to name the missing mux section", err)
+	}
+}
+
 // TestActiveIdentityOutsideMuxWithoutToken pins D13's guard: with nothing to ask
 // about, nothing is asked, and the caller is handed back to cwd matching rather
 // than to CurrentWindowID's answer — which outside a multiplexer is some other

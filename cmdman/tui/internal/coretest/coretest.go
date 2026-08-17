@@ -54,6 +54,9 @@ type FakeBackend struct {
 	MuxWorkdirs []string
 	MuxErr      error
 
+	MuxDowns   []DownCall // calls taken by MuxDown
+	MuxDownErr error      // error returned by MuxDown
+
 	Switched  []core.SwitchTarget // targets passed to SwitchToProject
 	SwitchErr error               // error returned by SwitchToProject
 
@@ -93,6 +96,10 @@ type FakeBackend struct {
 	ComposeUpEvents []core.ComposeUpEvent // events pre-loaded into the stream
 	ComposeUpErr    error                 // error returned by ComposeUp (open failure)
 	ComposeUpStream *FakeComposeUpStream
+
+	ComposeDowns       []DownCall       // calls taken by ComposeDown
+	ComposeDownSummary core.DownSummary // summary returned by ComposeDown
+	ComposeDownErr     error            // error returned by ComposeDown
 
 	LaunchLocs       []core.LaunchLocation // locations returned by ListLaunchTargets
 	LaunchErr        error                 // error returned by ListLaunchTargets
@@ -145,6 +152,17 @@ type CycleScaleCall struct {
 // project the summon named — compose file and work directory and all, since
 // naming it is the whole of what the switcher's m does (D9/D20).
 type SummonCall struct {
+	Project string
+	Path    string
+	Workdir string
+}
+
+// DownCall is one recorded teardown call — [FakeBackend.MuxDown]'s or
+// [FakeBackend.ComposeDown]'s. Both name their project the same way, so both
+// record the same three fields: the name plus the compose file and work
+// directory that complete it — a call that dropped one would still look right
+// against the name alone.
+type DownCall struct {
 	Project string
 	Path    string
 	Workdir string
@@ -248,6 +266,18 @@ func (f *FakeBackend) CycleMux(
 	return f.MuxErr
 }
 
+func (f *FakeBackend) MuxDown(
+	_ context.Context,
+	projectName, composeFile, workDir string,
+) error {
+	f.MuxDowns = append(f.MuxDowns, DownCall{
+		Project: projectName,
+		Path:    composeFile,
+		Workdir: workDir,
+	})
+	return f.MuxDownErr
+}
+
 func (f *FakeBackend) SwitchToProject(_ context.Context, target core.SwitchTarget) error {
 	f.Switched = append(f.Switched, target)
 	return f.SwitchErr
@@ -347,6 +377,18 @@ func (f *FakeBackend) ComposeUp(
 	}
 	f.ComposeUpStream = s
 	return s, nil
+}
+
+func (f *FakeBackend) ComposeDown(
+	_ context.Context,
+	projectName, composeFile, workDir string,
+) (core.DownSummary, error) {
+	f.ComposeDowns = append(f.ComposeDowns, DownCall{
+		Project: projectName,
+		Path:    composeFile,
+		Workdir: workDir,
+	})
+	return f.ComposeDownSummary, f.ComposeDownErr
 }
 
 func (f *FakeBackend) ListLaunchTargets(context.Context) ([]core.LaunchLocation, error) {

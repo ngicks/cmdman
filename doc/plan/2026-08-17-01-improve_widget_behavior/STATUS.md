@@ -1,7 +1,7 @@
 # STATUS — improve TUI widget behavior
 
 **Current state**: implementation in progress (autonomous run started
-2026-08-18). Steps 1–4 done. Note for step 9: doc/man/cmdman-tui.1.md's
+2026-08-18). Steps 1–5 done. Note for step 9: doc/man/cmdman-tui.1.md's
 launcher opening-list description ("directories you have brought projects
 up in") now understates the view — config-dir locations are listed too.
 
@@ -17,7 +17,7 @@ up in") now understates the view — config-dir locations are listed too.
 - [x] Step 4 — empty-filter admission per D2: "appear … ordered after
       history rows … and start **disabled**"; store/cwd sources stay
       filter-only
-- [ ] Step 5 — `Backend.MuxDown` / `Backend.ComposeDown` + `serviceBackend`
+- [x] Step 5 — `Backend.MuxDown` / `Backend.ComposeDown` + `serviceBackend`
       impls + `FakeBackend` doubles (IDEA §2; D3 backend half, incl. the
       no-`mux:` sentinel error)
 - [ ] Step 6 — `d`/`D` in switcher, launcher, projectmanager per D3:

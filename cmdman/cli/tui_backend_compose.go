@@ -242,6 +242,58 @@ func (s *composeUpStream) Close() error {
 	return nil
 }
 
+// ComposeDown stops and removes the project's commands, wrapping
+// compose.Service.Down — the whole-project teardown `cmdman compose down`
+// performs, orphans of the project included.
+//
+// The project is named as the other project-targeting actions name it (an empty
+// composeFile makes the name the file key, so a never-run named project still
+// resolves), except that it need not declare a mux: section: down is about the
+// supervised commands, which a project without a dashboard has just the same.
+//
+// The summary travels back with the aggregated failure rather than instead of
+// it: a teardown that could not remove one command removed the others, and the
+// caller has both halves to report.
+func (b *serviceBackend) ComposeDown(
+	ctx context.Context, projectName, composeFile, workDir string,
+) (tui.DownSummary, error) {
+	opts := compose.NormalizeOpts{
+		File:        composeFile,
+		ProjectName: projectName,
+		WorkDir:     b.targetWorkDir(workDir),
+	}
+	if composeFile == "" {
+		opts.File, opts.ProjectName = projectName, ""
+	}
+	selection, err := compose.LoadOrProject(opts)
+	if err != nil {
+		return tui.DownSummary{}, err
+	}
+	result, err := b.compose.Down(ctx, selection, compose.DownOption{})
+	if err != nil {
+		return tui.DownSummary{}, err
+	}
+	return downSummary(result), DownResultErr(result)
+}
+
+// downSummary counts what a teardown got through: the outcomes carrying no
+// error. Counting the failed ones too would report a command as removed in the
+// same breath as the failure to remove it.
+func downSummary(result *compose.DownResult) tui.DownSummary {
+	var summary tui.DownSummary
+	for _, s := range result.Stops {
+		if s.Err == nil {
+			summary.Stopped++
+		}
+	}
+	for _, r := range result.Removes {
+		if r.Err == nil {
+			summary.Removed++
+		}
+	}
+	return summary
+}
+
 // resolveComposePath returns the compose file path for a project. composeFile is
 // used directly when set; otherwise it is resolved on demand via
 // compose.LoadOrProject, so never-run named projects (which carry an empty path)
