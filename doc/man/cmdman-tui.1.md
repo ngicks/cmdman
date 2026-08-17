@@ -66,12 +66,17 @@ it in any terminal or pane. Each widget is its own subcommand.
   `compose down <project>? y/n` on the hint line first, `y` goes ahead and any
   other key takes the question back, and what the teardown did — `stopped N,
   removed M` — is reported there when it ends.
-- `launcher`: quick-launch selector. The left pane lists target locations (the
-  directories you have brought projects up in, most recent first, plus
-  everything the filter reaches); the right pane lists the compose projects at
-  the location under the cursor, toggled on or off. Type to filter, tab
-  completes what is typed, enter steps input → locations → projects, esc walks
-  back and then dismisses. On a list, `s` starts the enabled projects and `S`
+- `launcher`: quick-launch selector. The left pane lists target locations: with
+  the input empty, the directories you have brought projects up in, most recent
+  first, then the directories of the projects named under cmdman's config
+  `compose/` directory, sorted by the name each row shows — one never launched
+  from has no recency to be placed by. Typing widens that to everything the
+  filter reaches. The right pane lists the compose projects at the location
+  under the cursor, toggled on or off: one brought up before arrives on, one
+  known only from the config `compose/` directory arrives off until `space`
+  turns it on. Type to filter, tab completes what is typed, enter steps input →
+  locations → projects, esc walks back and then dismisses. On a list, `s` starts
+  the enabled projects — so a config-only row waits for its `space` — and `S`
   launches and lands in one; `d` and `D` tear the project `S` would launch back
   down — `d` its dashboard windows, leaving the commands running, `D` the
   commands themselves after the `compose down <project>? y/n` confirm described

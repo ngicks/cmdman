@@ -188,8 +188,11 @@ Nothing is printed on success.
 ### frame hide
 
 Take the frame around the current window down; the project region expands into
-the space it occupied. A window carrying no frame is a quiet no-op, and so is a
-`hide` racing the window's disappearance.
+the space it occupied. What comes down is the frame panes themselves, not
+whatever def the window recorded, so a window left holding frame panes under a
+`FRAME` column reading `-` — a teardown that died partway — is put back in order
+rather than skipped. A window holding no frame pane is a quiet no-op, and so is
+a `hide` racing the window's disappearance.
 
 Managed entries survive: the panes and their disposable viewers go away, while
 each `frame-<def>-<i>` command keeps running under its own monitor and stays

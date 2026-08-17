@@ -15,12 +15,16 @@ func tuiWidgetLauncherCmd(parent *cobra.Command, rf *rootFlags, noQuit *bool) {
 		Short: "Quick-launch selector: locations left, their compose projects right",
 		Long: `Run the quick-launch selector.
 
-The left pane lists target locations — the directories you have brought projects
-up in, most recent first, plus everything the filter reaches; the right pane
-lists the compose projects at the location under the cursor, toggled on or off.
-Type to filter; tab completes the path over the locations and the directories on
-disk, and lists the candidates it cannot choose between — tab and shift+tab then
-put them in the input one at a time and enter accepts the one it stands on.
+The left pane lists target locations — with the input empty, the directories you
+have brought projects up in, most recent first, then the directories of the
+projects named under cmdman's config compose/ directory, sorted by the name each
+row shows; typing widens that to everything the filter reaches. The right pane
+lists the compose projects at the location under the cursor, toggled on or off:
+one brought up before arrives on, one known only from the config compose/
+directory arrives off until space turns it on. Type to filter; tab completes the
+path over the locations and the directories on disk, and lists the candidates it
+cannot choose between — tab and shift+tab then put them in the input one at a
+time and enter accepts the one it stands on.
 Otherwise enter steps input -> locations -> projects, and esc drops the list —
 taking back whatever it put in the input — before it walks the zones back and
 dismisses. On a list, s starts the enabled projects and S launches and lands in
