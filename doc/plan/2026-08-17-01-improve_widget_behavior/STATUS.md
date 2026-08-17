@@ -1,7 +1,9 @@
 # STATUS — improve TUI widget behavior
 
 **Current state**: implementation in progress (autonomous run started
-2026-08-18). Steps 1–3 done.
+2026-08-18). Steps 1–4 done. Note for step 9: doc/man/cmdman-tui.1.md's
+launcher opening-list description ("directories you have brought projects
+up in") now understates the view — config-dir locations are listed too.
 
 ## Checklist (mirrors PLAN.md steps)
 
@@ -12,7 +14,7 @@
       never desync" (incl. the F7-ordering check for managed entries)
 - [x] Step 3 — `FromConfig` provenance threaded backend → core types
       (IDEA §1; D2 provenance half)
-- [ ] Step 4 — empty-filter admission per D2: "appear … ordered after
+- [x] Step 4 — empty-filter admission per D2: "appear … ordered after
       history rows … and start **disabled**"; store/cwd sources stay
       filter-only
 - [ ] Step 5 — `Backend.MuxDown` / `Backend.ComposeDown` + `serviceBackend`

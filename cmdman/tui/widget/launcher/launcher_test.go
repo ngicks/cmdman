@@ -121,6 +121,155 @@ func TestLauncherHistoryIsTheOpeningList(t *testing.T) {
 	}
 }
 
+// launcherConfigFixture is the listing with the compose config dir in it: two
+// history locations, two locations that exist only because the config dir names
+// them, and one that is merely on disk. The config rows arrive out of name order
+// so the opening list has to sort them rather than echo what it was handed.
+func launcherConfigFixture() []core.LaunchLocation {
+	base := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	return []core.LaunchLocation{
+		{
+			Dir: "/home/u/gitrepo/cmdman", RepoName: "cmdman", Branch: "main",
+			LastUsed: base, FromHistory: true,
+			Projects: []core.LaunchProject{
+				{Name: "devenv", File: "devenv.yaml", FromHistory: true, HasMux: true},
+			},
+		},
+		{
+			Dir: "/home/u/src/webapp", RepoName: "webapp", Branch: "feat/auth",
+			LastUsed: base.Add(-time.Hour), FromHistory: true,
+			Projects: []core.LaunchProject{
+				{Name: "staging", File: "compose.yaml", FromHistory: true, HasMux: true},
+			},
+		},
+		{
+			Dir: "/home/u/cfg/zeta", FromConfig: true,
+			Projects: []core.LaunchProject{
+				{Name: "zeta", File: "zeta.yaml", FromConfig: true, HasMux: true},
+			},
+		},
+		{
+			Dir: "/home/u/cfg/alpha", FromConfig: true,
+			Projects: []core.LaunchProject{
+				{Name: "alpha", File: "alpha.yaml", FromConfig: true, HasMux: true},
+			},
+		},
+		{
+			// Neither known from history nor named in the config dir: discovered in
+			// the store or in the working directory, so the filter has to reach it.
+			Dir: "/home/u/src/blog", RepoName: "blog", Branch: "main",
+			Projects: []core.LaunchProject{{Name: "blog", File: "compose.yaml", HasMux: true}},
+		},
+	}
+}
+
+func seedLauncherWith(t *testing.T, locs []core.LaunchLocation) (Model, *coretest.FakeBackend) {
+	t.Helper()
+	fb := &coretest.FakeBackend{LaunchLocs: locs}
+	m := New(
+		context.Background(),
+		core.Options{Backend: fb, Widget: core.WidgetLauncher, Version: "v0.0.0-test"},
+	)
+	m = updLauncher(t, m, tea.WindowSizeMsg{Width: 100, Height: 20})
+	return updLauncher(t, m, launchTargetsLoadedMsg{locs: fb.LaunchLocs}), fb
+}
+
+// TestLauncherConfigDirOpensWithHistory is the opening list once the compose
+// config dir has a say: a project the user keeps around is worth showing before
+// it has ever been launched, so the config-dir locations join the history ones
+// under the empty input. They come after them and by name — a location never
+// launched from has no recency to be placed by — and a location that is merely
+// on disk still waits for the filter.
+func TestLauncherConfigDirOpensWithHistory(t *testing.T) {
+	m, _ := seedLauncherWith(t, launcherConfigFixture())
+
+	want := []string{"cmdman(main)", "webapp(feat/auth)", "alpha", "zeta"}
+	if got := leftLabels(m); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("opening list = %v, want %v", got, want)
+	}
+
+	// The config-only location is selectable, and the project under it is what the
+	// right pane offers there.
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+	for range 2 {
+		m = updLauncher(t, m, coretest.Kr("j"))
+	}
+	li, ok := m.currentLoc()
+	if !ok || m.locs[li].Dir != "/home/u/cfg/alpha" {
+		t.Fatalf("the cursor should reach the config-dir location, got %d/%v", li, ok)
+	}
+	if ps := m.locs[li].projects; len(ps) != 1 || ps[0].Name != "alpha" {
+		t.Fatalf("projects at the config-dir location = %v, want [alpha]", ps)
+	}
+
+	m = updLauncher(t, m, coretest.Kr("/")) // back to the input zone
+	m = typeInto(t, m, "blog")
+	if got := leftLabels(m); len(got) != 1 || got[0] != "blog(main)" {
+		t.Fatalf("filtering to the on-disk location = %v, want [blog(main)]", got)
+	}
+}
+
+// TestLauncherConfigProjectsStartDisabled is the other half of letting the
+// config dir into the opening list: a project that was never run must not join a
+// bulk `s` aimed at the ones the user actually works with. It opens disabled and
+// space is what puts it in the batch.
+func TestLauncherConfigProjectsStartDisabled(t *testing.T) {
+	m, fb := seedLauncherWith(t, []core.LaunchLocation{{
+		Dir: "/home/u/gitrepo/cmdman", RepoName: "cmdman", Branch: "main",
+		LastUsed: time.Now(), FromHistory: true, FromConfig: true,
+		Projects: []core.LaunchProject{
+			{Name: "devenv", File: "devenv.yaml", FromHistory: true, HasMux: true},
+			{Name: "sandbox", File: "sandbox.yaml", FromConfig: true, HasMux: true},
+		},
+	}})
+	if !m.locs[0].projects[0].enabled {
+		t.Fatalf("a history project should open enabled")
+	}
+	if m.locs[0].projects[1].enabled {
+		t.Fatalf("a config-dir project that was never run should open disabled")
+	}
+
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+	next, cmd := m.Update(coretest.Kr("s"))
+	m = next.(Model)
+	drainLauncherCmd(t, cmd)
+	if len(fb.StartedProjects) != 1 || fb.StartedProjects[0].Project != "devenv" {
+		t.Fatalf("s started %v, want only the history project", fb.StartedProjects)
+	}
+
+	m = updLauncher(t, m, coretest.KEnter) // into the right list
+	m = updLauncher(t, m, coretest.Kr("j"))
+	m = updLauncher(t, m, coretest.Kr(" "))
+	if !m.locs[0].projects[1].enabled {
+		t.Fatalf("space should put the config-dir project in the batch")
+	}
+	next, cmd = m.Update(coretest.Kr("s"))
+	m = next.(Model)
+	drainLauncherCmd(t, cmd)
+	if len(fb.StartedProjects) != 2 || fb.StartedProjects[1].Project != "sandbox" {
+		t.Fatalf("s after the toggle started %v, want sandbox as well", fb.StartedProjects)
+	}
+
+	// A location whose only project came from the config dir has nothing enabled
+	// at all, so `s` there says so instead of starting anything.
+	m, fb = seedLauncherWith(t, []core.LaunchLocation{{
+		Dir: "/home/u/cfg/alpha", FromConfig: true,
+		Projects: []core.LaunchProject{
+			{Name: "alpha", File: "alpha.yaml", FromConfig: true, HasMux: true},
+		},
+	}})
+	m = updLauncher(t, m, coretest.KEnter)
+	next, cmd = m.Update(coretest.Kr("s"))
+	m = next.(Model)
+	drainLauncherCmd(t, cmd)
+	if len(fb.StartedProjects) != 0 {
+		t.Errorf("s started %v at a config-only location, want nothing", fb.StartedProjects)
+	}
+	if !strings.Contains(m.note, "nothing enabled") {
+		t.Errorf("s with nothing enabled noted %q, want the space hint", m.note)
+	}
+}
+
 // TestLauncherMatchFields covers D18's match surface: a row survives on its
 // branch, its repo uri or name, its full path, or one of its project names — and
 // the field that matched is reported, so each is exercised independently. The

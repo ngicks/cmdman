@@ -8,6 +8,7 @@
 package launcher
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -376,11 +377,12 @@ func (m Model) onResolved(msg launcherResolvedMsg) Model {
 		return m
 	}
 	loc := msg.loc
-	// Out of history whatever the resolve merged into it: the empty query is
-	// D28's history list, and a directory the user typed their way to has not
-	// joined it. Appended rather than inserted because failedLoc indexes m.locs —
-	// a row put anywhere but the end would move a failure off its own row.
-	loc.FromHistory = false
+	// Out of both provenances whatever the resolve merged into it: the empty query
+	// lists the locations the user keeps around, and a directory typed on the way
+	// to somewhere else has not joined them. Appended rather than inserted because
+	// failedLoc indexes m.locs — a row put anywhere but the end would move a
+	// failure off its own row.
+	loc.FromHistory, loc.FromConfig = false, false
 	m.locs = append(m.locs, newLauncherLocations([]core.LaunchLocation{loc})...)
 	return m.clampLeft()
 }
@@ -733,15 +735,27 @@ func menuLabels(cands []string) []string {
 
 // --- selection --------------------------------------------------------------
 
-// matched lists the locations the input selects: history only while the input is
-// empty (D28's opening state), every matching location once the user types.
+// matched lists the locations the input selects: while the input is empty, the
+// ones the user keeps around — known from history or named in the compose config
+// dir (D28's opening state) — and every matching location once the user types. A
+// location that is merely there, discovered in the store or in the working
+// directory, still waits for the filter to reach it.
+//
+// The empty-input order is history first in the recency order the listing
+// arrived in, then the config-dir locations by name: one that was never launched
+// from has no recency to be placed by, and letting them interleave would push
+// the everyday rows off the top.
 func (m Model) matched() []int {
 	out := make([]int, 0, len(m.locs))
+	var cfg []int
 	path := m.pathNeedle()
 	for i, l := range m.locs {
 		if m.filter == "" {
-			if l.FromHistory {
+			switch {
+			case l.FromHistory:
 				out = append(out, i)
+			case l.FromConfig:
+				cfg = append(cfg, i)
 			}
 			continue
 		}
@@ -749,7 +763,13 @@ func (m Model) matched() []int {
 			out = append(out, i)
 		}
 	}
-	return out
+	slices.SortFunc(cfg, func(x, y int) int {
+		return cmp.Or(
+			strings.Compare(m.locs[x].label(), m.locs[y].label()),
+			strings.Compare(m.locs[x].Dir, m.locs[y].Dir),
+		)
+	})
+	return append(out, cfg...)
 }
 
 // pathNeedle is what the path field is matched against. A path being typed is
