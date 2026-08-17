@@ -238,14 +238,6 @@ dev   @0
 This listing is def-centric; `mux ls` answers the same question per window in
 its `FRAME` column.
 
-### Collapsing from the docked switcher
-
-A docked `switcher` widget binds `z` to take the frame down, and a widget run as
-a frame component never quits on a keypress. Both are documented in
-[cmdman-tui(1)](./cmdman-tui.1.md) (`widget` subcommand and `--no-quit`).
-Putting the frame back up is a CLI step — `cmdman mux frame show` — since the
-widget is gone with the frame.
-
 ## Configuration
 
 `default_frame` (config file key, `config.json`) names the frame def used when

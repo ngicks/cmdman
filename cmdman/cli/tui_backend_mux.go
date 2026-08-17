@@ -69,16 +69,6 @@ func (b *serviceBackend) SwitchToProject(ctx context.Context, target tui.SwitchT
 	return err
 }
 
-// HideFrame takes the frame down around the caller's current window — the docked
-// switcher's collapse gesture (D16/V8). The def to hide is read off the window,
-// so nothing identifies it here; a window with no frame up is a no-op.
-func (b *serviceBackend) HideFrame(ctx context.Context) error {
-	return mux.FrameHide(ctx, mux.FrameOptions{
-		Config: b.svc.Config(),
-		Svc:    NewFrameSvc(b.svc),
-	})
-}
-
 // identityProbe is one active-project detection probe that did not answer: what
 // was asked and why it came back empty. D4 (as amended by D10) wants the
 // failure message to name every probe rather than only the last, so the user

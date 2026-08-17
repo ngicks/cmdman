@@ -193,11 +193,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onProjectSwitched(msg), nil
 	case core.ProjectManagerSummonedMsg:
 		return m.onProjectManagerSummoned(msg), nil
-	case core.FrameHiddenMsg:
-		if msg.Err != nil {
-			m.status = fmt.Sprintf("hide frame: %v", msg.Err)
-		}
-		return m, nil
 	case tea.MouseClickMsg:
 		if msg.Button != tea.MouseLeft {
 			return m, nil
@@ -343,11 +338,10 @@ func applyRuntime(groups []core.ProjectGroup, runtime map[string]core.RuntimeSta
 }
 
 // onKey handles the widget key set: the switcher's cursor keys, the selection
-// that takes the client to a project's window (D6), the summon that opens the
-// project-manager panel over it (D7), and the collapse gesture that takes the
-// whole frame down (V8). A selection lands in a window and nothing more — start,
-// stop and kill stay in the full TUI (V6), and the panel the summon opens is a
-// separate program with its own keys.
+// that takes the client to a project's window (D6), and the summon that opens
+// the project-manager panel over it (D7). A selection lands in a window and
+// nothing more — start, stop and kill stay in the full TUI (V6), and the panel
+// the summon opens is a separate program with its own keys.
 func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c", "ctrl+d":
@@ -368,8 +362,6 @@ func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.switchToSelected()
 	case "m":
 		return m.summonSelected()
-	case "z":
-		return m, core.HideFrameCmd(m.bgCtx(), m.backend)
 	}
 	return m, nil
 }

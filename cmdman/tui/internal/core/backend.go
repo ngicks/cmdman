@@ -262,10 +262,6 @@ type Backend interface {
 	// bring-up, which stays the launcher's gesture. A landing that fails comes
 	// back as an error, which the switcher shows in place of its hint line.
 	SwitchToProject(ctx context.Context, target SwitchTarget) error
-	// HideFrame takes the frame down around the caller's current window — the
-	// docked switcher's collapse gesture (D16/V8). A window with no frame up is
-	// not an error: hiding what is already hidden is what was asked for.
-	HideFrame(ctx context.Context) error
 
 	// ProjectDefinition returns the raw compose YAML file text for a project, as
 	// shown by the read-only definition viewer. projectName identifies the

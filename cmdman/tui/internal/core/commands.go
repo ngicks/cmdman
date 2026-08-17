@@ -33,11 +33,6 @@ type ProjectSwitchedMsg struct {
 	Err  error
 }
 
-// FrameHiddenMsg reports the collapse gesture's outcome (V8).
-type FrameHiddenMsg struct {
-	Err error
-}
-
 // ProjectManagerSummonedMsg reports a summon: the popup ran to its end, or came
 // back with the reason there was no popup to run it in (D4).
 type ProjectManagerSummonedMsg struct {
@@ -71,9 +66,9 @@ func ActiveIdentityCmd(ctx context.Context, backend Backend) tea.Cmd {
 	}
 }
 
-// SwitchProjectCmd and HideFrameCmd stand free of a model for the same reason
-// the list commands do: the widget model issues them off the update loop with
-// no model of its own to carry.
+// SwitchProjectCmd stands free of a model for the same reason the list commands
+// do: the widget model issues it off the update loop with no model of its own
+// to carry.
 func SwitchProjectCmd(
 	ctx context.Context,
 	backend Backend,
@@ -82,12 +77,6 @@ func SwitchProjectCmd(
 ) tea.Cmd {
 	return func() tea.Msg {
 		return ProjectSwitchedMsg{Name: name, Err: backend.SwitchToProject(ctx, target)}
-	}
-}
-
-func HideFrameCmd(ctx context.Context, backend Backend) tea.Cmd {
-	return func() tea.Msg {
-		return FrameHiddenMsg{Err: backend.HideFrame(ctx)}
 	}
 }
 

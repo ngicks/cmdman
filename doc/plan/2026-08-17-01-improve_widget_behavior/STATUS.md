@@ -1,11 +1,11 @@
 # STATUS — improve TUI widget behavior
 
-**Current state**: plan finalized 2026-08-17 — Q1–Q5 resolved with the user
-(DECISION.md D2–D6), traceability gate passed. Implementation not started.
+**Current state**: implementation in progress (autonomous run started
+2026-08-18). Step 1 done.
 
 ## Checklist (mirrors PLAN.md steps)
 
-- [ ] Step 1 — remove `z` + single-caller plumbing + docs (IDEA §4;
+- [x] Step 1 — remove `z` + single-caller plumbing + docs (IDEA §4;
       "all plumbing whose only caller was `z` is gone; docs match")
 - [ ] Step 2 — harden hide per D5: "frame-stamped panes are removed by
       their stamp regardless of recorded state, so panes and state can

@@ -1103,31 +1103,6 @@ func TestSwitcherSelectionResolvesBells(t *testing.T) {
 	}
 }
 
-// TestSwitcherCollapse covers V8's `z`: the docked switcher takes the whole
-// frame down without leaving the keyboard. Whether the window was framed at all
-// is the service's business — hide is a no-op there — so what this pins is that
-// a hide reporting nothing stays quiet, and a failing one does not.
-func TestSwitcherCollapse(t *testing.T) {
-	m := seedWidget(t, 32, 12)
-	fb := m.backend.(*coretest.FakeBackend)
-
-	m, cmd := updWidget(t, m, coretest.Kr("z"))
-	m = settle(t, m, cmd)
-	if fb.Hidden != 1 {
-		t.Fatalf("z should hide the frame once, got %d calls", fb.Hidden)
-	}
-	if m.status != "" {
-		t.Errorf("an unframed window is a quiet no-op, status = %q", m.status)
-	}
-
-	fb.HideErr = errors.New("not inside a multiplexer")
-	m, cmd = updWidget(t, m, coretest.Kr("z"))
-	m = settle(t, m, cmd)
-	if !strings.Contains(m.status, "not inside a multiplexer") {
-		t.Errorf("a failed hide should be reported, status = %q", m.status)
-	}
-}
-
 // TestSwitcherSummonsProjectManager covers D7/D9's `m`: the panel opens over
 // the project the cursor is on, named outright — file, work directory and all
 // — so nothing about the window the popup lands in can redirect it (D17/D20).

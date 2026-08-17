@@ -56,8 +56,6 @@ type FakeBackend struct {
 
 	Switched  []core.SwitchTarget // targets passed to SwitchToProject
 	SwitchErr error               // error returned by SwitchToProject
-	Hidden    int                 // HideFrame calls
-	HideErr   error               // error returned by HideFrame
 
 	LayoutsInfo core.LayoutsInfo // info returned by ListLayouts
 	LayoutsErr  error            // error returned by ListLayouts
@@ -253,11 +251,6 @@ func (f *FakeBackend) CycleMux(
 func (f *FakeBackend) SwitchToProject(_ context.Context, target core.SwitchTarget) error {
 	f.Switched = append(f.Switched, target)
 	return f.SwitchErr
-}
-
-func (f *FakeBackend) HideFrame(context.Context) error {
-	f.Hidden++
-	return f.HideErr
 }
 
 func (f *FakeBackend) ListLayouts(
