@@ -1,13 +1,13 @@
 # STATUS — improve TUI widget behavior
 
 **Current state**: implementation in progress (autonomous run started
-2026-08-18). Step 1 done.
+2026-08-18). Steps 1–2 done.
 
 ## Checklist (mirrors PLAN.md steps)
 
 - [x] Step 1 — remove `z` + single-caller plumbing + docs (IDEA §4;
       "all plumbing whose only caller was `z` is gone; docs match")
-- [ ] Step 2 — harden hide per D5: "frame-stamped panes are removed by
+- [x] Step 2 — harden hide per D5: "frame-stamped panes are removed by
       their stamp regardless of recorded state, so panes and state can
       never desync" (incl. the F7-ordering check for managed entries)
 - [ ] Step 3 — `FromConfig` provenance threaded backend → core types

@@ -34,3 +34,20 @@ behaviors; a muxctl redesign is its own plan.
 **Follow-up**: a future plan dedicated to muxctl (suggested name:
 `muxctl-NN-interface-cleanup`, joining the existing `muxctl-00`/`muxctl-01`
 series), taking this list plus whatever step 7's implementation uncovers.
+
+## 2. `frame show` self-heal on desynced windows — deferred (D8, automatic)
+
+**What**: `frameTarget.show` skips its teardown when no def is recorded, so
+a window carrying leftover frame-stamped panes with an empty
+`frameDefOption` gets new docks stacked on the leftovers. Whether show's
+pre-hide should become unconditional (making show itself self-healing) is
+undecided.
+
+**Why not done here**: surfaced during the hide-hardening step of the
+2026-08-17 widget-behavior plan; hide is the documented, now
+state-independent recovery path, and changing show semantics was out of the
+approved scope. Recorded by the autonomous orchestrator (DECISION.md D8).
+
+**Follow-up**: decide with the user whether show should hide
+unconditionally; if yes, a small change in `cmdman/mux/frame.go` plus a
+test mirroring the hide desync tests.

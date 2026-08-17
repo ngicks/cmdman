@@ -773,6 +773,98 @@ func TestHideFrame_LeavesAWindowCarryingNoStateAlone(t *testing.T) {
 	}
 }
 
+// TestHideFrame_RemovesStampedPanesWithNoDefRecorded pins what makes hide a
+// recovery and not just a teardown: the panes it removes are the stamped ones,
+// so a window left holding a frame it no longer names — the state a teardown
+// that died after clearing the def leaves — is cleaned up by hiding again. And
+// a show straight after builds its frame around the window that came back,
+// rather than stacking one on the leftovers.
+func TestHideFrame_RemovesStampedPanesWithNoDefRecorded(t *testing.T) {
+	requireTmux(t)
+	sess, socket := newSession(t, "cmdman")
+	ctx := context.Background()
+
+	before := listPaneIDs(t, socket, sess.WindowID())
+	showOneBarFrame(t, sess, "dev")
+	run(t, socket, "set-option", "-w", "-u", "-t", sess.WindowID(), "@cmdman_frame_def")
+	if got := framePaneIDs(t, socket, sess.WindowID()); len(got) != 1 {
+		t.Fatalf("frame panes = %v, want the def's one entry standing", got)
+	}
+
+	if err := sess.HideFrame(ctx); err != nil {
+		t.Fatalf("HideFrame on a window recording no def: %v", err)
+	}
+	if got := framePaneIDs(t, socket, sess.WindowID()); len(got) != 0 {
+		t.Errorf("frame panes after hide = %v, want none", got)
+	}
+	if got := listPaneIDs(t, socket, sess.WindowID()); !slices.Equal(got, before) {
+		t.Errorf("panes after hide = %v, want the window's original %v", got, before)
+	}
+
+	showOneBarFrame(t, sess, "dev")
+	if got := framePaneIDs(t, socket, sess.WindowID()); len(got) != 1 {
+		t.Errorf("frame panes after the show = %v, want the def's one entry", got)
+	}
+	if got := windowOption(t, socket, sess.WindowID(), "@cmdman_frame_def"); got != "dev" {
+		t.Errorf("@cmdman_frame_def = %q, want %q", got, "dev")
+	}
+}
+
+// TestHideFrame_ClearsTheDefBeforeKillingPanes pins the order the recovery
+// above rests on. A hide that dies mid-teardown must leave stamped panes on a
+// window naming no def, which hiding again removes; the opposite order would
+// leave a window naming a frame whose panes are gone, and the next show would
+// read that as "already shown" and never come back for them.
+func TestHideFrame_ClearsTheDefBeforeKillingPanes(t *testing.T) {
+	requireTmux(t)
+	socket := uniqueSocket(t)
+	t.Cleanup(func() { killServer(t, socket) })
+	ctx := context.Background()
+
+	srv, err := tmuxctl.Driver{}.Connect(ctx, muxctl.ServerConfig{
+		Executable: tmuxFailingOn(t, "kill-pane"),
+		Socket:     socket,
+	})
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	sess, err := srv.New(ctx, muxctl.Config{
+		SessionName: "cmdman-test",
+		WindowName:  "cmdman",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	before := listPaneIDs(t, socket, sess.WindowID())
+	showOneBarFrame(t, sess, "dev")
+
+	if err := sess.HideFrame(ctx); err == nil {
+		t.Fatal("HideFrame succeeded; the case under test needs it to die partway")
+	}
+	if got := windowOption(t, socket, sess.WindowID(), "@cmdman_frame_def"); got != "" {
+		t.Errorf("@cmdman_frame_def = %q after the failed hide, want it already cleared", got)
+	}
+	if got := framePaneIDs(t, socket, sess.WindowID()); len(got) != 1 {
+		t.Fatalf("frame panes after the failed hide = %v, want the one that outlived it", got)
+	}
+
+	// The recovery, through a tmux that works: [muxctl.Server.Open] is how a
+	// teardown caller reaches a window it must not stamp on the way in.
+	retry, ok, err := newServer(t, socket).Open(ctx, muxctl.Config{WindowID: sess.WindowID()})
+	if err != nil || !ok {
+		t.Fatalf("Open: %v (ok=%v)", err, ok)
+	}
+	if err := retry.HideFrame(ctx); err != nil {
+		t.Fatalf("HideFrame after the failed one: %v", err)
+	}
+	if got := framePaneIDs(t, socket, sess.WindowID()); len(got) != 0 {
+		t.Errorf("frame panes after the second hide = %v, want none", got)
+	}
+	if got := listPaneIDs(t, socket, sess.WindowID()); !slices.Equal(got, before) {
+		t.Errorf("panes after the second hide = %v, want the window's original %v", got, before)
+	}
+}
+
 // killMainRegion kills every project pane, leaving a window that holds nothing
 // but its frame — what a framed window becomes when the viewers it was built
 // around exit. Returns the frame pane ids that were left standing.

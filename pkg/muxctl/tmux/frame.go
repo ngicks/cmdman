@@ -249,13 +249,15 @@ func (s *Session) ShowFrame(
 	return s.focusMainRegion(ctx, anchorID)
 }
 
-// HideFrame is the frame side's teardown: it kills every frame-stamped pane and
-// clears frameDefOption, leaving the main region to expand into the window the
-// frame gave back. Frame panes are killed alike: what a frame pane was running
-// is the consumer's business, and the viewer quiesce is deliberately not run —
-// its detach keys address the project's viewers, which this operation does not
-// touch. What the main region runs is never changed: hiding a frame is not a
-// project teardown, and [Session.Detach] is the call that is.
+// HideFrame is the frame side's teardown: it clears frameDefOption and kills
+// every frame-stamped pane, leaving the main region to expand into the window
+// the frame gave back. What comes down is decided by the pane stamps alone, so
+// a window whose frameDefOption went stale is torn down just the same. Frame
+// panes are killed alike: what a frame pane was running is the consumer's
+// business, and the viewer quiesce is deliberately not run — its detach keys
+// address the project's viewers, which this operation does not touch. What the
+// main region runs is never changed: hiding a frame is not a project teardown,
+// and [Session.Detach] is the call that is.
 //
 // When the frame was the last cmdman state on the window, the window itself is
 // given back too (see releaseWindowIfLast). A window holding nothing but the
@@ -272,6 +274,18 @@ func (s *Session) HideFrame(ctx context.Context) error {
 	}
 	if !state {
 		return nil
+	}
+
+	// Cleared before a single pane is killed, mirroring the stamp ShowFrame
+	// writes before its panes exist. A teardown that dies partway then leaves
+	// stamped panes on a window claiming no frame, which is the state hiding
+	// again removes — panes are found by their stamp, not by the def. The
+	// opposite order leaves the mirror image: a window naming a frame whose panes
+	// are gone, which reads as "already shown" to the next show and strands them.
+	if _, err := s.exec.run(
+		ctx, "set-option", "-w", "-u", "-t", s.windowID, frameDefOption,
+	); err != nil {
+		return fmt.Errorf("tmux: clear %s: %w", frameDefOption, err)
 	}
 
 	panes, err := listPanesByRole(ctx, s.exec, s.windowID)
@@ -299,11 +313,6 @@ func (s *Session) HideFrame(ctx context.Context) error {
 		if _, err := s.exec.run(ctx, "kill-pane", "-t", id); err != nil {
 			return fmt.Errorf("tmux: kill frame pane %s: %w", id, err)
 		}
-	}
-	if _, err := s.exec.run(
-		ctx, "set-option", "-w", "-u", "-t", s.windowID, frameDefOption,
-	); err != nil {
-		return fmt.Errorf("tmux: clear %s: %w", frameDefOption, err)
 	}
 	return s.releaseWindowIfLast(ctx)
 }

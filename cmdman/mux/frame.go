@@ -99,8 +99,11 @@ func FrameShow(ctx context.Context, opts FrameOptions) error {
 }
 
 // FrameHide removes the frame shown around the target window, leaving the
-// project region to expand into it. A window carrying no frame is a quiet
-// no-op.
+// project region to expand into it. What comes down is decided by the panes the
+// driver stamped as the frame's, not by the def the window recorded, so a
+// window whose record went stale — frame panes standing with no def named — is
+// put back in order rather than skipped. A window holding no frame pane is a
+// quiet no-op.
 func FrameHide(ctx context.Context, opts FrameOptions) error {
 	target, err := openFrameTarget(ctx, opts)
 	if err != nil {
@@ -163,9 +166,11 @@ func FrameList(ctx context.Context, opts FrameOptions) (FrameListResult, error) 
 }
 
 // frameTarget is the window a frame verb acts on, together with the def shown
-// around it when the target was resolved ("" when unframed). The verbs read
-// that state once and branch on it: it decides no-op vs replace for show, and
-// no-op vs teardown for hide.
+// around it when the target was resolved ("" when unframed). Show reads that
+// state once and branches on it — no-op when the def asked for is already up,
+// replace when another one is. Hide does not branch on it at all: it only names
+// what came down in an error, because the panes hide removes are the ones the
+// driver stamped, which a window with no def recorded can still be holding.
 type frameTarget struct {
 	server   muxctl.Server
 	windowID string
@@ -236,12 +241,14 @@ func (t frameTarget) show(
 	return nil
 }
 
-// hide removes the frame the target carries, if any.
+// hide removes the frame panes the target window carries, if any.
+//
+// It runs whether or not the window recorded a def. A window can hold frame
+// panes with no def named — a teardown that died after clearing the state
+// leaves exactly that — and skipping those would leave them standing with no
+// verb able to reach them: hide is what removes them, and the frame stamps are
+// what it goes by.
 func (t frameTarget) hide(ctx context.Context) error {
-	if t.shown == "" {
-		return nil
-	}
-
 	// Open rather than New: hiding must not stamp anything onto the window it
 	// is handing back.
 	sess, ok, err := t.server.Open(ctx, muxctl.Config{
@@ -259,10 +266,13 @@ func (t frameTarget) hide(ctx context.Context) error {
 	return hideFrameOf(ctx, sess, t.shown)
 }
 
-// hideFrameOf tears the frame named defName off sess. It is the one place the
-// hide half lives, shared by [frameTarget.hide] and the replace path of
-// [frameTarget.show], because F7 pins the order both must follow: a managed
-// entry's viewer is detached before the driver removes its pane.
+// hideFrameOf tears sess's frame panes down. defName is the def the window
+// recorded, which names what came down in the error and nothing more — it is
+// empty on a window whose record went stale, and such a window is one to clean
+// up rather than one to skip. It is the one place the hide half lives, shared
+// by [frameTarget.hide] and the replace path of [frameTarget.show], because F7
+// pins the order both must follow: a managed entry's viewer is detached before
+// the driver removes its pane.
 func hideFrameOf(ctx context.Context, sess muxctl.Session, defName string) error {
 	// Managed entries (D19/V7) are detached here — their supervised commands
 	// keep running while the panes go away — and detaching one is precisely NOT
@@ -281,6 +291,9 @@ func hideFrameOf(ctx context.Context, sess muxctl.Session, defName string) error
 	// TestForwardedSignals_DoesNotIncludeSIGHUP), so it reaches the viewer and
 	// stops there.
 	if err := sess.HideFrame(ctx); err != nil {
+		if defName == "" {
+			return fmt.Errorf("mux: frame: hide: %w", err)
+		}
 		return fmt.Errorf("mux: frame: hide %q: %w", defName, err)
 	}
 	return nil

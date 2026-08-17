@@ -120,3 +120,17 @@ redesign (interface split, reuse semantics, name-as-identity fallbacks,
 contract docs, the inherited mux-socket item) is its own effort.
 **Rejected**: folding the full cleanup into this plan (scope creep);
 leaving the follow-up unrecorded.
+
+## D8 — Show does not self-heal desynced windows; recovery stays `frame hide` [automatic]
+
+**Decision** (orchestrator, autonomous run 2026-08-18): The hide-hardening
+step surfaced that `frameTarget.show` (`cmdman/mux/frame.go:212-215`) runs
+its teardown only when a def is recorded, so a window with an empty def but
+leftover frame-stamped panes gets docks stacked on the leftovers. This plan
+does not make show's pre-hide unconditional; the documented recovery is
+`cmdman mux frame hide` (now state-independent). Deferred to HANDOFF
+entry 2.
+**Rationale**: The user-approved hardening covered hide only; changing
+show's teardown semantics is new scope and touches the show/cycle gestures'
+behavior on healthy windows too.
+**Rejected**: silently widening scope mid-run.
