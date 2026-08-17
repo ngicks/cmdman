@@ -204,6 +204,11 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 		ReuseCurrentWindow: reuseCurrent,
 		ViewerDetachKeys:   viewerDetachKeys,
 	}
+	// attachSession is where the window the up acted on actually lives: the
+	// reuse path can pick a window in another session (the search is
+	// server-wide unless the caller pinned one), and the attach hint must name
+	// that session, not the one a create would have used.
+	attachSession := sessionName
 	if row, ok := pickOwnedWindow(rows, sessionName); ok {
 		// Target the window by id and leave the rest of the config out: the
 		// window is already ours, so neither the name it currently wears nor the
@@ -213,6 +218,7 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 			OwnedIdentity:    identity,
 			ViewerDetachKeys: viewerDetachKeys,
 		}
+		attachSession = row.SessionName
 	}
 
 	sess, err := server.New(ctx, cfg)
@@ -254,7 +260,7 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 	}
 
 	if envOf(env, "TMUX") == "" && envOf(env, "ZELLIJ") == "" {
-		fmt.Fprintf(stdout, "Attach: tmux attach -t %s\n", sessionName)
+		fmt.Fprintf(stdout, "Attach: tmux attach -t %s\n", attachSession)
 	}
 	return nil
 }

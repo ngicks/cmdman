@@ -1,7 +1,11 @@
 # STATUS — improve TUI widget behavior
 
-**Current state**: implementation in progress (autonomous run started
-2026-08-18). Steps 1–8 done. Step 7 also fixed a latent tmux create bug
+**Current state**: implementation complete (autonomous run, 2026-08-18).
+All nine steps done and committed; final gate (ng-reviewer, full
+build/test/e2e/lint, and the three Go review-checklist skills) passed
+after fixing the one blocking finding (mux.Run's attach hint named the
+resolved session instead of the reused window's session) and a stale
+Down doc comment. Step 7 also fixed a latent tmux create bug
 (`new-window -t <session>` prefix-matched window names; target is now
 `-a -t "=<session>:{end}"`, needs tmux ~2.9+ for `{end}`) and aligned the
 TUI backend's `projectIdentity` with the synthesized unnamed-project
@@ -40,7 +44,7 @@ up in") now understates the view — config-dir locations are listed too.
 - [x] Step 8 — `KeepLayout` per D6: "an existing window re-applies the
       layout its marker records; a fresh window gets layout 0"; call sites
       classified bring-up vs cycle — `CycleMux` and CLI keep cycling
-- [ ] Step 9 — docs truth sweep + full build/test/e2e + review skills
+- [x] Step 9 — docs truth sweep + full build/test/e2e + review skills
 
 ## Traceability (gate run 2026-08-17)
 
@@ -62,8 +66,14 @@ up in") now understates the view — config-dir locations are listed too.
 
 ## Next action
 
-Begin implementation at step 1 (z removal), or hand the plan to an
-implementer. Steps 1–2, 3–6, and 7–8 are largely independent tracks.
+None — implementation done. Minor non-blocking items the gate surfaced,
+left for a future pass: the real-backend ComposeDown test covers only the
+all-success path (partial-failure mapping is asserted via FakeBackend
+only); the three widget files keep growing past the 300-LoC guidance (a
+per-widget down.go split would fit); new tests in pre-existing files
+follow those files' context.Background() convention instead of
+t.Context(); the switcher's Long help never documented `m` (pre-existing
+incompleteness). Deferred decisions live in HANDOFF entries 1–3.
 
 ## Blocked
 

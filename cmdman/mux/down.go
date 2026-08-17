@@ -55,9 +55,10 @@ type DownOptions struct {
 // are torn down.
 //
 // A frame shown around the dashboard is not the project's to remove: the
-// window is left framed and projectless, ready for the next `mux up`. Removing
-// the frame is the frame verbs' own teardown, and whichever of the two goes
-// last hands the window back whole.
+// window is left framed and projectless. With the ownership stamp gone the
+// next `mux up` no longer recognises it and builds a fresh window beside it.
+// Removing the frame is the frame verbs' own teardown, and whichever of the
+// two goes last hands the window back whole.
 //
 // Down enumerates windows via [muxctl.Server.ListWindows], which requires no
 // $TMUX context and works from any pane, from run-shell, or from outside
