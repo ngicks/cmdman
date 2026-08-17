@@ -28,8 +28,14 @@ func WithFrameSvc(svc mux.FrameSvc) ServiceOption {
 type MuxUpOption struct {
 	// Selection is the resolved compose project; it must declare a "mux:" section.
 	Selection ProjectSelection
-	// Layout selects a layout by name or 0-based index. Empty cycles to the next.
+	// Layout selects a layout by name or 0-based index. Empty cycles to the next,
+	// unless KeepLayout says otherwise.
 	Layout string
+	// KeepLayout makes an empty Layout re-apply the layout the dashboard is
+	// already on instead of advancing to the next (see [mux.RunOptions.KeepLayout]).
+	// Callers bringing a project up set it: "make this project running" is not a
+	// request to move its layout.
+	KeepLayout bool
 	// SessionName targets a specific multiplexer session. Empty lets the driver
 	// resolve the current (or default "cmdman") session.
 	SessionName string
@@ -96,6 +102,7 @@ func (s *Service) MuxUp(ctx context.Context, opts MuxUpOption) error {
 		WindowName:        selection.MuxWindowName(),
 		Identity:          selection.ProjectIdentity(),
 		Layout:            opts.Layout,
+		KeepLayout:        opts.KeepLayout,
 		KeepCurrentWindow: opts.KeepCurrentWindow,
 		Config:            cfg,
 		Svc:               s.frameSvc,

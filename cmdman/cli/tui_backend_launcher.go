@@ -429,7 +429,11 @@ func (b *serviceBackend) bringUp(
 		// dashboard there would repurpose the window the user was looking at,
 		// which is the opposite of both launcher gestures (D4).
 		KeepCurrentWindow: true,
-		Stdout:            io.Discard,
+		// Neither launcher gesture says anything about layouts, so the dashboard
+		// comes back on the layout the user left it on. Advancing it is what the
+		// cycle key is for.
+		KeepLayout: true,
+		Stdout:     io.Discard,
 	}); err != nil {
 		return fmt.Errorf("launcher: mux %s: %w", launchLabel(target), err)
 	}

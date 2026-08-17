@@ -1,7 +1,7 @@
 # STATUS — improve TUI widget behavior
 
 **Current state**: implementation in progress (autonomous run started
-2026-08-18). Steps 1–7 done. Step 7 also fixed a latent tmux create bug
+2026-08-18). Steps 1–8 done. Step 7 also fixed a latent tmux create bug
 (`new-window -t <session>` prefix-matched window names; target is now
 `-a -t "=<session>:{end}"`, needs tmux ~2.9+ for `{end}`) and aligned the
 TUI backend's `projectIdentity` with the synthesized unnamed-project
@@ -37,7 +37,7 @@ up in") now understates the view — config-dir locations are listed too.
       `ListWindows` by identity; incl. "unnamed projects get a synthesized
       identity from the workdir hash" (absorbs the switcher_creates_window
       HANDOFF item)
-- [ ] Step 8 — `KeepLayout` per D6: "an existing window re-applies the
+- [x] Step 8 — `KeepLayout` per D6: "an existing window re-applies the
       layout its marker records; a fresh window gets layout 0"; call sites
       classified bring-up vs cycle — `CycleMux` and CLI keep cycling
 - [ ] Step 9 — docs truth sweep + full build/test/e2e + review skills
