@@ -133,6 +133,48 @@ func TestRun_SameWindowNameIsNotTheSameProject(t *testing.T) {
 	}
 }
 
+// TestRun_AttachHintNamesTheSessionOfTheReusedWindow: with no explicit
+// session, the identity search is server-wide, so the reused window can live
+// in a session other than the one a create would have used — and the
+// outside-multiplexer attach hint must name where the dashboard actually is,
+// not the "cmdman" fallback.
+func TestRun_AttachHintNamesTheSessionOfTheReusedWindow(t *testing.T) {
+	const identity = "wdhash-web"
+	_, socket := identitySocket(t)
+
+	err := Run(context.Background(), upSpec(socket), RunOptions{
+		SessionName: "other",
+		WindowName:  "cmdman-web",
+		Identity:    identity,
+		Env:         []string{},
+		Stdout:      io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Run (session other): %v", err)
+	}
+	built := theWindowOf(t, socket, identity)
+
+	var out strings.Builder
+	err = Run(context.Background(), upSpec(socket), RunOptions{
+		WindowName: "cmdman-web",
+		Identity:   identity,
+		Env:        []string{},
+		Stdout:     &out,
+	})
+	if err != nil {
+		t.Fatalf("Run (no session): %v", err)
+	}
+
+	if again := theWindowOf(t, socket, identity); again.WindowID != built.WindowID {
+		t.Fatalf("second up landed on %s, want the project's own %s in session other",
+			again.WindowID, built.WindowID)
+	}
+	if got := out.String(); !strings.Contains(got, "tmux attach -t other") {
+		t.Errorf("attach hint = %q, want it to name session other, where the reused window lives",
+			got)
+	}
+}
+
 // windowPaneIDs returns the ids of every pane in windowID, in tmux list order.
 func windowPaneIDs(t *testing.T, bin, socket, windowID string) []string {
 	t.Helper()
