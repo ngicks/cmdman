@@ -1,7 +1,7 @@
 # STATUS — improve TUI widget behavior
 
 **Current state**: implementation in progress (autonomous run started
-2026-08-18). Steps 1–2 done.
+2026-08-18). Steps 1–3 done.
 
 ## Checklist (mirrors PLAN.md steps)
 
@@ -10,7 +10,7 @@
 - [x] Step 2 — harden hide per D5: "frame-stamped panes are removed by
       their stamp regardless of recorded state, so panes and state can
       never desync" (incl. the F7-ordering check for managed entries)
-- [ ] Step 3 — `FromConfig` provenance threaded backend → core types
+- [x] Step 3 — `FromConfig` provenance threaded backend → core types
       (IDEA §1; D2 provenance half)
 - [ ] Step 4 — empty-filter admission per D2: "appear … ordered after
       history rows … and start **disabled**"; store/cwd sources stay

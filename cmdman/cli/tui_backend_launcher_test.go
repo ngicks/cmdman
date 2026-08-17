@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -41,13 +42,16 @@ func TestLaunchAccumulatorMergesByRecency(t *testing.T) {
 	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
 	acc := &launchAccumulator{}
 	// History, newest first as the store returns it.
-	acc.add("/w/api", "api", "/w/api/cmd-compose.yaml", now, true)
-	acc.add("/w/web", "web", "/w/web/cmd-compose.yaml", now.Add(-time.Hour), true)
+	acc.add("/w/api", "api", "/w/api/cmd-compose.yaml", now, true, false)
+	acc.add("/w/web", "web", "/w/web/cmd-compose.yaml", now.Add(-time.Hour), true, false)
 	// The store listing repeats one of them and adds a co-located project.
-	acc.add("/w/api", "api", "/w/api/cmd-compose.yaml", time.Time{}, false)
-	acc.add("/w/api", "tools", "/w/api/tools.yaml", time.Time{}, false)
+	acc.add("/w/api", "api", "/w/api/cmd-compose.yaml", time.Time{}, false, false)
+	acc.add("/w/api", "tools", "/w/api/tools.yaml", time.Time{}, false, false)
+	// The compose config dir names one of the history projects too: a project
+	// known from both sources carries both flags rather than the later one only.
+	acc.add("/w/api", "api", "/w/api/cmd-compose.yaml", time.Time{}, false, true)
 	// A named def nobody has run: no history, so it sorts after the history rows.
-	acc.add("/w/never", "named", "/w/never/compose.yaml", time.Time{}, false)
+	acc.add("/w/never", "named", "/w/never/compose.yaml", time.Time{}, false, true)
 
 	locs := acc.locations(resolverFor(map[string]resolvedCompose{
 		"/w/api/cmd-compose.yaml": specWithMux("/w/api", "api", true),
@@ -80,6 +84,18 @@ func TestLaunchAccumulatorMergesByRecency(t *testing.T) {
 	if !api[0].HasMux || api[1].HasMux {
 		t.Errorf("the mux: section should be read per project: %+v", api)
 	}
+	// Both provenances are an OR, at the project and at the location: a project
+	// the config dir names and history knows is both, and the co-located project
+	// the config dir does not name stays unflagged even though its location is.
+	if !api[0].FromConfig || api[1].FromConfig {
+		t.Errorf("only the config-named project should be flagged: %+v", api)
+	}
+	if !locs[0].FromConfig || !locs[2].FromConfig {
+		t.Errorf("a location with a config-named project should say so: %+v", locs)
+	}
+	if locs[1].FromConfig {
+		t.Errorf("a location the config dir does not name must not claim it: %+v", locs[1])
+	}
 }
 
 // TestLaunchRunningIdentityUsesComposeWorkdir is the check that a fake cannot
@@ -95,8 +111,8 @@ func TestLaunchRunningIdentityUsesComposeWorkdir(t *testing.T) {
 	}
 
 	acc := &launchAccumulator{}
-	acc.add(spec.WorkDir, spec.Project, "/w/api/cmd-compose.yaml", time.Now(), true)
-	acc.add("/w/api", "tools", "/w/api/tools.yaml", time.Time{}, false)
+	acc.add(spec.WorkDir, spec.Project, "/w/api/cmd-compose.yaml", time.Now(), true, false)
+	acc.add("/w/api", "tools", "/w/api/tools.yaml", time.Time{}, false, false)
 
 	locs := acc.locations(resolverFor(map[string]resolvedCompose{
 		"/w/api/cmd-compose.yaml": specWithMux("/w/api", "api", true),
@@ -108,6 +124,58 @@ func TestLaunchRunningIdentityUsesComposeWorkdir(t *testing.T) {
 	}
 	if locs[0].Projects[1].Running {
 		t.Errorf("a project with no window of its own must not read as running")
+	}
+}
+
+// TestListLaunchTargetsFlagsConfigProjects covers the provenance the listing
+// carries for a project the compose config dir names. It goes through the
+// backend rather than the accumulator because the flag's whole point is which
+// of the merged sources a row came from, and only the listing knows that.
+func TestListLaunchTargetsFlagsConfigProjects(t *testing.T) {
+	// The compose config dir is derived from $CMDMAN_CONF; without the override
+	// the listing would discover the projects the developer keeps in their own.
+	conf := t.TempDir()
+	t.Setenv("CMDMAN_CONF", filepath.Join(conf, "config.json"))
+	// work_dir: is declared so the row lands in a directory of the test's own
+	// rather than wherever the process happens to stand.
+	workDir := t.TempDir()
+	writeComposeFile(t, filepath.Join(conf, "compose", "named.yaml"),
+		"name: named\nwork_dir: "+workDir+"\ncommands:\n  a:\n    args: [echo, a]\n")
+	// An empty directory to stand in, so the cwd-project arm of the merge adds
+	// nothing and the named project is the only thing there is to find.
+	t.Chdir(t.TempDir())
+
+	svc := cmdman.NewService(frameSvcConfig(t))
+	defer svc.Close()
+	b := &serviceBackend{svc: svc, compose: compose.NewService(svc)}
+
+	locs, err := b.ListLaunchTargets(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(locs, func(l tui.LaunchLocation) bool { return l.Dir == workDir })
+	if i < 0 {
+		t.Fatalf("locations = %+v, want the named project at %s", locs, workDir)
+	}
+	loc := locs[i]
+	if !loc.FromConfig || loc.FromHistory {
+		t.Errorf("location = %+v, want it known from the config dir and not from history", loc)
+	}
+	if len(loc.Projects) != 1 || loc.Projects[0].Name != "named" {
+		t.Fatalf("projects = %+v, want the named project", loc.Projects)
+	}
+	if p := loc.Projects[0]; !p.FromConfig || p.FromHistory {
+		t.Errorf("project = %+v, want it known from the config dir and not from history", p)
+	}
+}
+
+func writeComposeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

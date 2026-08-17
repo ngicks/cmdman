@@ -42,7 +42,7 @@ func (b *serviceBackend) ListLaunchTargets(ctx context.Context) ([]tui.LaunchLoc
 		return nil, fmt.Errorf("launcher: list compose history: %w", err)
 	}
 	for _, h := range history {
-		acc.add(h.WorkDir, h.Project, h.File, h.LastUsed, true)
+		acc.add(h.WorkDir, h.Project, h.File, h.LastUsed, true, false)
 	}
 
 	summaries, err := b.compose.ListProjects(ctx)
@@ -50,7 +50,7 @@ func (b *serviceBackend) ListLaunchTargets(ctx context.Context) ([]tui.LaunchLoc
 		return nil, fmt.Errorf("launcher: list compose projects: %w", err)
 	}
 	for _, s := range summaries {
-		acc.add(s.WorkDir, s.Project, s.ComposeFile, time.Time{}, false)
+		acc.add(s.WorkDir, s.Project, s.ComposeFile, time.Time{}, false, false)
 	}
 
 	resolver := &composeResolver{}
@@ -60,13 +60,13 @@ func (b *serviceBackend) ListLaunchTargets(ctx context.Context) ([]tui.LaunchLoc
 	named, _ := compose.ListNamedProjects()
 	for _, n := range named {
 		if sel, err := resolver.resolve(n); err == nil && sel.Spec != nil {
-			acc.add(sel.WorkDir, sel.Project, sel.Spec.ComposeFile, time.Time{}, false)
+			acc.add(sel.WorkDir, sel.Project, sel.Spec.ComposeFile, time.Time{}, false, true)
 		}
 	}
 	if sel, err := compose.LoadOrProject(
 		compose.NormalizeOpts{WorkDir: b.workDir},
 	); err == nil && sel.Spec != nil {
-		acc.add(sel.WorkDir, sel.Project, sel.Spec.ComposeFile, time.Time{}, false)
+		acc.add(sel.WorkDir, sel.Project, sel.Spec.ComposeFile, time.Time{}, false, false)
 	}
 
 	locs := acc.locations(resolver, b.runningIdentities(ctx))
@@ -111,7 +111,7 @@ func resolveLaunchDir(
 	acc := &launchAccumulator{}
 	for _, h := range history {
 		if h.WorkDir == dir {
-			acc.add(dir, h.Project, h.File, h.LastUsed, true)
+			acc.add(dir, h.Project, h.File, h.LastUsed, true, false)
 		}
 	}
 	// The discovered project is recorded under dir rather than under the work
@@ -119,7 +119,7 @@ func resolveLaunchDir(
 	// spec declaring work_dir: elsewhere would otherwise open a second location
 	// the caller never asked about.
 	if spec, err := discoverLaunchDirSpec(ctx, dir); err == nil {
-		acc.add(dir, spec.Project, spec.ComposeFile, time.Time{}, false)
+		acc.add(dir, spec.Project, spec.ComposeFile, time.Time{}, false, false)
 	}
 
 	locs := acc.locations(&composeResolver{}, running)
@@ -174,6 +174,7 @@ type launchDir struct {
 	dir         string
 	lastUsed    time.Time
 	fromHistory bool
+	fromConfig  bool
 	projects    []launchProj
 	seen        map[string]int
 }
@@ -182,12 +183,17 @@ type launchProj struct {
 	name        string
 	file        string
 	fromHistory bool
+	fromConfig  bool
 }
 
 // add records one project at a location. A project already recorded keeps the
 // first file it was seen with — history is added first, so the file a project
 // was actually brought up with wins over one merely discovered.
-func (a *launchAccumulator) add(dir, project, file string, lastUsed time.Time, fromHistory bool) {
+func (a *launchAccumulator) add(
+	dir, project, file string,
+	lastUsed time.Time,
+	fromHistory, fromConfig bool,
+) {
 	if dir == "" {
 		return
 	}
@@ -206,13 +212,17 @@ func (a *launchAccumulator) add(dir, project, file string, lastUsed time.Time, f
 			d.lastUsed = lastUsed
 		}
 	}
+	if fromConfig {
+		d.fromConfig = true
+	}
 	if i, ok := d.seen[project]; ok {
 		d.projects[i].fromHistory = d.projects[i].fromHistory || fromHistory
+		d.projects[i].fromConfig = d.projects[i].fromConfig || fromConfig
 		return
 	}
 	d.seen[project] = len(d.projects)
 	d.projects = append(d.projects, launchProj{
-		name: project, file: file, fromHistory: fromHistory,
+		name: project, file: file, fromHistory: fromHistory, fromConfig: fromConfig,
 	})
 }
 
@@ -230,6 +240,7 @@ func (a *launchAccumulator) locations(
 			Dir:         d.dir,
 			LastUsed:    d.lastUsed,
 			FromHistory: d.fromHistory,
+			FromConfig:  d.fromConfig,
 			Projects:    make([]tui.LaunchProject, 0, len(d.projects)),
 		}
 		for _, p := range d.projects {
@@ -238,6 +249,7 @@ func (a *launchAccumulator) locations(
 				Name:        p.name,
 				File:        p.file,
 				FromHistory: p.fromHistory,
+				FromConfig:  p.fromConfig,
 				Running:     identity != "" && running[identity],
 			}
 			entry.HasMux, entry.Problem, entry.Missing = resolver.classify(p.file, p.name)
