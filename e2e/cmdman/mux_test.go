@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ngicks/cmdman/cmdman"
+	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
 // These e2e tests drive the real `cmdman mux` / `cmdman compose mux` binary
@@ -785,6 +786,148 @@ func TestComposeMux_DownFindsWindowServerWide(t *testing.T) {
 	}
 	if got := tmuxWindowOption(t, socket, wid, "@cmdman_window"); got != "" {
 		t.Errorf("@cmdman_window still set after down: %q", got)
+	}
+}
+
+// tmuxWindowIDByIdentity returns the @id of the window whose @cmdman_window
+// ownership option equals identity, across every session on the socket, failing
+// unless exactly one window carries it. Same-named windows are precisely what
+// the stamp exists to tell apart, so tmuxWindowID's name lookup cannot answer
+// for a project whose window shares its name with another's.
+func tmuxWindowIDByIdentity(t *testing.T, socket, identity string) string {
+	t.Helper()
+	out := tmuxRun(t, socket, "list-windows", "-a", "-F", "#{window_id}\t#{@cmdman_window}")
+	var found []string
+	for line := range strings.SplitSeq(out, "\n") {
+		id, stamp, ok := strings.Cut(line, "\t")
+		if ok && stamp == identity {
+			found = append(found, id)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("windows stamped %q = %v, want exactly one; windows on %s:\n%s",
+			identity, found, socket, out)
+	}
+	return found[0]
+}
+
+// tmuxWindowName returns the current name of windowID.
+func tmuxWindowName(t *testing.T, socket, windowID string) string {
+	t.Helper()
+	return tmuxRun(t, socket, "display-message", "-p", "-t", windowID, "#{window_name}")
+}
+
+// TestComposeMux_SameProjectNameInTwoWorkdirs is the two-checkouts case: one
+// project name, two work directories — a repository cloned twice, or a project
+// and its worktree. Both dashboards want the window named cmdman-<project>, and
+// the window name is where their claims collide; the ownership stamp, hashed
+// from the work directory too, is where they do not.
+//
+// So each `compose mux up` must build a window of its own, and a `compose mux
+// down` in one directory must tear down that directory's dashboard and leave the
+// other's standing.
+func TestComposeMux_SameProjectNameInTwoWorkdirs(t *testing.T) {
+	t.Parallel()
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	const project = "muxtwice"
+	socket := muxSocket(t)
+	t.Cleanup(func() { killTmuxServer(t, socket) })
+
+	// Two projects that differ in nothing a window name can show.
+	type site struct {
+		workdir     string
+		composePath string
+		identity    string
+		windowID    string
+	}
+	sites := make([]*site, 2)
+	for i := range sites {
+		wd := composeWorkdir(t)
+		sites[i] = &site{
+			workdir:     wd,
+			composePath: writeComposeFile(t, wd, composeMuxYAML(project, socket)),
+			identity: compose.ProjectSelection{
+				WorkDir: wd,
+				Project: project,
+			}.ProjectIdentity(),
+		}
+		t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+	}
+	if sites[0].identity == sites[1].identity {
+		t.Fatalf("both work directories hash to identity %q", sites[0].identity)
+	}
+
+	for _, s := range sites {
+		if _, stderr, err := env.exec(
+			ctx, "compose", "--workdir", s.workdir, "-f", s.composePath, "up",
+		); err != nil {
+			t.Fatalf("compose up in %s failed: %v\nstderr:\n%s", s.workdir, err, stderr)
+		}
+		for _, e := range env.lsJSON(ctx,
+			"-l", "cmdman.compose.workdir="+s.workdir,
+			"-l", "cmdman.compose.project="+project,
+		) {
+			env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
+		}
+
+		stdout, stderr, err := env.muxExec(
+			ctx, "compose", "--workdir", s.workdir, "-f", s.composePath, "mux",
+		)
+		if err != nil {
+			t.Fatalf("compose mux in %s failed: %v\nstdout:\n%s\nstderr:\n%s",
+				s.workdir, err, stdout, stderr)
+		}
+		s.windowID = tmuxWindowIDByIdentity(t, socket, s.identity)
+	}
+
+	first, second := sites[0], sites[1]
+	if first.windowID == second.windowID {
+		t.Fatalf("both projects took window %s; the second up stole the first's dashboard",
+			first.windowID)
+	}
+	window := "cmdman-" + project
+	for _, s := range sites {
+		if got := tmuxWindowName(t, socket, s.windowID); got != window {
+			t.Errorf("window %s is named %q, want %q", s.windowID, got, window)
+		}
+		if got := len(tmuxPaneField(t, socket, s.windowID, "#{pane_id}")); got != 2 {
+			t.Errorf("window %s has %d panes, want the layout's 2", s.windowID, got)
+		}
+	}
+
+	// Down in the first directory only.
+	downStdout, downStderr, downErr := env.muxExec(
+		ctx, "compose", "--workdir", first.workdir, "-f", first.composePath, "mux", "down",
+	)
+	if downErr != nil {
+		t.Fatalf("compose mux down failed: %v\nstdout:\n%s\nstderr:\n%s",
+			downErr, downStdout, downStderr)
+	}
+	if !strings.Contains(downStdout, "Restored window") {
+		t.Fatalf("expected a restored-window line on stdout; got:\n%s", downStdout)
+	}
+
+	if got := len(tmuxPaneField(t, socket, first.windowID, "#{pane_id}")); got != 1 {
+		t.Errorf("torn-down window %s has %d panes, want 1", first.windowID, got)
+	}
+	if got := tmuxWindowOption(t, socket, first.windowID, "@cmdman_window"); got != "" {
+		t.Errorf("@cmdman_window on the torn-down window = %q, want it cleared", got)
+	}
+
+	// The other directory's dashboard is untouched, stamp and all — it is still
+	// the one its own down, land and cycle will find.
+	if got := len(tmuxPaneField(t, socket, second.windowID, "#{pane_id}")); got != 2 {
+		t.Errorf("the other project's window %s has %d panes, want its 2 left standing",
+			second.windowID, got)
+	}
+	if got := tmuxWindowOption(
+		t, socket, second.windowID, "@cmdman_window",
+	); got != second.identity {
+		t.Errorf("@cmdman_window on the other project's window = %q, want %q",
+			got, second.identity)
 	}
 }
 

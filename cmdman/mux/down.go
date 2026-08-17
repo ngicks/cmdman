@@ -25,17 +25,19 @@ type DownOptions struct {
 	// optional for teardown: omitting it restores every matching dashboard
 	// server-wide.
 	SessionName string
-	// WindowName is used solely for identity derivation when Identity is empty
-	// (standalone-mux default). It is NOT used as a session-filter fallback.
-	// Empty defaults to the resolved session name, exactly as [Run] does.
+	// WindowName is used solely for identity derivation when Identity is empty —
+	// the standalone-mux default, the only caller that leaves Identity unset. It
+	// is NOT used as a session-filter fallback. Empty defaults to the resolved
+	// session name, exactly as [Run] does.
 	WindowName string
 	// Identity is the opaque ownership string passed to [muxctl.Server.ListWindows]
 	// as the filter. When empty, it is derived the same way [Run] defaults it:
-	// resolveSessionName → windowName default → identity = windowName. This
-	// derivation is the documented standalone-mux limitation (a dashboard built
-	// with the default naming in a different session resolves a different
-	// identity). Compose callers always pass Identity explicitly, which
-	// eliminates the context-dependence entirely.
+	// resolveSessionName → windowName default → identity = windowName. That
+	// derivation is session-local, which is the standalone-mux limitation: a
+	// dashboard built with the default naming in a different session resolves a
+	// different identity. Compose callers always pass Identity explicitly —
+	// unnamed projects included, since the work directory alone identifies one —
+	// which eliminates the context-dependence entirely.
 	Identity string
 	// Env is the process env consulted for driver autodetection. Empty defaults
 	// to os.Environ().

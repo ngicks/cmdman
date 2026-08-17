@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
 // composeMuxCycleScaleYAML returns a compose file with a scaled `web` service
@@ -420,9 +422,16 @@ func TestComposeMuxCycleScale_DownResetsPosition(t *testing.T) {
 	); err != nil {
 		t.Fatalf("compose mux up (2) failed: %v\nstderr:\n%s", err, stderr)
 	}
-	// Window id may have changed if up restored the window to a fresh state.
-	// Re-lookup the window id.
-	wid2 := tmuxWindowID(t, socket, window)
+	// The window down handed back is the user's again — it carries no project —
+	// so this up builds one of its own, beside it and under the same name. The
+	// ownership stamp is what tells the two apart.
+	wid2 := tmuxWindowIDByIdentity(
+		t, socket,
+		compose.ProjectSelection{WorkDir: wd, Project: project}.ProjectIdentity(),
+	)
+	if wid2 == wid {
+		t.Fatalf("up after down landed back in the restored window %s", wid)
+	}
 	waitForPaneTitle(t, socket, wid2, "web-1", 3*time.Second)
 }
 

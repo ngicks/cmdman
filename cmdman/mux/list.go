@@ -17,9 +17,11 @@ type OwnedWindow struct {
 	SessionName string
 	// WindowID is the driver-assigned window identifier (e.g. tmux "@3").
 	WindowID string
-	// WindowName is the human-visible window name. It may differ from the
-	// Identity — a takeover window keeps its original name while the identity
-	// stamp records the cmdman-assigned ownership value.
+	// WindowName is the human-visible window name, for display and diagnostics
+	// only: it is neither unique nor stable, so which project a window holds is
+	// the Identity's answer alone. A takeover window keeps its original name,
+	// two projects named alike wear the same one, and a rename changes it under
+	// everybody.
 	WindowName string
 	// Identity is the opaque string the caller supplied as
 	// [RunOptions.Identity] (or its default) when [Run] built this dashboard.

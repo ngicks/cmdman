@@ -100,13 +100,20 @@ func TestProjectSelection_ProjectIdentity(t *testing.T) {
 		}
 	})
 
-	t.Run("empty project returns empty identity", func(t *testing.T) {
-		sel := compose.ProjectSelection{
-			WorkDir: "/home/user/myproject",
-			Project: "",
+	t.Run("unnamed projects are told apart by their work directory", func(t *testing.T) {
+		// An unnamed project still owns a window of its own, so it still needs an
+		// identity: the work directory is the half that is always there. Two of
+		// them in one directory are the same project; in two directories they are
+		// two, and the mux window each brings up must not be the other's.
+		here := compose.ProjectSelection{WorkDir: "/home/user/myproject"}
+		there := compose.ProjectSelection{WorkDir: "/home/user/other"}
+
+		if id := here.ProjectIdentity(); id == "" {
+			t.Fatal("ProjectIdentity() is empty for an unnamed project")
 		}
-		if id := sel.ProjectIdentity(); id != "" {
-			t.Fatalf("ProjectIdentity() = %q for empty project, want \"\"", id)
+		if here.ProjectIdentity() == there.ProjectIdentity() {
+			t.Fatalf("both unnamed projects resolve to %q; they would share a window",
+				here.ProjectIdentity())
 		}
 	})
 

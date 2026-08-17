@@ -1,7 +1,12 @@
 # STATUS — improve TUI widget behavior
 
 **Current state**: implementation in progress (autonomous run started
-2026-08-18). Steps 1–6 done. Step-6 notes for later: the launcher keeps a
+2026-08-18). Steps 1–7 done. Step 7 also fixed a latent tmux create bug
+(`new-window -t <session>` prefix-matched window names; target is now
+`-a -t "=<session>:{end}"`, needs tmux ~2.9+ for `{end}`) and aligned the
+TUI backend's `projectIdentity` with the synthesized unnamed-project
+identity. See DECISION.md D9 / HANDOFF 3 for the deferred frame-adoption
+capability. Step-6 notes for later: the launcher keeps a
 row's Running marker until the next listing after a mux down (deliberate);
 `TestLogs_SinceCrossesRotation` in e2e flaked once under full-suite load,
 passed alone and on rerun — pre-existing, unrelated. Note for step 9: doc/man/cmdman-tui.1.md's
@@ -26,7 +31,7 @@ up in") now understates the view — config-dir locations are listed too.
 - [x] Step 6 — `d`/`D` in switcher, launcher, projectmanager per D3:
       "`D` shows 'compose down <project>? y/n'"; footers, Long helps,
       `doc/man/cmdman-tui.1.md`
-- [ ] Step 7 — per D4 as amended 2026-08-18: driver `New` "always
+- [x] Step 7 — per D4 as amended 2026-08-18: driver `New` "always
       creates; the by-name adoption … is deleted; WindowName is …
       display-only"; `mux.Run` finds-or-creates cmdman-side via
       `ListWindows` by identity; incl. "unnamed projects get a synthesized

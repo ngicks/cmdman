@@ -74,20 +74,25 @@ mux:
 }
 
 // TestFrameLifecycle is the parent plan's step-15 criterion, quoted: "chrome
-// survives project switch/stop/relaunch". One framed window carries a project
-// through `mux up`, a layout cycle, a switch away driven through the docked
+// survives project switch/stop/relaunch". A dashboard is built, framed, and then
+// carried through a layout cycle, a switch away driven through the docked
 // switcher, `mux down` and a relaunch. The frame must be the same panes
 // throughout — the same tmux ids, never torn down and rebuilt — and the managed
 // entry the same supervised command, until the explicit hide at the end takes
 // the chrome down and leaves that command running (D19/V7).
 //
-// The verbs are pointed at the window with -s, the documented targeting path for
-// a caller outside tmux and the one cmdman/mux's own tests use. So the driver's
-// "a window holding a frame but no project is taken over in place" branch is not
-// what puts the project under the frame here; that stays covered by the muxctl
-// unit tests. The switch is likewise as much of one as a server with no client
-// can be: select-window moves the project's session onto its window, and the
-// switch-client half has no client to move.
+// The frame goes up around a project rather than ahead of one because the verbs
+// are pointed at the window with -s: an up that names a session builds the
+// project's own window, and only the window already stamped for that project is
+// reused. Show-before-launch — chrome put up first, the project landing in the
+// region it leaves over — is the current-window takeover, which needs a caller
+// sitting in the window; the muxctl unit tests cover it. For the same reason the
+// relaunch after `mux down` arrives beside the chrome rather than inside it:
+// down handed the window back, leaving nothing to recognize it by.
+//
+// The switch is as much of one as a server with no client can be: select-window
+// moves the project's session onto its window, and the switch-client half has no
+// client to move.
 //
 // Not parallel: the switch leg reads a live widget rendering in a pane, which is
 // the one leg whose timing matters.
@@ -124,13 +129,39 @@ func TestFrameLifecycle(t *testing.T) {
 		t.Fatalf("compose up: %v\nstderr:\n%s", err, stderr)
 	}
 
-	wid := startFrameLifeSession(t, env, tmuxTmpdir, wd)
-	if got := tmuxFormat(t, tmuxTmpdir, wid, "#{window_width}x#{window_height}"); got != "200x50" {
-		t.Fatalf("window is %s, want the 200x50 it was created at: a clamped window "+
-			"truncates the frame the assertions below read", got)
+	shellWid := startFrameLifeSession(t, env, tmuxTmpdir, wd)
+
+	muxUp := func(leg string) {
+		t.Helper()
+		if _, stderr, err := env.muxExecWithTmpdir(
+			ctx, tmuxTmpdir, "mux", "up", specPath, "-s", frameLifeSession,
+		); err != nil {
+			t.Fatalf("mux up (%s): %v\nstderr:\n%s", leg, err, stderr)
+		}
 	}
 
-	// ---- the frame goes up on a window holding no project (D15, driver F6) ----
+	// ---- the dashboard is built, and the chrome goes up around it ----
+
+	muxUp("first")
+	wid := windowIDStamped(t, tmuxTmpdir, frameLifeSession)
+	// The shell window has served its purpose. Killing it leaves the dashboard as
+	// the session's only — and so its current — window, which is what the frame
+	// verbs target and what the one-window assertions below read.
+	tmuxRunWithTmpdir(t, tmuxTmpdir, "kill-window", "-t", shellWid)
+	if got := tmuxFormat(t, tmuxTmpdir, wid, "#{window_width}x#{window_height}"); got != "200x50" {
+		t.Fatalf("window is %s, want the 200x50 the session was created at: a clamped "+
+			"window truncates the frame the assertions below read", got)
+	}
+	if want := []string{"web", "worker"}; !slices.Equal(
+		readPanes(t, tmuxTmpdir, wid).titles, want,
+	) {
+		t.Fatalf("project panes after mux up = %v, want %v",
+			readPanes(t, tmuxTmpdir, wid).titles, want)
+	}
+	if got := sessionWindowIDs(t, tmuxTmpdir, frameLifeSession); len(got) != 1 {
+		t.Fatalf("session %s holds windows %v, want only the dashboard %s",
+			frameLifeSession, got, wid)
+	}
 
 	if _, stderr, err := env.muxExecWithTmpdir(
 		ctx, tmuxTmpdir, "mux", "frame", "show", "dev", "-s", frameLifeSession,
@@ -175,29 +206,12 @@ func TestFrameLifecycle(t *testing.T) {
 		return p
 	}
 
-	muxUp := func(leg string) {
-		t.Helper()
-		if _, stderr, err := env.muxExecWithTmpdir(
-			ctx, tmuxTmpdir, "mux", "up", specPath, "-s", frameLifeSession,
-		); err != nil {
-			t.Fatalf("mux up (%s): %v\nstderr:\n%s", leg, err, stderr)
-		}
-	}
-
-	// ---- the project lands under the standing frame ----
-
-	muxUp("first")
-	p := intact("mux up")
-	if got := tmuxFormat(t, tmuxTmpdir, wid, "#{@cmdman_window}"); got != frameLifeSession {
-		t.Fatalf("@cmdman_window = %q after mux up, want %q: the dashboard landed "+
-			"beside the frame rather than under it", got, frameLifeSession)
-	}
+	// The chrome went up around a project that was already there, and left it
+	// running: the frame resizes the main region, it never rebuilds it.
+	p := intact("mux frame show")
 	if want := []string{"web", "worker"}; !slices.Equal(p.titles, want) {
-		t.Fatalf("project panes after mux up = %v, want %v", p.titles, want)
-	}
-	if got := sessionWindowIDs(t, tmuxTmpdir, frameLifeSession); len(got) != 1 {
-		t.Fatalf("session %s holds windows %v, want only the framed %s",
-			frameLifeSession, got, wid)
+		t.Fatalf("project panes after mux frame show = %v, want the untouched %v",
+			p.titles, want)
 	}
 
 	// ---- a layout cycle rebuilds the project region, not the frame ----
@@ -210,10 +224,9 @@ func TestFrameLifecycle(t *testing.T) {
 
 	// ---- the switch, driven through the docked switcher (D6/V6) ----
 
-	// The project's dashboard goes up in its own session — the default one, since
-	// the invocation is outside tmux — rather than beside the framed window: a
-	// second window in session "life" cannot be created while a window there is
-	// named like the session (see the driver note in this plan's STATUS).
+	// The switch target's dashboard goes up in its own session — the default
+	// "cmdman", since the invocation names no session and runs outside tmux — so
+	// the switch has somewhere else to go.
 	if _, stderr, err := env.muxExecWithTmpdir(
 		ctx, tmuxTmpdir,
 		"compose", "--workdir", wd, "-f", composePath, "mux", "up",
@@ -286,18 +299,34 @@ func TestFrameLifecycle(t *testing.T) {
 		t.Fatalf("@cmdman_window = %q after mux down, want it cleared", got)
 	}
 
-	// ---- and the relaunch arrives inside the chrome that was waiting ----
+	// ---- the relaunch builds a new dashboard; the chrome outlives it ----
 
+	// `down` handed this window back to the user, stamp and all, so the relaunch
+	// has nothing to recognize it by and builds its dashboard beside it. What the
+	// criterion asks of the chrome is unchanged: it is still standing, still the
+	// same panes, still running the same managed command.
 	muxUp("relaunch")
+	relaunched := windowIDStamped(t, tmuxTmpdir, frameLifeSession)
+	if relaunched == wid {
+		t.Fatalf("the relaunch landed back in the restored window %s", wid)
+	}
 	p = intact("the relaunch")
-	if want := []string{"web", "worker"}; !slices.Equal(p.titles, want) {
-		t.Fatalf("project panes after the relaunch = %v, want %v", p.titles, want)
+	if got := windowPaneCount(t, tmuxTmpdir, wid); got != len(p.frame)+1 {
+		t.Fatalf("the framed window holds %d panes after the relaunch, want its %d "+
+			"frame panes plus the one default pane down left", got, len(p.frame))
+	}
+	if want := []string{"web", "worker"}; !slices.Equal(
+		readPanes(t, tmuxTmpdir, relaunched).titles, want,
+	) {
+		t.Fatalf("project panes on the relaunched dashboard = %v, want %v",
+			readPanes(t, tmuxTmpdir, relaunched).titles, want)
 	}
 
 	// ---- only the explicit hide takes the chrome down ----
 
 	// hide acts on the target session's current window, which is still the framed
-	// one: the switch moved the dashboard's own session, not this one.
+	// one: the switch moved the dashboard's own session, and the relaunch built
+	// its window detached.
 	if _, stderr, err := env.muxExecWithTmpdir(
 		ctx, tmuxTmpdir, "mux", "frame", "hide", "-s", frameLifeSession,
 	); err != nil {
@@ -310,8 +339,9 @@ func TestFrameLifecycle(t *testing.T) {
 	if got := tmuxFormat(t, tmuxTmpdir, wid, "#{@cmdman_frame_def}"); got != "" {
 		t.Fatalf("@cmdman_frame_def = %q after hide, want it cleared", got)
 	}
-	if want := []string{"web", "worker"}; !slices.Equal(p.titles, want) {
-		t.Fatalf("project panes after hide = %v, want the untouched %v", p.titles, want)
+	if got := windowPaneCount(t, tmuxTmpdir, wid); got != 1 {
+		t.Fatalf("the window holds %d panes after hide, want the single pane a "+
+			"fully restored window is left as", got)
 	}
 	if got := frameLsWindows(t, ctx, env, tmuxTmpdir, "dev"); got != "-" {
 		t.Fatalf("mux frame ls still reports dev on %q after hide", got)
@@ -325,7 +355,7 @@ func TestFrameLifecycle(t *testing.T) {
 }
 
 // startFrameLifeSession starts the test's own tmux server with its one session
-// and returns the id of the window the frame verbs target.
+// and returns the id of that session's shell window.
 //
 // The server is started with the cmdman environment, and it is also set on the
 // server explicitly: a docked widget's argv carries no --data-dir
@@ -355,12 +385,27 @@ func startFrameLifeSession(t *testing.T, e *testEnv, tmuxTmpdir, startDir string
 		tmuxRunWithTmpdir(t, tmuxTmpdir, "set-environment", "-g", kv[0], kv[1])
 	}
 
-	wid := currentWindowID(t, tmuxTmpdir, frameLifeSession)
-	// `mux up` finds its window by name, so a window tmux renamed out from under
-	// it would be answered with a second one — which reads exactly like the frame
-	// having vanished.
-	tmuxRunWithTmpdir(t, tmuxTmpdir, "set-option", "-w", "-t", wid, "automatic-rename", "off")
-	return wid
+	return currentWindowID(t, tmuxTmpdir, frameLifeSession)
+}
+
+// windowIDStamped returns the id of the one window on the server whose
+// @cmdman_window ownership option equals identity — how the test addresses a
+// window `mux up` built for itself, and the same stamp the up goes by.
+func windowIDStamped(t *testing.T, tmuxTmpdir, identity string) string {
+	t.Helper()
+	out := tmuxRunWithTmpdir(t, tmuxTmpdir, "list-windows", "-a",
+		"-F", "#{window_id}\t#{@cmdman_window}")
+	var found []string
+	for line := range strings.SplitSeq(out, "\n") {
+		if id, stamp, ok := strings.Cut(line, "\t"); ok && stamp == identity {
+			found = append(found, id)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("windows stamped %q = %v, want exactly one; windows:\n%s",
+			identity, found, out)
+	}
+	return found[0]
 }
 
 // lifePanes is one window's panes split by the frame stamp: which are the
@@ -396,6 +441,19 @@ func readPanes(t *testing.T, tmuxTmpdir, windowID string) lifePanes {
 	}
 	slices.Sort(p.titles)
 	return p
+}
+
+// windowPaneCount counts the window's panes. It reads them itself rather than
+// through [readPanes]: a lone untitled pane — what a restored window is left as
+// — carries nothing after its id, and the runner's trailing trim takes the empty
+// fields with it, so readPanes cannot see it.
+func windowPaneCount(t *testing.T, tmuxTmpdir, windowID string) int {
+	t.Helper()
+	out := tmuxRunWithTmpdir(t, tmuxTmpdir, "list-panes", "-t", windowID, "-F", "#{pane_id}")
+	if out == "" {
+		return 0
+	}
+	return len(strings.Split(out, "\n"))
 }
 
 // paneWithTitle returns the id of the pane carrying the given border title —

@@ -477,15 +477,9 @@ func (b *serviceBackend) hasDashboard(
 	muxSpec *mux.Spec,
 	selection compose.ProjectSelection,
 ) bool {
-	// An unnamed project has no identity of its own; the window name is what mux
-	// stamps for it, exactly as compose's own mux operations resolve it.
-	identity := selection.ProjectIdentity()
-	if identity == "" {
-		identity = selection.MuxWindowName()
-	}
 	windows, err := mux.List(ctx, mux.ListOptions{
 		Driver:   muxSpec.Driver,
-		Identity: identity,
+		Identity: selection.ProjectIdentity(),
 	})
 	if err != nil {
 		return false

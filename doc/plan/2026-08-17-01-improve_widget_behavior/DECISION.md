@@ -134,3 +134,19 @@ entry 2.
 show's teardown semantics is new scope and touches the show/cycle gestures'
 behavior on healthy windows too.
 **Rejected**: silently widening scope mid-run.
+
+## D9 — No frame-only window adoption in Run's miss branch [automatic]
+
+**Decision** (orchestrator, autonomous run 2026-08-18): With by-name
+adoption gone from the driver, a `mux up` from outside tmux (or with an
+explicit `-s` session) no longer lands a project inside a pre-existing
+standing frame window — the miss branch plainly creates, per the approved
+design. The current-window takeover inside tmux is unchanged and covered
+by tests. Frame-only adoption was NOT re-added cmdman-side: it contradicts
+the approved "miss: plain create" and raises unresolved questions (which
+frame-only window wins; whether it needs a KeepCurrentWindow-style guard).
+Deferred to HANDOFF entry 3.
+**Rationale**: the approved mechanism is explicit; re-adding adoption on a
+different key mid-run would be new design without the user.
+**Rejected**: silently restoring the capability via frame-stamp-keyed
+adoption.

@@ -75,9 +75,10 @@ func appendCwdProject(infos []tui.ProjectInfo, workDir string) []tui.ProjectInfo
 // that form, while tui.ProjectInfo.Workdir is resolved for cwd comparison and
 // would hash into a window that does not exist. A project with no directory to
 // hash gets no identity rather than one that would match some other project's
-// window.
+// window; an unnamed project still gets one, hashed from the work directory
+// alone, matching what mux stamps on its window.
 func projectIdentity(workDir, project string) string {
-	if workDir == "" || project == "" {
+	if workDir == "" {
 		return ""
 	}
 	return compose.ProjectSelection{WorkDir: workDir, Project: project}.ProjectIdentity()

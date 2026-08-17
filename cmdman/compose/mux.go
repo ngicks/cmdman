@@ -133,19 +133,11 @@ func (s *Service) MuxLand(ctx context.Context, opts MuxLandOption) (mux.LandResu
 		driver = selection.Spec.Mux.Driver
 	}
 
-	// For an unnamed project (identity "") fall back to the window name, exactly
-	// as [Service.MuxLs] does: an empty identity filter matches every stamped
-	// window on the server, which would land on somebody else's project.
-	identity := selection.ProjectIdentity()
-	if identity == "" {
-		identity = selection.MuxWindowName()
-	}
-
 	return mux.Land(ctx, mux.LandOptions{
 		Driver:      driver,
 		SessionName: opts.SessionName,
 		WindowName:  selection.MuxWindowName(),
-		Identity:    identity,
+		Identity:    selection.ProjectIdentity(),
 		WorkDir:     selection.WorkDir,
 	})
 }
@@ -176,10 +168,7 @@ func (s *Service) MuxDown(ctx context.Context, opts MuxDownOption) error {
 		// identity. An explicit session keeps the scan in one session.
 		SessionName: opts.SessionName,
 		Identity:    selection.ProjectIdentity(),
-		// WindowName feeds identity derivation only when Identity is empty
-		// (unnamed project): it keeps down aligned with what MuxUp stamped.
-		WindowName: selection.MuxWindowName(),
-		Stdout:     opts.Stdout,
+		Stdout:      opts.Stdout,
 	})
 }
 
@@ -212,17 +201,10 @@ func (s *Service) MuxLs(ctx context.Context, opts MuxLsOption) (MuxLsResult, err
 	selection := opts.Selection
 	spec := *selection.Spec.Mux
 
-	// For an unnamed project (identity ""), fall back to the window name
-	// ("cmdman") so the filter still matches what up stamped.
-	identity := selection.ProjectIdentity()
-	if identity == "" {
-		identity = selection.MuxWindowName()
-	}
-
 	windows, err := mux.List(ctx, mux.ListOptions{
 		Driver:      spec.Driver,
 		SessionName: opts.SessionName,
-		Identity:    identity,
+		Identity:    selection.ProjectIdentity(),
 	})
 	if err != nil {
 		return MuxLsResult{}, err
@@ -339,18 +321,10 @@ func (s *Service) MuxScaleState(
 	selection := opts.Selection
 	spec := *selection.Spec.Mux
 
-	// For an unnamed project (identity ""), fall back to the window name
-	// ("cmdman") so the filter still matches what up stamped, as [Service.MuxLs]
-	// does.
-	identity := selection.ProjectIdentity()
-	if identity == "" {
-		identity = selection.MuxWindowName()
-	}
-
 	windows, err := mux.List(ctx, mux.ListOptions{
 		Driver:      spec.Driver,
 		SessionName: opts.SessionName,
-		Identity:    identity,
+		Identity:    selection.ProjectIdentity(),
 	})
 	if err != nil {
 		return nil, err

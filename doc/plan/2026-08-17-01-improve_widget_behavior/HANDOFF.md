@@ -51,3 +51,29 @@ approved scope. Recorded by the autonomous orchestrator (DECISION.md D8).
 **Follow-up**: decide with the user whether show should hide
 unconditionally; if yes, a small change in `cmdman/mux/frame.go` plus a
 test mirroring the hide desync tests.
+
+## 3. Show-before-launch under a standing frame for outside-tmux callers — deferred (D9, automatic)
+
+**What**: Before the identity-keyed lookup change, `mux up` from outside
+tmux could adopt a pre-existing frame-only window by name and launch the
+project "under the chrome". Now the miss branch always creates, so that
+path builds a fresh window beside the standing frame. Inside tmux the
+current-window takeover still covers it. If the capability should return,
+the find must key on the frame stamp (never the name) and needs answers
+for: which frame-only window wins when several exist, and whether adoption
+wants an opt-in/opt-out guard.
+
+**Why not done here**: surfaced while removing by-name adoption in the
+2026-08-17 widget-behavior plan; the approved design was "miss: plain
+create", and frame-stamp adoption is new design. Recorded by the
+autonomous orchestrator (DECISION.md D9).
+
+**Follow-up**: decide with the user; likely belongs to the deferred muxctl
+cleanup plan (entry 1). Related: `Server.Open`'s by-name fallback
+(`pkg/muxctl/tmux/tmux.go:211`) is now exercised only by tests — a
+removal candidate for the same cleanup.
+
+Also note, same change, accepted consequence (not open): `compose mux
+down` then `up` now builds a fresh window — down clears the stamp, so the
+next up has nothing to recognise; the restored window stays. The e2e
+tests pin the new behavior.
