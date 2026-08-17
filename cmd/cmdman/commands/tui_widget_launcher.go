@@ -24,8 +24,10 @@ put them in the input one at a time and enter accepts the one it stands on.
 Otherwise enter steps input -> locations -> projects, and esc drops the list —
 taking back whatever it put in the input — before it walks the zones back and
 dismisses. On a list, s starts the enabled projects and S launches and lands in
-one; in the input every key is text, so ctrl+c is the dismissal that works from
-anywhere (unless --no-quit took the quit keys away).
+one; d tears a project's dashboard down and leaves its commands running, and D
+stops and removes those commands after a y on the note line — any other key
+takes the question back. In the input every key is text, so ctrl+c is the
+dismissal that works from anywhere (unless --no-quit took the quit keys away).
 
 The selector fills its window, so the popup framing belongs to the multiplexer.
 Bind it as a tmux popup to summon it from anywhere:

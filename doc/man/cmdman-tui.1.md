@@ -56,16 +56,26 @@ it in any terminal or pane. Each widget is its own subcommand.
   floating pane, and where there is no floating pane to open — a plain terminal,
   or a multiplexer with no popup support — says so on the hint line; `q` quits.
   Landing in a window is all a selection does: it never brings the project up,
-  and starting, stopping and removing commands stay in the full dashboard. A
-  project with no directory or name to address a window by — one that has never
-  run anywhere in particular — is reported on the hint line instead.
+  and starting, stopping and removing one command at a time stay in the full
+  dashboard. A project with no directory or name to address a window by — one
+  that has never run anywhere in particular — is reported on the hint line
+  instead. The two teardowns act on the whole project: `d` tears its dashboard
+  windows down and leaves its commands running — the dashboard is only a viewer
+  of them — and a project whose compose file declares no `mux:` section says so
+  on the hint line. `D` stops and removes the commands themselves: it asks
+  `compose down <project>? y/n` on the hint line first, `y` goes ahead and any
+  other key takes the question back, and what the teardown did — `stopped N,
+  removed M` — is reported there when it ends.
 - `launcher`: quick-launch selector. The left pane lists target locations (the
   directories you have brought projects up in, most recent first, plus
   everything the filter reaches); the right pane lists the compose projects at
   the location under the cursor, toggled on or off. Type to filter, tab
   completes what is typed, enter steps input → locations → projects, esc walks
   back and then dismisses. On a list, `s` starts the enabled projects and `S`
-  launches and lands in one; in the input every key is text, so ctrl+c is the
+  launches and lands in one; `d` and `D` tear the project `S` would launch back
+  down — `d` its dashboard windows, leaving the commands running, `D` the
+  commands themselves after the `compose down <project>? y/n` confirm described
+  under the switcher. In the input every key is text, so ctrl+c is the
   dismissal that works from anywhere (unless `--no-quit` took the quit keys
   away).
 - `project-manager`: shortcuts over one project — the replica count of each of
@@ -80,7 +90,11 @@ it in any terminal or pane. Each widget is its own subcommand.
   dashboard windows disagree about it, or none is showing it, the badge reads
   `[?]` and only `l` applies. On layouts, `enter` applies the one under the
   cursor and `c` cycles to the next, with the running dashboard's own layout
-  marked. `r` reloads what the panel shows; `q` quits. The project it manages is
+  marked. `d` and `D` tear the project down — `d` its dashboard windows,
+  leaving the commands running, `D` the commands themselves after the
+  `compose down <project>? y/n` confirm described under the switcher — and both
+  are the whole project's, so neither list has to have the keyboard for them.
+  `r` reloads what the panel shows; `q` quits. The project it manages is
   the one it detects — the window `--mux-token` names, else the window it runs
   in, else the project of the working directory — and `--file` and
   `--project-name` name one outright, ahead of all three; the project it lands

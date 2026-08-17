@@ -1,7 +1,10 @@
 # STATUS — improve TUI widget behavior
 
 **Current state**: implementation in progress (autonomous run started
-2026-08-18). Steps 1–5 done. Note for step 9: doc/man/cmdman-tui.1.md's
+2026-08-18). Steps 1–6 done. Step-6 notes for later: the launcher keeps a
+row's Running marker until the next listing after a mux down (deliberate);
+`TestLogs_SinceCrossesRotation` in e2e flaked once under full-suite load,
+passed alone and on rerun — pre-existing, unrelated. Note for step 9: doc/man/cmdman-tui.1.md's
 launcher opening-list description ("directories you have brought projects
 up in") now understates the view — config-dir locations are listed too.
 
@@ -20,7 +23,7 @@ up in") now understates the view — config-dir locations are listed too.
 - [x] Step 5 — `Backend.MuxDown` / `Backend.ComposeDown` + `serviceBackend`
       impls + `FakeBackend` doubles (IDEA §2; D3 backend half, incl. the
       no-`mux:` sentinel error)
-- [ ] Step 6 — `d`/`D` in switcher, launcher, projectmanager per D3:
+- [x] Step 6 — `d`/`D` in switcher, launcher, projectmanager per D3:
       "`D` shows 'compose down <project>? y/n'"; footers, Long helps,
       `doc/man/cmdman-tui.1.md`
 - [ ] Step 7 — per D4 as amended 2026-08-18: driver `New` "always

@@ -99,14 +99,18 @@ func linesText(lines []switcherLine) []string {
 	return out
 }
 
-// switcherFooter is the pinned last line: the transient error text when there
-// is one, else the key hints. Quit is hinted only where it is bound — a docked
-// switcher runs with it unbound (V6).
+// switcherFooter is the pinned last line: a teardown waiting to be confirmed
+// first, since the next key answers it; then the transient error text; else the
+// key hints. Quit is hinted only where it is bound — a docked switcher runs
+// with it unbound (V6).
 func (m Model) switcherFooter() string {
+	if m.pendingDown.Project != "" {
+		return core.StyleActive.Render(core.ComposeDownPrompt(m.pendingDown.Project))
+	}
 	if m.status != "" {
 		return core.StyleActive.Render(m.status)
 	}
-	hint := "j/k move · enter switch · m manage"
+	hint := "j/k move · enter switch · m manage · d/D down"
 	if !m.noQuit {
 		hint += " · q quit"
 	}

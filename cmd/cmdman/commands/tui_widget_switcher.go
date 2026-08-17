@@ -19,7 +19,11 @@ The switcher lists every known compose project — running, exited, and never
 run — each heading a group with its commands listed under it. j/k (or the
 arrow keys) move the selection, enter and a mouse click take you to the
 selected project's window — opening one for a project that has none yet — and
-q quits unless --no-quit was given.`,
+q quits unless --no-quit was given.
+
+d tears the selected project's dashboard windows down and leaves its commands
+running; D stops and removes those commands, and asks for a y on the hint line
+first — any other key takes the question back.`,
 		Args:              cobra.NoArgs,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {

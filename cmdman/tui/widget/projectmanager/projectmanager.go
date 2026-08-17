@@ -67,6 +67,11 @@ type Model struct {
 	note   string
 	errMsg string
 
+	// pendingDown is the project whose compose teardown is waiting for its y.
+	// The question is drawn from it rather than written into note, which a
+	// reload's own line would replace while the next key still answered it.
+	pendingDown core.DownTarget
+
 	quitting bool
 }
 
@@ -110,6 +115,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onLayoutApplied(msg)
 	case layoutCycledMsg:
 		return m.onLayoutCycled(msg)
+	case core.MuxDownMsg:
+		return m.onTornDown(msg.Status(), msg.Err)
+	case core.ComposeDownMsg:
+		return m.onTornDown(msg.Status(), msg.Err)
 	case tea.KeyMsg:
 		return m.onKey(msg)
 	}
@@ -172,6 +181,17 @@ func (m Model) onLayoutCycled(msg layoutCycledMsg) (tea.Model, tea.Cmd) {
 	return m.done("cycled layout")
 }
 
+// onTornDown takes either teardown's outcome. Both read the same on the status
+// line — the compose one carries its counts whether or not it failed — so the
+// error decides only whether the line is a failure and whether the panel
+// re-reads what changed.
+func (m Model) onTornDown(text string, err error) (tea.Model, tea.Cmd) {
+	if err != nil {
+		return m.failed(text), nil
+	}
+	return m.done(text)
+}
+
 func (m Model) failed(text string) Model {
 	m.pending, m.errMsg = "", text
 	return m
@@ -191,9 +211,17 @@ func (m Model) reload() (tea.Model, tea.Cmd) {
 // --- keys --------------------------------------------------------------------
 
 // onKey handles the widget's key table. Movement, the zone switch and the quit
-// gesture are always live; the action keys are the focused list's alone and
+// gesture are always live; the action keys are the focused list's alone — the
+// two teardowns act on the whole project, so they are neither list's — and they
 // wait for whatever is in flight.
+//
+// While a compose teardown is waiting to be confirmed the key table is that one
+// question: the key answers it and nothing else, so a q that meant "no" cannot
+// close the panel on the way.
 func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pendingDown.Project != "" {
+		return m.answerComposeDown(msg.String())
+	}
 	m.note, m.errMsg = "", ""
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -230,10 +258,72 @@ func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.applyLayout()
 	case "c":
 		return m.cycleLayout()
+	case "d":
+		return m.muxDown()
+	case "D":
+		return m.confirmComposeDown()
 	case "r":
 		return m.reload()
 	}
 	return m, nil
+}
+
+// muxDown is `d`: the project's dashboard windows go away and its commands keep
+// running, the dashboard being only a viewer of them. It asks nothing first
+// because nothing supervised is lost, and a project whose spec has no mux
+// section comes back as the reason on the failure line.
+func (m Model) muxDown() (tea.Model, tea.Cmd) {
+	target, ok := m.downTarget()
+	if !ok {
+		return m, nil
+	}
+	m.pending = "tearing down the dashboard of " + target.Project + "…"
+	return m, core.MuxDownCmd(m.bgCtx(), m.backend, target)
+}
+
+// confirmComposeDown is `D`: it asks on the status line instead of tearing the
+// project down where it stands. Compose down takes away every command of the
+// project, the ones no row here shows included, so it is not a keystroke to
+// make by accident.
+func (m Model) confirmComposeDown() (tea.Model, tea.Cmd) {
+	target, ok := m.downTarget()
+	if !ok {
+		return m, nil
+	}
+	m.pendingDown = target
+	return m, nil
+}
+
+// answerComposeDown spends the key the question was waiting for: y tears the
+// project down and anything else takes the question back. Either way the key is
+// used up rather than passed on — a key that cancelled and scaled a service in
+// one press would act on a panel the user was still answering about.
+func (m Model) answerComposeDown(key string) (tea.Model, tea.Cmd) {
+	target := m.pendingDown
+	m.pendingDown = core.DownTarget{}
+	m.note, m.errMsg = "", ""
+	if key != "y" {
+		m.note = core.ComposeDownCancelled(target.Project)
+		return m, nil
+	}
+	m.pending = "tearing down " + target.Project + "…"
+	return m, core.ComposeDownCmd(m.bgCtx(), m.backend, target)
+}
+
+// downTarget names the loaded project for a teardown, as every other action
+// names it: the file and the work directory travel with the name, or the
+// teardown would reach a project of the panel's own directory instead of the
+// one on screen.
+func (m *Model) downTarget() (core.DownTarget, bool) {
+	if m.info.Project == "" {
+		m.note = "no project to tear down"
+		return core.DownTarget{}, false
+	}
+	return core.DownTarget{
+		Project: m.info.Project,
+		Path:    m.info.Path,
+		WorkDir: m.info.WorkDir,
+	}, true
 }
 
 // busy reports that a backend call is in flight. A failed load is not busy: `r`

@@ -148,6 +148,12 @@ type Model struct {
 	// note is a transient one-liner, cleared on the next keystroke.
 	note string
 
+	// pendingDown is the project whose compose teardown is waiting for its y.
+	// The question is drawn from it rather than written into note, which a
+	// bring-up reporting back would replace while the next key still answered
+	// it.
+	pendingDown core.DownTarget
+
 	// spin advances the in-flight marker and ticking says a tick loop is already
 	// running, so a second `s` does not start a second one (D29).
 	spin    int
@@ -224,6 +230,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onAttached(msg)
 	case launcherForgotMsg:
 		return m.onForgot(msg), nil
+	case core.MuxDownMsg:
+		m.note = msg.Status()
+		return m, nil
+	case core.ComposeDownMsg:
+		m.note = msg.Status()
+		return m, nil
 	case core.ReloadTickMsg:
 		return m.resolveTyped(msg)
 	case launcherResolvedMsg:
@@ -438,7 +450,14 @@ func (m Model) find(t core.LaunchTarget) (li, pi int, ok bool) {
 
 // --- keys -------------------------------------------------------------------
 
+// onKey drives the three zones. While a compose teardown is waiting to be
+// confirmed there are no zones and no editing: the key answers that one
+// question, so an esc or a q that meant "no" cannot walk a zone or dismiss the
+// launcher on the way.
 func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.pendingDown.Project != "" {
+		return m.answerComposeDown(msg.String())
+	}
 	m.note = ""
 	before := m.filter
 	switch msg.String() {
@@ -554,6 +573,10 @@ func (m Model) text(t string) (tea.Model, tea.Cmd) {
 		return m.startEnabled()
 	case "S":
 		return m.launchSelected()
+	case "d":
+		return m.muxDownSelected()
+	case "D":
+		return m.confirmComposeDown()
 	case "q":
 		return m.quit()
 	}
@@ -978,6 +1001,67 @@ func (m Model) pickProject(li int) int {
 		}
 	}
 	return 0
+}
+
+// muxDownSelected is `d`: the project's dashboard windows go away and its
+// commands keep running, the dashboard being only a viewer of them. It asks
+// nothing first because nothing supervised is lost, and a project whose compose
+// file has no mux section comes back as the reason on the note line — the key
+// stays on offer for it, since a project can gain a dashboard between listings.
+func (m Model) muxDownSelected() (tea.Model, tea.Cmd) {
+	target, ok := m.downTarget()
+	if !ok {
+		return m, nil
+	}
+	m.note = "tearing down the dashboard of " + target.Project
+	return m, core.MuxDownCmd(m.bgCtx(), m.backend, target)
+}
+
+// confirmComposeDown is `D`: it asks before taking the project's commands away.
+// The launcher is where projects are brought up, so the key that takes one down
+// sits next to `s` and `S` — which is exactly why it does not act on the first
+// press.
+func (m Model) confirmComposeDown() (tea.Model, tea.Cmd) {
+	target, ok := m.downTarget()
+	if !ok {
+		return m, nil
+	}
+	m.pendingDown = target
+	return m, nil
+}
+
+// answerComposeDown spends the key the question was waiting for: y tears the
+// project down and anything else takes the question back. Either way the key is
+// used up rather than passed on — a key that cancelled and launched something
+// in one press would act on a row the user was still answering about.
+func (m Model) answerComposeDown(key string) (tea.Model, tea.Cmd) {
+	target := m.pendingDown
+	m.pendingDown = core.DownTarget{}
+	if key != "y" {
+		m.note = core.ComposeDownCancelled(target.Project)
+		return m, nil
+	}
+	m.note = ""
+	return m, core.ComposeDownCmd(m.bgCtx(), m.backend, target)
+}
+
+// downTarget names the project both teardowns act on: the one `S` would launch
+// — the row under the right cursor when that pane has the keyboard, else the
+// location's first enabled project. A row whose compose file is gone is not
+// refused here: its commands may well still be running, and the backend is what
+// knows whether the project can be resolved at all.
+func (m *Model) downTarget() (core.DownTarget, bool) {
+	li, ok := m.currentLoc()
+	if !ok {
+		return core.DownTarget{}, false
+	}
+	pi := m.pickProject(li)
+	if pi < 0 {
+		m.note = "no compose project here"
+		return core.DownTarget{}, false
+	}
+	t := m.target(li, pi)
+	return core.DownTarget{Project: t.Project, Path: t.File, WorkDir: t.WorkDir}, true
 }
 
 // drop removes a stale history entry, the offer D10 makes when resolution fails.

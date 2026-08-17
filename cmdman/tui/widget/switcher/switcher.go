@@ -65,6 +65,13 @@ type Model struct {
 	cwd      string // normalized working directory for active detection
 	status   string // transient error text, shown in place of the hint line
 
+	// pendingDown is the project whose compose teardown is waiting for its y.
+	// The question itself is drawn from this rather than written into status: a
+	// listing landing while it waits clears status, and a question that went off
+	// the screen while the next key still answered it would take the commands of
+	// a project nobody was looking at.
+	pendingDown core.DownTarget
+
 	// activeIdentity is the mux ownership stamp of the project the caller is
 	// sitting in (D3), "" when no probe answered — which is when the active mark
 	// falls back to the working directory.
@@ -193,6 +200,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onProjectSwitched(msg), nil
 	case core.ProjectManagerSummonedMsg:
 		return m.onProjectManagerSummoned(msg), nil
+	case core.MuxDownMsg:
+		m.status = msg.Status()
+		return m, nil
+	case core.ComposeDownMsg:
+		m.status = msg.Status()
+		return m, nil
 	case tea.MouseClickMsg:
 		if msg.Button != tea.MouseLeft {
 			return m, nil
@@ -338,11 +351,19 @@ func applyRuntime(groups []core.ProjectGroup, runtime map[string]core.RuntimeSta
 }
 
 // onKey handles the widget key set: the switcher's cursor keys, the selection
-// that takes the client to a project's window (D6), and the summon that opens
-// the project-manager panel over it (D7). A selection lands in a window and
-// nothing more — start, stop and kill stay in the full TUI (V6), and the panel
-// the summon opens is a separate program with its own keys.
+// that takes the client to a project's window (D6), the summon that opens the
+// project-manager panel over it (D7), and the two teardowns. A selection lands
+// in a window and nothing more — start, stop and kill of single commands stay
+// in the full TUI (V6), and the panel the summon opens is a separate program
+// with its own keys.
+//
+// While a compose teardown is waiting to be confirmed the key set is that one
+// question: the key answers it and nothing else, so a q that meant "no" cannot
+// quit the widget on the way.
 func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pendingDown.Project != "" {
+		return m.answerComposeDown(msg.String())
+	}
 	switch msg.String() {
 	case "q", "ctrl+c", "ctrl+d":
 		if m.noQuit {
@@ -362,6 +383,10 @@ func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.switchToSelected()
 	case "m":
 		return m.summonSelected()
+	case "d":
+		return m.muxDownSelected()
+	case "D":
+		return m.confirmComposeDown()
 	}
 	return m, nil
 }
@@ -377,7 +402,12 @@ func (m *Model) moveSelection(delta int) {
 // clickAt selects the group the pointer landed on and switches to it, which is
 // what enter does on that group (D24) — a click is a selection, and a selection
 // is the switch.
+//
+// A click also takes back a teardown waiting to be confirmed: the click is
+// about to move the cursor, and a question left standing over another project
+// would be answered about the wrong one.
 func (m Model) clickAt(y int) (tea.Model, tea.Cmd) {
+	m.pendingDown = core.DownTarget{}
 	i, ok := m.groupAt(y)
 	if !ok {
 		return m, nil
@@ -425,6 +455,65 @@ func (m Model) summonSelected() (tea.Model, tea.Cmd) {
 	}
 	return m, core.SummonProjectManagerCmd(
 		m.bgCtx(), m.backend, g.Name, g.Path, g.Workdir, groupLabel(g))
+}
+
+// muxDownSelected is `d`: the selected project's dashboard windows go away and
+// its commands keep running, the dashboard being only a viewer of them. It asks
+// nothing first because nothing supervised is lost, and a project whose spec has
+// no mux section comes back as the reason on the hint line — the key stays on
+// offer for it, since which projects have a dashboard is not something the
+// listing says.
+func (m Model) muxDownSelected() (tea.Model, tea.Cmd) {
+	target, ok := m.downTarget()
+	if !ok {
+		return m, nil
+	}
+	return m, core.MuxDownCmd(m.bgCtx(), m.backend, target)
+}
+
+// confirmComposeDown is `D`: it puts the question on the hint line instead of
+// tearing the project down where it stands. Compose down takes away every
+// command of the project, the ones the cursor is not on included, so it is not
+// a keystroke to make by accident.
+func (m Model) confirmComposeDown() (tea.Model, tea.Cmd) {
+	target, ok := m.downTarget()
+	if !ok {
+		return m, nil
+	}
+	m.pendingDown = target
+	return m, nil
+}
+
+// answerComposeDown spends the key the question was waiting for: y tears the
+// project down and anything else takes the question back. Either way the key is
+// used up rather than passed on — a key that cancelled and moved the cursor in
+// one press would leave the user acting on a project they were still answering
+// about.
+func (m Model) answerComposeDown(key string) (tea.Model, tea.Cmd) {
+	target := m.pendingDown
+	m.pendingDown = core.DownTarget{}
+	if key != "y" {
+		m.status = core.ComposeDownCancelled(target.Project)
+		return m, nil
+	}
+	m.status = ""
+	return m, core.ComposeDownCmd(m.bgCtx(), m.backend, target)
+}
+
+// downTarget names the selected project for a teardown. Both teardowns address
+// the project by name, so a group the project listing never claimed a name for
+// has nothing to hand them; its directory travels along because a compose file
+// names a project only together with the directory it stands in.
+func (m *Model) downTarget() (core.DownTarget, bool) {
+	g, ok := m.selectedGroup()
+	if !ok {
+		return core.DownTarget{}, false
+	}
+	if g.Name == "" {
+		m.status = "no project to tear down here"
+		return core.DownTarget{}, false
+	}
+	return core.DownTarget{Project: g.Name, Path: g.Path, WorkDir: g.Workdir}, true
 }
 
 // onProjectManagerSummoned reports a summon, the way onProjectSwitched reports

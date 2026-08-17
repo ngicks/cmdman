@@ -33,11 +33,16 @@ Keys:
   l/right, h/left  services: show the next / previous replica
   enter            layouts: apply the selected layout
   c                layouts: cycle to the next layout
+  d                tear the dashboard down; the commands keep running
+  D                stop and remove the commands (asks for a y first)
   r                reload
   q, ctrl+c        quit (absent under --no-quit)
 
 Showing the previous replica needs the shown one to be known; where a project's
 dashboard windows disagree about it, only l/right applies.
+
+D is the one key that asks: the question stands on the status line until it is
+answered, y goes ahead and any other key takes it back.
 
 The project is the one the panel detects: the window --mux-token names, else the
 window the panel runs in, else the project of the working directory. --file and

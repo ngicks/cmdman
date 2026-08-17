@@ -128,7 +128,11 @@ func (p launcherPane) at(x, y int) (int, bool) {
 
 // clickAt moves the left cursor or toggles a project, whichever pane was hit,
 // and focuses that pane so the keyboard carries on from where you clicked (D31).
+// It also takes back a teardown waiting to be confirmed: the click is about to
+// move the cursor, and a question left standing over another row would be
+// answered about the wrong project.
 func (m Model) clickAt(x, y int) Model {
+	m.pendingDown = core.DownTarget{}
 	if y == 0 {
 		// Clicking the text area puts the keyboard back in it.
 		m.focus = zoneInput
@@ -502,14 +506,21 @@ func (m Model) footerLines() []string {
 	case m.focus == zoneInput:
 		full = "type to filter · tab complete · ↑↓ move · enter → locations · esc clear/quit"
 	case m.focus == zoneLeft:
-		full = "j/k move · enter → projects · s start · S launch · / input · esc back"
+		full = "j/k move · enter → projects · s start · S launch · d/D down · / input · esc back"
 	case m.focus == zoneRight:
-		full = "space toggle · s start enabled · S launch · / input · esc ← locations"
+		full = "space toggle · s start enabled · S launch · d/D down · / input · esc ← locations"
 	}
 	if m.width < lipgloss.Width(full) {
-		full = "enter → · j/k move · s start · S launch · / input · esc back"
+		full = "enter → · j/k move · s start · S launch · d/D down · / input · esc back"
 	}
 	hints := core.StyleActive.Render(full)
+	// The question comes before the note, since the next key answers it.
+	if m.pendingDown.Project != "" {
+		return []string{
+			styleLauncherWork.Render("· " + core.ComposeDownPrompt(m.pendingDown.Project)),
+			hints,
+		}
+	}
 	if m.note != "" {
 		return []string{styleLauncherPrompt.Render("· " + m.note), hints}
 	}

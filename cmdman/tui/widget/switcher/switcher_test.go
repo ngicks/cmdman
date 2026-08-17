@@ -1181,6 +1181,169 @@ func TestSwitcherSummonNeedsAName(t *testing.T) {
 	}
 }
 
+// TestSwitcherMuxDown covers `d`: the selected project's dashboard windows go
+// away and its commands stay up, so the widget names the project — file and
+// directory with it — and reports what came back. Nothing supervised is lost,
+// which is why the key acts on the first press.
+func TestSwitcherMuxDown(t *testing.T) {
+	m := seedWidget(t, 32, 12)
+	fb := m.backend.(*coretest.FakeBackend)
+	if hint := m.switcherFooter(); !strings.Contains(hint, "d/D down") {
+		t.Errorf("the switcher should hint at the teardowns: %q", hint)
+	}
+
+	m, cmd := updWidget(t, m, coretest.Kr("d"))
+	m = settle(t, m, cmd)
+	want := []coretest.DownCall{{
+		Project: "local-dev",
+		Path:    "/work/local-dev/cmd-compose.yaml",
+		Workdir: "/work/local-dev",
+	}}
+	if !slices.Equal(fb.MuxDowns, want) {
+		t.Fatalf("d tore down %v, want %v", fb.MuxDowns, want)
+	}
+	if len(fb.ComposeDowns) != 0 {
+		t.Fatalf("d must leave the commands alone, compose downs = %v", fb.ComposeDowns)
+	}
+	if !strings.Contains(m.status, "commands still running") {
+		t.Errorf("d should say what it left up, status = %q", m.status)
+	}
+
+	// A project whose spec has no mux section is the everyday refusal, and the
+	// key stays on offer for it: nothing in the listing says which projects have
+	// a dashboard.
+	fb.MuxDownErr = errors.New("project \"local-dev\" has no mux: section")
+	m, cmd = updWidget(t, m, coretest.Kr("d"))
+	m = settle(t, m, cmd)
+	if !strings.Contains(m.status, "no mux: section") {
+		t.Errorf("a refused teardown should be reported, status = %q", m.status)
+	}
+	if !strings.Contains(m.renderSwitcher(m.size()), "mux down") {
+		t.Errorf("the reason belongs where the hint line is:\n%q", m.renderSwitcher(m.size()))
+	}
+}
+
+// TestSwitcherComposeDownConfirms covers `D`: it takes away every command of the
+// project, so the first press only asks. y goes ahead and reports what the
+// teardown did; any other key takes the question back and is spent doing so.
+func TestSwitcherComposeDownConfirms(t *testing.T) {
+	m := seedWidget(t, 60, 12)
+	fb := m.backend.(*coretest.FakeBackend)
+	fb.ComposeDownSummary = core.DownSummary{Stopped: 3, Removed: 2}
+
+	m, cmd := updWidget(t, m, coretest.Kr("D"))
+	if cmd != nil {
+		t.Fatalf("D on its own should dispatch nothing")
+	}
+	if len(fb.ComposeDowns) != 0 {
+		t.Fatalf("D on its own tore down %v", fb.ComposeDowns)
+	}
+	if got := core.StripANSI(m.switcherFooter()); !strings.Contains(
+		got, "compose down local-dev? y/n") {
+		t.Fatalf("D should ask before it acts, footer = %q", got)
+	}
+
+	cancelled, cmd := updWidget(t, m, coretest.Kr("j"))
+	if cmd != nil || len(fb.ComposeDowns) != 0 {
+		t.Fatalf("a key that is not y should tear nothing down, %v", fb.ComposeDowns)
+	}
+	if cancelled.selected != 0 {
+		t.Errorf("the key that cancelled should not also move the cursor, selected = %d",
+			cancelled.selected)
+	}
+	if !strings.Contains(cancelled.status, "cancelled") {
+		t.Errorf("a cancelled teardown should say so, status = %q", cancelled.status)
+	}
+	// With the question answered the same key is a movement key again.
+	cancelled, _ = updWidget(t, cancelled, coretest.Kr("j"))
+	if cancelled.selected != 1 {
+		t.Errorf("j after the question should move again, selected = %d", cancelled.selected)
+	}
+
+	m, cmd = updWidget(t, m, coretest.Kr("y"))
+	m = settle(t, m, cmd)
+	want := []coretest.DownCall{{
+		Project: "local-dev",
+		Path:    "/work/local-dev/cmd-compose.yaml",
+		Workdir: "/work/local-dev",
+	}}
+	if !slices.Equal(fb.ComposeDowns, want) {
+		t.Fatalf("y tore down %v, want %v", fb.ComposeDowns, want)
+	}
+	if len(fb.MuxDowns) != 0 {
+		t.Errorf("D must not touch the dashboard, mux downs = %v", fb.MuxDowns)
+	}
+	if !strings.Contains(m.status, "stopped 3, removed 2") {
+		t.Errorf("the teardown should report what it did, status = %q", m.status)
+	}
+}
+
+// TestSwitcherComposeDownReportsPartialTeardown pins the half a non-nil error
+// must not hide: a teardown that failed on one command still tore the others
+// down, and both belong on the status line.
+func TestSwitcherComposeDownReportsPartialTeardown(t *testing.T) {
+	m := seedWidget(t, 60, 12)
+	fb := m.backend.(*coretest.FakeBackend)
+	fb.ComposeDownSummary = core.DownSummary{Stopped: 2, Removed: 1}
+	fb.ComposeDownErr = errors.New("remove seed-db: still running")
+
+	m, _ = updWidget(t, m, coretest.Kr("D"))
+	m, cmd := updWidget(t, m, coretest.Kr("y"))
+	m = settle(t, m, cmd)
+	if !strings.Contains(m.status, "stopped 2, removed 1") ||
+		!strings.Contains(m.status, "remove seed-db: still running") {
+		t.Errorf("a partial teardown should report both halves, status = %q", m.status)
+	}
+}
+
+// TestSwitcherComposeDownPromptSurvivesAReload pins where the question lives: a
+// listing lands on its own and clears the status line, and a question that went
+// off the screen while the next key still answered it would take the commands
+// of a project nobody was looking at.
+func TestSwitcherComposeDownPromptSurvivesAReload(t *testing.T) {
+	m := seedWidget(t, 60, 12)
+	fb := m.backend.(*coretest.FakeBackend)
+
+	m, _ = updWidget(t, m, coretest.Kr("D"))
+	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: seedInfos()})
+	if got := core.StripANSI(m.switcherFooter()); !strings.Contains(
+		got, "compose down local-dev? y/n") {
+		t.Fatalf("the question should outlive a reload, footer = %q", got)
+	}
+
+	m, cmd := updWidget(t, m, coretest.Kr("y"))
+	settle(t, m, cmd)
+	if len(fb.ComposeDowns) != 1 {
+		t.Errorf("y after the reload should still tear the project down, %v", fb.ComposeDowns)
+	}
+}
+
+// TestSwitcherTeardownsNeedAName pins the row neither teardown can act on: both
+// address the project by name, and a group the project listing never claimed a
+// name for has nothing to hand them.
+func TestSwitcherTeardownsNeedAName(t *testing.T) {
+	for _, key := range []tea.KeyMsg{coretest.Kr("d"), coretest.Kr("D")} {
+		m := seedWidget(t, 32, 12)
+		fb := m.backend.(*coretest.FakeBackend)
+		m, _ = updWidget(t, m, core.ProjectsLoadedMsg{Infos: nil})
+		m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: []core.CommandInfo{
+			{ID: "1", Name: "solo", Workdir: "/work/solo", State: model.EventTypeRunning},
+		}})
+		m.groups = []core.ProjectGroup{{Workdir: "/work/solo"}}
+
+		m, cmd := updWidget(t, m, key)
+		if cmd != nil {
+			t.Fatalf("%v on an unnamed group should dispatch nothing", key)
+		}
+		if !strings.Contains(m.status, "no project to tear down") {
+			t.Errorf("%v should say why, status = %q", key, m.status)
+		}
+		if len(fb.MuxDowns) != 0 || len(fb.ComposeDowns) != 0 {
+			t.Errorf("%v tore down %v / %v", key, fb.MuxDowns, fb.ComposeDowns)
+		}
+	}
+}
+
 // TestWidgetNoQuit covers V6's flag: a widget docked in a frame pane must not
 // exit from a keypress, and stops advertising a key it no longer has. A
 // standalone run keeps quitting, which is what the flag is opt-in for.

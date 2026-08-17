@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -615,6 +616,168 @@ func TestLauncherStaleEntry(t *testing.T) {
 	m = updLauncher(t, m, launcherForgotMsg{target: fb.ForgotTargets[0]})
 	if len(m.locs[2].projects) != 0 {
 		t.Errorf("a forgotten entry should leave the list")
+	}
+}
+
+// launcherFooterText is the footer as it is read, styling stripped.
+func launcherFooterText(m Model) string {
+	return core.StripANSI(strings.Join(m.footerLines(), "\n"))
+}
+
+// TestLauncherMuxDown covers `d`: the dashboard of the project `S` would launch
+// goes away and its commands stay up, so the key acts on the first press and
+// names the project the way a launch names it — file and directory included.
+func TestLauncherMuxDown(t *testing.T) {
+	m, fb := seedLauncher(t, 100, 20)
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+
+	if hints := launcherFooterText(m); !strings.Contains(hints, "d/D down") {
+		t.Errorf("a list should hint at the teardowns: %q", hints)
+	}
+
+	next, cmd := m.Update(coretest.Kr("d"))
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatalf("d should issue work")
+	}
+	m = updLauncher(t, m, cmd())
+
+	want := []coretest.DownCall{{
+		Project: "devenv", Path: "devenv.yaml", Workdir: "/home/u/gitrepo/cmdman",
+	}}
+	if !slices.Equal(fb.MuxDowns, want) {
+		t.Fatalf("d tore down %v, want %v", fb.MuxDowns, want)
+	}
+	if len(fb.ComposeDowns) != 0 {
+		t.Fatalf("d must leave the commands alone, compose downs = %v", fb.ComposeDowns)
+	}
+	if !strings.Contains(m.note, "commands still running") {
+		t.Errorf("d should say what it left up, note = %q", m.note)
+	}
+
+	// A project whose compose file declares no dashboard is the everyday
+	// refusal, and the key stays on offer for it.
+	fb.MuxDownErr = errors.New("project \"devenv\" has no mux: section")
+	next, cmd = m.Update(coretest.Kr("d"))
+	m = updLauncher(t, next.(Model), cmd())
+	if !strings.Contains(m.note, "no mux: section") {
+		t.Errorf("a refused teardown should be reported, note = %q", m.note)
+	}
+
+	// In the input zone every key is text, teardowns included.
+	typed, fb2 := seedLauncher(t, 100, 20)
+	typed = typeInto(t, typed, "dD")
+	if typed.filter != "dD" || len(fb2.MuxDowns) != 0 || len(fb2.ComposeDowns) != 0 {
+		t.Errorf("typing d/D left filter %q and tore down %v / %v",
+			typed.filter, fb2.MuxDowns, fb2.ComposeDowns)
+	}
+}
+
+// TestLauncherComposeDownConfirms covers `D`: it takes away every command of
+// the project, so the first press only asks. y goes ahead and reports what the
+// teardown did; any other key takes the question back and is spent doing so.
+func TestLauncherComposeDownConfirms(t *testing.T) {
+	m, fb := seedLauncher(t, 100, 20)
+	fb.ComposeDownSummary = core.DownSummary{Stopped: 3, Removed: 2}
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+
+	next, cmd := m.Update(coretest.Kr("D"))
+	m = next.(Model)
+	if cmd != nil {
+		t.Fatalf("D on its own should dispatch nothing")
+	}
+	if len(fb.ComposeDowns) != 0 {
+		t.Fatalf("D on its own tore down %v", fb.ComposeDowns)
+	}
+	if foot := launcherFooterText(m); !strings.Contains(foot, "compose down devenv? y/n") {
+		t.Fatalf("D should ask before it acts, footer = %q", foot)
+	}
+
+	cancelled, cmd := m.Update(coretest.Kr("j"))
+	if cmd != nil || len(fb.ComposeDowns) != 0 {
+		t.Fatalf("a key that is not y should tear nothing down, %v", fb.ComposeDowns)
+	}
+	if got := cancelled.(Model); got.leftSel != 0 {
+		t.Errorf("the key that cancelled should not also move the cursor, leftSel = %d",
+			got.leftSel)
+	} else if !strings.Contains(got.note, "cancelled") {
+		t.Errorf("a cancelled teardown should say so, note = %q", got.note)
+	}
+	// With the question answered the same key is a movement key again.
+	if moved := updLauncher(t, cancelled.(Model), coretest.Kr("j")); moved.leftSel != 1 {
+		t.Errorf("j after the question should move again, leftSel = %d", moved.leftSel)
+	}
+
+	next, cmd = m.Update(coretest.Kr("y"))
+	if cmd == nil {
+		t.Fatalf("y should issue the teardown")
+	}
+	m = updLauncher(t, next.(Model), cmd())
+	want := []coretest.DownCall{{
+		Project: "devenv", Path: "devenv.yaml", Workdir: "/home/u/gitrepo/cmdman",
+	}}
+	if !slices.Equal(fb.ComposeDowns, want) {
+		t.Fatalf("y tore down %v, want %v", fb.ComposeDowns, want)
+	}
+	if len(fb.MuxDowns) != 0 {
+		t.Errorf("D must not touch the dashboard, mux downs = %v", fb.MuxDowns)
+	}
+	if !strings.Contains(m.note, "stopped 3, removed 2") {
+		t.Errorf("the teardown should report what it did, note = %q", m.note)
+	}
+}
+
+// TestLauncherComposeDownTakesTheProjectUnderTheCursor pins what the two keys
+// act on: the project `S` would launch, which on the projects pane is the row
+// the cursor is on rather than the location's first enabled one.
+func TestLauncherComposeDownTakesTheProjectUnderTheCursor(t *testing.T) {
+	m, fb := seedLauncher(t, 100, 20)
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+	m = updLauncher(t, m, coretest.KEnter) // into the projects pane
+	m = updLauncher(t, m, coretest.Kr("j"))
+
+	next, cmd := m.Update(coretest.Kr("D"))
+	m = next.(Model)
+	if cmd != nil {
+		t.Fatalf("D on its own should dispatch nothing")
+	}
+	if foot := launcherFooterText(m); !strings.Contains(foot, "compose down test? y/n") {
+		t.Fatalf("D should ask about the row under the cursor, footer = %q", foot)
+	}
+	next, cmd = m.Update(coretest.Kr("y"))
+	updLauncher(t, next.(Model), cmd())
+	want := []coretest.DownCall{{
+		Project: "test", Path: "test.yaml", Workdir: "/home/u/gitrepo/cmdman",
+	}}
+	if !slices.Equal(fb.ComposeDowns, want) {
+		t.Fatalf("y tore down %v, want %v", fb.ComposeDowns, want)
+	}
+}
+
+// TestLauncherComposeDownReportsPartialTeardown pins the half a non-nil error
+// must not hide: a teardown that failed on one command still tore the others
+// down, and both belong on the note line. The question also outlives a bring-up
+// reporting back under it, since the next key still answers it.
+func TestLauncherComposeDownReportsPartialTeardown(t *testing.T) {
+	m, fb := seedLauncher(t, 100, 20)
+	fb.ComposeDownSummary = core.DownSummary{Stopped: 2, Removed: 1}
+	fb.ComposeDownErr = errors.New("remove watcher: still running")
+	m = updLauncher(t, m, coretest.KEnter)
+
+	next, _ := m.Update(coretest.Kr("D"))
+	m = next.(Model)
+	m = updLauncher(t, m, launcherStartedMsg{target: core.LaunchTarget{
+		WorkDir: "/home/u/src/webapp", Project: "staging",
+	}})
+	if foot := launcherFooterText(m); !strings.Contains(foot, "compose down devenv? y/n") {
+		t.Fatalf("the question should outlive a reply landing under it, footer = %q", foot)
+	}
+
+	next, cmd := m.Update(coretest.Kr("y"))
+	m = updLauncher(t, next.(Model), cmd())
+	if !strings.Contains(m.note, "stopped 2, removed 1") ||
+		!strings.Contains(m.note, "remove watcher: still running") {
+		t.Errorf("a partial teardown should report both halves, note = %q", m.note)
 	}
 }
 
