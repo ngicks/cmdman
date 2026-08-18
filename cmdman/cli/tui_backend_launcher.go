@@ -28,6 +28,11 @@ const launchGitProbes = 8
 // history, from the store, from the named defs and from the working directory,
 // grouped by the directory it runs in and ordered by recency (D7).
 //
+// A named def that declares no work_dir: is grouped nowhere, because it belongs
+// nowhere: it is offered at every location instead, so the directory it comes up
+// in is the one the user selects rather than the one the launcher was summoned
+// from (see (*launchAccumulator).offer).
+//
 // The grouping key is the canonical work directory compose itself computes
 // (filepath.Clean(filepath.Abs(p)), no symlink resolution) — the same string the
 // history table stores and the same one mux stamps its windows with, so a
@@ -56,18 +61,18 @@ func (b *serviceBackend) ListLaunchTargets(ctx context.Context) ([]tui.LaunchLoc
 	resolver := &composeResolver{}
 	// Never-run named defs and the project sitting in the working directory: the
 	// same two sources the Compose tab merges in, resolved here so their location
-	// is the canonical work directory rather than an empty one.
-	named, _ := compose.ListNamedProjects()
-	for _, n := range named {
-		if sel, err := resolver.resolve(n); err == nil && sel.Spec != nil {
-			acc.add(sel.WorkDir, sel.Project, sel.Spec.ComposeFile, time.Time{}, false, true)
-		}
+	// is the canonical work directory rather than an empty one. Only the defs
+	// that name a directory have one; the rest are offered at all of them.
+	pinned, floating := namedConfigProjects(resolver)
+	for _, p := range pinned {
+		acc.add(p.dir, p.proj.name, p.proj.file, time.Time{}, false, true)
 	}
 	if sel, err := compose.LoadOrProject(
 		compose.NormalizeOpts{WorkDir: b.workDir},
 	); err == nil && sel.Spec != nil {
 		acc.add(sel.WorkDir, sel.Project, sel.Spec.ComposeFile, time.Time{}, false, false)
 	}
+	acc.offer(floating)
 
 	locs := acc.locations(resolver, b.runningIdentities(ctx))
 	fillGitInfo(ctx, locs)
@@ -88,18 +93,22 @@ func (b *serviceBackend) ResolveLaunchDir(
 	if err != nil {
 		return tui.LaunchLocation{}, fmt.Errorf("launcher: list compose history: %w", err)
 	}
-	return resolveLaunchDir(ctx, dir, history, b.runningIdentities(ctx))
+	resolver := &composeResolver{}
+	_, floating := namedConfigProjects(resolver)
+	return resolveLaunchDir(ctx, dir, history, floating, resolver, b.runningIdentities(ctx))
 }
 
 // resolveLaunchDir is the listing's per-directory build fed only what belongs to
 // dir: the same accumulator, the same projection and the same git fill
 // ListLaunchTargets runs, so a resolved row and a listed row are the same shape.
-// It takes the history as data rather than reading it so the merge can be
-// exercised without a live service.
+// It takes the history and the offered projects as data rather than reading them
+// so the merge can be exercised without a live service.
 func resolveLaunchDir(
 	ctx context.Context,
 	dir string,
 	history []cmdman.ComposeHistoryEntry,
+	floating []launchProj,
+	resolver *composeResolver,
 	running map[string]bool,
 ) (tui.LaunchLocation, error) {
 	abs, err := filepath.Abs(dir)
@@ -109,6 +118,10 @@ func resolveLaunchDir(
 	dir = abs
 
 	acc := &launchAccumulator{}
+	// dir is a location before anything is found at it: a directory nothing was
+	// ever run in is exactly where an unpinned config project is worth offering,
+	// and offering needs a location to offer at.
+	acc.at(dir)
 	for _, h := range history {
 		if h.WorkDir == dir {
 			acc.add(dir, h.Project, h.File, h.LastUsed, true, false)
@@ -121,13 +134,53 @@ func resolveLaunchDir(
 	if spec, err := discoverLaunchDirSpec(ctx, dir); err == nil {
 		acc.add(dir, spec.Project, spec.ComposeFile, time.Time{}, false, false)
 	}
+	acc.offer(floating)
 
-	locs := acc.locations(&composeResolver{}, running)
-	if len(locs) == 0 {
-		locs = []tui.LaunchLocation{{Dir: dir}}
-	}
+	locs := acc.locations(resolver, running)
 	fillGitInfo(ctx, locs)
 	return locs[0], nil
+}
+
+// pinnedConfigProject is a named project from the compose config dir whose spec
+// declares work_dir:, paired with the directory it declares.
+type pinnedConfigProject struct {
+	dir  string
+	proj launchProj
+}
+
+// namedConfigProjects reads the compose config dir into the two kinds of row a
+// named project makes. One whose spec declares work_dir: belongs to that
+// directory and is listed there. One that declares none belongs to no directory
+// in particular — it comes up wherever it is started from — so it is returned to
+// be offered at every location instead of pinned to the directory the launcher
+// process happens to stand in, which for a popup is wherever the user summoned
+// it from.
+//
+// A project that fails to resolve is skipped, so one broken file in the config
+// dir does not hide the rest of it.
+func namedConfigProjects(
+	resolver *composeResolver,
+) (pinned []pinnedConfigProject, floating []launchProj) {
+	names, _ := compose.ListNamedProjects()
+	for _, n := range names {
+		sel, err := resolver.resolve(n)
+		if err != nil || sel.Spec == nil {
+			continue
+		}
+		proj := launchProj{name: sel.Project, file: sel.Spec.ComposeFile, fromConfig: true}
+		if sel.Spec.WorkDirDeclared {
+			pinned = append(pinned, pinnedConfigProject{dir: sel.WorkDir, proj: proj})
+			continue
+		}
+		floating = append(floating, proj)
+	}
+	// By project name rather than by file name: the name is what the list shows
+	// and what a location's rows are deduplicated on, so two files declaring one
+	// name land in a fixed order rather than in readdir order.
+	slices.SortStableFunc(floating, func(x, y launchProj) int {
+		return cmp.Or(cmp.Compare(x.name, y.name), cmp.Compare(x.file, y.file))
+	})
+	return pinned, floating
 }
 
 // discoverLaunchDirSpec loads the compose file sitting in dir. Discovery is
@@ -186,6 +239,46 @@ type launchProj struct {
 	fromConfig  bool
 }
 
+// at returns the location dir accumulates into, recording it when it is new. A
+// mention is enough to make one: a directory with nothing at it is still a place
+// to start something.
+func (a *launchAccumulator) at(dir string) *launchDir {
+	if a.byDir == nil {
+		a.byDir = map[string]*launchDir{}
+	}
+	d := a.byDir[dir]
+	if d == nil {
+		d = &launchDir{dir: dir, seen: map[string]int{}}
+		a.byDir[dir] = d
+		a.order = append(a.order, dir)
+	}
+	return d
+}
+
+// offer appends the projects that belong to no directory of their own to every
+// location, which is how a config project with no work_dir: is listed: it comes
+// up in whatever directory it is started from, so the launcher offers it at
+// whichever location the user is looking at.
+//
+// It runs after every add. A location that already lists the project keeps its
+// own row — the file it was recorded with, and the provenance that makes it open
+// enabled — and the offered rows land after the rows that are really there.
+// Nothing an offer adds flags the location: a location the config dir merely has
+// something to offer at stays as visible as it was, since it is the project the
+// user keeps around and not the place.
+func (a *launchAccumulator) offer(projects []launchProj) {
+	for _, dir := range a.order {
+		d := a.byDir[dir]
+		for _, p := range projects {
+			if _, ok := d.seen[p.name]; ok {
+				continue
+			}
+			d.seen[p.name] = len(d.projects)
+			d.projects = append(d.projects, p)
+		}
+	}
+}
+
 // add records one project at a location. A project already recorded keeps the
 // first file it was seen with — history is added first, so the file a project
 // was actually brought up with wins over one merely discovered.
@@ -197,15 +290,7 @@ func (a *launchAccumulator) add(
 	if dir == "" {
 		return
 	}
-	if a.byDir == nil {
-		a.byDir = map[string]*launchDir{}
-	}
-	d := a.byDir[dir]
-	if d == nil {
-		d = &launchDir{dir: dir, seen: map[string]int{}}
-		a.byDir[dir] = d
-		a.order = append(a.order, dir)
-	}
+	d := a.at(dir)
 	if fromHistory {
 		d.fromHistory = true
 		if lastUsed.After(d.lastUsed) {

@@ -150,3 +150,22 @@ Deferred to HANDOFF entry 3.
 different key mid-run would be new design without the user.
 **Rejected**: silently restoring the capability via frame-stamp-keyed
 adoption.
+
+## D10 — Floating config projects: offered at the selected/typed dir, not pinned to cwd
+
+**Decision** (user, 2026-08-18, post-implementation): A named config project
+whose spec declares no `work_dir:` (e.g. a dev-environment project meant to
+be started wherever the user is working) is no longer pinned to the
+launcher process's cwd. Instead it is offered at whatever directory the
+user selects or types: the projects pane of the selected location includes
+it, launching with that location's directory as the work dir. Projects
+WITH `work_dir:` keep their single pinned row. Floating rows keep the
+config provenance (disabled by default, `space` enables).
+**Rationale**: The user's real use case is starting a config-known project
+(devenv: nvim/shell/claude) in an arbitrary, possibly never-launched
+directory. Pinning to the launcher's cwd made the project invisible at any
+other selected dir — reported as "does not show project under
+~/.config/cmdman/compose/ when selecting dir not listed in history".
+**Rejected**: keeping cwd pinning with typed-dir merge only; offering
+floating projects at every location row while also keeping a cwd-pinned
+row (duplication).

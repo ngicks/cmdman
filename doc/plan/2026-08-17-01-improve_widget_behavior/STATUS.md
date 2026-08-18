@@ -64,6 +64,18 @@ up in") now understates the view — config-dir locations are listed too.
   inherited item this plan absorbs is cited in step 7 (D4); the inherited
   mux-socket item is carried forward inside HANDOFF entry 1.
 
+## Post-run fix (2026-08-18, user-reported)
+
+The shipped item 1 pinned a `work_dir:`-less named config project to the
+launcher process's cwd, so it was never offered at a selected or typed
+directory — missing the real use case (start devenv in an arbitrary dir).
+Per D10 such projects now float: offered in the projects pane of whichever
+location is selected or typed, starting in that directory; `work_dir:`
+projects keep their pinned row. Verified end-to-end against the real
+config dir in a tmux run. Consequence, accepted with D10: with no history
+and no pinned config project, the launcher opens empty until a path is
+typed.
+
 ## Next action
 
 None — implementation done. Minor non-blocking items the gate surfaced,

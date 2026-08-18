@@ -105,6 +105,7 @@ func Normalize(
 	if effectiveWorkDir == "" {
 		effectiveWorkDir = raw.WorkDir
 	}
+	workDirDeclared := effectiveWorkDir != ""
 	if effectiveWorkDir == "" {
 		effectiveWorkDir = cwd
 	}
@@ -275,11 +276,12 @@ func Normalize(
 	}
 
 	return ComposeSpec{
-		ComposeFile: composeFilePath,
-		Project:     project,
-		WorkDir:     effectiveWorkDir,
-		Commands:    normalized,
-		Mux:         raw.Mux,
+		ComposeFile:     composeFilePath,
+		Project:         project,
+		WorkDir:         effectiveWorkDir,
+		WorkDirDeclared: workDirDeclared,
+		Commands:        normalized,
+		Mux:             raw.Mux,
 	}, nil
 }
 

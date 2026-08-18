@@ -83,6 +83,7 @@ commands:
 	)
 	assert.NilError(t, err)
 	assert.Equal(t, spec.WorkDir, projDir)
+	assert.Equal(t, spec.WorkDirDeclared, true)
 }
 
 // ---- default compose dir name resolution ------------------------------------

@@ -68,21 +68,26 @@ it in any terminal or pane. Each widget is its own subcommand.
   removed M` — is reported there when it ends.
 - `launcher`: quick-launch selector. The left pane lists target locations: with
   the input empty, the directories you have brought projects up in, most recent
-  first, then the directories of the projects named under cmdman's config
-  `compose/` directory, sorted by the name each row shows — one never launched
-  from has no recency to be placed by. Typing widens that to everything the
-  filter reaches. The right pane lists the compose projects at the location
-  under the cursor, toggled on or off: one brought up before arrives on, one
-  known only from the config `compose/` directory arrives off until `space`
-  turns it on. Type to filter, tab completes what is typed, enter steps input →
-  locations → projects, esc walks back and then dismisses. On a list, `s` starts
-  the enabled projects — so a config-only row waits for its `space` — and `S`
-  launches and lands in one; `d` and `D` tear the project `S` would launch back
-  down — `d` its dashboard windows, leaving the commands running, `D` the
-  commands themselves after the `compose down <project>? y/n` confirm described
-  under the switcher. In the input every key is text, so ctrl+c is the
-  dismissal that works from anywhere (unless `--no-quit` took the quit keys
-  away).
+  first, then the directories that the projects named under cmdman's config
+  `compose/` directory declare with `work_dir:`, sorted by the name each row
+  shows — one never launched from has no recency to be placed by. Typing widens
+  that to everything the filter reaches. The right pane lists the compose
+  projects at the location under the cursor, toggled on or off: one brought up
+  before arrives on, one known only from the config `compose/` directory arrives
+  off until `space` turns it on. A project named there that declares no
+  `work_dir:` belongs to no directory of its own, so it is offered at every
+  location — select or type the directory you want it in and it starts there,
+  which is how the editor-and-shell project you keep around comes up in a
+  directory it has never run in. Where you have already brought it up, the
+  location's own row for it stands: the one that opens enabled. Type to filter,
+  tab completes what is typed, enter steps input → locations → projects, esc
+  walks back and then dismisses. On a list, `s` starts the enabled projects — so
+  a config-only row waits for its `space` — and `S` launches and lands in one;
+  `d` and `D` tear the project `S` would launch back down — `d` its dashboard
+  windows, leaving the commands running, `D` the commands themselves after the
+  `compose down <project>? y/n` confirm described under the switcher. In the
+  input every key is text, so ctrl+c is the dismissal that works from anywhere
+  (unless `--no-quit` took the quit keys away).
 - `project-manager`: shortcuts over one project — the replica count of each of
   its services, which replica a scaled command's dashboard pane shows, and the
   project's mux layouts. Every action wraps the command that already does it, so
@@ -141,7 +146,8 @@ the input zone's, so leaving the zone takes it down too.
 
 A path typed to an existing directory that is none of the known locations
 becomes a selectable row of its own in the left pane, carrying whatever compose
-projects are there.
+projects are there and the config projects that declare no `work_dir:` — so a
+directory nothing has ever run in is still somewhere to start one.
 
 ## Options
 
