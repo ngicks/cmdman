@@ -77,3 +77,23 @@ Also note, same change, accepted consequence (not open): `compose mux
 down` then `up` now builds a fresh window — down clears the stamp, so the
 next up has nothing to recognise; the restored window stays. The e2e
 tests pin the new behavior.
+
+## 4. Upstream vt parser bug — report to charmbracelet/x/vt (D11, automatic)
+
+The emulator's OSC parser honors raw C1 control bytes even when they are
+continuation bytes inside a multi-byte UTF-8 rune, so an OSC 0/2 title
+like "✳ done" (U+2733 = E2 9C B3) is cut at the 0x9C (read as ST) and
+delivered as the invalid fragment `"\xe2"`; the leftover bytes then print
+into the screen and the trailing BEL rings a phantom bell. Separately,
+its `handleTitle` splits the payload on ';' and silently drops any title
+containing one (`len(parts) != 2`). Pinned version:
+`github.com/charmbracelet/x/vt v0.0.0-20260622092256-25656177ba8e`.
+
+**Why not done here**: the monitor-side sanitize (D11) already protects
+every cmdman consumer; filing and tracking an upstream issue is outside
+this plan's scope and needs no code change here.
+
+**Follow-up**: file the upstream issue (minimal repro: feed
+`\x1b]0;✳ x\x07` to the emulator, Title callback receives `"\xe2"`);
+once fixed upstream, bump the dep — the sanitize stays as a guard, and
+affected titles stop rendering with the replacement rune.

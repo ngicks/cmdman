@@ -169,3 +169,34 @@ other selected dir — reported as "does not show project under
 **Rejected**: keeping cwd pinning with typed-dir merge only; offering
 floating projects at every location row while also keeping a cwd-pinned
 row (duplication).
+
+## D11 — Sanitize runtime-state strings at the latch seam [automatic]
+
+**Decision** (orchestrator, 2026-08-19): Strings the monitor derives from
+raw terminal bytes — the OSC 0/2 window title and the OSC 9/777
+notification title/body — are sanitized to valid UTF-8 (invalid bytes
+replaced with U+FFFD) at the latch seam in
+`cmdman/monitor/runtime_state.go`, before storage and change-comparison.
+**Why**: the vt emulator's parser honors raw C1 control bytes even when
+they are continuation bytes inside a multi-byte UTF-8 rune, so a title
+like "✳ done" (U+2733 = E2 9C B3; 0x9C is C1 ST) reaches the Title
+callback cut mid-rune as the invalid fragment `"\xe2"`. Latched raw, that
+value makes `proto.Marshal` of every Status / WatchRuntimeState response
+fail ("string field contains invalid UTF-8"), and since listing treats
+every RPC failure as an absent entry, all runtime columns (title, status,
+detail, bell) silently go dark in `ls`, `inspect` and the TUI — while the
+attached tmux pane still shows the full title. Reproduced end-to-end with
+a probe command; every Claude-Code state glyph (U+2700 block, second
+UTF-8 byte 0x9C/0x9D) triggers it, and the leftover bytes after the cut
+also ring a phantom bell.
+**Why the latch, not the proto boundary**: sanitizing where the bytes
+enter protects every consumer at once — proto, hook dispatcher, TUI —
+against any emulator misbehavior, present or future.
+**Consequence, accepted**: until the upstream parser bug
+(charmbracelet/x/vt cutting OSC strings at C1 continuation bytes; it also
+silently drops titles containing ';') is fixed, an affected title shows
+visibly degraded (e.g. `� Mermaid-cli lint hook`) instead of vanishing.
+Upstream report left as a follow-up.
+**Rejected**: sanitizing in `protoRuntimeState` only (leaves hook
+dispatcher and future consumers exposed); dropping invalid titles
+entirely (hides that a title was set — the degraded marker is honest).

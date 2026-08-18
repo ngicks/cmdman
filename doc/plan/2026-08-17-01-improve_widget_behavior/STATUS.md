@@ -76,6 +76,20 @@ config dir in a tmux run. Consequence, accepted with D10: with no history
 and no pinned config project, the launcher opens empty until a path is
 typed.
 
+## Post-run fix (2026-08-19, user-reported)
+
+Investigating "switcher shows no title / `cmdman ls` shows empty title
+while tmux still displays `✳ Mermaid-cli lint hook`" surfaced that the
+vt emulator cuts an OSC title at a raw C1 byte even mid-rune, so any
+U+2700-block glyph title latched as invalid UTF-8 and failed proto
+marshaling of every Status / WatchRuntimeState response — silently
+blanking all runtime columns for the command. Per D11 the monitor now
+sanitizes title and notification strings to valid UTF-8 at the latch;
+unit tests cover the latch and the proto-marshal regression, and an e2e
+test drives it through the real binary. Follow-up left open: report the
+parser bug upstream to charmbracelet/x/vt (C1 continuation-byte cut;
+also drops titles containing ';').
+
 ## Next action
 
 None — implementation done. Minor non-blocking items the gate surfaced,
