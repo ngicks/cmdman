@@ -82,9 +82,11 @@ func (b *serviceBackend) ListLaunchTargets(ctx context.Context) ([]tui.LaunchLoc
 // ResolveLaunchDir builds the listing row for one directory on its own — the
 // launcher turning a path the user typed into a location it can select (D28).
 //
-// A directory with nothing to run is still a location, so "no compose file, no
-// history" is an empty Projects rather than an error; what does come back as an
-// error is a failure that would hide what is there, which is the history query.
+// A directory with nothing of its own to run is still a location: "no compose
+// file, no history" comes back without error, its Projects holding only the
+// work_dir-less config projects offered at every selected directory (empty
+// when there are none). What does come back as an error is a failure that
+// would hide what is there, which is the history query.
 func (b *serviceBackend) ResolveLaunchDir(
 	ctx context.Context,
 	dir string,

@@ -58,8 +58,10 @@ type LaunchLocation struct {
 	// FromHistory reports that at least one project here is known from history,
 	// which is what the empty-input history list shows.
 	FromHistory bool
-	// FromConfig reports that at least one project here came from the compose
-	// config dir.
+	// FromConfig reports that a config project is pinned at this directory (a
+	// named compose file declaring it as work_dir). A work_dir-less config
+	// project offered here does not set it: offers follow the selection and
+	// must not make a location visible on the empty filter.
 	FromConfig bool
 	// Projects are the compose projects at this location.
 	Projects []LaunchProject

@@ -101,17 +101,21 @@ func Normalize(
 	baseEnv[ENV_CMDMAN_COMPOSE_DIR] = filepath.Dir(composeFilePath)
 	baseLookup := buildLookup(baseEnv)
 
-	effectiveWorkDir := opts.WorkDir
-	if effectiveWorkDir == "" {
-		effectiveWorkDir = raw.WorkDir
+	declaredWorkDir := opts.WorkDir
+	if declaredWorkDir == "" {
+		declaredWorkDir = raw.WorkDir
 	}
-	workDirDeclared := effectiveWorkDir != ""
-	if effectiveWorkDir == "" {
-		effectiveWorkDir = cwd
-	}
-	effectiveWorkDir, err = template.Substitute(effectiveWorkDir, baseLookup)
+	declaredWorkDir, err = template.Substitute(declaredWorkDir, baseLookup)
 	if err != nil {
 		return ComposeSpec{}, fmt.Errorf("work_dir interpolation: %w", err)
+	}
+	// Declared-ness is judged after interpolation: work_dir: ${UNSET}
+	// substitutes to "" and lands in the cwd fallback, so it must not read as
+	// a declared directory.
+	workDirDeclared := declaredWorkDir != ""
+	effectiveWorkDir := declaredWorkDir
+	if effectiveWorkDir == "" {
+		effectiveWorkDir = cwd
 	}
 	if !filepath.IsAbs(effectiveWorkDir) {
 		effectiveWorkDir = filepath.Join(cwd, effectiveWorkDir)
