@@ -1,6 +1,8 @@
 # STATUS — improve TUI widget behavior
 
-**Current state**: implementation complete (autonomous run, 2026-08-18).
+**Current state**: concluded (2026-08-19) — open HANDOFF items folded
+into `doc/plan/issue.md` at the user's direction. Implementation was
+completed by the autonomous run of 2026-08-18.
 All nine steps done and committed; final gate (ng-reviewer, full
 build/test/e2e/lint, and the three Go review-checklist skills) passed
 after fixing the one blocking finding (mux.Run's attach hint named the
@@ -86,9 +88,11 @@ marshaling of every Status / WatchRuntimeState response — silently
 blanking all runtime columns for the command. Per D11 the monitor now
 sanitizes title and notification strings to valid UTF-8 at the latch;
 unit tests cover the latch and the proto-marshal regression, and an e2e
-test drives it through the real binary. Follow-up left open: report the
-parser bug upstream to charmbracelet/x/vt (C1 continuation-byte cut;
-also drops titles containing ';').
+test drives it through the real binary. Follow-up resolved 2026-08-19:
+the bug was already reported upstream as charmbracelet/x#848; fix PR #946
+is vendored at `internal/third_party/charmbracelet-x-ansi` (HANDOFF
+entry 4), and the release-tracking remainder lives in
+`doc/plan/issue.md`.
 
 ## Next action
 
@@ -99,7 +103,9 @@ only); the three widget files keep growing past the 300-LoC guidance (a
 per-widget down.go split would fit); new tests in pre-existing files
 follow those files' context.Background() convention instead of
 t.Context(); the switcher's Long help never documented `m` (pre-existing
-incompleteness). Deferred decisions live in HANDOFF entries 1–3.
+incompleteness). The deferred decisions (HANDOFF entries 1–3) and the
+vendored x/ansi release tracking moved to `doc/plan/issue.md`
+(2026-08-19, user request); HANDOFF keeps pointer stubs.
 
 ## Blocked
 
