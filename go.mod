@@ -2,6 +2,10 @@ module github.com/ngicks/cmdman
 
 go 1.26.0
 
+tool github.com/sqlc-dev/sqlc/cmd/sqlc
+
+replace github.com/charmbracelet/x/ansi => ./internal/third_party/charmbracelet-x-ansi
+
 require (
 	charm.land/bubbletea/v2 v2.0.7
 	charm.land/lipgloss/v2 v2.0.3
@@ -89,7 +93,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-tool github.com/sqlc-dev/sqlc/cmd/sqlc
-
-replace github.com/charmbracelet/x/ansi => ./internal/third_party/charmbracelet-x-ansi
