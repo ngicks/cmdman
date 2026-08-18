@@ -79,6 +79,43 @@ sleep 300
 	}
 }
 
+// TestLs_RuntimeStateSurvivesMangledTitle drives the sanitize guard through the
+// real binary: the emulator hands the title callback an OSC string cut at a raw
+// C1 byte even mid-rune — "✳ done" (U+2733 = E2 9C B3, 0x9C reads as ST)
+// arrives as the invalid fragment "\xe2" — and an invalid latched title used to
+// fail proto marshaling of the whole Status response, listing as empty runtime
+// columns while the attached terminal still showed the full title. The row must
+// keep serving, visibly degraded, never dark.
+func TestLs_RuntimeStateSurvivesMangledTitle(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "glyph.sh")
+	body := `#!/bin/sh
+printf '\033]0;plain title\007'
+sleep 1
+printf '\033]0;\342\234\263 done\007'
+sleep 300
+`
+	must(t, os.WriteFile(script, []byte(body), 0o755))
+
+	env.run(ctx, "run", "-t", "-n", "glyph-title", "--", "/bin/sh", script)
+	t.Cleanup(func() { env.cleanupCommand(context.Background(), "glyph-title") })
+	env.waitForState(ctx, "glyph-title", "running", defaultTimeout)
+
+	// The ASCII title first: the capture path works before the glyph arrives.
+	pollOutput(ctx, env, "plain title", "ls", "--format", "{{.Title}}")
+
+	// After the glyph title, the sanitized cut ("\xe2" -> the replacement
+	// rune) is what the emulator leaves of it today; an emulator that learns
+	// to parse UTF-8 across C1 bytes would surface the full "✳ done" instead,
+	// and this expectation should follow it. Empty here is the bug: the RPC
+	// died and took every runtime column with it.
+	pollOutput(ctx, env, "�", "ls", "--format", "{{.Title}}")
+}
+
 // TestLs_RuntimeColumnsEmptyWithoutMonitor pins the other half of the contract:
 // a command nobody is monitoring costs its columns, not the listing. A created
 // command never had a monitor, and an exited one leaves its socket path behind
