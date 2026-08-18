@@ -144,6 +144,19 @@ type ServiceScaleInfo struct {
 	Cyclable bool
 }
 
+// DownSummary is what a compose teardown did: how many of the project's
+// commands its stop phase covered and how many its remove phase removed. A
+// command that was already exited counts as stopped — the phases report what
+// they completed, not state transitions they caused.
+//
+// The counts are of the commands the teardown got through, so they stay
+// meaningful next to a non-nil error: a teardown that failed on one command
+// still tore the others down, and the widget has both halves to report.
+type DownSummary struct {
+	Stopped int
+	Removed int
+}
+
 // Backend abstracts the cmdman/compose services the TUI talks to. It exists so
 // the model can be exercised without a live service. Methods that perform I/O
 // take a context and run off the bubbletea update loop; their results are
@@ -205,6 +218,11 @@ type Backend interface {
 	// project came from its own directory passes (see ProjectManagerInfo.WorkDir
 	// for the caller that does not).
 	CycleMux(ctx context.Context, projectName, composeFile, workDir string) error
+	// MuxDown tears down the project's mux dashboard windows; the supervised
+	// commands keep running, since the dashboard is only a viewer of them. The
+	// project is named the way CycleMux names it, and a project whose spec has no
+	// mux: section comes back as an error the widget shows in its status line.
+	MuxDown(ctx context.Context, projectName, composeFile, workDir string) error
 
 	// ListLayouts returns the current project's mux layouts in definition order
 	// plus the running dashboard's current layout marker (see LayoutsInfo). The
@@ -262,10 +280,6 @@ type Backend interface {
 	// bring-up, which stays the launcher's gesture. A landing that fails comes
 	// back as an error, which the switcher shows in place of its hint line.
 	SwitchToProject(ctx context.Context, target SwitchTarget) error
-	// HideFrame takes the frame down around the caller's current window — the
-	// docked switcher's collapse gesture (D16/V8). A window with no frame up is
-	// not an error: hiding what is already hidden is what was asked for.
-	HideFrame(ctx context.Context) error
 
 	// ProjectDefinition returns the raw compose YAML file text for a project, as
 	// shown by the read-only definition viewer. projectName identifies the
@@ -284,6 +298,15 @@ type Backend interface {
 	// finishes (its channel closes), at which point Err reports the
 	// operation-level error.
 	ComposeUp(ctx context.Context, projectName, composeFile string) (ComposeUpStream, error)
+	// ComposeDown stops and removes the project's supervised commands and reports
+	// what it did (see DownSummary). The project is named the way CycleMux names
+	// it, except that no mux: section is required: a project that never had a
+	// dashboard is torn down like any other. It is destructive — every command of
+	// the project goes away, not only the ones on screen — so widgets gate it
+	// behind a confirm.
+	ComposeDown(
+		ctx context.Context, projectName, composeFile, workDir string,
+	) (DownSummary, error)
 
 	// ListLaunchTargets returns the launcher's merged list: compose history,
 	// the ListProjects merge, and the projects whose mux window is currently

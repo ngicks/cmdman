@@ -28,20 +28,89 @@ func TestNew_CreatesSessionAndWindow(t *testing.T) {
 	}
 }
 
-func TestNew_FindsExistingWindow(t *testing.T) {
+// TestNew_NeverAdoptsAWindowByName pins the driver's half of identity-keyed
+// window lookup: a window name is a display label, so New builds a window of its
+// own rather than moving into the same-named one that is already there. Adoption
+// by name is what let two projects named alike — one repository checked out
+// twice, brought up from either directory — fight over a single window, and the
+// stamp the adopting call wrote would have orphaned the first project's window
+// from its own down/cycle.
+//
+// Finding the window a caller already owns is that caller's job, via
+// ListWindows filtered by identity; see cmdman/mux.Run for the find-or-create
+// this leaves to the layer above.
+func TestNew_NeverAdoptsAWindowByName(t *testing.T) {
 	requireTmux(t)
-	sess1, socket := newSession(t, "cmdman")
+	socket := uniqueSocket(t)
+	t.Cleanup(func() { killServer(t, socket) })
 
-	sess2, err := newServer(t, socket).New(context.Background(), muxctl.Config{
-		SessionName: "cmdman-test",
-		WindowName:  "cmdman",
+	ctx := context.Background()
+	srv := newServer(t, socket)
+	theirs, err := srv.New(ctx, muxctl.Config{
+		SessionName:   "cmdman-test",
+		WindowName:    "cmdman-app",
+		OwnedIdentity: "wd-a-app",
 	})
 	if err != nil {
-		t.Fatalf("second New: %v", err)
+		t.Fatalf("New (theirs): %v", err)
 	}
-	if sess1.WindowID() != sess2.WindowID() {
-		t.Errorf("WindowID drifted on reuse: %s vs %s",
-			sess1.WindowID(), sess2.WindowID())
+
+	mine, err := srv.New(ctx, muxctl.Config{
+		SessionName:   "cmdman-test",
+		WindowName:    "cmdman-app", // the very same name
+		OwnedIdentity: "wd-b-app",
+	})
+	if err != nil {
+		t.Fatalf("New (mine): %v", err)
+	}
+
+	if mine.WindowID() == theirs.WindowID() {
+		t.Fatalf("adopted the same-named window %s instead of creating one",
+			theirs.WindowID())
+	}
+	if got := windowOwnerOption(t, socket, theirs.WindowID()); got != "wd-a-app" {
+		t.Errorf("their ownership stamp = %q, want wd-a-app: the second New "+
+			"must not restamp a window it did not build", got)
+	}
+	if got := windowOwnerOption(t, socket, mine.WindowID()); got != "wd-b-app" {
+		t.Errorf("my ownership stamp = %q, want wd-b-app", got)
+	}
+	names := listWindowNames(t, socket, "cmdman-test")
+	sameNamed := 0
+	for _, n := range names {
+		if n == "cmdman-app" {
+			sameNamed++
+		}
+	}
+	if sameNamed != 2 {
+		t.Errorf("windows named cmdman-app = %d (%v), want the two New built", sameNamed, names)
+	}
+}
+
+// TestNew_CreatesBesideAWindowNamedLikeTheSession guards the create target: the
+// standalone dashboard names its window after its session ("cmdman" in
+// "cmdman"), and tmux resolves a bare "-t <session>" against window names first,
+// so a create that named only the session would resolve that window's index and
+// fail with "index N in use". Nothing exercised it while New adopted same-named
+// windows instead of building beside them.
+func TestNew_CreatesBesideAWindowNamedLikeTheSession(t *testing.T) {
+	requireTmux(t)
+	socket := uniqueSocket(t)
+	t.Cleanup(func() { killServer(t, socket) })
+
+	ctx := context.Background()
+	srv := newServer(t, socket)
+	first, err := srv.New(ctx, muxctl.Config{SessionName: "cmdman", WindowName: "cmdman"})
+	if err != nil {
+		t.Fatalf("New (first): %v", err)
+	}
+	second, err := srv.New(ctx, muxctl.Config{SessionName: "cmdman", WindowName: "cmdman"})
+	if err != nil {
+		t.Fatalf("New (second): %v", err)
+	}
+	if first.WindowID() == second.WindowID() {
+		t.Errorf("both News resolved %s; the second must build its own window",
+			first.WindowID())
 	}
 }
 
@@ -75,10 +144,10 @@ func TestNew_StartDirectory(t *testing.T) {
 	}
 }
 
-// TestNew_WindowIDBypassesFindOrCreate verifies that passing Config.WindowID
+// TestNew_WindowIDBypassesCreate verifies that passing Config.WindowID
 // targets the given window directly: SessionName/WindowName must be
 // ignored, and no spurious window is created.
-func TestNew_WindowIDBypassesFindOrCreate(t *testing.T) {
+func TestNew_WindowIDBypassesCreate(t *testing.T) {
 	requireTmux(t)
 	socket := uniqueSocket(t)
 	t.Cleanup(func() { killServer(t, socket) })

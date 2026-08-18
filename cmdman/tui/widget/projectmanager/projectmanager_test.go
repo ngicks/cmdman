@@ -593,6 +593,155 @@ func TestManagerHints(t *testing.T) {
 	}
 }
 
+// TestManagerMuxDown covers `d`: the project's dashboard windows go away and
+// its commands stay up, so the key acts on the first press and names the whole
+// target the load resolved. A project whose spec has no mux section is the
+// everyday refusal, and it reads as one — the key stays on offer for it.
+func TestManagerMuxDown(t *testing.T) {
+	m, fb := seedManager(t, 100, 24)
+	if got := m.hintText(); !strings.Contains(got, "d/D down") {
+		t.Errorf("the hints should offer the teardowns: %q", got)
+	}
+
+	m, msg := pressManager(t, m, coretest.Kr("d"))
+	if m.pending == "" {
+		t.Errorf("a teardown in flight should show a pending line, got none")
+	}
+	m = updManager(t, m, msg)
+	want := coretest.DownCall{Project: "api", Path: managerPath, Workdir: managerWorkDir}
+	if len(fb.MuxDowns) != 1 || fb.MuxDowns[0] != want {
+		t.Fatalf("d recorded %v, want [%v]", fb.MuxDowns, want)
+	}
+	if len(fb.ComposeDowns) != 0 {
+		t.Fatalf("d must leave the commands alone, compose downs = %v", fb.ComposeDowns)
+	}
+	if !m.loading {
+		t.Errorf("a finished teardown should re-read what it changed")
+	}
+	m = updManager(t, m, managerLoadedMsg{info: fb.ManagerInfo})
+	if out := plainView(m); !strings.Contains(out, "commands still running") {
+		t.Errorf("d should say what it left up:\n%s", out)
+	}
+
+	fb.MuxDownErr = errors.New("project \"api\" has no mux: section")
+	m, msg = pressManager(t, m, coretest.Kr("d"))
+	m = updManager(t, m, msg)
+	if out := plainView(m); !strings.Contains(out, "mux down api: project \"api\" has no mux") {
+		t.Errorf("a refused teardown should be reported:\n%s", out)
+	}
+	if m.loading || m.pending != "" {
+		t.Errorf("a teardown that did not happen leaves nothing to re-read")
+	}
+}
+
+// TestManagerComposeDownConfirms covers `D`: it takes away every command of the
+// project, the ones no row here shows included, so the first press only asks. y
+// goes ahead and reports what the teardown did; any other key takes the
+// question back and is spent doing so.
+func TestManagerComposeDownConfirms(t *testing.T) {
+	m, fb := seedManager(t, 100, 24)
+	fb.ComposeDownSummary = core.DownSummary{Stopped: 3, Removed: 2}
+
+	m, msg := pressManager(t, m, coretest.Kr("D"))
+	if msg != nil {
+		t.Fatalf("D on its own should dispatch nothing, got %v", msg)
+	}
+	if len(fb.ComposeDowns) != 0 {
+		t.Fatalf("D on its own tore down %v", fb.ComposeDowns)
+	}
+	if out := plainView(m); !strings.Contains(out, "compose down api? y/n") {
+		t.Fatalf("D should ask before it acts:\n%s", out)
+	}
+
+	cancelled, msg := pressManager(t, m, coretest.Kr("j"))
+	if msg != nil || len(fb.ComposeDowns) != 0 {
+		t.Fatalf("a key that is not y should tear nothing down, %v", fb.ComposeDowns)
+	}
+	if cancelled.svcSel != 0 {
+		t.Errorf("the key that cancelled should not also move the cursor, svcSel = %d",
+			cancelled.svcSel)
+	}
+	if !strings.Contains(cancelled.note, "cancelled") {
+		t.Errorf("a cancelled teardown should say so, note = %q", cancelled.note)
+	}
+	// With the question answered the same key is a movement key again.
+	if cancelled = updManager(t, cancelled, coretest.Kr("j")); cancelled.svcSel != 1 {
+		t.Errorf("j after the question should move again, svcSel = %d", cancelled.svcSel)
+	}
+
+	m, msg = pressManager(t, m, coretest.Kr("y"))
+	m = updManager(t, m, msg)
+	want := coretest.DownCall{Project: "api", Path: managerPath, Workdir: managerWorkDir}
+	if len(fb.ComposeDowns) != 1 || fb.ComposeDowns[0] != want {
+		t.Fatalf("y recorded %v, want [%v]", fb.ComposeDowns, want)
+	}
+	if len(fb.MuxDowns) != 0 {
+		t.Errorf("D must not touch the dashboard, mux downs = %v", fb.MuxDowns)
+	}
+	if !strings.Contains(m.note, "stopped 3, removed 2") {
+		t.Errorf("the teardown should report what it did, note = %q", m.note)
+	}
+	if !m.loading {
+		t.Errorf("a finished teardown should re-read what it changed")
+	}
+}
+
+// TestManagerComposeDownReportsPartialTeardown pins the half a non-nil error
+// must not hide: a teardown that failed on one command still tore the others
+// down, and the counts belong on the failure line with the reason.
+func TestManagerComposeDownReportsPartialTeardown(t *testing.T) {
+	m, fb := seedManager(t, 100, 24)
+	fb.ComposeDownSummary = core.DownSummary{Stopped: 2, Removed: 1}
+	fb.ComposeDownErr = errors.New("remove worker-1: still running")
+
+	m, _ = pressManager(t, m, coretest.Kr("D"))
+	m, msg := pressManager(t, m, coretest.Kr("y"))
+	m = updManager(t, m, msg)
+
+	out := plainView(m)
+	if !strings.Contains(out, "stopped 2, removed 1") ||
+		!strings.Contains(out, "remove worker-1: still running") {
+		t.Errorf("a partial teardown should report both halves:\n%s", out)
+	}
+	if m.pending != "" {
+		t.Errorf("a failed teardown should not stay pending")
+	}
+}
+
+// TestManagerTeardownsAreTheProjects covers what the two keys are scoped to:
+// the project, not a list — so they act from either zone — and they wait for
+// whatever is in flight, as every other action does. The question also outlives
+// a reload landing under it, since the next key still answers it.
+func TestManagerTeardownsAreTheProjects(t *testing.T) {
+	m, fb := seedManager(t, 100, 24)
+	m = updManager(t, m, coretest.KTab)
+	m, msg := pressManager(t, m, coretest.Kr("d"))
+	updManager(t, m, msg)
+	if len(fb.MuxDowns) != 1 {
+		t.Fatalf("d in the layouts zone recorded %v, want one call", fb.MuxDowns)
+	}
+
+	m, fb = seedManager(t, 100, 24)
+	next, _ := m.Update(coretest.Kr("+"))
+	m = next.(Model)
+	pressManager(t, m, coretest.Kr("d"))
+	if len(fb.MuxDowns) != 0 {
+		t.Fatalf("d while a scale is in flight recorded %v, want nothing", fb.MuxDowns)
+	}
+
+	m, fb = seedManager(t, 100, 24)
+	m, _ = pressManager(t, m, coretest.Kr("D"))
+	m = updManager(t, m, managerLoadedMsg{info: fb.ManagerInfo})
+	if out := plainView(m); !strings.Contains(out, "compose down api? y/n") {
+		t.Fatalf("the question should outlive a reload:\n%s", out)
+	}
+	m, msg = pressManager(t, m, coretest.Kr("y"))
+	updManager(t, m, msg)
+	if len(fb.ComposeDowns) != 1 {
+		t.Errorf("y after the reload should still tear the project down, %v", fb.ComposeDowns)
+	}
+}
+
 // TestManagerScrollsBothLists pins the windowing: a list longer than its share
 // of the popup scrolls under its cursor and says how much it left out — out of
 // its own share, so what it hides is rows and never the footer.

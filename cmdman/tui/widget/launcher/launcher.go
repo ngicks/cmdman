@@ -8,6 +8,7 @@
 package launcher
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -147,6 +148,12 @@ type Model struct {
 	// note is a transient one-liner, cleared on the next keystroke.
 	note string
 
+	// pendingDown is the project whose compose teardown is waiting for its y.
+	// The question is drawn from it rather than written into note, which a
+	// bring-up reporting back would replace while the next key still answered
+	// it.
+	pendingDown core.DownTarget
+
 	// spin advances the in-flight marker and ticking says a tick loop is already
 	// running, so a second `s` does not start a second one (D29).
 	spin    int
@@ -223,6 +230,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onAttached(msg)
 	case launcherForgotMsg:
 		return m.onForgot(msg), nil
+	case core.MuxDownMsg:
+		m.note = msg.Status()
+		return m, nil
+	case core.ComposeDownMsg:
+		m.note = msg.Status()
+		return m, nil
 	case core.ReloadTickMsg:
 		return m.resolveTyped(msg)
 	case launcherResolvedMsg:
@@ -376,11 +389,12 @@ func (m Model) onResolved(msg launcherResolvedMsg) Model {
 		return m
 	}
 	loc := msg.loc
-	// Out of history whatever the resolve merged into it: the empty query is
-	// D28's history list, and a directory the user typed their way to has not
-	// joined it. Appended rather than inserted because failedLoc indexes m.locs —
-	// a row put anywhere but the end would move a failure off its own row.
-	loc.FromHistory = false
+	// Out of both provenances whatever the resolve merged into it: the empty query
+	// lists the locations the user keeps around, and a directory typed on the way
+	// to somewhere else has not joined them. Appended rather than inserted because
+	// failedLoc indexes m.locs — a row put anywhere but the end would move a
+	// failure off its own row.
+	loc.FromHistory, loc.FromConfig = false, false
 	m.locs = append(m.locs, newLauncherLocations([]core.LaunchLocation{loc})...)
 	return m.clampLeft()
 }
@@ -436,7 +450,14 @@ func (m Model) find(t core.LaunchTarget) (li, pi int, ok bool) {
 
 // --- keys -------------------------------------------------------------------
 
+// onKey drives the three zones. While a compose teardown is waiting to be
+// confirmed there are no zones and no editing: the key answers that one
+// question, so an esc or a q that meant "no" cannot walk a zone or dismiss the
+// launcher on the way.
 func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.pendingDown.Project != "" {
+		return m.answerComposeDown(msg.String())
+	}
 	m.note = ""
 	before := m.filter
 	switch msg.String() {
@@ -552,6 +573,10 @@ func (m Model) text(t string) (tea.Model, tea.Cmd) {
 		return m.startEnabled()
 	case "S":
 		return m.launchSelected()
+	case "d":
+		return m.muxDownSelected()
+	case "D":
+		return m.confirmComposeDown()
 	case "q":
 		return m.quit()
 	}
@@ -733,15 +758,27 @@ func menuLabels(cands []string) []string {
 
 // --- selection --------------------------------------------------------------
 
-// matched lists the locations the input selects: history only while the input is
-// empty (D28's opening state), every matching location once the user types.
+// matched lists the locations the input selects: while the input is empty, the
+// ones the user keeps around — known from history or named in the compose config
+// dir (D28's opening state) — and every matching location once the user types. A
+// location that is merely there, discovered in the store or in the working
+// directory, still waits for the filter to reach it.
+//
+// The empty-input order is history first in the recency order the listing
+// arrived in, then the config-dir locations by name: one that was never launched
+// from has no recency to be placed by, and letting them interleave would push
+// the everyday rows off the top.
 func (m Model) matched() []int {
 	out := make([]int, 0, len(m.locs))
+	var cfg []int
 	path := m.pathNeedle()
 	for i, l := range m.locs {
 		if m.filter == "" {
-			if l.FromHistory {
+			switch {
+			case l.FromHistory:
 				out = append(out, i)
+			case l.FromConfig:
+				cfg = append(cfg, i)
 			}
 			continue
 		}
@@ -749,7 +786,13 @@ func (m Model) matched() []int {
 			out = append(out, i)
 		}
 	}
-	return out
+	slices.SortFunc(cfg, func(x, y int) int {
+		return cmp.Or(
+			strings.Compare(m.locs[x].label(), m.locs[y].label()),
+			strings.Compare(m.locs[x].Dir, m.locs[y].Dir),
+		)
+	})
+	return append(out, cfg...)
 }
 
 // pathNeedle is what the path field is matched against. A path being typed is
@@ -958,6 +1001,67 @@ func (m Model) pickProject(li int) int {
 		}
 	}
 	return 0
+}
+
+// muxDownSelected is `d`: the project's dashboard windows go away and its
+// commands keep running, the dashboard being only a viewer of them. It asks
+// nothing first because nothing supervised is lost, and a project whose compose
+// file has no mux section comes back as the reason on the note line — the key
+// stays on offer for it, since a project can gain a dashboard between listings.
+func (m Model) muxDownSelected() (tea.Model, tea.Cmd) {
+	target, ok := m.downTarget()
+	if !ok {
+		return m, nil
+	}
+	m.note = "tearing down the dashboard of " + target.Project
+	return m, core.MuxDownCmd(m.bgCtx(), m.backend, target)
+}
+
+// confirmComposeDown is `D`: it asks before taking the project's commands away.
+// The launcher is where projects are brought up, so the key that takes one down
+// sits next to `s` and `S` — which is exactly why it does not act on the first
+// press.
+func (m Model) confirmComposeDown() (tea.Model, tea.Cmd) {
+	target, ok := m.downTarget()
+	if !ok {
+		return m, nil
+	}
+	m.pendingDown = target
+	return m, nil
+}
+
+// answerComposeDown spends the key the question was waiting for: y tears the
+// project down and anything else takes the question back. Either way the key is
+// used up rather than passed on — a key that cancelled and launched something
+// in one press would act on a row the user was still answering about.
+func (m Model) answerComposeDown(key string) (tea.Model, tea.Cmd) {
+	target := m.pendingDown
+	m.pendingDown = core.DownTarget{}
+	if key != "y" {
+		m.note = core.ComposeDownCancelled(target.Project)
+		return m, nil
+	}
+	m.note = ""
+	return m, core.ComposeDownCmd(m.bgCtx(), m.backend, target)
+}
+
+// downTarget names the project both teardowns act on: the one `S` would launch
+// — the row under the right cursor when that pane has the keyboard, else the
+// location's first enabled project. A row whose compose file is gone is not
+// refused here: its commands may well still be running, and the backend is what
+// knows whether the project can be resolved at all.
+func (m *Model) downTarget() (core.DownTarget, bool) {
+	li, ok := m.currentLoc()
+	if !ok {
+		return core.DownTarget{}, false
+	}
+	pi := m.pickProject(li)
+	if pi < 0 {
+		m.note = "no compose project here"
+		return core.DownTarget{}, false
+	}
+	t := m.target(li, pi)
+	return core.DownTarget{Project: t.Project, Path: t.File, WorkDir: t.WorkDir}, true
 }
 
 // drop removes a stale history entry, the offer D10 makes when resolution fails.

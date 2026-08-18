@@ -130,6 +130,12 @@ type ComposeSpec struct {
 	ComposeFile string
 	Project     string
 	WorkDir     string
+	// WorkDirDeclared reports that WorkDir was chosen — by the file's work_dir:
+	// or by the caller's override — rather than defaulted to the working
+	// directory the load happened to run in. A project that declares none runs
+	// wherever it is started from, which is a different thing from one that
+	// belongs to a directory.
+	WorkDirDeclared bool
 	// Commands preserves normalization order.
 	Commands []Command
 	// Mux is the embedded "mux:" layout from the compose file (nil when

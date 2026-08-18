@@ -33,19 +33,20 @@ type ProjectSelection struct {
 // pass as [mux.RunOptions.Identity] and [mux.DownOptions.Identity] for compose
 // mux dashboards.
 //
-// Returns "" when Project is empty (no project name = no stable identity;
-// callers should not build or tear down a dashboard for an unnamed project).
+// An unnamed project still gets one, hashed from the work directory alone: the
+// directory is the half of a project's identity that is always there, so two
+// unnamed projects in two directories own two windows rather than fighting over
+// the one window a shared name would have named.
 func (s ProjectSelection) ProjectIdentity() string {
-	if s.Project == "" {
-		return ""
-	}
 	return GenerateProjectIdentity(workdirHash(s.WorkDir), s.Project)
 }
 
 // MuxWindowName derives the cmdman-owned window name for a compose project:
 // "cmdman-<project>", or plain "cmdman" when the project is unnamed. It is the
 // value passed as [mux.RunOptions.WindowName] / [mux.DownOptions.WindowName] for
-// compose mux dashboards.
+// compose mux dashboards — the label the window wears, not what it is found by
+// (that is [ProjectSelection.ProjectIdentity]), so two projects sharing a name
+// may well share it.
 func (s ProjectSelection) MuxWindowName() string {
 	if s.Project != "" {
 		return "cmdman-" + s.Project

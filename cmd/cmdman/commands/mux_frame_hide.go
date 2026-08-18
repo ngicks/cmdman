@@ -13,8 +13,10 @@ func muxFrameHideCmd(parent *cobra.Command, parentSession *string) {
 		Short: "Take the frame around the current window down",
 		Long: `Take the frame around the current window down.
 
-The project region expands into the space it occupied. A window carrying no
-frame is a quiet no-op.
+The project region expands into the space it occupied. What comes down is the
+frame panes themselves, not whatever def the window recorded, so a window left
+holding frame panes under no def is cleaned up rather than skipped. A window
+holding no frame pane is a quiet no-op.
 
 The panes and their disposable viewers go away; a managed entry's supervised
 command keeps running, and showing the frame again attaches to it instead of

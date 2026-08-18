@@ -25,12 +25,12 @@ func windowOwnerOption(t *testing.T, socket, windowID string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// TestNew_StampsOwnerOption_FindOrCreate verifies that New stamps
-// @cmdman_window on the window when OwnedIdentity is set, using the
-// find-or-create path (Config.WindowID empty, ReuseCurrentWindow false).
+// TestNew_StampsOwnerOption_CreatePath verifies that New stamps
+// @cmdman_window on the window when OwnedIdentity is set, using the create
+// path (Config.WindowID empty, ReuseCurrentWindow false).
 // This is the primary stamping path exercised from outside tmux or from
 // a context where display-message client resolution is unavailable.
-func TestNew_StampsOwnerOption_FindOrCreate(t *testing.T) {
+func TestNew_StampsOwnerOption_CreatePath(t *testing.T) {
 	requireTmux(t)
 	socket := uniqueSocket(t)
 	t.Cleanup(func() { killServer(t, socket) })

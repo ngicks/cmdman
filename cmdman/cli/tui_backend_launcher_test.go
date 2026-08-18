@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -41,13 +42,16 @@ func TestLaunchAccumulatorMergesByRecency(t *testing.T) {
 	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
 	acc := &launchAccumulator{}
 	// History, newest first as the store returns it.
-	acc.add("/w/api", "api", "/w/api/cmd-compose.yaml", now, true)
-	acc.add("/w/web", "web", "/w/web/cmd-compose.yaml", now.Add(-time.Hour), true)
+	acc.add("/w/api", "api", "/w/api/cmd-compose.yaml", now, true, false)
+	acc.add("/w/web", "web", "/w/web/cmd-compose.yaml", now.Add(-time.Hour), true, false)
 	// The store listing repeats one of them and adds a co-located project.
-	acc.add("/w/api", "api", "/w/api/cmd-compose.yaml", time.Time{}, false)
-	acc.add("/w/api", "tools", "/w/api/tools.yaml", time.Time{}, false)
+	acc.add("/w/api", "api", "/w/api/cmd-compose.yaml", time.Time{}, false, false)
+	acc.add("/w/api", "tools", "/w/api/tools.yaml", time.Time{}, false, false)
+	// The compose config dir names one of the history projects too: a project
+	// known from both sources carries both flags rather than the later one only.
+	acc.add("/w/api", "api", "/w/api/cmd-compose.yaml", time.Time{}, false, true)
 	// A named def nobody has run: no history, so it sorts after the history rows.
-	acc.add("/w/never", "named", "/w/never/compose.yaml", time.Time{}, false)
+	acc.add("/w/never", "named", "/w/never/compose.yaml", time.Time{}, false, true)
 
 	locs := acc.locations(resolverFor(map[string]resolvedCompose{
 		"/w/api/cmd-compose.yaml": specWithMux("/w/api", "api", true),
@@ -80,6 +84,75 @@ func TestLaunchAccumulatorMergesByRecency(t *testing.T) {
 	if !api[0].HasMux || api[1].HasMux {
 		t.Errorf("the mux: section should be read per project: %+v", api)
 	}
+	// Both provenances are an OR, at the project and at the location: a project
+	// the config dir names and history knows is both, and the co-located project
+	// the config dir does not name stays unflagged even though its location is.
+	if !api[0].FromConfig || api[1].FromConfig {
+		t.Errorf("only the config-named project should be flagged: %+v", api)
+	}
+	if !locs[0].FromConfig || !locs[2].FromConfig {
+		t.Errorf("a location with a config-named project should say so: %+v", locs)
+	}
+	if locs[1].FromConfig {
+		t.Errorf("a location the config dir does not name must not claim it: %+v", locs[1])
+	}
+}
+
+// TestLaunchAccumulatorOffersUnpinnedProjects covers the config project that
+// declares no work_dir:: it is not a location of its own but an offer at every
+// location, dropped where the location already lists the project, and no reason
+// for a location to claim the config dir it came from.
+func TestLaunchAccumulatorOffersUnpinnedProjects(t *testing.T) {
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	acc := &launchAccumulator{}
+	acc.add("/w/api", "api", "/w/api/cmd-compose.yaml", now, true, false)
+	// devenv has been brought up here before, so this location already has a row
+	// for it — the one that carries the file it ran with and opens enabled.
+	acc.add("/w/api", "devenv", "/w/api/devenv.yaml", now.Add(-time.Hour), true, false)
+	acc.add("/w/store", "store", "/w/store/cmd-compose.yaml", time.Time{}, false, false)
+
+	acc.offer([]launchProj{
+		{name: "devenv", file: "/cfg/compose/devenv.yaml", fromConfig: true},
+		{name: "scratch", file: "/cfg/compose/scratch.yaml", fromConfig: true},
+	})
+
+	locs := acc.locations(resolverFor(map[string]resolvedCompose{
+		"/w/api/cmd-compose.yaml":   specWithMux("/w/api", "api", false),
+		"/w/api/devenv.yaml":        specWithMux("/w/api", "devenv", true),
+		"/w/store/cmd-compose.yaml": specWithMux("/w/store", "store", false),
+		"/cfg/compose/devenv.yaml":  specWithMux("", "devenv", true),
+		"/cfg/compose/scratch.yaml": specWithMux("", "scratch", false),
+	}), nil)
+
+	if len(locs) != 2 || locs[0].Dir != "/w/api" || locs[1].Dir != "/w/store" {
+		t.Fatalf("locations = %+v, want /w/api then /w/store", locs)
+	}
+	// The offered project the location already knows keeps its own row: one row
+	// for devenv, with the file and the provenance history recorded for it.
+	api := locs[0].Projects
+	if len(api) != 3 {
+		t.Fatalf("projects at /w/api = %+v, want api, devenv and the offered scratch", api)
+	}
+	if api[1].Name != "devenv" || api[1].File != "/w/api/devenv.yaml" || !api[1].FromHistory {
+		t.Errorf("devenv at /w/api = %+v, want the history row it already had", api[1])
+	}
+	// Offered rows land after the rows that are really there, in name order.
+	if api[2].Name != "scratch" || !api[2].FromConfig || api[2].FromHistory {
+		t.Errorf("the offered row = %+v, want scratch known from the config dir only", api[2])
+	}
+	store := locs[1].Projects
+	if len(store) != 3 ||
+		store[0].Name != "store" || store[1].Name != "devenv" || store[2].Name != "scratch" {
+		t.Fatalf("projects at /w/store = %+v, want store then the offered two by name", store)
+	}
+	// Every location is offered them, and none of them makes a location one the
+	// empty input lists: the config dir names the project, not the place.
+	if locs[0].FromConfig || locs[1].FromConfig {
+		t.Errorf("an offered project should flag no location: %+v", locs)
+	}
+	if locs[1].FromHistory {
+		t.Errorf("a store-derived location must not claim history: %+v", locs[1])
+	}
 }
 
 // TestLaunchRunningIdentityUsesComposeWorkdir is the check that a fake cannot
@@ -95,8 +168,8 @@ func TestLaunchRunningIdentityUsesComposeWorkdir(t *testing.T) {
 	}
 
 	acc := &launchAccumulator{}
-	acc.add(spec.WorkDir, spec.Project, "/w/api/cmd-compose.yaml", time.Now(), true)
-	acc.add("/w/api", "tools", "/w/api/tools.yaml", time.Time{}, false)
+	acc.add(spec.WorkDir, spec.Project, "/w/api/cmd-compose.yaml", time.Now(), true, false)
+	acc.add("/w/api", "tools", "/w/api/tools.yaml", time.Time{}, false, false)
 
 	locs := acc.locations(resolverFor(map[string]resolvedCompose{
 		"/w/api/cmd-compose.yaml": specWithMux("/w/api", "api", true),
@@ -108,6 +181,218 @@ func TestLaunchRunningIdentityUsesComposeWorkdir(t *testing.T) {
 	}
 	if locs[0].Projects[1].Running {
 		t.Errorf("a project with no window of its own must not read as running")
+	}
+}
+
+// TestListLaunchTargetsFlagsConfigProjects covers the provenance the listing
+// carries for a project the compose config dir names. It goes through the
+// backend rather than the accumulator because the flag's whole point is which
+// of the merged sources a row came from, and only the listing knows that.
+func TestListLaunchTargetsFlagsConfigProjects(t *testing.T) {
+	// The compose config dir is derived from $CMDMAN_CONF; without the override
+	// the listing would discover the projects the developer keeps in their own.
+	conf := t.TempDir()
+	t.Setenv("CMDMAN_CONF", filepath.Join(conf, "config.json"))
+	// work_dir: is declared so the row lands in a directory of the test's own
+	// rather than wherever the process happens to stand.
+	workDir := t.TempDir()
+	writeComposeFile(t, filepath.Join(conf, "compose", "named.yaml"),
+		"name: named\nwork_dir: "+workDir+"\ncommands:\n  a:\n    args: [echo, a]\n")
+	// An empty directory to stand in, so the cwd-project arm of the merge adds
+	// nothing and the named project is the only thing there is to find.
+	t.Chdir(t.TempDir())
+
+	svc := cmdman.NewService(frameSvcConfig(t))
+	defer svc.Close()
+	b := &serviceBackend{svc: svc, compose: compose.NewService(svc)}
+
+	locs, err := b.ListLaunchTargets(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(locs, func(l tui.LaunchLocation) bool { return l.Dir == workDir })
+	if i < 0 {
+		t.Fatalf("locations = %+v, want the named project at %s", locs, workDir)
+	}
+	loc := locs[i]
+	if !loc.FromConfig || loc.FromHistory {
+		t.Errorf("location = %+v, want it known from the config dir and not from history", loc)
+	}
+	if len(loc.Projects) != 1 || loc.Projects[0].Name != "named" {
+		t.Fatalf("projects = %+v, want the named project", loc.Projects)
+	}
+	if p := loc.Projects[0]; !p.FromConfig || p.FromHistory {
+		t.Errorf("project = %+v, want it known from the config dir and not from history", p)
+	}
+}
+
+// TestListLaunchTargetsOffersWorkDirLessConfigProjects covers the split the
+// config dir gets: a project that declares work_dir: is one row at that
+// directory, and one that declares none is offered at every location instead of
+// being pinned to wherever the launcher was summoned from — which for the
+// "devenv" project the user keeps around is the whole point, since the directory
+// it should come up in is the one they are about to select.
+func TestListLaunchTargetsOffersWorkDirLessConfigProjects(t *testing.T) {
+	conf := t.TempDir()
+	t.Setenv("CMDMAN_CONF", filepath.Join(conf, "config.json"))
+	pinnedDir := t.TempDir()
+	writeComposeFile(t, filepath.Join(conf, "compose", "pinned.yaml"),
+		"name: pinned\nwork_dir: "+pinnedDir+"\ncommands:\n  a:\n    args: [echo, a]\n")
+	devenvFile := filepath.Join(conf, "compose", "devenv.yaml")
+	writeComposeFile(t, devenvFile, "name: devenv\ncommands:\n  a:\n    args: [echo, a]\n")
+	// An empty directory to stand in: the cwd is exactly where the work_dir-less
+	// project must not land.
+	t.Chdir(t.TempDir())
+
+	svc := cmdman.NewService(frameSvcConfig(t))
+	defer svc.Close()
+	// Two history locations: one that has never seen devenv, and one the user has
+	// already brought it up in.
+	apiDir, usedDir := t.TempDir(), t.TempDir()
+	for _, h := range []cmdman.ComposeHistoryRequest{
+		{WorkDir: apiDir, Project: "api", File: filepath.Join(apiDir, "cmd-compose.yaml")},
+		{WorkDir: usedDir, Project: "devenv", File: devenvFile},
+	} {
+		if err := svc.RecordComposeHistory(t.Context(), h); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	b := &serviceBackend{svc: svc, compose: compose.NewService(svc)}
+	locs, err := b.ListLaunchTargets(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	byDir := map[string]tui.LaunchLocation{}
+	for _, l := range locs {
+		byDir[l.Dir] = l
+	}
+	for _, dir := range []string{pinnedDir, apiDir, usedDir} {
+		if _, ok := byDir[dir]; !ok {
+			t.Fatalf("locations = %+v, want one at %s", locs, dir)
+		}
+	}
+	if _, ok := byDir[cwdOf(t)]; ok {
+		t.Errorf("locations = %+v, want no row at the launcher's own directory", locs)
+	}
+
+	// The pinned project is one row at the directory it declares, and it is
+	// offered the work_dir-less one like every other location.
+	pinned := byDir[pinnedDir]
+	if !pinned.FromConfig {
+		t.Errorf("the pinned location = %+v, want it known from the config dir", pinned)
+	}
+	if names := projectNames(pinned); len(names) != 2 ||
+		names[0] != "pinned" || names[1] != "devenv" {
+		t.Fatalf("projects at %s = %v, want pinned then the offered devenv", pinnedDir, names)
+	}
+
+	// A history location is offered it too, and stays a history location: the
+	// offer is a project to start here, not a reason to list the place.
+	api := byDir[apiDir]
+	if names := projectNames(api); len(names) != 2 || names[0] != "api" || names[1] != "devenv" {
+		t.Fatalf("projects at %s = %v, want api then the offered devenv", apiDir, names)
+	}
+	if api.FromConfig || !api.FromHistory {
+		t.Errorf("the history location = %+v, want it unchanged by the offer", api)
+	}
+	if p := api.Projects[1]; !p.FromConfig || p.FromHistory || p.File != devenvFile {
+		t.Errorf("the offered project = %+v, want the config file it comes from", p)
+	}
+
+	// Where the project has been brought up before, the history row is what
+	// stands: one row, still the enabled one.
+	used := byDir[usedDir]
+	if names := projectNames(used); len(names) != 1 || names[0] != "devenv" {
+		t.Fatalf("projects at %s = %v, want the history row alone", usedDir, names)
+	}
+	if p := used.Projects[0]; !p.FromHistory {
+		t.Errorf("devenv at %s = %+v, want the history row to win", usedDir, p)
+	}
+}
+
+// TestResolveLaunchDirOffersWorkDirLessConfigProjects is the other half of the
+// same promise (D28): a directory the user types is a place to start the
+// work_dir-less config projects too, and starting one there really does resolve
+// the project to that directory.
+func TestResolveLaunchDirOffersWorkDirLessConfigProjects(t *testing.T) {
+	conf := t.TempDir()
+	t.Setenv("CMDMAN_CONF", filepath.Join(conf, "config.json"))
+	devenvFile := filepath.Join(conf, "compose", "devenv.yaml")
+	writeComposeFile(t, devenvFile, "name: devenv\ncommands:\n  a:\n    args: [echo, a]\n")
+	// The process stands somewhere else entirely, which is the directory the
+	// offered project would have been pinned to.
+	t.Chdir(t.TempDir())
+
+	resolver := &composeResolver{}
+	pinned, floating := namedConfigProjects(resolver)
+	if len(pinned) != 0 {
+		t.Fatalf("pinned = %+v, want none: the project declares no work_dir:", pinned)
+	}
+	if len(floating) != 1 || floating[0].name != "devenv" || floating[0].file != devenvFile {
+		t.Fatalf("offered = %+v, want devenv from %s", floating, devenvFile)
+	}
+
+	// A directory with no compose file, no history and nothing ever run in it.
+	dir := t.TempDir()
+	loc, err := resolveLaunchDir(t.Context(), dir, nil, floating, resolver, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loc.Dir != dir {
+		t.Errorf("Dir = %q, want the typed directory %q", loc.Dir, dir)
+	}
+	if loc.FromHistory || loc.FromConfig {
+		t.Errorf("location = %+v, want a row the empty input still does not list", loc)
+	}
+	if len(loc.Projects) != 1 {
+		t.Fatalf("projects = %+v, want devenv offered at the typed directory", loc.Projects)
+	}
+	p := loc.Projects[0]
+	if p.Name != "devenv" || p.File != devenvFile || !p.FromConfig || p.FromHistory {
+		t.Fatalf("project = %+v, want the config row for devenv at %s", p, devenvFile)
+	}
+
+	// What the launcher would launch: the spec resolves to the directory the row
+	// stands in, not to the one the process is in.
+	spec, err := loadLaunchSpec(tui.LaunchTarget{
+		WorkDir: loc.Dir, Project: p.Name, File: p.File,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.WorkDir != dir {
+		t.Errorf("spec work dir = %q, want the typed directory %q", spec.WorkDir, dir)
+	}
+	if spec.Project != "devenv" || spec.ComposeFile != devenvFile {
+		t.Errorf("spec = %+v, want the devenv project from %s", spec, devenvFile)
+	}
+}
+
+func projectNames(loc tui.LaunchLocation) []string {
+	names := make([]string, 0, len(loc.Projects))
+	for _, p := range loc.Projects {
+		names = append(names, p.Name)
+	}
+	return names
+}
+
+func cwdOf(t *testing.T) string {
+	t.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cwd
+}
+
+func writeComposeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -136,7 +421,7 @@ func TestResolveLaunchDir(t *testing.T) {
 		{WorkDir: filepath.Join(dir, "elsewhere"), Project: "other", File: "other.yaml"},
 	}
 
-	loc, err := resolveLaunchDir(t.Context(), dir, history, nil)
+	loc, err := resolveLaunchDir(t.Context(), dir, history, nil, &composeResolver{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +446,7 @@ func TestResolveLaunchDir(t *testing.T) {
 
 	// The same directory with nothing recorded: the compose file standing there
 	// is found on its own, which is what the merge above has to have merged.
-	loc, err = resolveLaunchDir(t.Context(), dir, nil, nil)
+	loc, err = resolveLaunchDir(t.Context(), dir, nil, nil, &composeResolver{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +460,7 @@ func TestResolveLaunchDir(t *testing.T) {
 	// A directory with no compose file and no history of its own: still a
 	// location, and the projects it has none of are not an error.
 	plain := t.TempDir()
-	loc, err = resolveLaunchDir(t.Context(), plain, history, nil)
+	loc, err = resolveLaunchDir(t.Context(), plain, history, nil, &composeResolver{}, nil)
 	if err != nil {
 		t.Fatalf("a directory with nothing to run should resolve, got %v", err)
 	}

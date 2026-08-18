@@ -25,17 +25,19 @@ type DownOptions struct {
 	// optional for teardown: omitting it restores every matching dashboard
 	// server-wide.
 	SessionName string
-	// WindowName is used solely for identity derivation when Identity is empty
-	// (standalone-mux default). It is NOT used as a session-filter fallback.
-	// Empty defaults to the resolved session name, exactly as [Run] does.
+	// WindowName is used solely for identity derivation when Identity is empty —
+	// the standalone-mux default, the only caller that leaves Identity unset. It
+	// is NOT used as a session-filter fallback. Empty defaults to the resolved
+	// session name, exactly as [Run] does.
 	WindowName string
 	// Identity is the opaque ownership string passed to [muxctl.Server.ListWindows]
 	// as the filter. When empty, it is derived the same way [Run] defaults it:
-	// resolveSessionName → windowName default → identity = windowName. This
-	// derivation is the documented standalone-mux limitation (a dashboard built
-	// with the default naming in a different session resolves a different
-	// identity). Compose callers always pass Identity explicitly, which
-	// eliminates the context-dependence entirely.
+	// resolveSessionName → windowName default → identity = windowName. That
+	// derivation is session-local, which is the standalone-mux limitation: a
+	// dashboard built with the default naming in a different session resolves a
+	// different identity. Compose callers always pass Identity explicitly —
+	// unnamed projects included, since the work directory alone identifies one —
+	// which eliminates the context-dependence entirely.
 	Identity string
 	// Env is the process env consulted for driver autodetection. Empty defaults
 	// to os.Environ().
@@ -53,9 +55,10 @@ type DownOptions struct {
 // are torn down.
 //
 // A frame shown around the dashboard is not the project's to remove: the
-// window is left framed and projectless, ready for the next `mux up`. Removing
-// the frame is the frame verbs' own teardown, and whichever of the two goes
-// last hands the window back whole.
+// window is left framed and projectless. With the ownership stamp gone the
+// next `mux up` no longer recognises it and builds a fresh window beside it.
+// Removing the frame is the frame verbs' own teardown, and whichever of the
+// two goes last hands the window back whole.
 //
 // Down enumerates windows via [muxctl.Server.ListWindows], which requires no
 // $TMUX context and works from any pane, from run-shell, or from outside

@@ -11,7 +11,14 @@ type Config struct {
 	// SessionName is required unless WindowID is set.
 	SessionName string
 
-	// WindowName is required when WindowID is empty.
+	// WindowName is required when WindowID is empty. It is display-only — the
+	// label the window wears — and never a lookup key: [Server.New] creates a
+	// window under it rather than adopting an existing one that happens to
+	// answer to it. Nothing keeps it unique or stable (the user renames
+	// windows, in-pane programs set the title, multiplexers rewrite it
+	// automatically), so a caller looking for a window it already owns
+	// enumerates by [Config.OwnedIdentity] via [Server.ListWindows] and passes
+	// the row's WindowID back in.
 	WindowName string
 
 	// WindowID directly targets an existing driver-native window.
@@ -22,7 +29,8 @@ type Config struct {
 	OwnedIdentity string
 
 	// ReuseCurrentWindow permits taking over the caller's current window when
-	// WindowID is empty; otherwise the server finds or creates WindowName.
+	// WindowID is empty; otherwise the server creates a window named
+	// WindowName.
 	//
 	// Only a window that is safe to take over is: one already stamped with this
 	// same OwnedIdentity (so a re-run cycles in place), one holding a frame but
@@ -89,9 +97,10 @@ type Window struct {
 
 	WindowID string
 
-	// WindowName is the human-visible window name. It may differ from Identity
-	// — a takeover window keeps its original name while the stamp records the
-	// cmdman-assigned ownership value.
+	// WindowName is the human-visible window name, for display and diagnostics
+	// only. It is neither unique nor stable — a takeover window keeps its
+	// original name, two projects may wear the same one, and a rename changes
+	// it under everybody — so [Identity] is what says which window this is.
 	WindowName string
 
 	// Identity is the opaque [Config.OwnedIdentity] stamp.
@@ -177,9 +186,16 @@ type Driver interface {
 // enumeration, leaf-find, per-window state) must work from any calling context
 // with no attached session, while the per-session operations live on [Session].
 type Server interface {
-	// New builds (or finds-or-creates) the cmdman-owned window described by
-	// cfg and returns a Session controlling it. It applies no layout — call
-	// [Session.ApplyLayout] to populate the window.
+	// New builds the cmdman-owned window described by cfg and returns a Session
+	// controlling it: the window cfg.WindowID names, the caller's current window
+	// when cfg.ReuseCurrentWindow accepts it, or a newly created one. It applies
+	// no layout — call [Session.ApplyLayout] to populate the window.
+	//
+	// New never looks a window up by [Config.WindowName]: names are display
+	// labels, so reaching a window built earlier is done by enumerating with
+	// [Server.ListWindows] and passing the row's WindowID back in. Find-or-create
+	// is therefore the caller's own two calls, which is where it belongs — only
+	// the caller knows what counts as its window.
 	New(ctx context.Context, cfg Config) (Session, error)
 
 	// Open locates an already-existing cmdman-owned window WITHOUT creating one

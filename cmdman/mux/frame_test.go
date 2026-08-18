@@ -561,6 +561,44 @@ func TestFrameHide(t *testing.T) {
 			t.Errorf("project panes = %v, want [web worker] untouched by hide", got)
 		}
 	})
+
+	t.Run("a frame the window no longer names comes down too", func(t *testing.T) {
+		frameDefs(t, "dev")
+		socket, windowID := framedWindow(t, "abc123-myproject", "dev")
+		bin := tmuxOrSkip(t)
+
+		// What a teardown that died after clearing the state leaves behind: the
+		// frame's panes standing, the window naming no def. Nothing but hide can
+		// reach those panes, so it must act on the stamps rather than on the state.
+		tmuxRun(t, bin, socket, "set-option", "-w", "-u", "-t", windowID, "@cmdman_frame_def")
+
+		ctx := context.Background()
+		if err := FrameHide(ctx, frameOpts(socket)); err != nil {
+			t.Fatalf("FrameHide on a window naming no def: %v", err)
+		}
+		if got := framePaneCount(t, bin, socket, windowID); got != 0 {
+			t.Errorf("frame panes after hide = %d, want none", got)
+		}
+		if got := projectPaneTitles(t, bin, socket, windowID); !slices.Equal(
+			got, []string{"web", "worker"},
+		) {
+			t.Errorf("project panes = %v, want [web worker] untouched by hide", got)
+		}
+
+		// And the window is showable again, which is what the leftovers used to
+		// stand in the way of.
+		opts := frameOpts(socket)
+		opts.Def = "dev"
+		if err := FrameShow(ctx, opts); err != nil {
+			t.Fatalf("FrameShow after the recovery hide: %v", err)
+		}
+		if got := framePaneCount(t, bin, socket, windowID); got != 1 {
+			t.Errorf("frame panes after the show = %d, want the def's one dock", got)
+		}
+		if got := shownDef(t, bin, socket, windowID); got != "dev" {
+			t.Errorf("@cmdman_frame_def = %q, want dev", got)
+		}
+	})
 }
 
 // TestFrameCycle_WalksSortedDefsAndWraps is V3: the rotation is the sorted def

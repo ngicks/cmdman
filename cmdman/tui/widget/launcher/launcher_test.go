@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -118,6 +119,155 @@ func TestLauncherHistoryIsTheOpeningList(t *testing.T) {
 	m = typeInto(t, m, "blog")
 	if got := leftLabels(m); len(got) != 1 || got[0] != "blog(main)" {
 		t.Fatalf("filtering to a never-launched location = %v, want [blog(main)]", got)
+	}
+}
+
+// launcherConfigFixture is the listing with the compose config dir in it: two
+// history locations, two locations that exist only because the config dir names
+// them, and one that is merely on disk. The config rows arrive out of name order
+// so the opening list has to sort them rather than echo what it was handed.
+func launcherConfigFixture() []core.LaunchLocation {
+	base := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	return []core.LaunchLocation{
+		{
+			Dir: "/home/u/gitrepo/cmdman", RepoName: "cmdman", Branch: "main",
+			LastUsed: base, FromHistory: true,
+			Projects: []core.LaunchProject{
+				{Name: "devenv", File: "devenv.yaml", FromHistory: true, HasMux: true},
+			},
+		},
+		{
+			Dir: "/home/u/src/webapp", RepoName: "webapp", Branch: "feat/auth",
+			LastUsed: base.Add(-time.Hour), FromHistory: true,
+			Projects: []core.LaunchProject{
+				{Name: "staging", File: "compose.yaml", FromHistory: true, HasMux: true},
+			},
+		},
+		{
+			Dir: "/home/u/cfg/zeta", FromConfig: true,
+			Projects: []core.LaunchProject{
+				{Name: "zeta", File: "zeta.yaml", FromConfig: true, HasMux: true},
+			},
+		},
+		{
+			Dir: "/home/u/cfg/alpha", FromConfig: true,
+			Projects: []core.LaunchProject{
+				{Name: "alpha", File: "alpha.yaml", FromConfig: true, HasMux: true},
+			},
+		},
+		{
+			// Neither known from history nor named in the config dir: discovered in
+			// the store or in the working directory, so the filter has to reach it.
+			Dir: "/home/u/src/blog", RepoName: "blog", Branch: "main",
+			Projects: []core.LaunchProject{{Name: "blog", File: "compose.yaml", HasMux: true}},
+		},
+	}
+}
+
+func seedLauncherWith(t *testing.T, locs []core.LaunchLocation) (Model, *coretest.FakeBackend) {
+	t.Helper()
+	fb := &coretest.FakeBackend{LaunchLocs: locs}
+	m := New(
+		context.Background(),
+		core.Options{Backend: fb, Widget: core.WidgetLauncher, Version: "v0.0.0-test"},
+	)
+	m = updLauncher(t, m, tea.WindowSizeMsg{Width: 100, Height: 20})
+	return updLauncher(t, m, launchTargetsLoadedMsg{locs: fb.LaunchLocs}), fb
+}
+
+// TestLauncherConfigDirOpensWithHistory is the opening list once the compose
+// config dir has a say: a project the user keeps around is worth showing before
+// it has ever been launched, so the config-dir locations join the history ones
+// under the empty input. They come after them and by name — a location never
+// launched from has no recency to be placed by — and a location that is merely
+// on disk still waits for the filter.
+func TestLauncherConfigDirOpensWithHistory(t *testing.T) {
+	m, _ := seedLauncherWith(t, launcherConfigFixture())
+
+	want := []string{"cmdman(main)", "webapp(feat/auth)", "alpha", "zeta"}
+	if got := leftLabels(m); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("opening list = %v, want %v", got, want)
+	}
+
+	// The config-only location is selectable, and the project under it is what the
+	// right pane offers there.
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+	for range 2 {
+		m = updLauncher(t, m, coretest.Kr("j"))
+	}
+	li, ok := m.currentLoc()
+	if !ok || m.locs[li].Dir != "/home/u/cfg/alpha" {
+		t.Fatalf("the cursor should reach the config-dir location, got %d/%v", li, ok)
+	}
+	if ps := m.locs[li].projects; len(ps) != 1 || ps[0].Name != "alpha" {
+		t.Fatalf("projects at the config-dir location = %v, want [alpha]", ps)
+	}
+
+	m = updLauncher(t, m, coretest.Kr("/")) // back to the input zone
+	m = typeInto(t, m, "blog")
+	if got := leftLabels(m); len(got) != 1 || got[0] != "blog(main)" {
+		t.Fatalf("filtering to the on-disk location = %v, want [blog(main)]", got)
+	}
+}
+
+// TestLauncherConfigProjectsStartDisabled is the other half of letting the
+// config dir into the opening list: a project that was never run must not join a
+// bulk `s` aimed at the ones the user actually works with. It opens disabled and
+// space is what puts it in the batch.
+func TestLauncherConfigProjectsStartDisabled(t *testing.T) {
+	m, fb := seedLauncherWith(t, []core.LaunchLocation{{
+		Dir: "/home/u/gitrepo/cmdman", RepoName: "cmdman", Branch: "main",
+		LastUsed: time.Now(), FromHistory: true, FromConfig: true,
+		Projects: []core.LaunchProject{
+			{Name: "devenv", File: "devenv.yaml", FromHistory: true, HasMux: true},
+			{Name: "sandbox", File: "sandbox.yaml", FromConfig: true, HasMux: true},
+		},
+	}})
+	if !m.locs[0].projects[0].enabled {
+		t.Fatalf("a history project should open enabled")
+	}
+	if m.locs[0].projects[1].enabled {
+		t.Fatalf("a config-dir project that was never run should open disabled")
+	}
+
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+	next, cmd := m.Update(coretest.Kr("s"))
+	m = next.(Model)
+	drainLauncherCmd(t, cmd)
+	if len(fb.StartedProjects) != 1 || fb.StartedProjects[0].Project != "devenv" {
+		t.Fatalf("s started %v, want only the history project", fb.StartedProjects)
+	}
+
+	m = updLauncher(t, m, coretest.KEnter) // into the right list
+	m = updLauncher(t, m, coretest.Kr("j"))
+	m = updLauncher(t, m, coretest.Kr(" "))
+	if !m.locs[0].projects[1].enabled {
+		t.Fatalf("space should put the config-dir project in the batch")
+	}
+	next, cmd = m.Update(coretest.Kr("s"))
+	m = next.(Model)
+	drainLauncherCmd(t, cmd)
+	if len(fb.StartedProjects) != 2 || fb.StartedProjects[1].Project != "sandbox" {
+		t.Fatalf("s after the toggle started %v, want sandbox as well", fb.StartedProjects)
+	}
+
+	// A location whose only project came from the config dir has nothing enabled
+	// at all, so `s` there says so instead of starting anything.
+	m, fb = seedLauncherWith(t, []core.LaunchLocation{{
+		Dir: "/home/u/cfg/alpha", FromConfig: true,
+		Projects: []core.LaunchProject{
+			{Name: "alpha", File: "alpha.yaml", FromConfig: true, HasMux: true},
+		},
+	}})
+	m = updLauncher(t, m, coretest.KEnter)
+	next, cmd = m.Update(coretest.Kr("s"))
+	m = next.(Model)
+	drainLauncherCmd(t, cmd)
+	if len(fb.StartedProjects) != 0 {
+		t.Errorf("s started %v at a config-only location, want nothing", fb.StartedProjects)
+	}
+	if !strings.Contains(m.note, "nothing enabled") {
+		t.Errorf("s with nothing enabled noted %q, want the space hint", m.note)
 	}
 }
 
@@ -466,6 +616,168 @@ func TestLauncherStaleEntry(t *testing.T) {
 	m = updLauncher(t, m, launcherForgotMsg{target: fb.ForgotTargets[0]})
 	if len(m.locs[2].projects) != 0 {
 		t.Errorf("a forgotten entry should leave the list")
+	}
+}
+
+// launcherFooterText is the footer as it is read, styling stripped.
+func launcherFooterText(m Model) string {
+	return core.StripANSI(strings.Join(m.footerLines(), "\n"))
+}
+
+// TestLauncherMuxDown covers `d`: the dashboard of the project `S` would launch
+// goes away and its commands stay up, so the key acts on the first press and
+// names the project the way a launch names it — file and directory included.
+func TestLauncherMuxDown(t *testing.T) {
+	m, fb := seedLauncher(t, 100, 20)
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+
+	if hints := launcherFooterText(m); !strings.Contains(hints, "d/D down") {
+		t.Errorf("a list should hint at the teardowns: %q", hints)
+	}
+
+	next, cmd := m.Update(coretest.Kr("d"))
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatalf("d should issue work")
+	}
+	m = updLauncher(t, m, cmd())
+
+	want := []coretest.DownCall{{
+		Project: "devenv", Path: "devenv.yaml", Workdir: "/home/u/gitrepo/cmdman",
+	}}
+	if !slices.Equal(fb.MuxDowns, want) {
+		t.Fatalf("d tore down %v, want %v", fb.MuxDowns, want)
+	}
+	if len(fb.ComposeDowns) != 0 {
+		t.Fatalf("d must leave the commands alone, compose downs = %v", fb.ComposeDowns)
+	}
+	if !strings.Contains(m.note, "commands still running") {
+		t.Errorf("d should say what it left up, note = %q", m.note)
+	}
+
+	// A project whose compose file declares no dashboard is the everyday
+	// refusal, and the key stays on offer for it.
+	fb.MuxDownErr = errors.New("project \"devenv\" has no mux: section")
+	next, cmd = m.Update(coretest.Kr("d"))
+	m = updLauncher(t, next.(Model), cmd())
+	if !strings.Contains(m.note, "no mux: section") {
+		t.Errorf("a refused teardown should be reported, note = %q", m.note)
+	}
+
+	// In the input zone every key is text, teardowns included.
+	typed, fb2 := seedLauncher(t, 100, 20)
+	typed = typeInto(t, typed, "dD")
+	if typed.filter != "dD" || len(fb2.MuxDowns) != 0 || len(fb2.ComposeDowns) != 0 {
+		t.Errorf("typing d/D left filter %q and tore down %v / %v",
+			typed.filter, fb2.MuxDowns, fb2.ComposeDowns)
+	}
+}
+
+// TestLauncherComposeDownConfirms covers `D`: it takes away every command of
+// the project, so the first press only asks. y goes ahead and reports what the
+// teardown did; any other key takes the question back and is spent doing so.
+func TestLauncherComposeDownConfirms(t *testing.T) {
+	m, fb := seedLauncher(t, 100, 20)
+	fb.ComposeDownSummary = core.DownSummary{Stopped: 3, Removed: 2}
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+
+	next, cmd := m.Update(coretest.Kr("D"))
+	m = next.(Model)
+	if cmd != nil {
+		t.Fatalf("D on its own should dispatch nothing")
+	}
+	if len(fb.ComposeDowns) != 0 {
+		t.Fatalf("D on its own tore down %v", fb.ComposeDowns)
+	}
+	if foot := launcherFooterText(m); !strings.Contains(foot, "compose down devenv? y/n") {
+		t.Fatalf("D should ask before it acts, footer = %q", foot)
+	}
+
+	cancelled, cmd := m.Update(coretest.Kr("j"))
+	if cmd != nil || len(fb.ComposeDowns) != 0 {
+		t.Fatalf("a key that is not y should tear nothing down, %v", fb.ComposeDowns)
+	}
+	if got := cancelled.(Model); got.leftSel != 0 {
+		t.Errorf("the key that cancelled should not also move the cursor, leftSel = %d",
+			got.leftSel)
+	} else if !strings.Contains(got.note, "cancelled") {
+		t.Errorf("a cancelled teardown should say so, note = %q", got.note)
+	}
+	// With the question answered the same key is a movement key again.
+	if moved := updLauncher(t, cancelled.(Model), coretest.Kr("j")); moved.leftSel != 1 {
+		t.Errorf("j after the question should move again, leftSel = %d", moved.leftSel)
+	}
+
+	next, cmd = m.Update(coretest.Kr("y"))
+	if cmd == nil {
+		t.Fatalf("y should issue the teardown")
+	}
+	m = updLauncher(t, next.(Model), cmd())
+	want := []coretest.DownCall{{
+		Project: "devenv", Path: "devenv.yaml", Workdir: "/home/u/gitrepo/cmdman",
+	}}
+	if !slices.Equal(fb.ComposeDowns, want) {
+		t.Fatalf("y tore down %v, want %v", fb.ComposeDowns, want)
+	}
+	if len(fb.MuxDowns) != 0 {
+		t.Errorf("D must not touch the dashboard, mux downs = %v", fb.MuxDowns)
+	}
+	if !strings.Contains(m.note, "stopped 3, removed 2") {
+		t.Errorf("the teardown should report what it did, note = %q", m.note)
+	}
+}
+
+// TestLauncherComposeDownTakesTheProjectUnderTheCursor pins what the two keys
+// act on: the project `S` would launch, which on the projects pane is the row
+// the cursor is on rather than the location's first enabled one.
+func TestLauncherComposeDownTakesTheProjectUnderTheCursor(t *testing.T) {
+	m, fb := seedLauncher(t, 100, 20)
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+	m = updLauncher(t, m, coretest.KEnter) // into the projects pane
+	m = updLauncher(t, m, coretest.Kr("j"))
+
+	next, cmd := m.Update(coretest.Kr("D"))
+	m = next.(Model)
+	if cmd != nil {
+		t.Fatalf("D on its own should dispatch nothing")
+	}
+	if foot := launcherFooterText(m); !strings.Contains(foot, "compose down test? y/n") {
+		t.Fatalf("D should ask about the row under the cursor, footer = %q", foot)
+	}
+	next, cmd = m.Update(coretest.Kr("y"))
+	updLauncher(t, next.(Model), cmd())
+	want := []coretest.DownCall{{
+		Project: "test", Path: "test.yaml", Workdir: "/home/u/gitrepo/cmdman",
+	}}
+	if !slices.Equal(fb.ComposeDowns, want) {
+		t.Fatalf("y tore down %v, want %v", fb.ComposeDowns, want)
+	}
+}
+
+// TestLauncherComposeDownReportsPartialTeardown pins the half a non-nil error
+// must not hide: a teardown that failed on one command still tore the others
+// down, and both belong on the note line. The question also outlives a bring-up
+// reporting back under it, since the next key still answers it.
+func TestLauncherComposeDownReportsPartialTeardown(t *testing.T) {
+	m, fb := seedLauncher(t, 100, 20)
+	fb.ComposeDownSummary = core.DownSummary{Stopped: 2, Removed: 1}
+	fb.ComposeDownErr = errors.New("remove watcher: still running")
+	m = updLauncher(t, m, coretest.KEnter)
+
+	next, _ := m.Update(coretest.Kr("D"))
+	m = next.(Model)
+	m = updLauncher(t, m, launcherStartedMsg{target: core.LaunchTarget{
+		WorkDir: "/home/u/src/webapp", Project: "staging",
+	}})
+	if foot := launcherFooterText(m); !strings.Contains(foot, "compose down devenv? y/n") {
+		t.Fatalf("the question should outlive a reply landing under it, footer = %q", foot)
+	}
+
+	next, cmd := m.Update(coretest.Kr("y"))
+	m = updLauncher(t, next.(Model), cmd())
+	if !strings.Contains(m.note, "stopped 2, removed 1") ||
+		!strings.Contains(m.note, "remove watcher: still running") {
+		t.Errorf("a partial teardown should report both halves, note = %q", m.note)
 	}
 }
 

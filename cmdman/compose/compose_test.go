@@ -162,6 +162,25 @@ func TestWorkDirDefaultIsCWD(t *testing.T) {
 	spec, err := normalizeFromFile(t, testdataPath("basic.yaml"), compose.NormalizeOpts{})
 	assert.NilError(t, err)
 	assert.Equal(t, spec.WorkDir, filepath.Clean(cwd))
+	// Falling back to the working directory is not a declaration: a caller has to
+	// be able to tell a project that belongs to a directory from one that merely
+	// loaded in whichever directory the process stood in.
+	assert.Equal(t, spec.WorkDirDeclared, false)
+}
+
+func TestWorkDirDeclaredJudgedAfterInterpolation(t *testing.T) {
+	cwd, err := os.Getwd()
+	assert.NilError(t, err)
+
+	// work_dir: ${UNSET} substitutes to "" and lands in the cwd fallback — it
+	// must read as undeclared, or the launcher would pin the project to
+	// whichever directory the process stood in.
+	spec, err := normalizeFromFile(t, testdataPath("basic.yaml"), compose.NormalizeOpts{
+		WorkDir: "${CMDMAN_TEST_WORKDIR_THAT_IS_NEVER_SET}",
+	})
+	assert.NilError(t, err)
+	assert.Equal(t, spec.WorkDir, filepath.Clean(cwd))
+	assert.Equal(t, spec.WorkDirDeclared, false)
 }
 
 func TestWorkDirOverride(t *testing.T) {
@@ -170,6 +189,7 @@ func TestWorkDirOverride(t *testing.T) {
 	})
 	assert.NilError(t, err)
 	assert.Equal(t, spec.WorkDir, "/tmp")
+	assert.Equal(t, spec.WorkDirDeclared, true)
 }
 
 // ---- workdir hash determinism -----------------------------------------------

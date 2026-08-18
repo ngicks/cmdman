@@ -17,6 +17,7 @@ type (
 
 	ProjectManagerInfo = core.ProjectManagerInfo
 	ServiceScaleInfo   = core.ServiceScaleInfo
+	DownSummary        = core.DownSummary
 
 	EventSignal        = core.EventSignal
 	EventStream        = core.EventStream

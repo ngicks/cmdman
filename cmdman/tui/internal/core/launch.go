@@ -22,6 +22,10 @@ type LaunchProject struct {
 	// FromHistory reports that the project was brought up before, which is what
 	// makes it enabled on open.
 	FromHistory bool
+	// FromConfig reports that the project was discovered via the compose config
+	// dir (compose.ListNamedProjects), which is what makes it a project the user
+	// keeps around rather than one that merely happens to sit in a directory.
+	FromConfig bool
 	// Running reports that a mux window carrying this project's identity exists.
 	Running bool
 	// HasMux reports that the compose file declares a mux: section. A project
@@ -54,6 +58,11 @@ type LaunchLocation struct {
 	// FromHistory reports that at least one project here is known from history,
 	// which is what the empty-input history list shows.
 	FromHistory bool
+	// FromConfig reports that a config project is pinned at this directory (a
+	// named compose file declaring it as work_dir). A work_dir-less config
+	// project offered here does not set it: offers follow the selection and
+	// must not make a location visible on the empty filter.
+	FromConfig bool
 	// Projects are the compose projects at this location.
 	Projects []LaunchProject
 }

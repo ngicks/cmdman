@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"bytes"
+	"strings"
 	"sync"
 	"time"
 
@@ -153,9 +154,23 @@ func (s *commandRuntimeState) subscribeChange() (<-chan struct{}, func()) {
 	return s.changes.Subscribe()
 }
 
+// sanitizeTermString makes a string captured from raw terminal bytes safe to
+// store. The emulator can hand over invalid UTF-8 — its parser cuts an OSC
+// string at a C1 byte even mid-rune, so "✳ done" (U+2733 = E2 9C B3, 0x9C is
+// C1 ST) arrives as the lone byte "\xe2" — and one invalid latched string
+// fails proto marshaling of every Status / WatchRuntimeState response, which
+// readers render as no runtime state at all: every column goes dark, not just
+// the title. Sanitizing at the latch covers proto, the hook dispatcher and any
+// future consumer at once; the replacement rune keeps a mangled title visible
+// instead of silently dropping it.
+func sanitizeTermString(s string) string {
+	return strings.ToValidUTF8(s, "�")
+}
+
 // latchTitle records the window title. The hook fires on a real change only: a
 // shell retitles on every prompt, and a title is a value, not an occurrence.
 func (s *commandRuntimeState) latchTitle(title string) {
+	title = sanitizeTermString(title)
 	changed := s.mutate(func() bool {
 		if s.title == title {
 			return false
@@ -192,6 +207,7 @@ func (s *commandRuntimeState) latchBell() {
 // latchNotification records the newest notification. Every notification is an
 // event of its own, so a repeat of an identical one still counts as a change.
 func (s *commandRuntimeState) latchNotification(title, body string) {
+	title, body = sanitizeTermString(title), sanitizeTermString(body)
 	now := time.Now()
 	s.mutate(func() bool {
 		s.notif = &notificationEvent{Title: title, Body: body, At: now}

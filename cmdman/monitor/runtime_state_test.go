@@ -2,7 +2,10 @@ package monitor
 
 import (
 	"testing"
+	"unicode/utf8"
 
+	pb "github.com/ngicks/cmdman/api/gen/proto/go/cmdman/v1"
+	"google.golang.org/protobuf/proto"
 	"gotest.tools/v3/assert"
 )
 
@@ -37,6 +40,54 @@ func TestCommandRuntimeState_LatchesTitle(t *testing.T) {
 
 	feed("\x1b]0;second title\x1b\\")
 	assert.Equal(t, st.snapshot().Title, "second title")
+}
+
+func TestCommandRuntimeState_SanitizesInvalidUTF8(t *testing.T) {
+	st, feed := runtimeStateFeed(t)
+
+	// The vendored parser keeps a 0x9C continuation byte (the middle of "✳",
+	// E2 9C B3) inside the OSC string, so a glyph title arrives whole. The
+	// unpatched parser cut it there and handed the latch the invalid fragment
+	// "\xe2" — which the sanitizing below still guards against.
+	feed("\x1b]0;✳ Mermaid-cli lint hook\x07")
+	title := st.snapshot().Title
+	assert.Assert(t, utf8.ValidString(title), "latched title %q is invalid UTF-8", title)
+	assert.Equal(t, title, "✳ Mermaid-cli lint hook")
+
+	// The latch itself must sanitize whatever an emulator hands it: a raw
+	// invalid fragment stores as a valid-UTF-8, visibly degraded title.
+	st.latchTitle("\xe2")
+	assert.Equal(t, st.snapshot().Title, "�")
+
+	// Repeating the mangled title is still not a change.
+	changed, unsub := st.subscribeChange()
+	t.Cleanup(unsub)
+	st.latchTitle("\xe2")
+	assert.Assert(t, !woke(changed))
+
+	// A notification's title and body come off the same raw byte path.
+	st.latchNotification("\xe2 alert", "body \xff")
+	notif := st.snapshot().Notification
+	assert.Equal(t, notif.Title, "� alert")
+	assert.Equal(t, notif.Body, "body �")
+}
+
+// TestProtoRuntimeState_MarshalsMangledTitle pins the consequence the
+// sanitizing exists for: one invalid-UTF-8 latched string used to fail
+// proto.Marshal of every Status / WatchRuntimeState response, blanking all
+// runtime columns for the command instead of just degrading the title. The
+// mangled fragment is latched directly — the vendored parser no longer
+// produces one from a glyph title, and the guard must hold either way.
+func TestProtoRuntimeState_MarshalsMangledTitle(t *testing.T) {
+	st, feed := runtimeStateFeed(t)
+
+	feed("\x1b]0;✳ done\x07")
+	st.latchTitle("\xe2")
+
+	_, err := proto.Marshal(&pb.StatusResponse{
+		RuntimeState: protoRuntimeState(st.snapshot().view()),
+	})
+	assert.NilError(t, err)
 }
 
 func TestCommandRuntimeState_LatchesBell(t *testing.T) {

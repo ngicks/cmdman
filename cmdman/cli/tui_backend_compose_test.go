@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/compose"
 	"github.com/ngicks/cmdman/cmdman/tui"
 )
@@ -125,6 +126,63 @@ func TestComposeFilePathReturnsExplicitPath(t *testing.T) {
 	}
 	if got != "/etc/compose/tools.yaml" {
 		t.Fatalf("an explicit composeFile should pass through, got %q", got)
+	}
+}
+
+const downComposeYAML = `name: downproj
+commands:
+  a:
+    args: [echo, a]
+  b:
+    args: [echo, b]
+`
+
+// TestComposeDownSummarizesTheTeardown drives the teardown against a real
+// cmdman service so the counts come from the store rather than from a fake that
+// could only echo them back. The commands are created and never started, which
+// spawns no monitor: a created command is already terminal, so the stop phase
+// covers it as a no-op and the remove phase is what actually takes it away.
+func TestComposeDownSummarizesTheTeardown(t *testing.T) {
+	// The compose config dir is derived from $CMDMAN_CONF; without the override
+	// the resolution would reach the projects the developer keeps in their own.
+	conf := t.TempDir()
+	t.Setenv("CMDMAN_CONF", filepath.Join(conf, "config.json"))
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cmd-compose.yaml")
+	if err := os.WriteFile(path, []byte(downComposeYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	svc := cmdman.NewService(frameSvcConfig(t))
+	defer svc.Close()
+	composeSvc := compose.NewService(svc)
+
+	spec, err := compose.LoadAndNormalize(compose.NormalizeOpts{WorkDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := composeSvc.Create(t.Context(), spec, compose.CreateOption{}); err != nil {
+		t.Fatal(err)
+	}
+
+	b := &serviceBackend{svc: svc, compose: composeSvc, workDir: dir}
+	summary, err := b.ComposeDown(t.Context(), "downproj", path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Stopped != 2 || summary.Removed != 2 {
+		t.Fatalf("summary = %+v, want both phases to cover the project's two commands", summary)
+	}
+
+	cmds, err := b.ListCommands(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cmds {
+		if c.Project == "downproj" {
+			t.Fatalf("command %q survived the teardown", c.Name)
+		}
 	}
 }
 

@@ -252,11 +252,17 @@ func (m Model) clamp() Model {
 }
 
 // footerLines is the hint line plus, above it, whatever the last key produced:
-// the action in flight, its failure, or its note. Only one of the three can be
-// showing — a key clears the previous one before it acts.
+// a teardown waiting to be confirmed, the action in flight, its failure, or its
+// note. Only one of them can be showing — a key clears the previous one before
+// it acts — and the question comes first, since the next key answers it.
 func (m Model) footerLines() []string {
 	hints := core.StyleActive.Render(m.hintText())
 	switch {
+	case m.pendingDown.Project != "":
+		return []string{
+			styleManagerWork.Render("· " + core.ComposeDownPrompt(m.pendingDown.Project)),
+			hints,
+		}
 	case m.pending != "":
 		return []string{styleManagerWork.Render("· " + m.pending), hints}
 	case m.errMsg != "":
@@ -270,15 +276,15 @@ func (m Model) footerLines() []string {
 }
 
 func (m Model) hintText() string {
-	full := "j/k move · tab → layouts · +/- replicas · l/h shown replica · r reload"
+	full := "j/k move · tab → layouts · +/- replicas · l/h shown replica · d/D down · r reload"
 	if m.focus == zoneLayouts {
-		full = "j/k move · tab → services · enter apply · c cycle · r reload"
+		full = "j/k move · tab → services · enter apply · c cycle · d/D down · r reload"
 	}
 	if !m.noQuit {
 		full += " · q quit"
 	}
 	if m.width < lipgloss.Width(full) {
-		full = "j/k move · tab zone · +/- · l/h · enter · c · r"
+		full = "j/k move · tab zone · +/- · l/h · enter · c · d/D · r"
 	}
 	return full
 }

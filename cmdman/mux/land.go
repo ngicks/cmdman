@@ -25,8 +25,10 @@ type LandOptions struct {
 	// defaults to the resolved session name, as in [Run].
 	WindowName string
 	// Identity is the ownership stamp searched for, and stamped on a window this
-	// call creates. Empty derives it the way [Run] and [Down] do (window name,
-	// else session name).
+	// call creates. Compose callers always supply one — a project has an identity
+	// of its own whether or not it is named (compose.ProjectSelection.
+	// ProjectIdentity). Empty is the standalone default and derives it the way
+	// [Run] and [Down] do (window name, else session name).
 	Identity string
 	// WorkDir is the directory a created window's shell starts in — the project
 	// directory, so D9's synthesized window opens where the project lives. It is
@@ -107,7 +109,7 @@ func Land(ctx context.Context, opts LandOptions) (LandResult, error) {
 	}
 
 	var res LandResult
-	if row, ok := pickLandingWindow(rows, sessionName); ok {
+	if row, ok := pickOwnedWindow(rows, sessionName); ok {
 		res.SessionName, res.WindowID = row.SessionName, row.WindowID
 	} else {
 		sess, err := server.New(ctx, muxctl.Config{
@@ -143,10 +145,12 @@ func Land(ctx context.Context, opts LandOptions) (LandResult, error) {
 	return res, nil
 }
 
-// pickLandingWindow chooses which of the identity's windows to land on. A window
-// in the caller's own session wins: the same project brought up in two sessions
-// should take the caller to the one next door, not drag their client elsewhere.
-func pickLandingWindow(rows []muxctl.Window, sessionName string) (muxctl.Window, bool) {
+// pickOwnedWindow chooses which of the identity's windows an operation acts on.
+// A window in the caller's own session wins: the same project brought up in two
+// sessions should take the caller to the one next door, not drag their client
+// elsewhere — and [Run] should cycle the dashboard they can see rather than one
+// in a session nobody is looking at.
+func pickOwnedWindow(rows []muxctl.Window, sessionName string) (muxctl.Window, bool) {
 	if len(rows) == 0 {
 		return muxctl.Window{}, false
 	}

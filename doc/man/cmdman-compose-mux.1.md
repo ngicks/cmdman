@@ -48,6 +48,12 @@ Inside tmux, the current session is selected by default. Outside tmux, the
 session defaults to `cmdman` and an attach hint is printed. The owned window is
 named `cmdman-PROJECT`.
 
+That name is a label only. Which window belongs to a project is decided by the
+ownership stamp `up` writes, derived from the work directory and the project
+name — so the same project name in two directories gets a window each, and a
+window renamed after it was built is still found. `down`, `ls` and
+`cycle-scale` go by the same stamp.
+
 When no compose file is explicitly selected, `compose mux` selects a compose
 associated with the current directory that declares a mux section. Ambiguous
 selection is an error. Unlike other compose commands, a missing mux section is

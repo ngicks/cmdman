@@ -139,6 +139,12 @@ type Session interface {
 	// calls HideFrame. Selecting or cycling frames is HideFrame followed by
 	// ShowFrame.
 	//
+	// Which panes are the frame's is the driver's own record, never the
+	// [StateKeyFrameDef] value: a driver MUST take down the frame panes of a
+	// window whose recorded def has gone empty or stale. That is what makes
+	// hiding the way back from a teardown that died partway, and it is why a
+	// consumer may call HideFrame on a window it cannot name a frame for.
+	//
 	// HideFrame is the frame side's teardown, the counterpart to [Detach]: it
 	// clears the frame's state and nothing else, and it never changes what the
 	// main region runs. When the frame was the last driver state on the window,

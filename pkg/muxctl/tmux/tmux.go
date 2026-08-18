@@ -86,10 +86,16 @@ func (srv *Server) CurrentWindowID(
 	return out, true, nil
 }
 
-// New constructs a Session targeting either a known window (cfg.WindowID)
-// or a window found-or-created by name (cfg.SessionName + cfg.WindowName).
-// It does not apply any layout — call [Session.ApplyLayout] to populate
-// the window.
+// New constructs a Session targeting either a known window (cfg.WindowID) or a
+// freshly created one named cfg.WindowName in cfg.SessionName. It does not apply
+// any layout — call [Session.ApplyLayout] to populate the window.
+//
+// Without a cfg.WindowID New always CREATES: an existing window of the same name
+// is never adopted, because a window name is display-only (the user renames it,
+// a program sets it via OSC 2, tmux automatic-rename rewrites it) and two
+// projects may well want the same one. Finding the window a caller already owns
+// is the caller's job, through [Server.ListWindows] filtered by identity, and it
+// hands the result back as cfg.WindowID.
 //
 // With cfg.ReuseCurrentWindow the caller's current window is taken over instead
 // when it is this caller's own (its @cmdman_window slot holds
@@ -121,16 +127,16 @@ func (srv *Server) New(ctx context.Context, cfg muxctl.Config) (muxctl.Session, 
 			if err := ensureSession(ctx, e, cfg.SessionName, cfg.StartDirectory); err != nil {
 				return nil, fmt.Errorf("tmux: ensure session %q: %w", cfg.SessionName, err)
 			}
-			found, err := findOrCreateWindow(
+			created, err := createWindow(
 				ctx, e, cfg.SessionName, cfg.WindowName, cfg.StartDirectory,
 			)
 			if err != nil {
 				return nil, fmt.Errorf(
-					"tmux: find-or-create window %q in session %q: %w",
+					"tmux: create window %q in session %q: %w",
 					cfg.WindowName, cfg.SessionName, err,
 				)
 			}
-			wid = found
+			wid = created
 		}
 	}
 
@@ -260,7 +266,12 @@ func ensureSession(ctx context.Context, e *executor, name, startDir string) erro
 
 // findWindow looks up a window by exact name within the session and returns
 // its @id. ok is false (with a nil error) when no such window exists. It never
-// creates a window — see findOrCreateWindow for the create-on-miss variant.
+// creates a window.
+//
+// A name is a weak key — it is not unique within a session and the user, the
+// in-pane program, or tmux itself may change it — so this is the last resort
+// [Server.Open] falls back to when it has no window id and no current window to
+// go by. Nothing that builds a window resolves one this way.
 func findWindow(
 	ctx context.Context,
 	e *executor,
@@ -283,22 +294,25 @@ func findWindow(
 	return "", false, nil
 }
 
-// findOrCreateWindow looks up a window by exact name within the session
-// and returns its @id. If no such window exists, one is created
-// (detached, with a default shell pane started in startDir when that is
-// non-empty) and its @id is returned.
-func findOrCreateWindow(
+// createWindow appends a window named windowName to the session (detached, with
+// a default shell pane started in startDir when that is non-empty) and returns
+// its @id. An existing window of the same name is left alone: tmux allows
+// duplicate window names, and the name says what the window displays, never
+// which window this is.
+//
+// The target is "-a -t =<session>:{end}" — insert after the session's last
+// window — rather than the session alone. tmux resolves a bare "-t <session>"
+// against window NAMES first, so a session holding a window named like it (the
+// standalone dashboard: window "cmdman" in session "cmdman") or like a prefix of
+// it resolves to that window's index and the create fails with "index N in use".
+// Naming the insertion point leaves no name for tmux to match.
+func createWindow(
 	ctx context.Context,
 	e *executor,
 	sessionName, windowName, startDir string,
 ) (string, error) {
-	if id, ok, err := findWindow(ctx, e, sessionName, windowName); err != nil {
-		return "", err
-	} else if ok {
-		return id, nil
-	}
 	args := []string{
-		"new-window", "-d", "-t", sessionName,
+		"new-window", "-d", "-a", "-t", "=" + sessionName + ":{end}",
 		"-n", windowName,
 		"-P", "-F", "#{window_id}",
 	}

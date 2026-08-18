@@ -22,19 +22,25 @@ type RunOptions struct {
 	// is set). If detection fails or we are not inside tmux, falls back to
 	// "cmdman". A non-empty value is used verbatim as an explicit override.
 	SessionName string
-	// WindowName names the cmdman-owned window within SessionName. Empty
-	// defaults to SessionName. Plan/mux-00: standalone mux uses "cmdman";
-	// compose mux passes "cmdman-<project>".
+	// WindowName is the label a window created by this call wears (standalone
+	// mux uses "cmdman"; compose mux passes "cmdman-<project>"). Empty defaults
+	// to SessionName. It is display-only: which window this project already
+	// holds is answered by Identity, so a window renamed since it was built is
+	// still found, and a same-named window belonging to somebody else is never
+	// mistaken for it.
 	WindowName string
 	// Identity is the opaque ownership string stamped on the window as the
-	// @cmdman_window tmux user option, enabling server-wide discovery and
-	// reliable teardown via [Down]. Callers set this to a stable,
-	// context-independent value:
+	// @cmdman_window tmux user option. It is what says which window is this
+	// project's: [Run] reuses the window carrying it, and server-wide discovery
+	// and teardown via [Down] go by the same stamp. Callers set this to a
+	// stable, context-independent value:
 	//
 	//   - compose mux:    <wdhash>-<escaped-project>  (see compose.GenerateProjectIdentity)
-	//   - standalone mux: empty here — defaults to the resolved window name
-	//     (session-local, so [Down] with the same spec finds it within the
-	//     same session; see the known-limitation note in PLAN.md).
+	//   - standalone mux: empty here — defaults to the resolved window name.
+	//     A spec is not tied to a directory the way a compose project is, so
+	//     there is nothing context-independent to hash; the resulting identity
+	//     is session-local, and [Down] with the same spec finds it within the
+	//     same session.
 	//
 	// The identity is separate from the window name: a takeover window keeps
 	// its original name but is stamped with the identity, so find-by-identity
@@ -50,8 +56,24 @@ type RunOptions struct {
 	// Layout selects a specific layout to apply instead of cycling. It accepts
 	// a layout name or a 0-based index (e.g. "2"). A name is matched first, so
 	// a layout literally named "2" wins over index 2. Empty (the default)
-	// cycles to the next layout after the one currently applied.
+	// cycles to the next layout after the one currently applied, unless
+	// KeepLayout says otherwise.
 	Layout string
+	// KeepLayout makes an empty Layout mean "the layout already applied" instead
+	// of "the next one": an existing window re-applies the layout its marker
+	// records (clamped into range, in case the spec lost layouts since), and its
+	// marker stays where it was. A fresh window has no layout to keep and starts
+	// at index 0, exactly as a cycling Run does.
+	//
+	// Callers whose gesture is "make this project running" set it — bringing a
+	// project up is not a request to advance its layout, and a user who left the
+	// dashboard on the layout they wanted should find it there. Callers whose
+	// gesture is about the layout itself (the cycle key, `mux up`) leave it
+	// unset, which is what keeps repeated invocations cycling.
+	//
+	// A non-empty Layout wins: an explicit selector is already an answer to
+	// which layout to apply, so KeepLayout is ignored.
+	KeepLayout bool
 	// Config is the resolved cmdman configuration. Only DefaultFrame is read —
 	// it names the frame [Run] docks around the window it just brought up (V9),
 	// exactly as [FrameOptions.Config] names the one the frame verbs fall back
@@ -82,12 +104,19 @@ type RunOptions struct {
 var viewerDetachKeys = []string{"C-p", "C-q"}
 
 // Run applies one layout from spec to the configured driver's cmdman-owned
-// window. When opts.Layout is set, that named/indexed layout is applied
+// window: the window already stamped with opts.Identity when the project has
+// one, else a window built for it. Reuse goes by the stamp alone — a window
+// renamed since it was built is still the project's, and a same-named window
+// belonging to another project (two checkouts of one repo, brought up from
+// different directories) is not.
+//
+// When opts.Layout is set, that named/indexed layout is applied
 // directly; otherwise the applied layout index is `(previousMarker+1) mod
 // len(Layouts)`, read back from the existing window via
-// [muxctl.Session.StatWindow] (a fresh window starts at index 0). Either way
-// the applied index is persisted as the window marker, so a subsequent cycling
-// Run continues from the layout just shown.
+// [muxctl.Session.StatWindow] (a fresh window starts at index 0) — or the
+// previous marker itself when opts.KeepLayout asks for the layout already
+// applied. Either way the applied index is persisted as the window marker, so a
+// subsequent cycling Run continues from the layout just shown.
 //
 // A configured opts.Config.DefaultFrame is then shown around the window (V9),
 // so a dashboard arrives inside its chrome without the user placing a frame per
@@ -156,13 +185,43 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 		explicitIdx = idx
 	}
 
-	sess, err := server.New(ctx, muxctl.Config{
+	// Find the project's own window before building one, exactly as [Land] and
+	// [Down] do: the identity stamp is what says which window is this project's,
+	// and it is the cmdman side that knows it. The driver is only ever told
+	// "this window" or "make one".
+	rows, err := server.ListWindows(ctx, muxctl.ListOptions{
+		Session:  opts.SessionName,
+		Identity: identity,
+	})
+	if err != nil {
+		return fmt.Errorf("mux: enumerate owned windows: %w", err)
+	}
+
+	cfg := muxctl.Config{
 		SessionName:        sessionName,
 		WindowName:         windowName,
 		OwnedIdentity:      identity,
 		ReuseCurrentWindow: reuseCurrent,
 		ViewerDetachKeys:   viewerDetachKeys,
-	})
+	}
+	// attachSession is where the window the up acted on actually lives: the
+	// reuse path can pick a window in another session (the search is
+	// server-wide unless the caller pinned one), and the attach hint must name
+	// that session, not the one a create would have used.
+	attachSession := sessionName
+	if row, ok := pickOwnedWindow(rows, sessionName); ok {
+		// Target the window by id and leave the rest of the config out: the
+		// window is already ours, so neither the name it currently wears nor the
+		// current-window takeover has anything left to decide.
+		cfg = muxctl.Config{
+			WindowID:         row.WindowID,
+			OwnedIdentity:    identity,
+			ViewerDetachKeys: viewerDetachKeys,
+		}
+		attachSession = row.SessionName
+	}
+
+	sess, err := server.New(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -175,7 +234,14 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 		}
 		nextIdx = 0
 		if stat.Marker >= 0 {
-			nextIdx = (stat.Marker + 1) % len(spec.Layouts)
+			if opts.KeepLayout {
+				// The marker is clamped rather than trusted: it was written
+				// against whatever the spec held then, and a spec that has since
+				// lost layouts would index past the end of the one in hand.
+				nextIdx = min(stat.Marker, len(spec.Layouts)-1)
+			} else {
+				nextIdx = (stat.Marker + 1) % len(spec.Layouts)
+			}
 		}
 	}
 	if _, err := sess.ApplyLayout(ctx, spec.Layouts[nextIdx].Root, nextIdx); err != nil {
@@ -194,7 +260,7 @@ func Run(ctx context.Context, spec muxctl.MuxSpec, opts RunOptions) error {
 	}
 
 	if envOf(env, "TMUX") == "" && envOf(env, "ZELLIJ") == "" {
-		fmt.Fprintf(stdout, "Attach: tmux attach -t %s\n", sessionName)
+		fmt.Fprintf(stdout, "Attach: tmux attach -t %s\n", attachSession)
 	}
 	return nil
 }

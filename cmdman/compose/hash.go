@@ -50,7 +50,9 @@ func GenerateName(wdHash, project, command string) string {
 // wdHash must be the value returned by workdirHash for the project's canonical
 // working directory; project is the resolved project name. Both match the
 // inputs to [GenerateName], so the identity is always a strict prefix of any
-// generated command name for this project.
+// generated command name for this project. An empty project name is a name like
+// any other here ("<wdHash>-"): the work directory alone still tells one
+// unnamed project from another.
 func GenerateProjectIdentity(wdHash, project string) string {
 	return wdHash + "-" + escapeName(project)
 }
