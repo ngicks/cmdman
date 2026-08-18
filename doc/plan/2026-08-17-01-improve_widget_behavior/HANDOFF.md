@@ -94,7 +94,7 @@ charmbracelet/x#848 (with two open fix PRs: #946, the UTF-8
 continuation-byte counter, and #886, which drops 8-bit ST entirely; the
 actual defect lives in `x/ansi`'s parser, which `x/vt` uses). PR #946
 applied cleanly to the pinned `x/ansi v0.11.7`; it is vendored at
-`third_party/charmbracelet-x-ansi` behind a `replace` directive, its
+`internal/third_party/charmbracelet-x-ansi` behind a `replace` directive, its
 module tests and cmdman's full suite pass, and glyph titles now latch
 whole (the phantom bell is gone too). A confirmation comment for
 PR #946 is drafted at `pr946-comment.md` next to this file — posting it
@@ -102,7 +102,7 @@ from this environment failed (the gh token cannot comment on foreign
 repos), so it awaits a manual post.
 
 **Follow-up**: track charmbracelet/x#946; when a release containing the
-fix ships, delete `third_party/charmbracelet-x-ansi` plus the `replace`
-and bump the dep (see `third_party/README.md`). The latch-side sanitize
+fix ships, delete `internal/third_party/charmbracelet-x-ansi` plus the `replace`
+and bump the dep (see `internal/third_party/README.md`). The latch-side sanitize
 (D11) stays regardless, as the guard against any future parser
 misbehavior.

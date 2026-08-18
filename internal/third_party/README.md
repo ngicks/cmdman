@@ -1,7 +1,10 @@
-# third_party
+# internal/third_party
 
 Vendored dependencies carrying local patches, wired in via `replace`
-directives in the root `go.mod`.
+directives in the root `go.mod`. Placed under `internal/` to signal the
+copies are this module's build detail, not an API for anyone else — note
+a `replace` only binds this module's own build anyway: a downstream
+importer of cmdman resolves the unpatched upstream release.
 
 ## charmbracelet-x-ansi
 

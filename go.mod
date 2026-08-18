@@ -92,4 +92,4 @@ require (
 
 tool github.com/sqlc-dev/sqlc/cmd/sqlc
 
-replace github.com/charmbracelet/x/ansi => ./third_party/charmbracelet-x-ansi
+replace github.com/charmbracelet/x/ansi => ./internal/third_party/charmbracelet-x-ansi
