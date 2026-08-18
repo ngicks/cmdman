@@ -3,7 +3,7 @@ package ansi
 import (
 	"strings"
 
-	"github.com/charmbracelet/x/ansi/parser"
+	"github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-ansi/parser"
 	"github.com/clipperhouse/displaywidth"
 	"github.com/clipperhouse/uax29/v2/graphemes"
 )

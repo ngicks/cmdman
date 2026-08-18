@@ -4,7 +4,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/charmbracelet/x/ansi"
+	"github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-ansi"
 )
 
 func TestReset(t *testing.T) {

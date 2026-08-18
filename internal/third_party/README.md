@@ -1,10 +1,13 @@
 # internal/third_party
 
-Vendored dependencies carrying local patches, wired in via `replace`
-directives in the root `go.mod`. Placed under `internal/` to signal the
-copies are this module's build detail, not an API for anyone else — note
-a `replace` only binds this module's own build anyway: a downstream
-importer of cmdman resolves the unpatched upstream release.
+Vendored dependencies carrying local patches. The copies are part of this
+module (no `go.mod` of their own, no `replace` directives — a `replace`
+would make `go install github.com/ngicks/cmdman/cmd/cmdman@<version>`
+refuse the module) and are imported by their
+`github.com/ngicks/cmdman/internal/third_party/...` paths. Placed under
+`internal/` to signal the copies are this module's build detail, not an
+API for anyone else. `.golangci.yaml` excludes the directory from lint
+and formatting so the copies keep upstream style.
 
 ## charmbracelet-x-ansi
 
@@ -17,6 +20,28 @@ data, cutting titles like `✳ done` (U+2733 = `E2 9C B3`) mid-rune. The
 monitor latched the invalid fragment, which broke proto marshaling of
 every runtime-state response.
 
-Drop this vendored copy (delete the directory and the `replace`
-directive, then bump the dep) once a release containing the fix is
-published upstream.
+## charmbracelet-x-vt
+
+`github.com/charmbracelet/x/vt` **v0.0.0-20260622092256-25656177ba8e**,
+unpatched except for the rewiring below. Vendored because `vt.Emulator`
+constructs `ansi.NewParser()` itself: only a copy whose imports point at
+the patched `charmbracelet-x-ansi` above gives the monitor's emulator the
+fixed parser — the upstream release would resolve the unpatched ansi and
+reintroduce the mid-rune OSC cut.
+
+Local deviations from upstream:
+
+- All `github.com/charmbracelet/x/ansi` imports point at the vendored
+  copy.
+- `csi_sgr.go` and `mouse.go` convert between the vendored and upstream
+  ansi types at the `charmbracelet/ultraviolet` boundary
+  (`uv.ReadStyle` takes the upstream `ansi.Params`; `uv.MouseButton`
+  aliases the upstream `ansi.MouseButton`).
+
+## Unwinding
+
+Once a `charmbracelet/x/ansi` release containing the #946 fix is
+published: delete both directories, restore the plain
+`github.com/charmbracelet/x/ansi` / `github.com/charmbracelet/x/vt`
+imports throughout, bump the deps, and drop the `internal/third_party`
+exclusions from `.golangci.yaml`.

@@ -52,10 +52,18 @@ linters:
       # Tab width in spaces.
       # Default: 1
       tab-width: 2
+  exclusions:
+    paths:
+      # Vendored upstream code keeps upstream style; only the patches
+      # documented in internal/third_party/README.md diverge from it.
+      - internal/third_party
 formatters:
   enable:
     - goimports
     - golines
+  exclusions:
+    paths:
+      - internal/third_party
   settings:
     golines:
       # Shorten single-line comments.

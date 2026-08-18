@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
+	ansi "github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-ansi"
 )
 
 // Cells measures raw glyphs with East-Asian *Ambiguous* characters pinned to

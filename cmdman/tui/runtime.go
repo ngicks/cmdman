@@ -9,11 +9,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/vt"
 	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
+	ansi "github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-ansi"
+	vt "github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-vt"
 )
 
 // previewMaxLines caps the in-memory preview buffer.

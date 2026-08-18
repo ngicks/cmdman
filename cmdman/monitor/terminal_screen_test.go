@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/x/vt"
+	vt "github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-vt"
 )
 
 // renderVia replays raw in a fresh cols-by-rows emulator and returns its screen.

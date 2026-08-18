@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
+	ansi "github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-ansi"
 )
 
 // sanitizePreviewLine keeps printable text and SGR styling while dropping

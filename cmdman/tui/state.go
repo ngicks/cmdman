@@ -5,7 +5,7 @@ import (
 	"context"
 	"slices"
 
-	"github.com/charmbracelet/x/vt"
+	vt "github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-vt"
 
 	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )

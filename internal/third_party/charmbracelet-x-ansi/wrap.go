@@ -6,7 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/x/ansi/parser"
+	"github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-ansi/parser"
 )
 
 // nbsp is a non-breaking space.

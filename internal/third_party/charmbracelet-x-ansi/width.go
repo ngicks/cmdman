@@ -3,7 +3,7 @@ package ansi
 import (
 	"bytes"
 
-	"github.com/charmbracelet/x/ansi/parser"
+	"github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-ansi/parser"
 )
 
 // Strip removes ANSI escape codes from a string.

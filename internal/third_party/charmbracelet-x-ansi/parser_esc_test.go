@@ -3,7 +3,7 @@ package ansi
 import (
 	"testing"
 
-	"github.com/charmbracelet/x/ansi/parser"
+	"github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-ansi/parser"
 )
 
 func TestEscSequence(t *testing.T) {

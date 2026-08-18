@@ -10,10 +10,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/charmbracelet/x/vt"
 	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
+	vt "github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-vt"
 )
 
 func TestEventSignalSchedulesDebouncedRelist(t *testing.T) {

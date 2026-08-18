@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/x/ansi"
+	"github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-ansi"
 )
 
 var cases = []struct {

@@ -3,8 +3,8 @@ package switcher
 import (
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
+	ansi "github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-ansi"
 )
 
 // switcherLine is one rendered line of the scrollable region together with the

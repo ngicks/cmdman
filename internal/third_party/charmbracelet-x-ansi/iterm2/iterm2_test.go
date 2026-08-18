@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"testing"
 
-	"github.com/charmbracelet/x/ansi"
+	"github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-ansi"
 )
 
 func TestITerm2(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/x/vt"
 	"github.com/ngicks/cmdman/cmdman/model"
+	vt "github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-vt"
 )
 
 // notificationEvent is a desktop notification a command asked for through

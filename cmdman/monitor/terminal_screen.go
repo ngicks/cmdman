@@ -6,8 +6,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/vt"
+	ansi "github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-ansi"
+	vt "github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-vt"
 )
 
 // screenTracker preserves a TTY command's current screen after raw scrollback

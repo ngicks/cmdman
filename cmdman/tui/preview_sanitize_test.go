@@ -5,8 +5,7 @@ import (
 	"testing"
 
 	"github.com/ngicks/cmdman/cmdman/tui/internal/coretest"
-
-	"github.com/charmbracelet/x/ansi"
+	ansi "github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-ansi"
 )
 
 func TestSanitizePreviewLineKeepsSGRAndText(t *testing.T) {
