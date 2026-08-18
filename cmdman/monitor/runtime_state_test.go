@@ -45,14 +45,19 @@ func TestCommandRuntimeState_LatchesTitle(t *testing.T) {
 func TestCommandRuntimeState_SanitizesInvalidUTF8(t *testing.T) {
 	st, feed := runtimeStateFeed(t)
 
-	// The emulator cuts an OSC string at a raw C1 byte even mid-rune: the 0x9C
-	// inside "✳" (E2 9C B3) reads as ST, so the callback gets the invalid
-	// fragment "\xe2". The latch must store a valid-UTF-8, visibly degraded
-	// title, never the raw fragment.
+	// The vendored parser keeps a 0x9C continuation byte (the middle of "✳",
+	// E2 9C B3) inside the OSC string, so a glyph title arrives whole. The
+	// unpatched parser cut it there and handed the latch the invalid fragment
+	// "\xe2" — which the sanitizing below still guards against.
 	feed("\x1b]0;✳ Mermaid-cli lint hook\x07")
 	title := st.snapshot().Title
 	assert.Assert(t, utf8.ValidString(title), "latched title %q is invalid UTF-8", title)
-	assert.Equal(t, title, "�")
+	assert.Equal(t, title, "✳ Mermaid-cli lint hook")
+
+	// The latch itself must sanitize whatever an emulator hands it: a raw
+	// invalid fragment stores as a valid-UTF-8, visibly degraded title.
+	st.latchTitle("\xe2")
+	assert.Equal(t, st.snapshot().Title, "�")
 
 	// Repeating the mangled title is still not a change.
 	changed, unsub := st.subscribeChange()
@@ -70,11 +75,14 @@ func TestCommandRuntimeState_SanitizesInvalidUTF8(t *testing.T) {
 // TestProtoRuntimeState_MarshalsMangledTitle pins the consequence the
 // sanitizing exists for: one invalid-UTF-8 latched string used to fail
 // proto.Marshal of every Status / WatchRuntimeState response, blanking all
-// runtime columns for the command instead of just degrading the title.
+// runtime columns for the command instead of just degrading the title. The
+// mangled fragment is latched directly — the vendored parser no longer
+// produces one from a glyph title, and the guard must hold either way.
 func TestProtoRuntimeState_MarshalsMangledTitle(t *testing.T) {
 	st, feed := runtimeStateFeed(t)
 
 	feed("\x1b]0;✳ done\x07")
+	st.latchTitle("\xe2")
 
 	_, err := proto.Marshal(&pb.StatusResponse{
 		RuntimeState: protoRuntimeState(st.snapshot().view()),

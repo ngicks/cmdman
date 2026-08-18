@@ -79,13 +79,14 @@ sleep 300
 	}
 }
 
-// TestLs_RuntimeStateSurvivesMangledTitle drives the sanitize guard through the
-// real binary: the emulator hands the title callback an OSC string cut at a raw
-// C1 byte even mid-rune — "✳ done" (U+2733 = E2 9C B3, 0x9C reads as ST)
-// arrives as the invalid fragment "\xe2" — and an invalid latched title used to
-// fail proto marshaling of the whole Status response, listing as empty runtime
-// columns while the attached terminal still showed the full title. The row must
-// keep serving, visibly degraded, never dark.
+// TestLs_RuntimeStateSurvivesMangledTitle drives a glyph title through the real
+// binary: the unpatched parser cut "✳ done" (U+2733 = E2 9C B3) at the 0x9C —
+// read as an 8-bit ST even mid-rune — and the invalid latched fragment failed
+// proto marshaling of the whole Status response, listing as empty runtime
+// columns while the attached terminal still showed the full title. With the
+// vendored parser fix the title arrives whole; the latch-side sanitizing stays
+// as the guard that keeps the row serving even if a parser hands over garbage
+// again.
 func TestLs_RuntimeStateSurvivesMangledTitle(t *testing.T) {
 	t.Parallel()
 	ctx := testContext(t)
@@ -108,12 +109,12 @@ sleep 300
 	// The ASCII title first: the capture path works before the glyph arrives.
 	pollOutput(ctx, env, "plain title", "ls", "--format", "{{.Title}}")
 
-	// After the glyph title, the sanitized cut ("\xe2" -> the replacement
-	// rune) is what the emulator leaves of it today; an emulator that learns
-	// to parse UTF-8 across C1 bytes would surface the full "✳ done" instead,
-	// and this expectation should follow it. Empty here is the bug: the RPC
-	// died and took every runtime column with it.
-	pollOutput(ctx, env, "�", "ls", "--format", "{{.Title}}")
+	// The vendored parser keeps the 0x9C continuation byte inside the OSC
+	// string, so the glyph title arrives whole. Empty here is the original
+	// bug: an invalid-UTF-8 latch killed the RPC and took every runtime
+	// column with it; "�" would mean the parser regressed to cutting the
+	// title and only the latch-side sanitizing held.
+	pollOutput(ctx, env, "✳ done", "ls", "--format", "{{.Title}}")
 }
 
 // TestLs_RuntimeColumnsEmptyWithoutMonitor pins the other half of the contract:
