@@ -89,11 +89,20 @@ its `handleTitle` splits the payload on ';' and silently drops any title
 containing one (`len(parts) != 2`). Pinned version:
 `github.com/charmbracelet/x/vt v0.0.0-20260622092256-25656177ba8e`.
 
-**Why not done here**: the monitor-side sanitize (D11) already protects
-every cmdman consumer; filing and tracking an upstream issue is outside
-this plan's scope and needs no code change here.
+**Resolution (2026-08-19)**: the bug was already reported upstream as
+charmbracelet/x#848 (with two open fix PRs: #946, the UTF-8
+continuation-byte counter, and #886, which drops 8-bit ST entirely; the
+actual defect lives in `x/ansi`'s parser, which `x/vt` uses). PR #946
+applied cleanly to the pinned `x/ansi v0.11.7`; it is vendored at
+`third_party/charmbracelet-x-ansi` behind a `replace` directive, its
+module tests and cmdman's full suite pass, and glyph titles now latch
+whole (the phantom bell is gone too). A confirmation comment for
+PR #946 is drafted at `pr946-comment.md` next to this file — posting it
+from this environment failed (the gh token cannot comment on foreign
+repos), so it awaits a manual post.
 
-**Follow-up**: file the upstream issue (minimal repro: feed
-`\x1b]0;✳ x\x07` to the emulator, Title callback receives `"\xe2"`);
-once fixed upstream, bump the dep — the sanitize stays as a guard, and
-affected titles stop rendering with the replacement rune.
+**Follow-up**: track charmbracelet/x#946; when a release containing the
+fix ships, delete `third_party/charmbracelet-x-ansi` plus the `replace`
+and bump the dep (see `third_party/README.md`). The latch-side sanitize
+(D11) stays regardless, as the guard against any future parser
+misbehavior.
