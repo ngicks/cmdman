@@ -1,11 +1,11 @@
 # Status — switcher command row restyle + wheel scroll
 
-State: **planned, finalized** — gate reconfirmed by user 2026-08-20 after the
-`M`-binding addition (R9). All questions resolved (DECISION.md R1–R9). The
-"dashboard target on top" sort idea was retracted by the user (see R9's
-note) — deliberately not planned. Branch fast-forwarded onto main's cb1f875
-(Layout-tab removal; Commands tab intact, step 5 unaffected) and PLAN.md line
-refs re-checked against it. Ready to implement pending the user's go-ahead.
+State: **implemented** — all six steps landed on branch
+`switcher-row-restyle` (2026-08-21, autonomous run; one commit per step,
+plus a fix commit for the reviewer's findings). Final gate: ng-reviewer
+approve-with-nits (five nits fixed, one deferred to HANDOFF.md) and a full
+build/test/lint sweep. Awaiting the user's review; HANDOFF.md holds two
+follow-ups for triage.
 
 ## Checklist
 
@@ -23,7 +23,8 @@ refs re-checked against it. Ready to implement pending the user's go-ahead.
       displayed tmux window's dashboard target")
 - [x] Step 5 — Commands tab same language (R4 "both surfaces"); the three
       old badges deleted here with the last caller migration
-- [ ] Step 6 — e2e expectation fixes, full build/test/lint, review skills
+- [x] Step 6 — e2e expectation fixes (none needed — verified, not assumed),
+      wheel e2e added, full build/test/lint green, reviewer pass done
 - [x] e2e wheel coverage: confirmed by inspection of the vendored decoder —
       the harness can inject wheel events via
       `tmux send-keys -l $'\x1b[<64;x;yM'`; ultraviolet parses SGR mouse
@@ -32,5 +33,5 @@ refs re-checked against it. Ready to implement pending the user's go-ahead.
 
 ## Next action
 
-User gives the implementation go-ahead; on approval, implement steps 1–6 in
-order.
+User reviews the implementation; on approval, triage HANDOFF.md into
+`doc/plan/issue/issue.md` or drop its entries with the plan directory.
