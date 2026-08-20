@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"context"
+
 	"github.com/spf13/cobra"
 
 	"github.com/ngicks/cmdman/cmdman/cli"
@@ -58,6 +60,22 @@ func runComposeMuxUp(
 	args []string,
 	session string,
 ) error {
+	return cli.RunMuxOp(cmd.Context(), func(ctx context.Context) error {
+		return composeMuxUpOp(ctx, cmd, rf, cf, args, session)
+	})
+}
+
+// composeMuxUpOp is everything `compose mux up` does, split out so
+// [cli.RunMuxOp] decides where it runs: here, or in a worker that outlives the
+// invoking pane.
+func composeMuxUpOp(
+	ctx context.Context,
+	cmd *cobra.Command,
+	rf *rootFlags,
+	cf *composeFlags,
+	args []string,
+	session string,
+) error {
 	selection, err := compose.ResolveMuxSelection(cf.normalizeOpts())
 	if err != nil {
 		return err
@@ -74,7 +92,7 @@ func runComposeMuxUp(
 		layout = args[0]
 	}
 	return compose.NewService(svc, compose.WithFrameSvc(cli.NewFrameSvc(svc))).MuxUp(
-		cmd.Context(),
+		ctx,
 		compose.MuxUpOption{
 			Selection:   selection,
 			Layout:      layout,

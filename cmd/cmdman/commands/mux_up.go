@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -50,6 +51,20 @@ func runMuxUp(
 	args []string,
 	session string,
 ) error {
+	return cli.RunMuxOp(cmd.Context(), func(ctx context.Context) error {
+		return muxUpOp(ctx, cmd, rf, args, session)
+	})
+}
+
+// muxUpOp is everything `mux up` does, split out so [cli.RunMuxOp] decides
+// where it runs: here, or in a worker that outlives the invoking pane.
+func muxUpOp(
+	ctx context.Context,
+	cmd *cobra.Command,
+	rf *rootFlags,
+	args []string,
+	session string,
+) error {
 	path := "-"
 	if len(args) == 1 {
 		path = args[0]
@@ -78,7 +93,7 @@ func runMuxUp(
 		return fmt.Errorf("locate cmdman binary: %w", err)
 	}
 
-	built, err := mux.Build(cmd.Context(), mux.BuildOptions{
+	built, err := mux.Build(ctx, mux.BuildOptions{
 		Spec: spec,
 		// Standalone mux names concrete cmdman commands, so there is no replica
 		// cycling (nil counter). A leaf may still pin an explicit scale index,
@@ -95,7 +110,7 @@ func runMuxUp(
 		return err
 	}
 
-	return mux.Run(cmd.Context(), built, mux.RunOptions{
+	return mux.Run(ctx, built, mux.RunOptions{
 		SessionName: session,
 		Config:      cfg,
 		Svc:         cli.NewFrameSvc(svc),

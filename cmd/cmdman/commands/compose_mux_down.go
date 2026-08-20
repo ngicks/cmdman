@@ -1,8 +1,11 @@
 package commands
 
 import (
+	"context"
+
 	"github.com/spf13/cobra"
 
+	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
@@ -45,6 +48,20 @@ derived from the compose file is required.`,
 // cmdman service or leaf resolution — only the project identity and spec driver
 // options are required. The layout argument is irrelevant to teardown.
 func runComposeMuxDown(cmd *cobra.Command, cf *composeFlags, session string) error {
+	return cli.RunMuxOp(cmd.Context(), func(ctx context.Context) error {
+		return composeMuxDownOp(ctx, cmd, cf, session)
+	})
+}
+
+// composeMuxDownOp is everything `compose mux down` does, split out so
+// [cli.RunMuxOp] decides where it runs: here, or in a worker that outlives the
+// invoking pane.
+func composeMuxDownOp(
+	ctx context.Context,
+	cmd *cobra.Command,
+	cf *composeFlags,
+	session string,
+) error {
 	selection, err := compose.ResolveMuxSelection(cf.normalizeOpts())
 	if err != nil {
 		return err
@@ -52,7 +69,7 @@ func runComposeMuxDown(cmd *cobra.Command, cf *composeFlags, session string) err
 
 	// Down needs no cmdman service — only the project identity derived from the
 	// compose file (see this command's Long help). Pass a nil service.
-	return compose.NewService(nil).MuxDown(cmd.Context(), compose.MuxDownOption{
+	return compose.NewService(nil).MuxDown(ctx, compose.MuxDownOption{
 		Selection:   selection,
 		SessionName: session,
 		Stdout:      cmd.OutOrStdout(),

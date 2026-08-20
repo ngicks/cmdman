@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -70,6 +71,21 @@ func runComposeMuxCycleScale(
 	cf *composeFlags,
 	arg, session string,
 ) error {
+	return cli.RunMuxOp(cmd.Context(), func(ctx context.Context) error {
+		return composeMuxCycleScaleOp(ctx, cmd, rf, cf, arg, session)
+	})
+}
+
+// composeMuxCycleScaleOp is everything `compose mux cycle-scale` does, split
+// out so [cli.RunMuxOp] decides where it runs: here, or in a worker that
+// outlives the invoking pane.
+func composeMuxCycleScaleOp(
+	ctx context.Context,
+	cmd *cobra.Command,
+	rf *rootFlags,
+	cf *composeFlags,
+	arg, session string,
+) error {
 	command, posStr, hasPos := strings.Cut(arg, "=")
 	if command == "" {
 		return fmt.Errorf("cycle-scale: command name is empty in argument %q", arg)
@@ -101,7 +117,7 @@ func runComposeMuxCycleScale(
 	defer svc.Close()
 
 	result, cycleErr := compose.NewService(svc).MuxCycleScale(
-		cmd.Context(),
+		ctx,
 		compose.MuxCycleScaleOption{
 			Selection:   selection,
 			SessionName: session,

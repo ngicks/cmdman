@@ -1,8 +1,11 @@
 package commands
 
 import (
+	"context"
+
 	"github.com/spf13/cobra"
 
+	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/mux"
 )
 
@@ -47,6 +50,19 @@ any pane, run-shell, or outside tmux. --session narrows the scan to one session.
 // driver configuration. With the stdin default ("-") teardown uses the default
 // driver rather than blocking on stdin.
 func runMuxDown(cmd *cobra.Command, args []string, session string) error {
+	return cli.RunMuxOp(cmd.Context(), func(ctx context.Context) error {
+		return muxDownOp(ctx, cmd, args, session)
+	})
+}
+
+// muxDownOp is everything `mux down` does, split out so [cli.RunMuxOp] decides
+// where it runs: here, or in a worker that outlives the invoking pane.
+func muxDownOp(
+	ctx context.Context,
+	cmd *cobra.Command,
+	args []string,
+	session string,
+) error {
 	path := "-"
 	if len(args) == 1 {
 		path = args[0]
@@ -57,7 +73,7 @@ func runMuxDown(cmd *cobra.Command, args []string, session string) error {
 		return err
 	}
 
-	return mux.Down(cmd.Context(), mux.DownOptions{
+	return mux.Down(ctx, mux.DownOptions{
 		Driver:      driver,
 		SessionName: session,
 		Stdout:      cmd.OutOrStdout(),

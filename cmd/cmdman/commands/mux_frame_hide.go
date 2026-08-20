@@ -1,6 +1,9 @@
 package commands
 
 import (
+	"context"
+
+	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/mux"
 	"github.com/spf13/cobra"
 )
@@ -40,5 +43,7 @@ starting a second one.`,
 }
 
 func runMuxFrameHide(cmd *cobra.Command, session string) error {
-	return mux.FrameHide(cmd.Context(), mux.FrameOptions{Session: session})
+	return cli.RunMuxOp(cmd.Context(), func(ctx context.Context) error {
+		return mux.FrameHide(ctx, mux.FrameOptions{Session: session})
+	})
 }

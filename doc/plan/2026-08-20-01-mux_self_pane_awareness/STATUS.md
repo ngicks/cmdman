@@ -17,7 +17,7 @@ implementation steps detailed; traceability gate walked. Ready to implement.
       D11 (compose identity-schema log name), D12 (`logs -f` follow);
       Public surface delta filled
 - [x] PLAN.md implementation steps detailed
-- [ ] Step 1: marker-env worker entrypoint (`__CMDMAN_INTERNAL_MUXOP` →
+- [x] Step 1: marker-env worker entrypoint (`__CMDMAN_INTERNAL_MUXOP` →
       verb runs in-process; options serialization rejected — RunOptions
       carries Svc/Stdout live state)
 - [ ] Step 2: `CycleScaleOptions.Env` seam; `resolveServer` off
