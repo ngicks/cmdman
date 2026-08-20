@@ -36,7 +36,7 @@ or "frame" must be passed as: cmdman mux up <path>.`,
 	)
 
 	muxUpCmd(cmd, rf, &flagSession)
-	muxDownCmd(cmd, &flagSession)
+	muxDownCmd(cmd, rf, &flagSession)
 	muxLsCmd(cmd, &flagSession)
 	muxFrameCmd(cmd, rf, &flagSession)
 

@@ -22,7 +22,7 @@ Subcommands: show, hide, cycle, ls.`,
 	}
 
 	muxFrameShowCmd(cmd, rf, parentSession)
-	muxFrameHideCmd(cmd, parentSession)
+	muxFrameHideCmd(cmd, rf, parentSession)
 	muxFrameCycleCmd(cmd, rf, parentSession)
 	muxFrameLsCmd(cmd, parentSession)
 

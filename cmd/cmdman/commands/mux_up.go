@@ -51,9 +51,29 @@ func runMuxUp(
 	args []string,
 	session string,
 ) error {
-	return cli.RunMuxOp(cmd.Context(), cli.MuxOpOptions{}, func(ctx context.Context) error {
+	op := func(ctx context.Context) error {
 		return muxUpOp(ctx, cmd, rf, args, session)
-	})
+	}
+
+	path := specPathArg(args)
+	if path == "-" {
+		// The spec exists only on this process's stdin, so there is no file for
+		// a worker to re-read (see openSpecSource).
+		return cli.RunMuxOp(cmd.Context(), cli.MuxOpOptions{InProcess: true}, op)
+	}
+
+	logName, err := muxSpecLogName(cmd.Context(), path, session)
+	if err != nil {
+		return err
+	}
+	svc, err := cmdmanService(cmd, rf)
+	if err != nil {
+		return err
+	}
+	defer svc.Close()
+
+	opts := muxOpOptions(cmd, svc, logName)
+	return cli.RunMuxOp(cmd.Context(), opts, op)
 }
 
 // muxUpOp is everything `mux up` does, split out so [cli.RunMuxOp] decides
@@ -65,12 +85,7 @@ func muxUpOp(
 	args []string,
 	session string,
 ) error {
-	path := "-"
-	if len(args) == 1 {
-		path = args[0]
-	}
-
-	src, closer, err := openSpecSource(path)
+	src, closer, err := openSpecSource(specPathArg(args))
 	if err != nil {
 		return err
 	}

@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func muxFrameHideCmd(parent *cobra.Command, parentSession *string) {
+func muxFrameHideCmd(parent *cobra.Command, rf *rootFlags, parentSession *string) {
 	var flagSession string
 
 	cmd := &cobra.Command{
@@ -31,7 +31,7 @@ starting a second one.`,
 			if !cmd.Flags().Changed("session") && parentSession != nil {
 				sess = *parentSession
 			}
-			return runMuxFrameHide(cmd, sess)
+			return runMuxFrameHide(cmd, rf, sess)
 		},
 	}
 	cmd.Flags().StringVarP(
@@ -42,8 +42,21 @@ starting a second one.`,
 	parent.AddCommand(cmd)
 }
 
-func runMuxFrameHide(cmd *cobra.Command, session string) error {
-	return cli.RunMuxOp(cmd.Context(), cli.MuxOpOptions{}, func(ctx context.Context) error {
+func runMuxFrameHide(cmd *cobra.Command, rf *rootFlags, session string) error {
+	// Hiding a frame needs no cmdman service of its own — a managed entry's
+	// command keeps running — but registering the worker that does the hiding is
+	// an ordinary command creation, and that goes through the service.
+	svc, err := cmdmanService(cmd, rf)
+	if err != nil {
+		return err
+	}
+	defer svc.Close()
+
+	opts, err := muxFrameOpOptions(cmd, svc, session)
+	if err != nil {
+		return err
+	}
+	return cli.RunMuxOp(cmd.Context(), opts, func(ctx context.Context) error {
 		return mux.FrameHide(ctx, mux.FrameOptions{Session: session})
 	})
 }

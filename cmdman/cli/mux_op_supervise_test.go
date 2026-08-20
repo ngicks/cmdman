@@ -16,7 +16,7 @@ func muxOpTestOptions(t *testing.T, svc *cmdman.Service) MuxOpOptions {
 	t.Helper()
 	opts, err := MuxOpOptions{
 		Svc:     svc,
-		LogName: MuxOpLogName("dashboard"),
+		LogName: MuxOpLogName("", "dashboard"),
 		Argv:    []string{"mux", "up", "dashboard.yaml"},
 		Env:     []string{"PATH=/usr/bin"},
 		Dir:     t.TempDir(),

@@ -60,7 +60,18 @@ func runComposeMuxUp(
 	args []string,
 	session string,
 ) error {
-	return cli.RunMuxOp(cmd.Context(), cli.MuxOpOptions{}, func(ctx context.Context) error {
+	logName, err := composeMuxLogName(cf)
+	if err != nil {
+		return err
+	}
+	svc, err := cmdmanService(cmd, rf)
+	if err != nil {
+		return err
+	}
+	defer svc.Close()
+
+	opts := muxOpOptions(cmd, svc, logName)
+	return cli.RunMuxOp(cmd.Context(), opts, func(ctx context.Context) error {
 		return composeMuxUpOp(ctx, cmd, rf, cf, args, session)
 	})
 }

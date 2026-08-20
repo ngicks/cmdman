@@ -49,7 +49,17 @@ func runMuxFrameShow(
 	args []string,
 	session string,
 ) error {
-	return cli.RunMuxOp(cmd.Context(), cli.MuxOpOptions{}, func(ctx context.Context) error {
+	svc, err := cmdmanService(cmd, rf)
+	if err != nil {
+		return err
+	}
+	defer svc.Close()
+
+	opts, err := muxFrameOpOptions(cmd, svc, session)
+	if err != nil {
+		return err
+	}
+	return cli.RunMuxOp(cmd.Context(), opts, func(ctx context.Context) error {
 		return muxFrameShowOp(ctx, cmd, rf, args, session)
 	})
 }

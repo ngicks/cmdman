@@ -9,7 +9,12 @@ import (
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
-func composeMuxDownCmd(parent *cobra.Command, cf *composeFlags, parentSession *string) {
+func composeMuxDownCmd(
+	parent *cobra.Command,
+	rf *rootFlags,
+	cf *composeFlags,
+	parentSession *string,
+) {
 	var flagSession string
 
 	cmd := &cobra.Command{
@@ -26,14 +31,14 @@ running — only the disposable viewers are torn down.
 Window discovery is server-wide and requires no $TMUX context; it works from
 any pane, run-shell, or outside tmux. --session narrows the scan to one session.
 
-Down needs no cmdman service or leaf resolution — only the project identity
-derived from the compose file is required.`,
+Down resolves no leaves and touches none of the project's commands — only the
+project identity derived from the compose file is required.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := flagSession
 			if !cmd.Flags().Changed("session") && parentSession != nil {
 				sess = *parentSession
 			}
-			return runComposeMuxDown(cmd, cf, sess)
+			return runComposeMuxDown(cmd, rf, cf, sess)
 		},
 	}
 	cmd.Flags().StringVarP(
@@ -44,11 +49,29 @@ derived from the compose file is required.`,
 	parent.AddCommand(cmd)
 }
 
-// runComposeMuxDown tears down the compose project's dashboard. It needs no
-// cmdman service or leaf resolution — only the project identity and spec driver
-// options are required. The layout argument is irrelevant to teardown.
-func runComposeMuxDown(cmd *cobra.Command, cf *composeFlags, session string) error {
-	return cli.RunMuxOp(cmd.Context(), cli.MuxOpOptions{}, func(ctx context.Context) error {
+// runComposeMuxDown tears down the compose project's dashboard. The teardown
+// itself needs no leaf resolution — only the project identity and spec driver
+// options are required — but registering the worker that carries it out is an
+// ordinary command creation, so the service is opened here. The layout argument
+// is irrelevant to teardown.
+func runComposeMuxDown(
+	cmd *cobra.Command,
+	rf *rootFlags,
+	cf *composeFlags,
+	session string,
+) error {
+	logName, err := composeMuxLogName(cf)
+	if err != nil {
+		return err
+	}
+	svc, err := cmdmanService(cmd, rf)
+	if err != nil {
+		return err
+	}
+	defer svc.Close()
+
+	opts := muxOpOptions(cmd, svc, logName)
+	return cli.RunMuxOp(cmd.Context(), opts, func(ctx context.Context) error {
 		return composeMuxDownOp(ctx, cmd, cf, session)
 	})
 }

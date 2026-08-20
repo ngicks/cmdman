@@ -169,15 +169,32 @@ func RunMuxOp(ctx context.Context, opts MuxOpOptions, op func(context.Context) e
 }
 
 // MuxOpLogName returns the identity component of a standalone mux operation's
-// command name and log file. identity is the ownership identity the window
-// carries, which defaults to the window's name — an arbitrary string the user
-// chose.
+// command name and log file.
 //
-// Every '-' is doubled so the identity cannot be mistaken for the '-' that
-// separates it from the "compose" namespace [ComposeMuxOpLogName] uses; that is
-// the same escaping compose applies when it builds its own names.
-func MuxOpLogName(identity string) string {
-	return sanitizeMuxOpName(strings.ReplaceAll(identity, "-", "--"))
+// identity is the ownership identity the window carries, which defaults to the
+// window's name — an arbitrary string the user chose. server is the multiplexer
+// server that window lives on: the socket the spec's driver section names, empty
+// for the default server. Both are needed to say which window, because an
+// identity only means anything within one server: two tmux servers can each hold
+// a session called "cmdman", and an operation on one must not be refused because
+// an operation is under way on the other.
+//
+// Every '-' in either is doubled so neither can be mistaken for the '-' that
+// separates them, nor for the one that separates the "compose" namespace
+// [ComposeMuxOpLogName] uses; that is the same escaping compose applies when it
+// builds its own names.
+func MuxOpLogName(server, identity string) string {
+	name := escapeMuxOpNamePart(identity)
+	if server != "" {
+		name = escapeMuxOpNamePart(server) + "-" + name
+	}
+	return sanitizeMuxOpName(name)
+}
+
+// escapeMuxOpNamePart doubles every '-' in one component of a name so it cannot
+// be mistaken for the '-' that separates components.
+func escapeMuxOpNamePart(s string) string {
+	return strings.ReplaceAll(s, "-", "--")
 }
 
 // ComposeMuxOpLogName returns the identity component of a compose project

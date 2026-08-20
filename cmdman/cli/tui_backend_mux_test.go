@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -105,6 +107,79 @@ func TestMuxDownWithoutMuxSection(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "has no mux section") {
 		t.Fatalf("error = %v, want it to name the missing mux section", err)
+	}
+}
+
+// TestComposeMuxUpArgv pins the command line the layout worker is run with
+// against the way the project pair is read back: whatever the widget names its
+// project by, the worker must resolve the same project, or it cycles somebody
+// else's dashboard.
+func TestComposeMuxUpArgv(t *testing.T) {
+	tests := []struct {
+		name        string
+		projectName string
+		composeFile string
+		workDir     string
+		want        []string
+	}{
+		{
+			name:        "file and name travel together",
+			projectName: "tools",
+			composeFile: "/srv/app/cmd-compose.yaml",
+			workDir:     "/srv/app",
+			want: []string{
+				"compose", "-f", "/srv/app/cmd-compose.yaml", "-p", "tools",
+				"-w", "/srv/app", "mux", "up",
+			},
+		},
+		{
+			// With no file, the name is what -f resolves and the file's own
+			// name: stands — naming it again would resolve one file into two
+			// differently named projects.
+			name:        "a bare name is the file key",
+			projectName: "tools",
+			want:        []string{"compose", "-f", "tools", "mux", "up"},
+		},
+		{
+			name:        "a file alone leaves the declared name alone",
+			composeFile: "cmd-compose.yaml",
+			want:        []string{"compose", "-f", "cmd-compose.yaml", "mux", "up"},
+		},
+		{
+			name:    "nothing named is the working directory's own project",
+			workDir: "/srv/app",
+			want:    []string{"compose", "-w", "/srv/app", "mux", "up"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := composeMuxUpArgv(tt.projectName, tt.composeFile, tt.workDir)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("composeMuxUpArgv() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestMuxWorkerError pins that a failed worker is reported by what it said, not
+// by the status it exited with: the widget has one status line and "exit status
+// 1" fills it with nothing.
+func TestMuxWorkerError(t *testing.T) {
+	other := errors.New("resolve project: no such file")
+	if got := muxWorkerError(other, "ignored"); !errors.Is(got, other) {
+		t.Fatalf("an error that is not a worker's exit = %v, want it untouched", got)
+	}
+	if got := muxWorkerError(nil, ""); got != nil {
+		t.Fatalf("muxWorkerError(nil, \"\") = %v, want nil", got)
+	}
+
+	exit := &ExitCodeError{Code: 1}
+	got := muxWorkerError(exit, "cycling…\nerror: mux: spec has no layouts\n")
+	if got == nil || got.Error() != "mux: spec has no layouts" {
+		t.Fatalf("worker failure = %v, want the line it failed on", got)
+	}
+	if got := muxWorkerError(exit, "   \n\n"); !errors.Is(got, exit) {
+		t.Fatalf("a worker that said nothing = %v, want its exit status", got)
 	}
 }
 

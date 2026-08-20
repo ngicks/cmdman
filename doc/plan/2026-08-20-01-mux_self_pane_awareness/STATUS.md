@@ -26,7 +26,7 @@ implementation steps detailed; traceability gate walked. Ready to implement.
       lock + stale-leftover recovery), D10 `AutoRemove`, D11/D15 runtime-dir
       log with 1MiB/1-file caps, D12 `Service.Logs` follow, exit-code
       capture before removal
-- [ ] Step 4: wire `mux up` / `compose mux up` / `mux down` / `cycle-scale`
+- [x] Step 4: wire `mux up` / `compose mux up` / `mux down` / `cycle-scale`
       / `mux frame *` and widget CycleMux (D14) through the wrapper
 - [ ] Step 5: e2e — matrix rows 3/4 all-✅ (D1 absorb, D3 no extra
       feedback), paneless invocation, multi-window from inside, frame

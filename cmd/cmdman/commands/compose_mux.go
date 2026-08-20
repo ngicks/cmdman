@@ -41,7 +41,7 @@ Subcommands: up, down, ls, cycle-scale. A layout literally named "up", "down",
 	)
 
 	composeMuxUpCmd(cmd, rf, cf, &flagSession)
-	composeMuxDownCmd(cmd, cf, &flagSession)
+	composeMuxDownCmd(cmd, rf, cf, &flagSession)
 	composeMuxLsCmd(cmd, rf, cf, &flagSession)
 	composeMuxCycleScaleCmd(cmd, rf, cf, &flagSession)
 

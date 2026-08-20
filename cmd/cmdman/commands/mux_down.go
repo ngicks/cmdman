@@ -9,7 +9,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/mux"
 )
 
-func muxDownCmd(parent *cobra.Command, parentSession *string) {
+func muxDownCmd(parent *cobra.Command, rf *rootFlags, parentSession *string) {
 	var flagSession string
 
 	cmd := &cobra.Command{
@@ -34,7 +34,7 @@ any pane, run-shell, or outside tmux. --session narrows the scan to one session.
 			if !cmd.Flags().Changed("session") && parentSession != nil {
 				sess = *parentSession
 			}
-			return runMuxDown(cmd, args, sess)
+			return runMuxDown(cmd, rf, args, sess)
 		},
 	}
 	cmd.Flags().StringVarP(
@@ -49,8 +49,19 @@ any pane, run-shell, or outside tmux. --session narrows the scan to one session.
 // optional: it is only read when an explicit path is given, to extract the
 // driver configuration. With the stdin default ("-") teardown uses the default
 // driver rather than blocking on stdin.
-func runMuxDown(cmd *cobra.Command, args []string, session string) error {
-	return cli.RunMuxOp(cmd.Context(), cli.MuxOpOptions{}, func(ctx context.Context) error {
+func runMuxDown(cmd *cobra.Command, rf *rootFlags, args []string, session string) error {
+	logName, err := muxSpecLogName(cmd.Context(), specPathArg(args), session)
+	if err != nil {
+		return err
+	}
+	svc, err := cmdmanService(cmd, rf)
+	if err != nil {
+		return err
+	}
+	defer svc.Close()
+
+	opts := muxOpOptions(cmd, svc, logName)
+	return cli.RunMuxOp(cmd.Context(), opts, func(ctx context.Context) error {
 		return muxDownOp(ctx, cmd, args, session)
 	})
 }
@@ -63,12 +74,7 @@ func muxDownOp(
 	args []string,
 	session string,
 ) error {
-	path := "-"
-	if len(args) == 1 {
-		path = args[0]
-	}
-
-	driver, err := specDriver(path)
+	driver, err := specDriver(specPathArg(args))
 	if err != nil {
 		return err
 	}

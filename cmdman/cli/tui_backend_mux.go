@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -21,6 +22,15 @@ import (
 // surface (the TUI runs inside tmux, so mux prints nothing anyway); no
 // SessionName is passed, so the current tmux session is targeted.
 //
+// Applying a layout rebuilds the project's window, and in direct mode that is
+// the window this TUI is sitting in: the pane running it is closed part-way
+// through, and everything the operation had left to do never happens. So the
+// operation goes through [RunMuxOp] like the mux verbs do, and is carried out by
+// a worker that outlives this process. The argv is the command line that would
+// have done the same thing, because that is what the worker is: this binary run
+// again, resolving the project from the file the way `cmdman compose mux up`
+// resolves it.
+//
 // An empty workDir is the Compose tab's: its project came from the directory
 // this TUI works on, so the invocation's own override is the right one. The
 // project-manager widget names the loaded project's instead, which is the
@@ -28,16 +38,82 @@ import (
 func (b *serviceBackend) CycleMux(
 	ctx context.Context, projectName, composeFile, workDir string,
 ) error {
-	selection, err := compose.ResolveMuxSelectionByName(
-		projectName, composeFile, b.targetWorkDir(workDir),
-	)
+	workDir = b.targetWorkDir(workDir)
+	selection, err := compose.ResolveMuxSelectionByName(projectName, composeFile, workDir)
 	if err != nil {
 		return err
 	}
-	return b.compose.MuxUp(ctx, compose.MuxUpOption{
-		Selection: selection,
-		Stdout:    io.Discard,
-	})
+
+	// The TUI paints its own surface, so neither stream may reach the terminal;
+	// stderr is kept rather than dropped because it is where the worker says why
+	// it failed, and an exit status on its own says nothing worth showing.
+	var printed strings.Builder
+	err = RunMuxOp(
+		ctx,
+		MuxOpOptions{
+			Svc:     b.svc,
+			LogName: ComposeMuxOpLogName(selection.ProjectIdentity()),
+			Argv:    composeMuxUpArgv(projectName, composeFile, workDir),
+			Stdout:  io.Discard,
+			Stderr:  &printed,
+		},
+		func(ctx context.Context) error {
+			return b.compose.MuxUp(ctx, compose.MuxUpOption{
+				Selection: selection,
+				Stdout:    io.Discard,
+			})
+		},
+	)
+	return muxWorkerError(err, printed.String())
+}
+
+// composeMuxUpArgv is the `compose mux up` command line that cycles the layout
+// of the project [serviceBackend.CycleMux] was asked about.
+//
+// The pair is spelled the way [compose.ResolveMuxSelectionByName] reads it: with
+// no file to name, the project name is what -f resolves, and the name: the file
+// declares stands. Anything empty is left off rather than passed as an empty
+// flag, which is the same thing said twice on a command line.
+func composeMuxUpArgv(projectName, composeFile, workDir string) []string {
+	file, project := composeFile, projectName
+	if file == "" {
+		file, project = projectName, ""
+	}
+
+	argv := []string{"compose"}
+	if file != "" {
+		argv = append(argv, "-f", file)
+	}
+	if project != "" {
+		argv = append(argv, "-p", project)
+	}
+	if workDir != "" {
+		argv = append(argv, "-w", workDir)
+	}
+	return append(argv, "mux", "up")
+}
+
+// muxWorkerError turns a worker's exit status back into something worth reading.
+//
+// The status alone says only that the operation failed; why it failed the worker
+// printed on its way out. A command line shows that as it arrives, so the status
+// is all the error has to carry there — but a caller with nowhere to print it
+// has to put the words back, or the user is told "exit status 1" and nothing
+// else. printed is what the worker wrote; the diagnosis is its last line, and
+// one line is what a status bar has room for.
+func muxWorkerError(err error, printed string) error {
+	if _, ok := errors.AsType[*ExitCodeError](err); !ok {
+		return err
+	}
+	for _, line := range slices.Backward(strings.Split(printed, "\n")) {
+		if line = strings.TrimSpace(line); line != "" {
+			// The worker labelled the line an error on its way out (main does,
+			// for every command), and the caller shows it under a label of its
+			// own; one is enough.
+			return errors.New(strings.TrimPrefix(line, "error: "))
+		}
+	}
+	return err
 }
 
 // MuxDown tears the project's dashboard windows down via

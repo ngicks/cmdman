@@ -60,6 +60,7 @@ func TestRunMuxOp(t *testing.T) {
 func TestMuxOpLogName(t *testing.T) {
 	tests := []struct {
 		name     string
+		server   string
 		identity string
 		want     string
 	}{
@@ -70,13 +71,33 @@ func TestMuxOpLogName(t *testing.T) {
 			identity: "compose-abc",
 			want:     "compose--abc",
 		},
+		{
+			name:     "a named server is part of which window this is",
+			server:   "work",
+			identity: "dev",
+			want:     "work-dev",
+		},
+		{
+			name:     "both halves are escaped",
+			server:   "work-sock",
+			identity: "dev-box",
+			want:     "work--sock-dev--box",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, MuxOpLogName(tt.identity), tt.want)
+			assert.Equal(t, MuxOpLogName(tt.server, tt.identity), tt.want)
 		})
 	}
+}
+
+// Two multiplexer servers can each hold a session of the same name, and they are
+// two windows: an operation on one must not be taken for an operation on the
+// other, which is what sharing a name would do.
+func TestMuxOpLogNameSeparatesServers(t *testing.T) {
+	assert.Assert(t, MuxOpLogName("", "cmdman") != MuxOpLogName("scratch", "cmdman"))
+	assert.Assert(t, MuxOpLogName("a", "cmdman") != MuxOpLogName("b", "cmdman"))
 }
 
 func TestComposeMuxOpLogName(t *testing.T) {
@@ -104,7 +125,7 @@ func TestMuxOpLogNameSanitizes(t *testing.T) {
 
 	seen := map[string]string{}
 	for _, identity := range identities {
-		got := MuxOpLogName(identity)
+		got := MuxOpLogName("", identity)
 
 		assert.Assert(t, got != "", "identity %q produced no name", identity)
 		assert.Assert(
@@ -119,7 +140,9 @@ func TestMuxOpLogNameSanitizes(t *testing.T) {
 				r == '-' || r == '_' || r == '.'
 			assert.Assert(t, ok, "identity %q produced %q", identity, got)
 		}
-		assert.Equal(t, got, MuxOpLogName(identity), "identity %q is not deterministic", identity)
+		assert.Equal(
+			t, got, MuxOpLogName("", identity), "identity %q is not deterministic", identity,
+		)
 
 		if prev, dup := seen[got]; dup {
 			t.Fatalf("identities %q and %q share the name %q", prev, identity, got)
