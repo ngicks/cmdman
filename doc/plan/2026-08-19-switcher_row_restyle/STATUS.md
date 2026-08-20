@@ -12,15 +12,17 @@ refs re-checked against it. Ready to implement pending the user's go-ahead.
 - [x] IDEA.md gate reconfirmed after R9 — `confirmed by user, 2026-08-20`
 - [x] Open questions resolved (R1–R9, DECISION.md)
 - [x] PLAN.md detailed; traceability table maps every R-clause to a step
-- [ ] Step 1 — core helpers: `ClampCells`/`ScaleCell` (R8, R4)/`RowNameStyle`
+- [x] Step 1 — core helpers: `ClampCells`/`ScaleCell` (R8, R4)/`RowNameStyle`
       (R1 "Strong red, flat yellow, idle/done -> flat green, unreported ->
-      weak green", R3)/`RowPayload` (R2, D13); delete the three old badges
-- [ ] Step 2 — switcher row anatomy (R5 bell column, R6 separator, R8 nameW)
-- [ ] Step 3 — switcher wheel scroll (R7: "wheel scrolls the view; the next
+      weak green", R3)/`RowPayload` (R2, D13); badge deletion deferred to
+      step 5 so every per-step commit builds (see DECISION.md [automatic])
+- [x] Step 2 — switcher row anatomy (R5 bell column, R6 separator, R8 nameW)
+- [x] Step 3 — switcher wheel scroll (R7: "wheel scrolls the view; the next
       keyboard move snaps the view back")
-- [ ] Step 4 — switcher `M` binding (R9: "open manager for currently
+- [x] Step 4 — switcher `M` binding (R9: "open manager for currently
       displayed tmux window's dashboard target")
-- [ ] Step 5 — Commands tab same language (R4 "both surfaces")
+- [x] Step 5 — Commands tab same language (R4 "both surfaces"); the three
+      old badges deleted here with the last caller migration
 - [ ] Step 6 — e2e expectation fixes, full build/test/lint, review skills
 - [x] e2e wheel coverage: confirmed by inspection of the vendored decoder —
       the harness can inject wheel events via

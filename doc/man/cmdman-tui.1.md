@@ -46,10 +46,16 @@ it in any terminal or pane. Each widget is its own subcommand.
   directory it sits in, written `~/…` where that is under your home and cut
   keeping the tail; projects sharing a directory add their name in parentheses to
   tell them apart, and a project that has never run anywhere — so has no
-  directory to name — heads with its own name instead. A command that is one
-  replica among several carries a `[i]` badge after its state — replicas of one
-  command share its name, so the index is what tells them apart. `j`/`k` (or the
-  arrow keys) move the selection; `enter` and a left mouse click take the client
+  directory to name — heads with its own name instead. A command row leads with
+  its name, whose color carries the state of a live run — red when it reported
+  waiting, yellow working, green idle or done, dim green when it has reported
+  nothing — followed by the replica index where the command is one of several
+  (replicas share its name, so the index is what tells them apart), the unread
+  bell, and the title the command set; a run that is over shows its exit word
+  where the title would sit. `j`/`k` (or the
+  arrow keys) move the selection; the mouse wheel scrolls the list without
+  moving the selection, and the next keyboard move snaps the view back to it;
+  `enter` and a left mouse click take the client
   to the selected project's window and mark that project's bells read — a
   project with no window up yet gets one opened at its directory and lands in
   that. `m` opens the project-manager panel over the selected project in a
