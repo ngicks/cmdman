@@ -135,7 +135,7 @@ func (m Model) switcherLines(w int) []switcherLine {
 		for _, c := range g.Commands {
 			lines = append(
 				lines,
-				switcherLine{text: core.PadLine(m.commandLine(c, bg), w, bg), group: i},
+				switcherLine{text: core.PadLine(m.commandLine(c, bg, w), w, bg), group: i},
 			)
 		}
 	}
@@ -233,32 +233,81 @@ func headLabel(g core.ProjectGroup, dup bool, w int) string {
 	return core.TruncateLeftCells(label, w)
 }
 
-// commandLine is one command under its project's head: the command name in the
-// weak shade derived from the terminal's own colors, its state badge, which
-// replica it is when it is one of several (D44), an unread bell when it has
-// one, and the title it last set — the signal the grouped list exists for
-// (D20), fainter still than the name so a group reads as head plus detail.
-func (m Model) commandLine(c core.CommandRow, bg core.RowBg) string {
-	line := bg.Style(m.weakStyle()).Render("    "+core.PadCells(c.Name, 12)+" ") +
-		core.RowStateBadge(c, bg)
-	// Which replica this is comes before the report and outlives it: it is the
-	// command's identity, not something it said, so a run that is over keeps it
-	// where D13 takes its words away. An unscaled row appends nothing at all
-	// rather than an empty render, which would still emit the style's escapes.
-	if badge := core.ScaleBadge(c); badge != "" {
-		line += bg.Style(m.weakStyle()).Render(badge)
+// The command row's fixed columns, as raw text so their widths are measured
+// with the same ruler that draws them. The bell's width is not written down
+// here for the reason MarkerSlot is not: a terminal that draws 🔔 at another
+// width should move the columns rather than tear them apart.
+const (
+	rowIndent = "    "
+	rowIdx    = "  " // core.ScaleCell's width
+	rowSep    = " · "
+)
+
+// The name column's bounds. A name cut past rowNameMin identifies no row at
+// all, and past rowNameMax it would spend on padding what the title — the
+// signal the grouped list exists for (D20) — has better use for.
+const (
+	rowNameMin = 6
+	rowNameMax = 12
+	// rowTitleFloor is the payload the name column yields to before it starts
+	// shrinking: a wide name is worth less than the first words of a title, and
+	// a column that shows no title at all is a listing of names.
+	rowTitleFloor = 8
+)
+
+// rowFixedW is every cell of a command row that is neither the name nor the
+// payload: the indent, the two gaps, the replica index, the bell and the
+// separator.
+func rowFixedW() int {
+	return core.GlyphWidth(rowIndent) + 1 + core.GlyphWidth(rowIdx) + 1 +
+		core.GlyphWidth(core.GlyphBell) + core.GlyphWidth(rowSep)
+}
+
+// rowNameW is what a row spends on the command's own name at pane width w.
+func rowNameW(w int) int {
+	return min(max(w-rowFixedW()-rowTitleFloor, rowNameMin), rowNameMax)
+}
+
+// commandLine is one command under its project's head, title first:
+//
+//	"    " + name + " " + idx + " " + bell + " · " + payload
+//
+// The name leads because it is what the user looks a row up by, and it carries
+// the row's state in its own color (core.RowNameStyle) rather than next to it —
+// a status word spends a column saying what a shade already says, and the
+// column it spends is the title's.
+//
+// The index and bell columns are drawn whether or not the row has anything to
+// put in them. Inserts that appear only on the rows that need them shift every
+// following column on those rows, so a group of commands lines its titles up
+// only by accident; a fixed column lines them up always, which is what makes a
+// list of live titles readable down its left edge.
+//
+// The payload is the title for a live run and the lifecycle word for anything
+// else — a run that is over shows where in its life it stands, never its last
+// report (D13) — and it is cut to the pane rather than left for the row's own
+// truncation, so it ends in an ellipsis instead of mid-word.
+func (m Model) commandLine(c core.CommandRow, bg core.RowBg, w int) string {
+	nameW := rowNameW(w)
+	bell := strings.Repeat(" ", core.GlyphWidth(core.GlyphBell))
+	if c.Bell && core.LiveReport(c) {
+		bell = core.GlyphBell
 	}
-	if !core.LiveReport(c) {
-		// Nothing a finished run said still speaks for it (D13).
+	line := bg.Style(core.RowNameStyle(c, m.weak)).
+		Render(rowIndent+core.PadCells(core.ClampCells(c.Name, nameW), nameW)) +
+		bg.Style(m.weakStyle()).Render(" "+core.ScaleCell(c)) +
+		bg.Plain(" "+bell)
+
+	text, live := core.RowPayload(c)
+	if text == "" {
 		return line
 	}
-	if c.Bell {
-		line += bg.Plain(" " + core.GlyphBell)
+	style := core.StatusStyle(c.State, c.Pending)
+	if live {
+		style = core.StyleActive
 	}
-	if c.Title != "" {
-		line += bg.Style(core.StyleActive).Render(" · " + c.Title)
-	}
-	return line
+	return line + bg.Style(core.StyleActive).Render(rowSep) +
+		bg.Style(style).Render(core.ClampCells(text, w-rowFixedW()-nameW))
 }
 
 // viewportOffset scrolls the list so the selected group stays visible: as much
