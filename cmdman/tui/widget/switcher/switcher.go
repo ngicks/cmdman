@@ -361,11 +361,12 @@ func applyRuntime(groups []core.ProjectGroup, runtime map[string]core.RuntimeSta
 }
 
 // onKey handles the widget key set: the switcher's cursor keys, the selection
-// that takes the client to a project's window (D6), the summon that opens the
-// project-manager panel over it (D7), and the two teardowns. A selection lands
-// in a window and nothing more — start, stop and kill of single commands stay
-// in the full TUI (V6), and the panel the summon opens is a separate program
-// with its own keys.
+// that takes the client to a project's window (D6), the two summons that open
+// the project-manager panel — over the cursor's project, or over the one the
+// caller is already in — and the two teardowns. A selection lands in a window
+// and nothing more — start, stop and kill of single commands stay in the full
+// TUI (V6), and the panel a summon opens is a separate program with its own
+// keys.
 //
 // While a compose teardown is waiting to be confirmed the key set is that one
 // question: the key answers it and nothing else, so a q that meant "no" cannot
@@ -393,6 +394,8 @@ func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.switchToSelected()
 	case "m":
 		return m.summonSelected()
+	case "M":
+		return m.summonActive()
 	case "d":
 		return m.muxDownSelected()
 	case "D":
@@ -452,18 +455,38 @@ func (m Model) switchToSelected() (tea.Model, tea.Cmd) {
 // summonSelected opens the project-manager panel over the selected project
 // (D7/D9). The cursor addresses a whole group, head line and command rows
 // alike, so the project is the same one enter would switch to whichever of its
-// lines the cursor sits on. The row's directory travels with its name (D20):
-// the popup opens wherever the switcher stands, which is not where the project
-// does, and a project is (work directory, name).
+// lines the cursor sits on.
 func (m Model) summonSelected() (tea.Model, tea.Cmd) {
 	g, ok := m.selectedGroup()
 	if !ok {
 		return m, nil
 	}
+	return m.summonGroup(g, "no project to manage here")
+}
+
+// summonActive is `M`: the same panel over the project the caller is already in
+// (the active mark, D3), wherever the cursor happens to be. Looking at another
+// project's rows is the ordinary state of the switcher — that is what the list
+// is for — and managing the project you are sitting in should not cost the
+// cursor its place.
+func (m Model) summonActive() (tea.Model, tea.Cmd) {
+	g, ok := m.activeGroup()
+	if !ok {
+		m.status = "no active project to manage"
+		return m, nil
+	}
+	return m.summonGroup(g, "no active project to manage")
+}
+
+// summonGroup opens the panel over one group, or says why it cannot. The row's
+// directory travels with its name (D20): the popup opens wherever the switcher
+// stands, which is not where the project does, and a project is (work
+// directory, name).
+func (m Model) summonGroup(g core.ProjectGroup, noName string) (tea.Model, tea.Cmd) {
 	if g.Name == "" {
 		// The summon names its project on the child's command line, so an
 		// unnamed group has nothing to hand it.
-		m.status = "no project to manage here"
+		m.status = noName
 		return m, nil
 	}
 	return m, core.SummonProjectManagerCmd(
@@ -778,6 +801,19 @@ func (m Model) selectedGroup() (core.ProjectGroup, bool) {
 		return core.ProjectGroup{}, false
 	}
 	return m.groups[m.selected], true
+}
+
+// activeGroup is the group the caller's own window belongs to (see activeMark).
+// An identity answers for exactly one group, and where the directory fallback
+// answers for several the first in list order is taken — the active groups sort
+// to the top, so that is the one at the head of the list either way.
+func (m Model) activeGroup() (core.ProjectGroup, bool) {
+	for _, g := range m.groups {
+		if g.Active {
+			return g, true
+		}
+	}
+	return core.ProjectGroup{}, false
 }
 
 // View implements tea.Model.

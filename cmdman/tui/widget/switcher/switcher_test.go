@@ -1502,8 +1502,8 @@ func TestSwitcherSelectionResolvesBells(t *testing.T) {
 func TestSwitcherSummonsProjectManager(t *testing.T) {
 	m := seedWidget(t, 32, 12)
 	fb := m.backend.(*coretest.FakeBackend)
-	if hint := m.switcherFooter(); !strings.Contains(hint, "m manage") {
-		t.Errorf("the switcher should hint at the summon: %q", hint)
+	if hint := m.switcherFooter(); !strings.Contains(hint, "m/M manage") {
+		t.Errorf("the switcher should hint at both summons: %q", hint)
 	}
 
 	m, cmd := updWidget(t, m, coretest.Kr("m"))
@@ -1570,6 +1570,89 @@ func TestSwitcherSummonNeedsAName(t *testing.T) {
 	}
 	if len(fb.Summoned) != 0 {
 		t.Errorf("backend was asked to summon %v", fb.Summoned)
+	}
+}
+
+// TestSwitcherSummonsActiveProjectManager covers `M`: the panel opens over the
+// project the caller's own window belongs to (D3), which is not the project the
+// cursor is on — reading down the list at another project is the ordinary state
+// of a switcher, and the cursor keeps its place.
+func TestSwitcherSummonsActiveProjectManager(t *testing.T) {
+	m := seedWidget(t, 32, 12)
+	fb := m.backend.(*coretest.FakeBackend)
+
+	// local-dev is the cwd-active group and heads the list, so j takes the
+	// cursor off it and onto api-stack.
+	m, _ = updWidget(t, m, coretest.Kr("j"))
+	if g, _ := m.selectedGroup(); g.Active {
+		t.Fatalf("precondition: the cursor should be off the active project, on %+v", g)
+	}
+
+	m, cmd := updWidget(t, m, coretest.Kr("M"))
+	m = settle(t, m, cmd)
+	want := []coretest.SummonCall{
+		{
+			Project: "local-dev",
+			Path:    "/work/local-dev/cmd-compose.yaml",
+			Workdir: "/work/local-dev",
+		},
+	}
+	if !slices.Equal(fb.Summoned, want) {
+		t.Fatalf("M summoned %v, want %v", fb.Summoned, want)
+	}
+	if m.status != "" {
+		t.Errorf("a popup that ran has nothing to say: %q", m.status)
+	}
+	if m.selected != 1 {
+		t.Errorf("M should leave the cursor where it was, selected = %d", m.selected)
+	}
+}
+
+// TestSwitcherSummonActiveNeedsAnActiveProject pins the two rows M cannot act
+// on: no group carries the mark at all, and the marked group has no name to
+// hand the child's command line. Either way the reason takes the hint line and
+// no popup is asked for.
+func TestSwitcherSummonActiveNeedsAnActiveProject(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, m Model) Model
+	}{
+		{
+			// The probe named a window none of the listed projects owns, which
+			// leaves the mark on nothing.
+			name: "nothing is marked active",
+			setup: func(t *testing.T, m Model) Model {
+				msg := core.ActiveIdentityLoadedMsg{Identity: "h9-gone", OK: true}
+				m, _ = updWidget(t, m, msg)
+				return m
+			},
+		},
+		{
+			// Sitting in a project the listing never claimed a name for: there is
+			// a group to manage and nothing to call it.
+			name: "the active group has no name",
+			setup: func(_ *testing.T, m Model) Model {
+				m.groups = []core.ProjectGroup{{Workdir: "/work/solo", Active: true}}
+				return m
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := seedWidget(t, 32, 12)
+			fb := m.backend.(*coretest.FakeBackend)
+			m = tc.setup(t, m)
+
+			m, cmd := updWidget(t, m, coretest.Kr("M"))
+			if cmd != nil {
+				t.Fatal("M should dispatch nothing with no active project to manage")
+			}
+			if !strings.Contains(m.status, "no active project to manage") {
+				t.Errorf("the switcher should say why, status = %q", m.status)
+			}
+			if len(fb.Summoned) != 0 {
+				t.Errorf("backend was asked to summon %v", fb.Summoned)
+			}
+		})
 	}
 }
 

@@ -153,7 +153,7 @@ func (m Model) switcherFooter() string {
 	if m.status != "" {
 		return core.StyleActive.Render(m.status)
 	}
-	hint := "j/k move · enter switch · m manage · d/D down"
+	hint := "j/k move · enter switch · m/M manage · d/D down"
 	if !m.noQuit {
 		hint += " · q quit"
 	}

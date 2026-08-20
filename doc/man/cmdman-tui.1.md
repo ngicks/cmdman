@@ -54,7 +54,10 @@ it in any terminal or pane. Each widget is its own subcommand.
   project with no window up yet gets one opened at its directory and lands in
   that. `m` opens the project-manager panel over the selected project in a
   floating pane, and where there is no floating pane to open — a plain terminal,
-  or a multiplexer with no popup support — says so on the hint line; `q` quits.
+  or a multiplexer with no popup support — says so on the hint line; `M` opens
+  the same panel over the project marked `active` — the one whose window you are
+  in — wherever the cursor happens to be, and says so on the hint line when
+  nothing is marked; `q` quits.
   Landing in a window is all a selection does: it never brings the project up,
   and starting, stopping and removing one command at a time stay in the full
   dashboard. A project with no directory or name to address a window by — one
