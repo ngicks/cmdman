@@ -20,7 +20,7 @@ implementation steps detailed; traceability gate walked. Ready to implement.
 - [x] Step 1: marker-env worker entrypoint (`__CMDMAN_INTERNAL_MUXOP` →
       verb runs in-process; options serialization rejected — RunOptions
       carries Svc/Stdout live state)
-- [ ] Step 2: `CycleScaleOptions.Env` seam; `resolveServer` off
+- [x] Step 2: `CycleScaleOptions.Env` seam; `resolveServer` off
       `os.Environ()`
 - [ ] Step 3: spawn + follow wrapper — D13 deterministic name (concurrency
       lock + stale-leftover recovery), D10 `AutoRemove`, D11/D15 runtime-dir

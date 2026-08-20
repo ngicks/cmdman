@@ -151,6 +151,7 @@ func (b *serviceBackend) CycleScale(
 		Selection: selection,
 		Command:   command,
 		Position:  set,
+		Env:       os.Environ(),
 	})
 	return err
 }

@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -123,6 +124,10 @@ func composeMuxCycleScaleOp(
 			SessionName: session,
 			Command:     command,
 			Position:    position,
+			// The env is taken here, in the invocation the user typed, because
+			// the cycling itself may be carried out by another process (see
+			// [cli.RunMuxOp]) whose own $TMUX names a different server, or none.
+			Env: os.Environ(),
 		},
 	)
 	cli.RenderCycleScaleResult(cmd.OutOrStdout(), result)
