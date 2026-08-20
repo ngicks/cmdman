@@ -18,6 +18,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/mux"
 	"github.com/ngicks/cmdman/cmdman/tui"
 	"github.com/ngicks/cmdman/internal/gitinfo"
+	"github.com/ngicks/cmdman/internal/templateutil"
 )
 
 // launchGitProbes bounds how many git probes run at once. The launcher opens on
@@ -422,6 +423,25 @@ func fillGitInfo(ctx context.Context, locs []tui.LaunchLocation) {
 		})
 	}
 	_ = g.Wait()
+}
+
+// launcherWindowName derives the compact display name used for a launcher
+// window. A detached or unavailable Git identity falls back to the selected
+// working directory, and an empty directory leaves naming to the caller.
+func launcherWindowName(ctx context.Context, workDir string) string {
+	if workDir == "" {
+		return ""
+	}
+
+	info := gitinfo.Probe(ctx, workDir)
+	name := ""
+	if info.RepoName != "" && info.Branch != "" && info.Branch != "HEAD" {
+		name = info.RepoName + "-" + info.Branch
+	}
+	if name == "" {
+		name = filepath.Base(filepath.Clean(workDir))
+	}
+	return templateutil.Trunc(name, 10)
 }
 
 // StartProject brings a project up in the background — the launcher's `s` (D4).
