@@ -3,6 +3,8 @@ package switcher
 import (
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 	ansi "github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-ansi"
 )
@@ -71,8 +73,49 @@ func (m Model) switcherGeometry(w, h int) switcherGeometry {
 	if len(g.lines) == 0 {
 		g.lines = []switcherLine{{text: core.StyleActive.Render("No projects."), group: -1}}
 	}
-	g.off = viewportOffset(g.lines, m.selected, g.avail)
+	if m.scrolled {
+		// The wheel is driving, so the view is where it was left rather than where
+		// the selection is (see wheel). Clamped here and not only at the notch: the
+		// list the offset was taken against can have been reloaded or re-laid-out
+		// since, and an offset past the end of a shorter list would draw nothing.
+		g.off = clampOffset(m.scrollOff, len(g.lines), g.avail)
+	} else {
+		g.off = viewportOffset(g.lines, m.selected, g.avail)
+	}
 	return g
+}
+
+// switcherWheelStep is how far one wheel notch scrolls, the same notch the
+// launcher's panes take.
+const switcherWheelStep = 3
+
+// wheel scrolls the list, cursor unmoved: the wheel looks around, and the keys
+// are what act on what is found. It leaves a teardown waiting to be confirmed
+// standing — unlike a click, it moves no cursor, so the question still names the
+// project it was asked about.
+//
+// The notch is taken from where the list already sits rather than from a stored
+// offset that may never have been set, which is what makes the first notch of a
+// selection-following view move by a notch instead of jumping to the top.
+func (m Model) wheel(msg tea.MouseWheelMsg) Model {
+	d := switcherWheelStep
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		d = -switcherWheelStep
+	case tea.MouseWheelDown:
+	default:
+		return m
+	}
+	g := m.switcherGeometry(m.size())
+	m.scrollOff, m.scrolled = clampOffset(g.off+d, len(g.lines), g.avail), true
+	return m
+}
+
+// clampOffset bounds a scroll offset to the list: never negative, and never past
+// the last screenful — which a list that fits its pane does not have, so the
+// upper bound falls back to the top rather than going negative.
+func clampOffset(off, lines, avail int) int {
+	return min(max(off, 0), max(lines-avail, 0))
 }
 
 // groupAt resolves a screen row to the group drawn on it. The chrome rows and

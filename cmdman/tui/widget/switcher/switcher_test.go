@@ -3,6 +3,7 @@ package switcher
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -1070,6 +1071,153 @@ func TestSwitcherKeysMoveSelection(t *testing.T) {
 	}
 }
 
+// TestSwitcherWheelScrollsTheView checks the wheel's half of the contract: a
+// notch moves the visible window and leaves the cursor where it is, so the list
+// can be looked through without the selection following the pointer around.
+func TestSwitcherWheelScrollsTheView(t *testing.T) {
+	m := scrollWidget(t, 32, 8)
+	if got := paneOff(m); got != 0 {
+		t.Fatalf("the list starts scrolled to %d, want the top", got)
+	}
+
+	m, _ = updWidget(t, m, wheelMsg(tea.MouseWheelDown))
+	if m.selected != 0 {
+		t.Errorf("the wheel moved the selection to %d; it scrolls away from the cursor",
+			m.selected)
+	}
+	if got := paneOff(m); got != switcherWheelStep {
+		t.Fatalf("one notch scrolled to line %d, want %d", got, switcherWheelStep)
+	}
+	out := paneText(m)
+	if strings.Contains(out, "/work/proj-0") {
+		t.Errorf("the group the notch scrolled past is still drawn:\n%s", out)
+	}
+	if !strings.Contains(out, "/work/proj-4") {
+		t.Errorf("the rows the notch brought up are not drawn:\n%s", out)
+	}
+}
+
+// TestSwitcherWheelClampsAtBothEnds checks that the view stops at the ends of
+// the list: notches past either end are spent, not banked, so a notch the other
+// way turns the view around at once.
+func TestSwitcherWheelClampsAtBothEnds(t *testing.T) {
+	m := scrollWidget(t, 32, 8)
+	g := m.switcherGeometry(m.size())
+	bottom := len(g.lines) - g.avail
+	if bottom <= switcherWheelStep {
+		t.Fatalf("the fixture nearly fits its pane: %d lines in %d rows",
+			len(g.lines), g.avail)
+	}
+
+	m, _ = updWidget(t, m, wheelMsg(tea.MouseWheelUp))
+	if got := paneOff(m); got != 0 {
+		t.Errorf("a notch up at the top scrolled to line %d, want the top", got)
+	}
+
+	for range len(g.lines) {
+		m, _ = updWidget(t, m, wheelMsg(tea.MouseWheelDown))
+	}
+	if got := paneOff(m); got != bottom {
+		t.Fatalf("scrolling to the end landed on line %d, want %d", got, bottom)
+	}
+	if out := paneText(m); !strings.Contains(out, "/work/proj-7") {
+		t.Errorf("the last group is not drawn at the end of the list:\n%s", out)
+	}
+	m, _ = updWidget(t, m, wheelMsg(tea.MouseWheelDown))
+	if got := paneOff(m); got != bottom {
+		t.Errorf("a notch past the end scrolled to line %d, want %d", got, bottom)
+	}
+	m, _ = updWidget(t, m, wheelMsg(tea.MouseWheelUp))
+	if got, want := paneOff(m), bottom-switcherWheelStep; got != want {
+		t.Errorf("a notch back up scrolled to line %d, want %d: the offset ran past the end",
+			got, want)
+	}
+}
+
+// TestSwitcherKeyMoveSnapsTheViewBack checks the other half of the contract: the
+// next keyboard move hands the view back to the selection, wherever the wheel
+// had left it.
+func TestSwitcherKeyMoveSnapsTheViewBack(t *testing.T) {
+	m := scrollWidget(t, 32, 8)
+	for range 3 {
+		m, _ = updWidget(t, m, wheelMsg(tea.MouseWheelDown))
+	}
+	if paneOff(m) == 0 {
+		t.Fatalf("the wheel left the view at the top; nothing to snap back from")
+	}
+
+	m, _ = updWidget(t, m, coretest.Kr("j"))
+	if m.selected != 1 {
+		t.Fatalf("j should move the selection down, got %d", m.selected)
+	}
+	if m.scrolled {
+		t.Errorf("a keyboard move should stop the view following the wheel")
+	}
+	if got := paneOff(m); got != 0 {
+		t.Fatalf("the view stayed on line %d, want the selection's own offset 0", got)
+	}
+	if out := paneText(m); !strings.Contains(out, "/work/proj-1") {
+		t.Errorf("the selected group is not on screen:\n%s", out)
+	}
+
+	for range 3 {
+		m, _ = updWidget(t, m, wheelMsg(tea.MouseWheelDown))
+	}
+	m, _ = updWidget(t, m, coretest.Kr("k"))
+	if m.selected != 0 || paneOff(m) != 0 {
+		t.Fatalf("k left the selection on %d and the view on line %d, want 0 and 0",
+			m.selected, paneOff(m))
+	}
+}
+
+// TestSwitcherClickFollowsTheScrolledView checks that a click after a scroll
+// lands on the row actually under the pointer. The render and the hit-test read
+// one geometry, so the wheel moves both together.
+func TestSwitcherClickFollowsTheScrolledView(t *testing.T) {
+	m := scrollWidget(t, 32, 8)
+	const y = 2 // the second list row, under the pinned title
+
+	before, ok := m.groupAt(y)
+	if !ok {
+		t.Fatalf("row %d resolved to no group before the scroll", y)
+	}
+	m, _ = updWidget(t, m, wheelMsg(tea.MouseWheelDown))
+	after, ok := m.groupAt(y)
+	if !ok {
+		t.Fatalf("row %d resolved to no group after the scroll", y)
+	}
+	if after == before {
+		t.Fatalf("group %d is still under row %d; the hit-test did not follow the view",
+			before, y)
+	}
+	g := m.switcherGeometry(m.size())
+	if want := g.lines[g.off+y-g.top()].group; after != want {
+		t.Fatalf("row %d resolves to group %d, the row drawn there belongs to %d",
+			y, after, want)
+	}
+
+	want := m.groups[after].Name
+	m, cmd := updWidget(t, m, tea.MouseClickMsg{Button: tea.MouseLeft, X: 2, Y: y})
+	m = settle(t, m, cmd)
+	fb := m.backend.(*coretest.FakeBackend)
+	if len(fb.Switched) != 1 || fb.Switched[0].Project != want {
+		t.Fatalf("the click switched to %v, want the project drawn on row %d (%q)",
+			fb.Switched, y, want)
+	}
+}
+
+// wheelMsg is one notch of the wheel over the widget. The switcher is a single
+// column, so where across it the pointer sits does not pick what scrolls.
+func wheelMsg(b tea.MouseButton) tea.MouseWheelMsg {
+	return tea.MouseWheelMsg{Button: b, X: 1, Y: 1}
+}
+
+// paneOff is the list line the view is scrolled to as the widget stands.
+func paneOff(m Model) int { return m.switcherGeometry(m.size()).off }
+
+// paneText is what the widget draws, stripped of styling.
+func paneText(m Model) string { return core.StripANSI(m.viewContent()) }
+
 // seedInfos is the command list seedWidget loads: two live commands and one
 // that has exited. It is rebuilt per call, so a test that edits an entry cannot
 // reach the fixture the fake backend answers a re-list with.
@@ -1112,6 +1260,39 @@ func seedWidget(t *testing.T, width, height int) Model {
 	m = next.(Model)
 	next, _ = m.Update(core.ProjectsLoadedMsg{Infos: fb.Projs})
 	return next.(Model)
+}
+
+// scrollWidget builds a switcher over more projects than its pane can show:
+// eight groups of one command each, so the list is sixteen lines and the view
+// has slack to scroll in both directions. Every command has exited, which keeps
+// the runtime watcher out of a fixture that is only about layout.
+//
+// The groups are drawn in name order — proj-0 leads on its own name as well as
+// on being the cwd-active one — which is what the tests' line arithmetic reads.
+func scrollWidget(t *testing.T, width, height int) Model {
+	t.Helper()
+	const n = 8
+	projs := make([]core.ProjectInfo, 0, n)
+	cmds := make([]core.CommandInfo, 0, n)
+	for i := range n {
+		name := fmt.Sprintf("proj-%d", i)
+		dir := "/work/" + name
+		projs = append(projs, core.ProjectInfo{
+			Name: name, Workdir: dir,
+			Path: dir + "/cmd-compose.yaml", Identity: "id-" + name,
+		})
+		cmds = append(cmds, core.CommandInfo{
+			ID: name, Name: "run", Project: name, Workdir: dir,
+			State: model.EventTypeExited,
+		})
+	}
+	fb := &coretest.FakeBackend{Dir: "/work/proj-0", Cmds: cmds, Projs: projs}
+	m := New(t.Context(), core.Options{Backend: fb})
+	t.Cleanup(func() { _ = m.watcher.Close() })
+	m, _ = updWidget(t, m, tea.WindowSizeMsg{Width: width, Height: height})
+	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: cmds})
+	m, _ = updWidget(t, m, core.ProjectsLoadedMsg{Infos: projs})
+	return m
 }
 
 // rowByID returns the rendered row for a command id.

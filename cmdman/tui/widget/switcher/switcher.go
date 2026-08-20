@@ -65,6 +65,14 @@ type Model struct {
 	cwd      string // normalized working directory for active detection
 	status   string // transient error text, shown in place of the hint line
 
+	// scrollOff is the list line the wheel parked the view on, and scrolled is
+	// whether the view is following it rather than the selection. Scrolling away
+	// from the cursor is what a wheel is for, so the two questions — what is
+	// selected and what is on screen — come apart while the wheel is driving and
+	// are put back together by the next keyboard move (see moveSelection).
+	scrollOff int
+	scrolled  bool
+
 	// pendingDown is the project whose compose teardown is waiting for its y.
 	// The question itself is drawn from this rather than written into status: a
 	// listing landing while it waits clears status, and a question that went off
@@ -206,6 +214,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case core.ComposeDownMsg:
 		m.status = msg.Status()
 		return m, nil
+	case tea.MouseWheelMsg:
+		return m.wheel(msg), nil
 	case tea.MouseClickMsg:
 		if msg.Button != tea.MouseLeft {
 			return m, nil
@@ -392,6 +402,9 @@ func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) moveSelection(delta int) {
+	// The view follows the cursor again from here, wherever the wheel left it: a
+	// cursor moving somewhere off screen is a move the user cannot see.
+	m.scrolled = false
 	if len(m.groups) == 0 {
 		m.selected = 0
 		return
