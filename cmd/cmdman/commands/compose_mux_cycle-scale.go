@@ -72,7 +72,7 @@ func runComposeMuxCycleScale(
 	cf *composeFlags,
 	arg, session string,
 ) error {
-	return cli.RunMuxOp(cmd.Context(), func(ctx context.Context) error {
+	return cli.RunMuxOp(cmd.Context(), cli.MuxOpOptions{}, func(ctx context.Context) error {
 		return composeMuxCycleScaleOp(ctx, cmd, rf, cf, arg, session)
 	})
 }

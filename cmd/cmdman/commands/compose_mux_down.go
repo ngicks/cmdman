@@ -48,7 +48,7 @@ derived from the compose file is required.`,
 // cmdman service or leaf resolution — only the project identity and spec driver
 // options are required. The layout argument is irrelevant to teardown.
 func runComposeMuxDown(cmd *cobra.Command, cf *composeFlags, session string) error {
-	return cli.RunMuxOp(cmd.Context(), func(ctx context.Context) error {
+	return cli.RunMuxOp(cmd.Context(), cli.MuxOpOptions{}, func(ctx context.Context) error {
 		return composeMuxDownOp(ctx, cmd, cf, session)
 	})
 }

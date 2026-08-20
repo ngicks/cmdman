@@ -22,7 +22,7 @@ implementation steps detailed; traceability gate walked. Ready to implement.
       carries Svc/Stdout live state)
 - [x] Step 2: `CycleScaleOptions.Env` seam; `resolveServer` off
       `os.Environ()`
-- [ ] Step 3: spawn + follow wrapper — D13 deterministic name (concurrency
+- [x] Step 3: spawn + follow wrapper — D13 deterministic name (concurrency
       lock + stale-leftover recovery), D10 `AutoRemove`, D11/D15 runtime-dir
       log with 1MiB/1-file caps, D12 `Service.Logs` follow, exit-code
       capture before removal

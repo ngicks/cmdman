@@ -51,7 +51,7 @@ func runMuxUp(
 	args []string,
 	session string,
 ) error {
-	return cli.RunMuxOp(cmd.Context(), func(ctx context.Context) error {
+	return cli.RunMuxOp(cmd.Context(), cli.MuxOpOptions{}, func(ctx context.Context) error {
 		return muxUpOp(ctx, cmd, rf, args, session)
 	})
 }

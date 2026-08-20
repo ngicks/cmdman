@@ -1,5 +1,37 @@
 # Handoff ledger
 
+## H2 — k8s-file writer can split entries larger than 4096 bytes (2026-08-21)
+
+What: `cmdman/logdriver/k8sfile/writer.go:113` uses `bufio.NewWriter`'s
+default 4096-byte buffer; an entry larger than that splits into several
+`write(2)` calls and could interleave with a concurrent appender to the same
+file. Normal-length lines are one write (assemble + single `Flush()` at
+`writer.go:179`).
+
+Why not done here: fixing it means restructuring the writer's hot path
+around `CurrentOffset`/rotation — not small or local. In practice one mux op
+log file has one writer at a time: same identity is serialized by the
+deterministic op-command name, different identities use different files.
+
+Follow-up: enlarge/replace the buffering strategy if multi-writer log files
+ever become a supported pattern.
+
+## H3 — mux op name lock has a small created-record TOCTOU (2026-08-21)
+
+What: two truly concurrent invocations on the same identity — A creates the
+op record (state `created`), B hits the name conflict and cannot distinguish
+A's milliseconds-old `created` record from a crashed-before-start leftover,
+so B removes it and wins. One live worker still results and the identity is
+never locked out; A's error just reads as a start failure instead of
+"already running".
+
+Why not done here: distinguishing needs a CreatedAt-age heuristic; the
+failure mode is cosmetic (wrong error text on a rare double-invocation).
+
+Follow-up: add a CreatedAt grace window to the leftover-cleanup check in
+`cmdman/cli/mux_op_supervise.go` if the confusing error shows up in
+practice.
+
 ## H1 — driver pane classification is floating-pane-blind (out-of-scope discovery, 2026-08-21)
 
 What: tmux 3.7 floating panes (`new-pane`, `pane_floating_flag`) are full

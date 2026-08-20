@@ -50,7 +50,7 @@ any pane, run-shell, or outside tmux. --session narrows the scan to one session.
 // driver configuration. With the stdin default ("-") teardown uses the default
 // driver rather than blocking on stdin.
 func runMuxDown(cmd *cobra.Command, args []string, session string) error {
-	return cli.RunMuxOp(cmd.Context(), func(ctx context.Context) error {
+	return cli.RunMuxOp(cmd.Context(), cli.MuxOpOptions{}, func(ctx context.Context) error {
 		return muxDownOp(ctx, cmd, args, session)
 	})
 }

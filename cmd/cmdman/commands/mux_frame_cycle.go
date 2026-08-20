@@ -41,7 +41,7 @@ Each step replaces the frame in place, exactly as "frame show DEF" does.`,
 }
 
 func runMuxFrameCycle(cmd *cobra.Command, rf *rootFlags, session string) error {
-	return cli.RunMuxOp(cmd.Context(), func(ctx context.Context) error {
+	return cli.RunMuxOp(cmd.Context(), cli.MuxOpOptions{}, func(ctx context.Context) error {
 		return muxFrameCycleOp(ctx, cmd, rf, session)
 	})
 }

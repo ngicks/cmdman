@@ -31,6 +31,13 @@ func specDriver(path string) (muxctl.DriverSpec, error) {
 
 // openSpecSource opens the spec source. An empty or "-" path reads from stdin
 // (returns a no-op closer); anything else opens the file.
+//
+// A spec read from stdin is the one case a mux operation cannot be handed to a
+// detached worker: the worker is given /dev/null for stdin, so a spec that only
+// ever existed on the invoking process's stdin is gone by the time the worker
+// looks for it. Those runs stay in the invoking process — which is what every
+// mux verb did before any worker existed — and give up surviving their own pane
+// in exchange. Naming a file is what buys that back.
 func openSpecSource(path string) (io.Reader, func(), error) {
 	if path == "" || path == "-" {
 		return os.Stdin, func() {}, nil

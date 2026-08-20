@@ -43,7 +43,7 @@ starting a second one.`,
 }
 
 func runMuxFrameHide(cmd *cobra.Command, session string) error {
-	return cli.RunMuxOp(cmd.Context(), func(ctx context.Context) error {
+	return cli.RunMuxOp(cmd.Context(), cli.MuxOpOptions{}, func(ctx context.Context) error {
 		return mux.FrameHide(ctx, mux.FrameOptions{Session: session})
 	})
 }

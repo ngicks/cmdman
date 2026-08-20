@@ -6,6 +6,19 @@ Decision: commit the untracked plan directory as a docs commit before
 starting implementation, matching repo precedent (main's history commits
 plan directories alongside their implementation).
 
+## D17: stdin-provided specs run in-process, not supervised [automatic] (2026-08-21)
+
+Decision: when `mux up`/`mux down` receive the spec on stdin (`path == "-"`,
+`cmd/cmdman/commands/zz_mux_helpers.go:34`), the operation runs in-process as
+today instead of being handed to the detached worker. A detached worker
+re-execs the original argv with /dev/null stdin, so a piped spec would be
+lost; forwarding stdin to the worker would add machinery for a rare flow.
+The pre-existing self-pane hazard remains for that flow only, documented in
+code.
+
+Rejected: stdin forwarding (extra plumbing for a rare flow); hard error
+(would break a working outside-pane piped invocation).
+
 ## D8: approach pivot — supervise the operation instead of spare-then-settle (2026-08-21)
 
 Decision: pane-destroying mux verbs run as a cmdman-supervised operation (the
