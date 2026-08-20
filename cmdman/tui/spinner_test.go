@@ -10,7 +10,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/tui/internal/core"
 )
 
-func TestStatusGlyphMatchesComposeMarkers(t *testing.T) {
+func TestStatusGlyphMarksLifecycleStates(t *testing.T) {
 	cases := []struct {
 		state   model.EventType
 		pending string

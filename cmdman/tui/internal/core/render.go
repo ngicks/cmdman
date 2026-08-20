@@ -138,9 +138,9 @@ var (
 	StyleWidgetTitle = lipgloss.NewStyle().Bold(true).Foreground(ColorAccent)
 	StyleWidgetHead  = lipgloss.NewStyle().Bold(true)
 	// The traffic-light marker palette (D21): green nothing wants you, yellow
-	// something is working, red something is blocked on you. The status words in
-	// command rows share it, so a row and its project's dot say the same thing
-	// twice rather than in two vocabularies. They are basic ANSI colors like the
+	// something is working, red something is blocked on you. Command-row names
+	// share it (RowNameStyle), so a row and its project's dot say the same thing
+	// in one vocabulary. They are basic ANSI colors like the
 	// rest of this TUI's markers (theme.go's StyleMark*), so they follow the
 	// user's own theme.
 	StyleMarkerIdle    = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
@@ -148,7 +148,8 @@ var (
 	StyleMarkerBlocked = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 )
 
-// ReportedStatusStyle colors a reported status word or the dot standing for it.
+// ReportedStatusStyle colors what stands for a reported status: a command
+// row's name, or a project head's dot.
 // Anything unreported keeps idle's green: "nothing wants you" is what both
 // mean, and the glyph — hollow rather than filled — carries the difference.
 func ReportedStatusStyle(status string) lipgloss.Style {

@@ -484,6 +484,14 @@ func TestSwitcherRowClampsTitleToThePaneEdge(t *testing.T) {
 			t.Errorf("a title cut at the pane edge should say so, width %d: %q", w, line)
 		}
 	}
+	// Below w=20 nothing of the title fits: the separator must go with it
+	// rather than dangle at the pane edge.
+	for w := 8; w < 20; w++ {
+		line := rowText(Model{}, c, w)
+		if strings.Contains(line, rowSep) {
+			t.Errorf("no room for a payload at width %d, yet the separator is drawn: %q", w, line)
+		}
+	}
 }
 
 // TestSwitcherRowPayloadForDeadRows is D13 in the title slot: a run that is over

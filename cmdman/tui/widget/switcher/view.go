@@ -342,6 +342,7 @@ func (m Model) commandLine(c core.CommandRow, bg core.RowBg, w int) string {
 		bg.Plain(" "+bell)
 
 	text, live := core.RowPayload(c)
+	text = core.ClampCells(text, w-rowFixedW()-nameW)
 	if text == "" {
 		return line
 	}
@@ -349,8 +350,7 @@ func (m Model) commandLine(c core.CommandRow, bg core.RowBg, w int) string {
 	if live {
 		style = core.StyleActive
 	}
-	return line + bg.Style(core.StyleActive).Render(rowSep) +
-		bg.Style(style).Render(core.ClampCells(text, w-rowFixedW()-nameW))
+	return line + bg.Style(core.StyleActive).Render(rowSep) + bg.Style(style).Render(text)
 }
 
 // viewportOffset scrolls the list so the selected group stays visible: as much

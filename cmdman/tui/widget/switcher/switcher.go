@@ -856,7 +856,8 @@ func (m Model) deriveWeak() Model {
 	return m
 }
 
-// weakStyle is the command rows' foreground: the terminal's own letter color
-// pulled toward its background, so a group reads as bright head plus subdued
-// detail on light and dark terminals alike.
+// weakStyle is the subdued foreground for a row's secondary columns (the
+// replica index): the terminal's own letter color pulled toward its
+// background, so a group reads as bright head plus subdued detail on light
+// and dark terminals alike. Names take it via RowNameStyle's weak fallback.
 func (m Model) weakStyle() lipgloss.Style { return core.WeakStyle(m.weak) }

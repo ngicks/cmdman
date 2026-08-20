@@ -165,8 +165,10 @@ func (m Model) composeUpSize() (w, h int) {
 	return max(width-8, 30), min(max(rows, 5), max(height-4, 5))
 }
 
-// composeUpGlyph picks the single-cell mark for a service, matching statusGlyph:
-// spinner while in flight, ● running, ◌ created, ✘ failed, ✔ otherwise terminal.
+// composeUpGlyph picks the single-cell mark for a service: spinner while in
+// flight, ● running, ◌ created, ✘ failed, ✔ otherwise terminal. statusGlyph
+// shares the vocabulary except for running, which a progress list must show
+// and a command row already says with the name's color.
 func composeUpGlyph(mk composeUpMark, frame int) string {
 	if !mk.terminal {
 		return spinnerFrames[frame%len(spinnerFrames)]
@@ -608,11 +610,15 @@ func scrollLines(lines []string, height, top int) string {
 	return strings.Join(view, "\n")
 }
 
+// truncate cuts with core.Cells, not the locale-derived package default: rows
+// are measured and clamped with core.Cells, and the two rulers disagree on
+// ambiguous-width glyphs (the row separator's "·", the clamps' "…") under a
+// CJK locale, which would cut the selected row short of its own rendering.
 func truncate(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
-	return runewidth.Truncate(s, w, "")
+	return core.Cells.Truncate(s, w, "")
 }
 
 // truncateLeft truncates s to w cells keeping the tail, prefixing "…" when it
