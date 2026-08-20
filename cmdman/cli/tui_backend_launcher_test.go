@@ -587,17 +587,3 @@ func upResult(actions ...string) *compose.UpResult {
 	}
 	return res
 }
-
-func TestRepoNameFromURI(t *testing.T) {
-	for uri, want := range map[string]string{
-		"https://github.com/ngicks/cmdman.git": "cmdman",
-		"https://github.com/ngicks/cmdman":     "cmdman",
-		"git@github.com:acme/webapp.git":       "webapp",
-		"/srv/git/bare/edge.git/":              "edge",
-		"cmdman":                               "cmdman",
-	} {
-		if got := repoNameFromURI(uri); got != want {
-			t.Errorf("repoNameFromURI(%q) = %q, want %q", uri, got, want)
-		}
-	}
-}

@@ -17,6 +17,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/compose"
 	"github.com/ngicks/cmdman/cmdman/mux"
 	"github.com/ngicks/cmdman/cmdman/tui"
+	"github.com/ngicks/cmdman/internal/gitinfo"
 )
 
 // launchGitProbes bounds how many git probes run at once. The launcher opens on
@@ -413,7 +414,7 @@ func fillGitInfo(ctx context.Context, locs []tui.LaunchLocation) {
 	g.SetLimit(launchGitProbes)
 	for i := range locs {
 		g.Go(func() error {
-			info := probeGit(ctx, locs[i].Dir)
+			info := gitinfo.Probe(ctx, locs[i].Dir)
 			locs[i].RepoName = info.RepoName
 			locs[i].RepoURI = info.RepoURI
 			locs[i].Branch = info.Branch
