@@ -444,6 +444,12 @@ func launcherWindowName(ctx context.Context, workDir string) string {
 	return templateutil.Trunc(name, 10)
 }
 
+type launcherComposeSvc interface {
+	Up(context.Context, compose.ComposeSpec, compose.UpOption) (*compose.UpResult, error)
+	MuxUp(context.Context, compose.MuxUpOption) error
+	MuxLand(context.Context, compose.MuxLandOption) (mux.LandResult, error)
+}
+
 // StartProject brings a project up in the background — the launcher's `s` (D4).
 // It runs the same two calls the Compose tab makes, compose up followed by the
 // mux bring-up, and returns when they are done; the launcher shows the flight in
@@ -453,11 +459,20 @@ func launcherWindowName(ctx context.Context, workDir string) string {
 // window D9 gives it belongs to the landing, and `s` is the gesture that stays
 // where it is.
 func (b *serviceBackend) StartProject(ctx context.Context, target tui.LaunchTarget) error {
+	return b.startProject(ctx, target, b.compose)
+}
+
+func (b *serviceBackend) startProject(
+	ctx context.Context,
+	target tui.LaunchTarget,
+	composeSvc launcherComposeSvc,
+) error {
 	spec, err := loadLaunchSpec(target)
 	if err != nil {
 		return err
 	}
-	return b.bringUp(ctx, target, spec)
+	windowName := launcherWindowName(ctx, spec.WorkDir)
+	return b.bringUp(ctx, target, spec, windowName, composeSvc)
 }
 
 // LaunchProject brings a project up and lands focus inside it — the launcher's
@@ -474,16 +489,26 @@ func (b *serviceBackend) LaunchProject(
 	ctx context.Context,
 	target tui.LaunchTarget,
 ) (tui.LaunchOutcome, error) {
+	return b.launchProject(ctx, target, b.compose)
+}
+
+func (b *serviceBackend) launchProject(
+	ctx context.Context,
+	target tui.LaunchTarget,
+	composeSvc launcherComposeSvc,
+) (tui.LaunchOutcome, error) {
 	spec, err := loadLaunchSpec(target)
 	if err != nil {
 		return tui.LaunchOutcome{}, err
 	}
-	if err := b.bringUp(ctx, target, spec); err != nil {
+	windowName := launcherWindowName(ctx, spec.WorkDir)
+	if err := b.bringUp(ctx, target, spec, windowName, composeSvc); err != nil {
 		return tui.LaunchOutcome{}, err
 	}
 
-	res, err := b.compose.MuxLand(ctx, compose.MuxLandOption{
-		Selection: compose.SelectionFromSpec(&spec),
+	res, err := composeSvc.MuxLand(ctx, compose.MuxLandOption{
+		Selection:  compose.SelectionFromSpec(&spec),
+		WindowName: windowName,
 	})
 	if err != nil {
 		return tui.LaunchOutcome{}, fmt.Errorf(
@@ -514,8 +539,10 @@ func (b *serviceBackend) bringUp(
 	ctx context.Context,
 	target tui.LaunchTarget,
 	spec compose.ComposeSpec,
+	windowName string,
+	composeSvc launcherComposeSvc,
 ) error {
-	res, upErr := b.compose.Up(ctx, spec, compose.UpOption{})
+	res, upErr := composeSvc.Up(ctx, spec, compose.UpOption{})
 	if err := upVerdict(target, res, upErr); err != nil {
 		return err
 	}
@@ -531,8 +558,9 @@ func (b *serviceBackend) bringUp(
 	// so it would fall back to the launcher's own — and a popup runs in whatever
 	// directory the user summoned it from, which is exactly the case D3 exists
 	// for. Same identity as the up, no second load.
-	if err := b.compose.MuxUp(ctx, compose.MuxUpOption{
-		Selection: selection,
+	if err := composeSvc.MuxUp(ctx, compose.MuxUpOption{
+		Selection:  selection,
+		WindowName: windowName,
 		// The launcher is a popup over somebody else's window: building the
 		// dashboard there would repurpose the window the user was looking at,
 		// which is the opposite of both launcher gestures (D4).
