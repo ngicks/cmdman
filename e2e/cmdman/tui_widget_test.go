@@ -37,7 +37,7 @@ func TestTUIWidget_SwitcherRendersAndQuits(t *testing.T) {
 	// reaches the column once discovery has found the project sitting there.
 	w.waitFor(t, filepath.Base(wd), 5*time.Second)
 	// The widget is a single view: the full TUI's tab bar must not be there.
-	if snap := w.snapshot(); strings.Contains(snap, "Layout") {
+	if snap := w.snapshot(); strings.Contains(snap, "Compose") {
 		t.Errorf("switcher widget rendered the full TUI chrome; got:\n%q", snap)
 	}
 	w.quit(t)
@@ -153,7 +153,7 @@ func TestTUIWidget_LauncherRendersAndQuits(t *testing.T) {
 	// brought up — typing is what reaches a location discovered on disk.
 	w.send(t, "widgetlnch")
 	w.waitFor(t, "widgetlnch", 5*time.Second)
-	if snap := w.snapshot(); strings.Contains(snap, "Layout") {
+	if snap := w.snapshot(); strings.Contains(snap, "Compose") {
 		t.Errorf("launcher widget rendered the full TUI chrome; got:\n%q", snap)
 	}
 	// A bare letter types into the filter, so the dismissal is ctrl+c.

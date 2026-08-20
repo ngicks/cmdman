@@ -298,10 +298,6 @@ func TestTabSwitchPreservesTabLocalState(t *testing.T) {
 		t.Fatalf("tab should switch to Compose")
 	}
 	m, _ = upd(m, kTab)
-	if m.active != TabLayout {
-		t.Fatalf("tab should switch to Layout")
-	}
-	m, _ = upd(m, kTab)
 	if m.active != TabCommands {
 		t.Fatalf("tab should wrap back to Commands")
 	}
@@ -783,10 +779,10 @@ func TestComposeUpOpenErrorSurfacesStatus(t *testing.T) {
 	}
 }
 
-func TestTabBarRendersThreeTabs(t *testing.T) {
+func TestTabBarRendersBothTabs(t *testing.T) {
 	m := seed()
 	bar := m.renderTabBar()
-	for _, name := range []string{"Commands", "Compose", "Layout"} {
+	for _, name := range []string{"Commands", "Compose"} {
 		if !strings.Contains(bar, name) {
 			t.Fatalf("tab bar should render the %q tab, got %q", name, bar)
 		}
@@ -922,137 +918,6 @@ func TestComposeRowShowsWorkdir(t *testing.T) {
 	}
 	if !strings.Contains(out, "/other") {
 		t.Fatalf("each compose project row should show its own workdir, got:\n%s", out)
-	}
-}
-
-func TestLayoutTabDefaultSelectionIsMarker(t *testing.T) {
-	m := New(core.Options{Backend: &coretest.FakeBackend{}, PopupMode: true})
-	m.active = TabLayout
-	info := LayoutsInfo{
-		Project: "tools", Path: "/c.yaml",
-		Names: []string{"dev", "ops", "full"}, Current: 1,
-	}
-	m, _ = upd(m, layoutsLoadedMsg{info: info})
-	if len(m.layout.rows) != 3 {
-		t.Fatalf("want 3 layout rows, got %d", len(m.layout.rows))
-	}
-	if m.layout.selected != 1 {
-		t.Fatalf("default selection should be the current marker (1), got %d", m.layout.selected)
-	}
-	if m.layout.current != 1 {
-		t.Fatalf("current marker should be recorded as 1, got %d", m.layout.current)
-	}
-	out := m.renderLayoutBody(40, 10)
-	for _, name := range []string{"dev", "ops", "full"} {
-		if !strings.Contains(out, name) {
-			t.Fatalf("layout body should list %q, got:\n%s", name, out)
-		}
-	}
-}
-
-func TestLayoutTabNoMarkerSelectsFirst(t *testing.T) {
-	m := New(core.Options{Backend: &coretest.FakeBackend{}, PopupMode: true})
-	m.active = TabLayout
-	// No running dashboard: Current == -1 should land the selection on the first.
-	m, _ = upd(m, layoutsLoadedMsg{info: LayoutsInfo{Names: []string{"a", "b"}, Current: -1}})
-	if m.layout.selected != 0 {
-		t.Fatalf("with no marker the selection should default to 0, got %d", m.layout.selected)
-	}
-}
-
-func TestLayoutTabNavigation(t *testing.T) {
-	m := New(core.Options{Backend: &coretest.FakeBackend{}, PopupMode: true})
-	m.active = TabLayout
-	m, _ = upd(m, layoutsLoadedMsg{info: LayoutsInfo{Names: []string{"a", "b", "c"}, Current: 0}})
-	m, _ = upd(m, coretest.Kr("j"))
-	if m.layout.selected != 1 {
-		t.Fatalf("j should move the selection down, got %d", m.layout.selected)
-	}
-	m, _ = upd(m, coretest.Kr("k"))
-	if m.layout.selected != 0 {
-		t.Fatalf("k should move the selection up, got %d", m.layout.selected)
-	}
-	// Clamp at the top.
-	m, _ = upd(m, coretest.Kr("k"))
-	if m.layout.selected != 0 {
-		t.Fatalf("k at the top should clamp to 0, got %d", m.layout.selected)
-	}
-}
-
-func TestLayoutTabEnterAppliesInPopupMode(t *testing.T) {
-	m := New(core.Options{Backend: &coretest.FakeBackend{}, PopupMode: true})
-	m.active = TabLayout
-	m, _ = upd(m, layoutsLoadedMsg{info: LayoutsInfo{
-		Project: "tools", Path: "/c.yaml", Names: []string{"dev", "ops"}, Current: 0,
-	}})
-	m, _ = upd(m, coretest.Kr("j")) // select "ops"
-
-	m, cmd := upd(m, coretest.KEnter)
-	if m.popup.open() {
-		t.Fatalf("popup mode should apply immediately, not open a warning popup")
-	}
-	done, ok := firstMsg[layoutDoneMsg](drain(cmd))
-	if !ok {
-		t.Fatalf("enter should dispatch an ApplyLayout command")
-	}
-	if done.layout != "ops" {
-		t.Fatalf("layoutDoneMsg should report the applied layout, got %q", done.layout)
-	}
-	fb := m.backend.(*coretest.FakeBackend)
-	if len(fb.AppliedLayouts) != 1 || fb.AppliedLayouts[0] != "ops" {
-		t.Fatalf("ApplyLayout should target the selected layout, got %v", fb.AppliedLayouts)
-	}
-}
-
-func TestLayoutTabEnterWarnsInDirectMode(t *testing.T) {
-	m := New(core.Options{Backend: &coretest.FakeBackend{}}) // direct mode: PopupMode false
-	m.active = TabLayout
-	m, _ = upd(m, layoutsLoadedMsg{info: LayoutsInfo{
-		Project: "tools", Path: "/c.yaml", Names: []string{"dev", "ops"}, Current: 0,
-	}})
-
-	m, _ = upd(m, coretest.KEnter)
-	if m.popup.kind != popupMuxWarn {
-		t.Fatalf("direct mode should open the mux warning popup, got %v", m.popup.kind)
-	}
-	if m.popup.layout != "dev" {
-		t.Fatalf("the warning popup should carry the selected layout, got %q", m.popup.layout)
-	}
-	if m.popup.confirmed() {
-		t.Fatalf("the warning popup should default to <cancel>")
-	}
-	fb := m.backend.(*coretest.FakeBackend)
-	if len(fb.AppliedLayouts) != 0 {
-		t.Fatalf("apply must wait for confirmation, got %v", fb.AppliedLayouts)
-	}
-
-	// Toggle to the action button and confirm.
-	m, _ = upd(m, tea.KeyPressMsg{Code: tea.KeyLeft})
-	m, cmd := upd(m, coretest.KEnter)
-	if _, ok := firstMsg[layoutDoneMsg](drain(cmd)); !ok {
-		t.Fatalf("confirming the warning should dispatch ApplyLayout")
-	}
-	if len(fb.AppliedLayouts) != 1 || fb.AppliedLayouts[0] != "dev" {
-		t.Fatalf("ApplyLayout should target the selected layout after confirm, got %v",
-			fb.AppliedLayouts)
-	}
-}
-
-func TestLayoutTabEntryLoadsLayouts(t *testing.T) {
-	m := seed()
-	fb := m.backend.(*coretest.FakeBackend)
-	fb.LayoutsInfo = LayoutsInfo{Project: "local-dev", Names: []string{"solo"}, Current: 0}
-	// Switch Commands -> Compose -> Layout; entering Layout dispatches a load.
-	m, _ = upd(m, kTab) // Compose
-	m, cmd := upd(m, kTab)
-	if m.active != TabLayout {
-		t.Fatalf("precondition: should be on the Layout tab")
-	}
-	if _, ok := firstMsg[layoutsLoadedMsg](drain(cmd)); !ok {
-		t.Fatalf("entering the Layout tab should dispatch a ListLayouts load")
-	}
-	if len(fb.LayoutsReq) == 0 {
-		t.Fatalf("ListLayouts should have been requested on tab entry")
 	}
 }
 

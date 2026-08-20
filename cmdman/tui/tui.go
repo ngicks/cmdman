@@ -68,7 +68,5 @@ func New(opts Options) Model {
 		},
 		watcher: core.NewRuntimeWatcher(),
 		runtime: map[string]core.RuntimeStateView{},
-		// -1 = no dashboard marker known until the first ListLayouts load.
-		layout: layoutTab{current: -1},
 	}
 }

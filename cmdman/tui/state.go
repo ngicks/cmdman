@@ -39,7 +39,6 @@ type Model struct {
 
 	commands commandsTab
 	compose  composeTab
-	layout   layoutTab
 
 	popup     popupState
 	helpOpen  bool
@@ -104,37 +103,6 @@ type composeRow struct {
 	active   bool
 	hasMux   bool
 	modified string
-}
-
-// layoutTab holds the Layout-tab state: the current project's mux layouts in
-// definition order, the selected row, and the running dashboard's current
-// marker. project/path are the resolved current project (cwd-active mux project,
-// falling back to the Compose-tab selection) used when applying a layout.
-type layoutTab struct {
-	rows     []layoutRow
-	selected int
-	project  string // resolved current project name
-	path     string // resolved compose file path (used to apply a layout)
-	current  int    // current dashboard marker index, or -1 when none/unknown
-	loaded   bool   // whether layouts have been loaded at least once
-}
-
-type layoutRow struct {
-	name string
-}
-
-// moveSelection applies delta and clamps the layout selection to existing rows.
-func (t *layoutTab) moveSelection(delta int) {
-	if len(t.rows) == 0 {
-		return
-	}
-	t.selected += delta
-	if t.selected < 0 {
-		t.selected = 0
-	}
-	if t.selected >= len(t.rows) {
-		t.selected = len(t.rows) - 1
-	}
 }
 
 // previewState holds the right-pane preview content for the selected command.

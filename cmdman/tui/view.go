@@ -274,58 +274,9 @@ func (m Model) renderBody(width, height int) string {
 	switch m.active {
 	case TabCommands:
 		return m.renderCommandsBody(width, height)
-	case TabCompose:
-		return m.renderComposeBody(width, height)
 	default:
-		return m.renderLayoutBody(width, height)
+		return m.renderComposeBody(width, height)
 	}
-}
-
-// renderLayoutBody renders the Layout tab: the current project's mux layouts in
-// definition order. The running dashboard's current layout is marked with ●; the
-// selection is shown with the selection bar.
-func (m Model) renderLayoutBody(width, height int) string {
-	cw := max(width-2, 1)
-	ch := max(height-2, 1)
-	title := "Layouts"
-	if m.layout.project != "" {
-		title = "Layouts — " + m.layout.project
-	}
-	rows := m.layout.rows
-	if len(rows) == 0 {
-		msg := "No mux layouts for the current project."
-		if !m.layout.loaded {
-			msg = "Loading…"
-		}
-		content := clampLines([]string{core.StyleActive.Render(msg)}, ch, 0)
-		return box(title, content, width, height)
-	}
-	lines := make([]string, 0, len(rows))
-	for i, r := range rows {
-		selected := i == m.layout.selected
-		prefix := "  "
-		if selected {
-			prefix = "> "
-		}
-		marker := " "
-		if i == m.layout.current {
-			marker = "●"
-		}
-		plain := fmt.Sprintf("%s%s %s", prefix, marker, r.name)
-		switch {
-		case selected:
-			lines = append(lines, styleSelected.Width(cw).Render(truncate(plain, cw)))
-		case i == m.layout.current:
-			lines = append(
-				lines,
-				fmt.Sprintf("%s%s %s", prefix, styleMarkOK.Render(marker), r.name),
-			)
-		default:
-			lines = append(lines, plain)
-		}
-	}
-	content := clampLines(lines, ch, m.layout.selected)
-	return box(title, content, width, height)
 }
 
 func (m Model) renderCommandsBody(width, height int) string {
@@ -530,11 +481,9 @@ func (m Model) renderFooter(width int) string {
 	case TabCommands:
 		hints = "tab next  j/k move  h/l fold  / filter  s start  S stop  r restart  " +
 			"a attach  x remove  ? help  q quit"
-	case TabCompose:
+	default:
 		hints = "tab next  j/k move  / filter  enter def  e edit  a up  " +
 			"c cycle mux  r refresh  ? help  q quit"
-	default:
-		hints = "tab next  j/k move  enter apply  r refresh  ? help  q quit"
 	}
 	status := m.status
 	line1 := styleFooter.Render(truncate(hints, width))

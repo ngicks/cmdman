@@ -173,7 +173,7 @@ func shownBadge(s core.ServiceScaleInfo) string {
 }
 
 // layoutRows draws the layout list with the running dashboard's own layout
-// marked, the way the Layout tab marks it.
+// marked.
 func (m Model) layoutRows(budget int) []string {
 	names := m.info.Layouts.Names
 	if len(names) == 0 {

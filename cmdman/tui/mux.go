@@ -37,8 +37,8 @@ func (m Model) cycleMux() (tea.Model, tea.Cmd) {
 	return m, m.cycleMuxCmd(row.name, row.path)
 }
 
-// cycleMuxCmd names no work directory, for the reason applyLayoutCmd does not:
-// the row it cycles is a project of the directory this TUI works on.
+// cycleMuxCmd names no work directory: the row it cycles is a project of the
+// directory this TUI works on.
 func (m Model) cycleMuxCmd(name, composeFile string) tea.Cmd {
 	backend := m.backend
 	ctx := m.bgCtx()

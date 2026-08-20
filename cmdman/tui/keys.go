@@ -86,12 +86,6 @@ func (m Model) confirmPopup() (tea.Model, tea.Cmd) {
 		m.setPending(p.targetID, "removing")
 		return m, m.removeCmd(p.targetID, p.command, force)
 	case popupMuxWarn:
-		// A carried layout name means "apply this layout" (Layout tab); an empty
-		// one means "cycle to the next layout" (Compose tab `c`).
-		if p.layout != "" {
-			m.status = fmt.Sprintf("applying layout %s…", p.layout)
-			return m, m.applyLayoutCmd(p.project, p.path, p.layout)
-		}
 		m.status = fmt.Sprintf("cycling mux for %s…", p.project)
 		return m, m.cycleMuxCmd(p.project, p.path)
 	case popupComposeUp:
@@ -180,11 +174,11 @@ func (m Model) onNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "tab":
 		m.active = Tab((int(m.active) + 1) % NumTabs())
 		m.status = ""
-		return m, m.maybeLoadLayoutsCmd()
+		return m, nil
 	case "shift+tab":
 		m.active = Tab((int(m.active) + NumTabs() - 1) % NumTabs())
 		m.status = ""
-		return m, m.maybeLoadLayoutsCmd()
+		return m, nil
 	case "/":
 		m.setFiltering(true)
 		return m, nil
@@ -195,8 +189,6 @@ func (m Model) onNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.onCommandsKey(msg)
 	case TabCompose:
 		return m.onComposeKey(msg)
-	case TabLayout:
-		return m.onLayoutKey(msg)
 	}
 	return m, nil
 }

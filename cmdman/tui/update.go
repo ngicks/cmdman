@@ -14,7 +14,6 @@ func (m Model) Init() tea.Cmd {
 		m.loadProjectsCmd(),
 		m.subscribeEventsCmd(),
 		armRuntimeWatchCmd(),
-		m.maybeLoadLayoutsCmd(),
 	)
 }
 
@@ -59,10 +58,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onAttachDone(msg)
 	case muxDoneMsg:
 		return m.onMuxDone(msg)
-	case layoutsLoadedMsg:
-		return m.onLayoutsLoaded(msg)
-	case layoutDoneMsg:
-		return m.onLayoutDone(msg)
 	case defLoadedMsg:
 		return m.onDefLoaded(msg)
 	case editPathMsg:

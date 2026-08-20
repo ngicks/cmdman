@@ -28,7 +28,6 @@ type popupState struct {
 	command  string
 	targetID string
 	path     string // compose file path (mux warn popup)
-	layout   string // layout name to apply (mux warn popup); empty cycles instead
 	// choice selects between the action button (0) and <cancel> (1).
 	choice int
 }
@@ -100,13 +99,6 @@ func openMuxWarnPopup(project, path string) popupState {
 	return popupState{kind: popupMuxWarn, project: project, path: path, choice: 1}
 }
 
-// openLayoutWarnPopup opens the non-popup mux warning for applying a specific
-// layout (Layout tab), defaulting to <cancel>. The layout name is carried so the
-// confirm path applies that layout instead of cycling.
-func openLayoutWarnPopup(project, path, layout string) popupState {
-	return popupState{kind: popupMuxWarn, project: project, path: path, layout: layout, choice: 1}
-}
-
 // openComposeUpPopup opens the compose-up confirmation, defaulting to <up>
 // (running the project is the explicit intent of pressing `a`).
 func openComposeUpPopup(project, path string) popupState {
@@ -131,9 +123,6 @@ func (m Model) renderPopup() string {
 	switch p.kind {
 	case popupMuxWarn:
 		fmt.Fprintf(&b, "project: %s\n", p.project)
-		if p.layout != "" {
-			fmt.Fprintf(&b, "layout: %s\n", p.layout)
-		}
 		b.WriteString("\nApplying a mux layout will rearrange the current tmux window,\n")
 		b.WriteString("including this TUI. Continue?\n")
 	case popupComposeUp:
@@ -169,10 +158,8 @@ func (m Model) renderHelp() string {
 	switch m.active {
 	case TabCommands:
 		b.WriteString("Commands tab\n\n")
-	case TabCompose:
-		b.WriteString("Compose tab\n\n")
 	default:
-		b.WriteString("Layout tab\n\n")
+		b.WriteString("Compose tab\n\n")
 	}
 	b.WriteString("Navigation\n")
 	b.WriteString("  tab/shift-tab  switch tab\n")
@@ -187,17 +174,13 @@ func (m Model) renderHelp() string {
 		b.WriteString("\nCommand lifecycle\n")
 		b.WriteString("  s  start    S  stop    r  restart\n")
 		b.WriteString("  a  attach   x  remove\n")
-	case TabCompose:
+	default:
 		b.WriteString("\nCompose\n")
 		b.WriteString("  enter  view definition (read-only; j/k scroll, esc close)\n")
 		b.WriteString("  e      edit compose file in $VISUAL/$EDITOR/vim\n")
 		b.WriteString("  a      compose up (create + start, with confirmation)\n")
 		b.WriteString("  c      cycle mux layout\n")
 		b.WriteString("  r      refresh project list\n")
-	default:
-		b.WriteString("\nLayout\n")
-		b.WriteString("  enter  apply the selected layout (● marks the current one)\n")
-		b.WriteString("  r      refresh layouts\n")
 	}
 	b.WriteString("\nPopups\n")
 	b.WriteString("  ←/→ or tab   move between buttons\n")

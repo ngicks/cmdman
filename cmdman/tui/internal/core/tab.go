@@ -12,7 +12,6 @@ type Tab int
 const (
 	TabCommands Tab = iota
 	TabCompose
-	TabLayout
 )
 
 // TabDef is one row of TabDefs.
@@ -29,7 +28,6 @@ type TabDef struct {
 var TabDefs = []TabDef{
 	{TabCommands, "Commands", "commands"},
 	{TabCompose, "Compose", "compose"},
-	{TabLayout, "Layout", "layout"},
 }
 
 // TabNames returns the tab display names in tab order (used by the tab bar).

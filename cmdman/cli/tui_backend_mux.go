@@ -224,11 +224,11 @@ func (b *serviceBackend) selectionByIdentity(
 	return compose.ProjectSelection{}, fmt.Errorf("no listed project carries identity %q", identity)
 }
 
-// resolveLayoutSelection resolves the "current" mux project for the Layout tab
-// and the project-manager widget, identity first (D3/D5): the project whose mux
+// resolveLayoutSelection resolves the "current" mux project for ListLayouts and
+// the project-manager widget, identity first (D3/D5): the project whose mux
 // window the caller is in — or whose token it was handed — then the cwd-active
-// mux project, then the Compose-tab selection identified by
-// projectName/composeFile. The resolved project must declare a mux: section.
+// mux project, then the one projectName/composeFile names. The resolved project
+// must declare a mux: section.
 func (b *serviceBackend) resolveLayoutSelection(
 	ctx context.Context, projectName, composeFile string,
 ) (compose.ProjectSelection, error) {
@@ -265,7 +265,7 @@ func (b *serviceBackend) resolveLayoutSelection(
 // ListLayouts returns the current project's mux layouts in definition order plus
 // the running dashboard's current layout marker. The project is resolved per
 // D3/D5 (the project whose mux window the caller is in, then the cwd-active mux
-// project, then the Compose-tab selection).
+// project, then the one the caller named).
 func (b *serviceBackend) ListLayouts(
 	ctx context.Context, projectName, composeFile string,
 ) (tui.LayoutsInfo, error) {
@@ -276,7 +276,7 @@ func (b *serviceBackend) ListLayouts(
 	return layoutsOf(ctx, selection), nil
 }
 
-// layoutsOf projects an already-resolved selection onto the Layout-tab data.
+// layoutsOf projects an already-resolved selection onto tui.LayoutsInfo.
 // It is where the layout listing lives so the project-manager load, which
 // resolves its project once for the whole view, reads the same marker rather
 // than resolving a second time.

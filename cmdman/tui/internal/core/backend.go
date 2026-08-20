@@ -85,13 +85,14 @@ type SwitchTarget struct {
 	Project string
 }
 
-// LayoutsInfo is the Layout-tab data for the current project: its mux layout
-// names in definition order plus the running dashboard's current layout marker.
-// It is a backend-neutral projection so the model can be exercised without a
-// live mux/tmux server.
+// LayoutsInfo is one project's mux-layout data: its layout names in definition
+// order plus the running dashboard's current layout marker. It is a
+// backend-neutral projection so the model can be exercised without a live
+// mux/tmux server.
 type LayoutsInfo struct {
-	// Project is the resolved current project name (the cwd-active mux project,
-	// falling back to the Compose-tab selection).
+	// Project is the resolved current project name (the project whose mux window
+	// the caller is in, then the cwd-active mux project, then the project the
+	// caller named).
 	Project string
 	// Path is the resolved compose file path, carried so an apply can target the
 	// same file the listing came from.
@@ -119,7 +120,7 @@ type ProjectManagerInfo struct {
 	WorkDir string
 	// Services are the project's compose commands in definition order.
 	Services []ServiceScaleInfo
-	// Layouts is the same layout projection the Layout tab renders.
+	// Layouts is the project's mux-layout projection (see LayoutsInfo).
 	Layouts LayoutsInfo
 }
 
@@ -226,9 +227,9 @@ type Backend interface {
 
 	// ListLayouts returns the current project's mux layouts in definition order
 	// plus the running dashboard's current layout marker (see LayoutsInfo). The
-	// current project is the cwd-active mux project, falling back to the
-	// Compose-tab selection identified by projectName/composeFile (which may be
-	// empty when there is no selection).
+	// current project is the project whose mux window the caller is in, then the
+	// cwd-active mux project, then the project projectName/composeFile names
+	// (which may be empty when the caller names none).
 	ListLayouts(ctx context.Context, projectName, composeFile string) (LayoutsInfo, error)
 	// ApplyLayout applies the named layout to the project's running dashboard,
 	// starting one at that layout when none is running. It wraps the same compose

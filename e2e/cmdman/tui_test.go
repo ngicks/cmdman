@@ -73,7 +73,7 @@ func TestTUISmoke_RendersAndQuits(t *testing.T) {
 		t.Fatalf("TUI never rendered %q; got:\n%q", what, snapshot())
 	}
 	waitFor("cmdman tui", 5*time.Second)
-	for _, want := range []string{"Commands", "Compose", "Layout", "Filter"} {
+	for _, want := range []string{"Commands", "Compose", "Filter"} {
 		if !strings.Contains(snapshot(), want) {
 			t.Errorf("TUI render missing %q; got:\n%q", want, snapshot())
 		}
@@ -131,7 +131,7 @@ func TestTUI_TabFlagRejectsBogus(t *testing.T) {
 		t.Errorf("expected an invalid-tab error, got stderr:\n%s", stderr)
 	}
 	// The error must list the valid tokens so users can correct it.
-	for _, tab := range []string{"commands", "compose", "layout"} {
+	for _, tab := range []string{"commands", "compose"} {
 		if !strings.Contains(stderr, tab) {
 			t.Errorf("invalid-tab error missing valid value %q; stderr:\n%s", tab, stderr)
 		}
@@ -395,7 +395,7 @@ func TestTUI_PopupRunsTheFullTUI(t *testing.T) {
 
 	// The tab bar is the full TUI and nothing else: a widget popup has no tabs.
 	deadline := time.Now().Add(20 * time.Second)
-	for !strings.Contains(client.snapshot(), "Layout") {
+	for !strings.Contains(client.snapshot(), "Compose") {
 		if time.Now().After(deadline) {
 			t.Fatalf("the popup never rendered the full TUI.\nclient:\n%q\nlauncher pane:\n%s",
 				client.snapshot(), capturePane(t, tmuxTmpdir, pane))

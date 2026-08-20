@@ -12,8 +12,8 @@ import (
 )
 
 // ProjectManager loads the whole project-manager view for one project. A
-// project without a mux: section is out of reach here for the same reason it is
-// on the Layout tab: two of the three actions are mux actions.
+// project without a mux: section is out of reach here: two of the three actions
+// are mux actions.
 func (b *serviceBackend) ProjectManager(
 	ctx context.Context, projectName, composeFile string,
 ) (tui.ProjectManagerInfo, error) {
@@ -57,8 +57,8 @@ func (b *serviceBackend) ProjectManager(
 
 // resolveManagerSelection resolves the project the panel manages: the compose
 // target the invocation named (--file/--project-name), and only failing that
-// the Layout tab's chain — identity first, then the cwd-active mux project,
-// then the caller's own selection.
+// resolveLayoutSelection's chain — identity first, then the cwd-active mux
+// project, then the caller's own selection.
 //
 // The explicit target has to outrank detection (D17). A popup always opens
 // inside some window, so the ambient identity probe always answers there, and

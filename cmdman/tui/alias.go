@@ -51,7 +51,6 @@ type Tab = core.Tab
 const (
 	TabCommands = core.TabCommands
 	TabCompose  = core.TabCompose
-	TabLayout   = core.TabLayout
 )
 
 // TabNames returns the tab display names in tab order (used by the tab bar).

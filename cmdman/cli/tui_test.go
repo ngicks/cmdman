@@ -125,8 +125,8 @@ func TestTUIChildArgsForwardsTabAndWorkDir(t *testing.T) {
 		t.Error("the full-TUI child reports its ending over IPC")
 	}
 
-	full := tuiChildArgs("layout", "/work")
-	want := []string{"tui", "__child", "--tab", "layout", "--workdir", "/work"}
+	full := tuiChildArgs("compose", "/work")
+	want := []string{"tui", "__child", "--tab", "compose", "--workdir", "/work"}
 	if !slices.Equal(full.Args, want) {
 		t.Errorf("child argv = %v, want %v", full.Args, want)
 	}
@@ -230,7 +230,6 @@ func TestTabToken(t *testing.T) {
 	cases := map[tui.Tab]string{
 		tui.TabCommands: "commands",
 		tui.TabCompose:  "compose",
-		tui.TabLayout:   "layout",
 	}
 	for tab, want := range cases {
 		if got := tabToken(tab); got != want {
