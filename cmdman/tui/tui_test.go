@@ -98,6 +98,56 @@ func seed() Model {
 	return m
 }
 
+// rowSeed builds a model whose one project lists exactly the given commands, so
+// a row test reads the line it asked for and nothing else.
+func rowSeed(cmds ...core.CommandRow) Model {
+	m := New(core.Options{Backend: &coretest.FakeBackend{Dir: "/work/local-dev"}})
+	m.cwd = "/work/local-dev"
+	m.setGroups([]core.ProjectGroup{
+		{Name: "local-dev", Workdir: "/work/local-dev", Commands: cmds},
+	})
+	return m
+}
+
+// rowLine renders the Commands tab at pane width w and returns the one drawn
+// line carrying name, stripped of styling and of the box's own borders so its
+// columns can be read as plain text.
+func rowLine(t *testing.T, m Model, name string, w int) string {
+	t.Helper()
+	out := core.StripANSI(m.renderCommandList("Commands", w, 12))
+	for line := range strings.SplitSeq(out, "\n") {
+		if strings.Contains(line, name) {
+			return strings.TrimSuffix(strings.TrimPrefix(line, "│"), "│")
+		}
+	}
+	t.Fatalf("no row carries %q:\n%s", name, out)
+	return ""
+}
+
+// rowColumn is cells [at, at+n) of a rendered, ANSI-stripped row. Cells, not
+// bytes: the bell is two cells of four bytes, so a byte offset would put the
+// belled rows' columns somewhere else than the quiet ones'.
+func rowColumn(line string, at, n int) string {
+	head := core.Cells.Truncate(line, at, "")
+	return core.Cells.Truncate(strings.TrimPrefix(line, head), n, "")
+}
+
+// rowIdxCol is the cell a command row's replica-index column starts at, for a
+// command listed under a project header: the indent and the selection prefix,
+// the status glyph and its gap, then the name column and its gap.
+const rowIdxCol = 2 + 2 + 1 + 1 + rowNameW + 1
+
+// payloadCol is the cell a row's payload separator starts at — where a reader
+// scanning a project's titles expects every one of them to begin.
+func payloadCol(t *testing.T, line string) int {
+	t.Helper()
+	head, _, ok := strings.Cut(line, rowSep)
+	if !ok {
+		t.Fatalf("row carries no payload: %q", line)
+	}
+	return core.Cells.StringWidth(head)
+}
+
 // --- tests -----------------------------------------------------------------
 
 func TestActiveProjectSortsFirst(t *testing.T) {
@@ -869,27 +919,151 @@ func TestCommandsTabMarkerSlotIsFixedWidth(t *testing.T) {
 	}
 }
 
-// TestCommandRowShowsScaleBadge covers D44 on the Commands tab: a command that
-// is one replica among several says which one, next to its state where the
-// pane's own truncation reaches last, and an unscaled row is left as it was.
-func TestCommandRowShowsScaleBadge(t *testing.T) {
+// TestCommandRowNumbersReplicas is the replica identity where the Commands tab
+// carries it: a scaled command's row says which replica it is in its own fixed
+// column, on a row whose run is over as much as on a live one — a run ending
+// takes a command's words away, not what it is — and an unscaled row leaves the
+// column blank rather than closing it up and shifting the title.
+func TestCommandRowNumbersReplicas(t *testing.T) {
 	m := seed()
 	groups := m.commands.groups
 	groups[0].Commands[0].ScaleIndex, groups[0].Commands[0].ScaleCount = 2, 3
+	groups[0].Commands[1].ScaleIndex, groups[0].Commands[1].ScaleCount = 1, 2
 	m.setGroups(groups)
 
-	out := core.StripANSI(m.renderCommandList("Commands", 80, 12))
-	for line := range strings.SplitSeq(out, "\n") {
-		switch {
-		case strings.Contains(line, "watcher"):
-			if !strings.Contains(line, "[2]") {
-				t.Errorf("a replica's row should say which one it is: %q", line)
-			}
-		case strings.Contains(line, "seed-db"):
-			if strings.Contains(line, "[") {
-				t.Errorf("an unscaled command's row should carry no badge: %q", line)
-			}
+	for _, tc := range []struct{ name, want string }{
+		{"watcher", " 2"},
+		{"seed-db", " 1"},
+		{"web", "  "},
+	} {
+		line := rowLine(t, m, tc.name, 80)
+		if got := rowColumn(line, rowIdxCol, 2); got != tc.want {
+			t.Errorf("command %s index column = %q, want %q (%q)", tc.name, got, tc.want, line)
 		}
+	}
+}
+
+// TestCommandRowColumnsAlign is what the unconditional index and bell columns
+// are for: the titles of a project's commands start at one column and can be
+// read straight down, whether or not a row is one replica among several and
+// whether or not it is ringing. Inserts drawn only on the rows that need them
+// would move the title on exactly those rows.
+func TestCommandRowColumnsAlign(t *testing.T) {
+	plain := core.CommandRow{
+		ID: "1", Name: "plain", State: model.EventTypeRunning, Title: "serving",
+	}
+	scaled, belled, both := plain, plain, plain
+	scaled.ID, scaled.Name = "2", "scaled"
+	scaled.ScaleIndex, scaled.ScaleCount = 2, 3
+	belled.ID, belled.Name, belled.Bell = "3", "belled", true
+	both.ID, both.Name, both.Bell = "4", "both", true
+	both.ScaleIndex, both.ScaleCount = 10, 12
+
+	m := rowSeed(plain, scaled, belled, both)
+	want := payloadCol(t, rowLine(t, m, "plain", 80))
+	for _, name := range []string{"scaled", "belled", "both"} {
+		line := rowLine(t, m, name, 80)
+		if got := payloadCol(t, line); got != want {
+			t.Errorf("%s starts its title at cell %d, want %d: %q", name, got, want, line)
+		}
+	}
+}
+
+// TestCommandRowClampsName covers the name column's own cut: a name past it ends
+// in an ellipsis saying there is more, rather than being hard cut into a word
+// that reads as the whole name — and the columns after it do not move.
+func TestCommandRowClampsName(t *testing.T) {
+	long := core.CommandRow{
+		ID: "1", Name: "a-very-long-command-name", State: model.EventTypeRunning,
+		Title: "serving",
+	}
+	short := long
+	short.ID, short.Name = "2", "web"
+	m := rowSeed(long, short)
+
+	line := rowLine(t, m, "a-very-long", 80)
+	if !strings.Contains(line, "a-very-long-com…") {
+		t.Errorf("a name past its column should end in an ellipsis: %q", line)
+	}
+	if strings.Contains(line, "a-very-long-comm") {
+		t.Errorf("a name past its column must not be hard cut: %q", line)
+	}
+	if got, want := payloadCol(t, line), payloadCol(t, rowLine(t, m, "web", 80)); got != want {
+		t.Errorf("a clamped name moved the title to cell %d, want %d: %q", got, want, line)
+	}
+}
+
+// TestCommandRowPayloadForDeadRows is the title slot of a row whose run is over:
+// it says where in its life the command stands — including an action already in
+// flight, which outranks the state it is about to leave — and never the last
+// thing the command said (D13).
+func TestCommandRowPayloadForDeadRows(t *testing.T) {
+	zero := 0
+	for _, tc := range []struct {
+		name string
+		c    core.CommandRow
+		want string
+	}{
+		{
+			name: "an exited command annotates its code",
+			c: core.CommandRow{
+				State: model.EventTypeExited, ExitCode: &zero, Title: "still talking",
+			},
+			want: "exited(0)",
+		},
+		{
+			name: "a failed command says so",
+			c:    core.CommandRow{State: model.EventTypeFailed},
+			want: "failed",
+		},
+		{
+			name: "an action in flight outranks the state it is leaving",
+			c:    core.CommandRow{State: model.EventTypeRunning, Pending: "stopping"},
+			want: "stopping…",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.c.ID, tc.c.Name = "1", "web"
+			line := rowLine(t, rowSeed(tc.c), "web", 80)
+			if !strings.Contains(line, rowSep+tc.want) {
+				t.Errorf("a dead row should carry %q as its payload: %q", tc.want, line)
+			}
+			if strings.Contains(line, "still talking") {
+				t.Errorf("a run that is over must not keep its last title (D13): %q", line)
+			}
+		})
+	}
+}
+
+// TestCommandRowKeepsDetailWithoutTheStatusWord is what survived the status word
+// the row no longer spends a column on: the name's color says what the command
+// reported, so the row keeps only the words the command chose itself — its title
+// and the detail it reported alongside its status.
+func TestCommandRowKeepsDetailWithoutTheStatusWord(t *testing.T) {
+	live := func(title, detail string) core.CommandRow {
+		return core.CommandRow{
+			ID: "1", Name: "web", State: model.EventTypeRunning,
+			Title: title, Status: core.StatusWorking, Detail: detail,
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		c    core.CommandRow
+		want string
+	}{
+		{"title and detail", live("building", "step 2/3"), "building (step 2/3)"},
+		{"title alone", live("building", ""), "building"},
+		{"detail alone fills the slot", live("", "step 2/3"), "(step 2/3)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			line := rowLine(t, rowSeed(tc.c), "web", 80)
+			if !strings.Contains(line, rowSep+tc.want) {
+				t.Errorf("a live row should carry %q as its payload: %q", tc.want, line)
+			}
+			if strings.Contains(line, core.StatusWorking) {
+				t.Errorf("the reported status word is the name's color to carry: %q", line)
+			}
+		})
 	}
 }
 

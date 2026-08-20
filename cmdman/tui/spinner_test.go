@@ -17,7 +17,9 @@ func TestStatusGlyphMatchesComposeMarkers(t *testing.T) {
 		want    string
 	}{
 		{model.EventTypeCreated, "", "◌"},
-		{model.EventTypeRunning, "", "●"},
+		// A running command is marked by the color of its own name, so the glyph
+		// column stays empty rather than dotting every live row.
+		{model.EventTypeRunning, "", " "},
 		{model.EventTypeExited, "", "✔"},
 		{model.EventTypeFailed, "", "✘"},
 	}
@@ -39,11 +41,14 @@ func TestStatusGlyphMatchesComposeMarkers(t *testing.T) {
 func TestCommandRowShowsStatusMarker(t *testing.T) {
 	m := seed()
 	out := core.StripANSI(m.renderCommandList("Commands", 44, 12))
-	if !strings.Contains(out, "● watcher") {
-		t.Fatalf("running command should show the ● marker left of its name:\n%s", out)
-	}
 	if !strings.Contains(out, "✔ seed-db") {
 		t.Fatalf("exited command should show the ✔ marker left of its name:\n%s", out)
+	}
+	// A running row spends the same column on nothing at all: the marker is what
+	// the states worth noticing get, and a running command's name is already
+	// colored by what it reported.
+	if !strings.Contains(out, "  watcher") {
+		t.Fatalf("running command should leave its marker column blank:\n%s", out)
 	}
 }
 

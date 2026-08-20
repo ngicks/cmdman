@@ -371,12 +371,23 @@ func (m *Model) setComposeRows(rows []composeRow) {
 	}
 }
 
-// reportedText words what a command reported about itself: the status with its
-// detail in parentheses (D12). It is empty when the command reported nothing,
-// which includes every command with no live monitor.
-func reportedText(c core.CommandRow) string {
-	if c.Status == "" || c.Detail == "" {
-		return c.Status
+// rowPayload is what a Commands-tab row puts after its separator, and whether
+// that text is the command speaking: core.RowPayload's text, plus the detail a
+// live command reported alongside its status. The status word itself is not
+// there — the row's name is colored by it, and a word next to that shade would
+// only say it again — but the detail is the command's own words about what it
+// is doing, which nothing else on the row carries.
+//
+// A command that reported a detail and set no title has only the parenthesized
+// detail to show; it fills the slot alone rather than leaving the row to open
+// with a stray space.
+func rowPayload(c core.CommandRow) (text string, live bool) {
+	text, live = core.RowPayload(c)
+	if !live || c.Detail == "" {
+		return text, live
 	}
-	return c.Status + " (" + c.Detail + ")"
+	if text == "" {
+		return "(" + c.Detail + ")", live
+	}
+	return text + " (" + c.Detail + ")", live
 }

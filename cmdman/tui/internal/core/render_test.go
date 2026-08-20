@@ -11,6 +11,13 @@ import (
 // TestScaleCellIsAlwaysTwoCells pins the column's whole point: every row spends
 // exactly two cells on the replica index, whether it has one or not, so the
 // names after it line up down the list.
+//
+// The guard is covered at both its edges as well: a command that is one replica
+// among several says which one — the index alone, never the count it was scaled
+// to — and neither half of the unscaled zero value invents an answer. The
+// listing already collapses a sole instance to that zero pair
+// (cli.commandInfos), so what the guard keeps out is a {1,1} pair reaching a row
+// and numbering an unscaled command.
 func TestScaleCellIsAlwaysTwoCells(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -20,6 +27,8 @@ func TestScaleCellIsAlwaysTwoCells(t *testing.T) {
 	}{
 		{"unscaled", core.CommandRow{}, "  ", 2},
 		{"scaled but index zero", core.CommandRow{ScaleCount: 3}, "  ", 2},
+		{"a sole instance is not scaled", core.CommandRow{ScaleIndex: 1, ScaleCount: 1}, "  ", 2},
+		{"an index with no count says nothing", core.CommandRow{ScaleIndex: 2}, "  ", 2},
 		{"index 1", core.CommandRow{ScaleIndex: 1, ScaleCount: 3}, " 1", 2},
 		{"index 2", core.CommandRow{ScaleIndex: 2, ScaleCount: 3}, " 2", 2},
 		{"index 10", core.CommandRow{ScaleIndex: 10, ScaleCount: 12}, "10", 2},

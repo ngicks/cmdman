@@ -50,9 +50,14 @@ var (
 	styleMarkErr      = core.StyleMarkErr
 )
 
-// statusGlyph returns the single-cell status marker for a command, matching the
-// compose progress reporter: spinner while in progress, ◌ created, ● running,
-// ✔ exited, ✘ failed.
+// statusGlyph returns the single-cell status marker for a command row: spinner
+// while in progress, ◌ created, ✔ exited, ✘ failed — the compose progress
+// reporter's marks, minus the one for running.
+//
+// A running command shows nothing here because its name is already colored by
+// what it is doing (core.RowNameStyle), and a dot next to every live row says
+// that twice while making the states worth noticing harder to pick out. The
+// column stays as wide as the glyphs so the names line up either way.
 func statusGlyph(state model.EventType, pending string, frame int) string {
 	if pending != "" || state == model.EventTypeStarting {
 		return spinnerFrames[frame%len(spinnerFrames)]
@@ -60,8 +65,6 @@ func statusGlyph(state model.EventType, pending string, frame int) string {
 	switch state {
 	case model.EventTypeCreated:
 		return "◌"
-	case model.EventTypeRunning:
-		return "●"
 	case model.EventTypeExited:
 		return "✔"
 	case model.EventTypeFailed:
@@ -290,6 +293,19 @@ func (m Model) renderCommandsBody(width, height int) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
 
+// A command row's fixed columns, the switcher's row anatomy at this pane's
+// scale:
+//
+//	indent + prefix + glyph + " " + name + " " + idx + " " + bell + " · " + payload
+//
+// This list has a whole tab to itself where the switcher has a docked column,
+// so the name column is a written-down width rather than one computed from the
+// pane: it fits every name worth listing at any width the tab is drawn at.
+const (
+	rowNameW = 16
+	rowSep   = " · "
+)
+
 func (m Model) renderCommandList(title string, width, height int) string {
 	cw := max(width-2, 1)
 	ch := max(height-2, 1)
@@ -343,43 +359,48 @@ func (m Model) renderCommandList(title string, width, height int) string {
 			if standalone {
 				indent = ""
 			}
-			label := core.DisplayLabel(c.State, c.ExitCode)
-			if c.Pending != "" {
-				label = c.Pending + "…"
-			}
 			// Status marker (same indicators as compose) to the left of the
 			// command name, so a start cascade is visible as it progresses.
 			glyph := statusGlyph(c.State, c.Pending, m.spinner)
-			name := truncate(c.Name, 16)
-			plain = fmt.Sprintf("%s%s%s %-16s %s", indent, prefix, glyph, name, label)
-			styled = fmt.Sprintf("%s%s%s %-16s %s", indent, prefix,
-				core.StatusStyle(c.State, c.Pending).Render(glyph), name, label)
-			// Which replica this is when it is one of several (D44), next to the
-			// state and before anything the command said: it is the row's
-			// identity, so it stays on a row D13 has taken the words off. Dimmed
-			// like the paths, so a title after it still reads as the command's.
-			if badge := core.ScaleBadge(c); badge != "" {
-				plain += badge
-				styled += stylePath.Render(badge)
+			name := core.PadCells(core.ClampCells(c.Name, rowNameW), rowNameW)
+			// The replica index and the unread bell are columns, not inserts. An
+			// insert drawn only on the rows that have one shifts everything after
+			// it on exactly those rows, so a group's titles line up by accident;
+			// two fixed columns line them up always.
+			bell := strings.Repeat(" ", core.GlyphWidth(core.GlyphBell))
+			if c.Bell && core.LiveReport(c) {
+				bell = core.GlyphBell
 			}
-			// What the command says about itself, after what the store knows
-			// about it: an unread bell (D23), the status it reported with its
-			// detail (D12), and the title it set — dimmed like the paths, since
-			// it is the command's own words, not the TUI's. Only a live run gets
-			// to speak: a run that is over shows its exit state and nothing it
-			// said before it ended (D13), the same rule the switcher rows follow.
+			// The name carries the row's state in its own color rather than in a
+			// status word beside it, which would spend on saying what a shade
+			// already says the column the title has better use for. Only a live
+			// run has a state of its own to wear — a run that is over must not
+			// show its last report (D13) — so anything else keeps the plain
+			// letters this list has always given it, and the weak shade
+			// core.RowNameStyle would fall back to never comes up.
+			styledName := name
 			if core.LiveReport(c) {
-				if c.Bell {
-					plain += "  " + core.GlyphBell
-					styled += "  " + core.GlyphBell
-				}
-				if reported := reportedText(c); reported != "" {
-					plain += "  " + reported
-					styled += "  " + core.ReportedStatusStyle(c.Status).Render(reported)
-				}
-				if c.Title != "" {
-					plain += "  " + c.Title
-					styled += "  " + stylePath.Render(c.Title)
+				styledName = core.RowNameStyle(c, nil).Render(name)
+			}
+			head := indent + prefix
+			plain = head + glyph + " " + name + " " + core.ScaleCell(c) + " " + bell
+			styled = head + core.StatusStyle(c.State, c.Pending).Render(glyph) + " " +
+				styledName + " " + stylePath.Render(core.ScaleCell(c)) + " " + bell
+			// The title a live command set, with the detail it reported alongside
+			// it, or the lifecycle word for a run that is over or not yet begun.
+			// The command's own words are dimmed like the paths, since they are
+			// not the TUI speaking; the lifecycle word keeps the state's color.
+			// Cut here rather than left to the box's own truncation, so a title
+			// too long for the pane ends in an ellipsis instead of mid-word.
+			if text, live := rowPayload(c); text != "" {
+				room := cw - core.Cells.StringWidth(plain) - core.GlyphWidth(rowSep)
+				if text = core.ClampCells(text, room); text != "" {
+					style := core.StatusStyle(c.State, c.Pending)
+					if live {
+						style = stylePath
+					}
+					plain += rowSep + text
+					styled += stylePath.Render(rowSep) + style.Render(text)
 				}
 			}
 			// Free-floating commands have no project header to carry the workdir, so

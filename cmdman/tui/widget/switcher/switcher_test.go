@@ -372,36 +372,6 @@ func TestSwitcherWidthsSurviveWidePathsAndBadges(t *testing.T) {
 	}
 }
 
-// TestScaleBadgeMarksReplicasOnly covers the badge's guard at both its edges: a
-// command that is one replica among several says which one — the index alone,
-// never the count it was scaled to — and neither half of the unscaled zero
-// value invents an answer. The listing already collapses a sole instance to
-// that zero pair (cli.commandInfos), so what the guard here keeps out is a
-// {1,1} pair reaching a row and badging an unscaled command.
-func TestScaleBadgeMarksReplicasOnly(t *testing.T) {
-	for _, tc := range []struct {
-		name         string
-		index, count int
-		want         string
-	}{
-		{"one replica among several", 2, 3, " [2]"},
-		{"a sole instance is not scaled", 1, 1, ""},
-		{"a count with no index says nothing", 0, 3, ""},
-		{"an index with no count says nothing", 2, 0, ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c := core.CommandRow{
-				ID: "1", Name: "web", State: model.EventTypeRunning,
-				ScaleIndex: tc.index, ScaleCount: tc.count,
-			}
-			if got := core.ScaleBadge(c); got != tc.want {
-				t.Errorf("core.ScaleBadge(%d/%d) = %q, want %q",
-					tc.index, tc.count, got, tc.want)
-			}
-		})
-	}
-}
-
 // TestSwitcherRowsNumberReplicas is the replica identity where it was asked
 // for: a scaled command's row says which replica it is in its own fixed column,
 // the identity survives the load path (core.GroupFromInfos) and a run that is

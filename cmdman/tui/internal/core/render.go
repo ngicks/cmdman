@@ -186,31 +186,6 @@ func RowNameStyle(c CommandRow, weak color.Color) lipgloss.Style {
 	return ReportedStatusStyle(c.Status)
 }
 
-// ReportedStatusBadge renders a command's reported status: the word when it
-// reported one, else the hollow circle standing for "nothing said so far", so
-// every command carries a circle-or-word state instead of a blank (D24).
-func ReportedStatusBadge(status string, bg RowBg) string {
-	if status == "" {
-		return bg.Style(StyleMarkerIdle).Render(GlyphHollow)
-	}
-	return bg.Style(ReportedStatusStyle(status)).Render(status)
-}
-
-// RowStateBadge is the one state word a command row carries. A live run shows
-// what it reported about itself; anything else shows its lifecycle state, which
-// is the truthful signal for a run that is over or not yet begun — an exited
-// command must never show its last report (D13).
-func RowStateBadge(c CommandRow, bg RowBg) string {
-	if LiveReport(c) {
-		return ReportedStatusBadge(c.Status, bg)
-	}
-	label := DisplayLabel(c.State, c.ExitCode)
-	if c.Pending != "" {
-		label = c.Pending + "…"
-	}
-	return bg.Style(StatusStyle(c.State, c.Pending)).Render(label)
-}
-
 // RowPayload is what a command row puts in its one title slot, and whether that
 // text is the command speaking. A live run fills the slot with the title it set
 // — the reason the listing shows commands at all. Anything else fills it with
@@ -242,28 +217,6 @@ func ScaleCell(c CommandRow) string {
 		return "  "
 	}
 	return fmt.Sprintf("%2d", c.ScaleIndex)
-}
-
-// ScaleBadge is the replica identity a command row carries when the command is
-// one replica among several: " [i]", appended after the row's state word by
-// every listing that renders commands (D44). It sits next to the state rather
-// than at the end of the row because the row's tail is what a narrow pane cuts
-// first, and it is styled by its caller in the row's weak shade so a title
-// following it stays visibly the command's own words rather than the badge's.
-//
-// The count still decides whether there is a badge at all — it is what tells a
-// scaled command from an unscaled one — but it is not shown: a replica's stored
-// count is the desired count as of its own start, which a later `compose scale`
-// leaves behind, while its index is what it is for as long as it lives.
-//
-// An unscaled command — the zero ScaleIndex/ScaleCount pair, which is also how
-// a single-instance compose command arrives — has nothing to say and renders
-// exactly as it did before there was a badge to append.
-func ScaleBadge(c CommandRow) string {
-	if c.ScaleCount <= 1 || c.ScaleIndex <= 0 {
-		return ""
-	}
-	return fmt.Sprintf(" [%d]", c.ScaleIndex)
 }
 
 // PadLine truncates and right-pads a rendered line to exactly w cells, so a
