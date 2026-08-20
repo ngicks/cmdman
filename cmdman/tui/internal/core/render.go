@@ -58,6 +58,19 @@ func TruncateLeftCells(s string, w int) string {
 	return "…" + string(r[i:])
 }
 
+// ClampCells cuts a raw string to at most w cells keeping its head, with a
+// trailing ellipsis where it cut. A string that already fits comes back
+// untouched, so nothing pays for an ellipsis it does not need. Like
+// TruncateLeftCells this counts cells rather than runes, and a wide glyph that
+// no longer fits is dropped whole — the result may land a cell short of w
+// rather than a cell over it, because a cell over is what overruns the row.
+func ClampCells(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	return Cells.Truncate(s, w, "…")
+}
+
 // The marker glyphs. They are named because their widths feed the layout, and
 // those widths are measured rather than assumed — see MarkerSlot. Filled ● is
 // a reported state (idle/working/blocked, told apart by color); hollow ○ is
@@ -149,6 +162,30 @@ func ReportedStatusStyle(status string) lipgloss.Style {
 	}
 }
 
+// RowNameStyle colors a command row's own name by the state the row is in, so
+// the row carries its state in the one word it always shows instead of spending
+// a column on a status word next to it. It is the marker palette again — a row
+// and its project's dot then say the same thing in the same colors — with two
+// shades the dot has no room for: a blocked row is bold because it is the one
+// state that wants the user, and a live command that has reported nothing at all
+// is faint, which is idle's green minus the claim that something said so.
+//
+// A row that is not live has no state of its own worth coloring — an exited
+// command must never wear its last report — so it drops to the weak shade the
+// rest of the subdued rows use.
+func RowNameStyle(c CommandRow, weak color.Color) lipgloss.Style {
+	if !LiveReport(c) {
+		return WeakStyle(weak)
+	}
+	if c.Status == "" {
+		return StyleMarkerIdle.Faint(true)
+	}
+	if c.Status == StatusWaiting {
+		return ReportedStatusStyle(c.Status).Bold(true)
+	}
+	return ReportedStatusStyle(c.Status)
+}
+
 // ReportedStatusBadge renders a command's reported status: the word when it
 // reported one, else the hollow circle standing for "nothing said so far", so
 // every command carries a circle-or-word state instead of a blank (D24).
@@ -172,6 +209,39 @@ func RowStateBadge(c CommandRow, bg RowBg) string {
 		label = c.Pending + "…"
 	}
 	return bg.Style(StatusStyle(c.State, c.Pending)).Render(label)
+}
+
+// RowPayload is what a command row puts in its one title slot, and whether that
+// text is the command speaking. A live run fills the slot with the title it set
+// — the reason the listing shows commands at all. Anything else fills it with
+// its lifecycle word instead, which is the truthful signal for a run that is
+// over or not yet begun: a dead row shows no report and no title, only where in
+// its life it stands.
+func RowPayload(c CommandRow) (text string, live bool) {
+	if LiveReport(c) {
+		return c.Title, true
+	}
+	if c.Pending != "" {
+		return c.Pending + "…", false
+	}
+	return DisplayLabel(c.State, c.ExitCode), false
+}
+
+// ScaleCell is the replica identity column: which of several replicas this row
+// is, right-aligned in two cells, or two spaces for a command that is not
+// scaled. The column is unconditional so the names that follow it line up
+// whether or not a project scales anything — an alignment a bracketed badge
+// appended only to replicas cannot give.
+//
+// The count decides whether there is an index to show — it is what tells a
+// scaled command from an unscaled one — but it is not shown: a replica's stored
+// count is the desired count as of its own start, which a later `compose scale`
+// leaves behind, while its index is what it is for as long as it lives.
+func ScaleCell(c CommandRow) string {
+	if c.ScaleCount <= 1 || c.ScaleIndex <= 0 {
+		return "  "
+	}
+	return fmt.Sprintf("%2d", c.ScaleIndex)
 }
 
 // ScaleBadge is the replica identity a command row carries when the command is
