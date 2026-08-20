@@ -3,11 +3,13 @@ package cli
 import (
 	"os"
 	"testing"
+	"time"
 
 	"gotest.tools/v3/assert"
 
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/model"
+	"github.com/ngicks/cmdman/cmdman/store"
 )
 
 // muxOpTestOptions is a supervised MuxOpOptions against a service rooted at a
@@ -23,6 +25,23 @@ func muxOpTestOptions(t *testing.T, svc *cmdman.Service) MuxOpOptions {
 	}.resolve()
 	assert.NilError(t, err)
 	return opts
+}
+
+// backdateCommand moves id's registration timestamp back by age, which is how a
+// test asks for a record old enough to have outlived the grace a record gets
+// before it has a monitor to be judged by.
+func backdateCommand(t *testing.T, cfg cmdman.CmdmanConfig, id string, age time.Duration) {
+	t.Helper()
+
+	dbPath, err := cfg.DBPath()
+	assert.NilError(t, err)
+	st, err := store.OpenStore(t.Context(), dbPath, true)
+	assert.NilError(t, err)
+	defer func() { assert.NilError(t, st.Close()) }()
+
+	stamp := time.Now().UTC().Add(-age).Format(time.RFC3339)
+	_, err = st.DB().Exec(`UPDATE CommandConfig SET CreatedAt = ? WHERE ID = ?`, stamp, id)
+	assert.NilError(t, err)
 }
 
 // Registering the worker under a name derived from the window is what keeps two
@@ -49,7 +68,8 @@ func TestCreateMuxOpCommand(t *testing.T) {
 	})
 
 	t.Run("replaces a leftover record", func(t *testing.T) {
-		svc := cmdman.NewService(frameSvcConfig(t))
+		cfg := frameSvcConfig(t)
+		svc := cmdman.NewService(cfg)
 		defer svc.Close()
 
 		req, err := muxOpCreateRequest(muxOpTestOptions(t, svc))
@@ -57,6 +77,9 @@ func TestCreateMuxOpCommand(t *testing.T) {
 
 		stale, err := createMuxOpCommand(t.Context(), svc, req)
 		assert.NilError(t, err)
+		// A record that never left the created state is only a leftover once it
+		// is too old to be a worker still spawning.
+		backdateCommand(t, cfg, stale, 2*muxOpPreRunGrace)
 
 		fresh, err := createMuxOpCommand(t.Context(), svc, req)
 		assert.NilError(t, err)
@@ -66,6 +89,29 @@ func TestCreateMuxOpCommand(t *testing.T) {
 		assert.NilError(t, err)
 		assert.Assert(t, entry != nil)
 		assert.Equal(t, entry.ID, fresh)
+	})
+
+	// The window this covers is the one a second invocation races: the first has
+	// registered its worker but no monitor of it is up yet, so nothing but the
+	// record's age says the worker is alive.
+	t.Run("refuses while an operation is still spawning", func(t *testing.T) {
+		svc := cmdman.NewService(frameSvcConfig(t))
+		defer svc.Close()
+
+		req, err := muxOpCreateRequest(muxOpTestOptions(t, svc))
+		assert.NilError(t, err)
+
+		spawning, err := createMuxOpCommand(t.Context(), svc, req)
+		assert.NilError(t, err)
+
+		_, err = createMuxOpCommand(t.Context(), svc, req)
+		assert.ErrorContains(t, err, "already running")
+
+		entry, err := findCommandByName(t.Context(), svc, req.Name)
+		assert.NilError(t, err)
+		assert.Assert(t, entry != nil, "the spawning operation's record was removed")
+		assert.Equal(t, entry.ID, spawning)
+		assert.Equal(t, entry.State, model.EventTypeCreated)
 	})
 
 	t.Run("refuses while an operation is running", func(t *testing.T) {

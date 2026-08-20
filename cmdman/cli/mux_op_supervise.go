@@ -21,6 +21,21 @@ const (
 	// what matters is the last run, not a history of them.
 	muxOpLogMaxSize = "1MiB"
 	muxOpLogMaxFile = "1"
+
+	// muxOpPreRunGrace is how long a record that has not reached running yet is
+	// still taken for a live operation.
+	//
+	// A record begins life in the created state, and nothing about it says
+	// whether a worker is behind it: no monitor has started, so there is no PID
+	// to check and nothing for the stale sweep to reconcile. Removing it on that
+	// basis would pull the record out from under a worker that is merely still
+	// spawning, and the invocation that created it would then find its worker
+	// gone. Age decides instead. Starting a command waits up to five seconds for
+	// the monitor to report itself running — a hundred polls, fifty milliseconds
+	// apart — so anything younger than that may well still be on its way up.
+	// Ten seconds covers that whole wait plus the second of slack the stored
+	// timestamp can add, being written to the resolution of a second.
+	muxOpPreRunGrace = 10 * time.Second
 )
 
 // superviseMuxOp performs op in a detached worker and follows it.
@@ -191,9 +206,9 @@ func muxOpArgv(cfg cmdman.CmdmanConfig, verbArgv []string) ([]string, error) {
 // that was killed outright leaves its record behind, and a record like that
 // must not lock the window out for good. So a conflict is looked at once:
 // listing is what notices a monitor that died without cleaning up — it flips
-// the record, or removes it when the command was auto-removed — and only a
-// record still starting or running is a live operation. Anything else is a
-// leftover, is removed, and the registration is tried one more time.
+// the record, or removes it when the command was auto-removed — and what is
+// left is read by [muxOpRecordIsLive]. A leftover is removed, and the
+// registration is tried one more time.
 func createMuxOpCommand(
 	ctx context.Context,
 	svc *cmdman.Service,
@@ -213,7 +228,7 @@ func createMuxOpCommand(
 		)
 	}
 	if existing != nil {
-		if existing.State == model.EventTypeStarting || existing.State == model.EventTypeRunning {
+		if muxOpRecordIsLive(*existing, time.Now()) {
 			return "", fmt.Errorf(
 				"mux op already running for this window (command %s, state %s)",
 				existing.ID,
@@ -236,6 +251,34 @@ func createMuxOpCommand(
 		return "", fmt.Errorf("register mux op worker: %w", err)
 	}
 	return res.ID, nil
+}
+
+// muxOpRecordIsLive reports whether the record found under the worker's name
+// belongs to an operation still under way, as opposed to a leftover free to be
+// removed.
+//
+// A running record answers for itself: the listing that produced it has already
+// checked that a monitor is behind it. A record that has not got that far
+// cannot be checked that way — there is no monitor yet — so its age answers
+// instead, within [muxOpPreRunGrace]. Anything else has finished, one way or
+// another.
+func muxOpRecordIsLive(entry store.CommandEntry, now time.Time) bool {
+	switch entry.State {
+	case model.EventTypeRunning:
+		return true
+	case model.EventTypeCreated, model.EventTypeStarting:
+		created, err := time.Parse(time.RFC3339, entry.CreatedAt)
+		if err != nil {
+			// Registering a command always stamps it, so a stamp that cannot be
+			// read did not come from a registration a moment ago — it comes from
+			// a store old enough to predate the column. Reading it as live would
+			// lock the window out for good.
+			return false
+		}
+		return now.Sub(created) < muxOpPreRunGrace
+	default:
+		return false
+	}
 }
 
 // findCommandByName returns the command registered under name, or nil when

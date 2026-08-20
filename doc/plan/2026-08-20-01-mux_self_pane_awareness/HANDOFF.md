@@ -16,21 +16,15 @@ deterministic op-command name, different identities use different files.
 Follow-up: enlarge/replace the buffering strategy if multi-writer log files
 ever become a supported pattern.
 
-## H3 — mux op name lock has a small created-record TOCTOU (2026-08-21)
+## H3 — mux op name lock created-record TOCTOU (RESOLVED in-run, 2026-08-21)
 
-What: two truly concurrent invocations on the same identity — A creates the
-op record (state `created`), B hits the name conflict and cannot distinguish
-A's milliseconds-old `created` record from a crashed-before-start leftover,
-so B removes it and wins. One live worker still results and the identity is
-never locked out; A's error just reads as a start failure instead of
-"already running".
-
-Why not done here: distinguishing needs a CreatedAt-age heuristic; the
-failure mode is cosmetic (wrong error text on a rare double-invocation).
-
-Follow-up: add a CreatedAt grace window to the leftover-cleanup check in
-`cmdman/cli/mux_op_supervise.go` if the confusing error shows up in
-practice.
+Resolved during this run: `muxOpRecordIsLive`
+(`cmdman/cli/mux_op_supervise.go`) treats pre-`running` records younger
+than a 10s grace as live, so a racing invocation reports "already running"
+instead of removing the record under a live worker. Residual: the
+List→Remove window between two conflicting invocations remains a
+theoretical TOCTOU, made practically unreachable by the grace; no further
+action planned.
 
 ## H1 — driver pane classification is floating-pane-blind (out-of-scope discovery, 2026-08-21)
 
