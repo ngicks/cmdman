@@ -117,6 +117,106 @@ func TestTUIWidget_SwitcherSelectionLandsInProjectWindow(t *testing.T) {
 	}
 }
 
+// TestTUIWidget_SwitcherWheelScrollsTheListNotTheCursor is the wheel end to
+// end: raw SGR mouse reports reach the widget's stdin, walk the list past what
+// the pane can hold, and leave the cursor where it was. Both halves are the
+// assertion — a wheel that moved the cursor would scroll the list just the
+// same, and the two are only told apart by asking the widget which project it
+// is standing on.
+//
+// It runs as a tmux window because a scrolled list is a screen and not a
+// transcript: capture-pane answers with what the pane is showing now, while the
+// PTY harness accumulates everything ever drawn and so can never say that a
+// line went away.
+//
+// Nothing puts the terminal in a mouse mode here, and nothing needs to: the
+// input decoder parses an SGR mouse report wherever it finds one, so the bytes
+// tmux writes into the pane are the same thing a terminal reporting a real
+// wheel would write.
+func TestTUIWidget_SwitcherWheelScrollsTheListNotTheCursor(t *testing.T) {
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	tmuxTmpdir := t.TempDir()
+	t.Cleanup(func() { killDefaultTmuxServer(t, tmuxTmpdir) })
+	// The size is pinned rather than left to the default: what this test drives
+	// is a list longer than its pane, and a taller window would show the whole
+	// thing and leave nothing to scroll.
+	tmuxRunWithTmpdir(t, tmuxTmpdir,
+		"new-session", "-d", "-s", "work", "-n", "home", "-x", "80", "-y", "24")
+
+	// Two projects, and the tall one is the one the switcher opens on: --workdir
+	// below makes it the cwd-active project, which heads the list. Its command
+	// rows are what push the second project's head off the bottom of the pane.
+	wdTall := composeWorkdir(t)
+	const (
+		tall  = "swwheela"
+		short = "swwheelb"
+	)
+	tallPath := writeComposeFile(t, wdTall, wheelFillerYAML(tall, switcherWheelRows))
+	t.Cleanup(func() { cleanupProject(ctx, env, wdTall, tall) })
+	wdShort := composeWorkdir(t)
+	shortPath := writeComposeFile(t, wdShort, composeBasicYAML(short))
+	t.Cleanup(func() { cleanupProject(ctx, env, wdShort, short) })
+
+	// create and no more: the rows only have to exist to take up lines, and a
+	// project nothing was started in leaves no monitor to outlive the test.
+	for _, p := range []struct{ wd, path string }{{wdTall, tallPath}, {wdShort, shortPath}} {
+		if _, stderr, err := env.muxExecWithTmpdir(
+			ctx, tmuxTmpdir, "compose", "--workdir", p.wd, "-f", p.path, "create",
+		); err != nil {
+			t.Fatalf("compose create in %s failed: %v\nstderr:\n%s", p.wd, err, stderr)
+		}
+	}
+
+	window := switcherWindow(t, env, tmuxTmpdir, wdTall)
+
+	// The two heads are what the scroll is read by: a head is one line, it names
+	// the directory its project sits in (D44), and those directories are this
+	// test's own, so on-screen and off-screen are unambiguous for both. The
+	// command rows between them are never read — they are there to take up lines.
+	tallHead, shortHead := filepath.Base(wdTall), filepath.Base(wdShort)
+	onlyTall := func(s string) bool {
+		return strings.Contains(s, tallHead) && !strings.Contains(s, shortHead)
+	}
+	onlyShort := func(s string) bool {
+		return !strings.Contains(s, tallHead) && strings.Contains(s, shortHead)
+	}
+	// The project listing and the command listing arrive as separate messages, so
+	// for a moment the list is the two heads and nothing between them — a screen
+	// on which the reading below would mean nothing. Waiting for the settled one
+	// is what makes "the second head is off the bottom" a fact about the layout.
+	waitForPaneShowing(t, tmuxTmpdir, window,
+		"the tall project's head with the second project below the fold",
+		onlyTall, 20*time.Second)
+
+	// More notches than the list has room to travel, so the offset lands on its
+	// bottom clamp: what is on screen afterwards is the end of the list whatever
+	// height the pane turned out to have. How far one notch goes is the unit
+	// tests' business.
+	spinWheel(t, tmuxTmpdir, window, wheelDownSGR, switcherWheelNotches)
+	waitForPaneShowing(t, tmuxTmpdir, window,
+		"the second project's head with the first scrolled off", onlyShort, 20*time.Second)
+
+	// The cursor is the other half, and it is not on screen to be read — so it is
+	// asked. The teardown question names the project under the cursor, and the
+	// list showing is the second project's, so the first project's name in that
+	// question is the wheel having moved the view and nothing else.
+	tmuxRunWithTmpdir(t, tmuxTmpdir, "send-keys", "-t", "=work:"+window, "-l", "D")
+	waitForPane(t, tmuxTmpdir, window, "compose down "+tall+"? y/n", 20*time.Second)
+	// Anything but y takes the question back, which is how the project survives
+	// having been asked about.
+	tmuxRunWithTmpdir(t, tmuxTmpdir, "send-keys", "-t", "=work:"+window, "-l", "n")
+	waitForPane(t, tmuxTmpdir, window, "compose down "+tall+" cancelled", 20*time.Second)
+
+	// Back up the way it came: the other button code, and the offset clamping at
+	// the top rather than running past it.
+	spinWheel(t, tmuxTmpdir, window, wheelUpSGR, switcherWheelNotches)
+	waitForPaneShowing(t, tmuxTmpdir, window,
+		"the tall project's head back at the top", onlyTall, 20*time.Second)
+}
+
 // TestTUIWidget_NoQuitSurvivesTheQuitKey is V6's flag end to end — the one a
 // frame pane always gets. A docked widget that exits on a keypress leaves a hole
 // in the fixture, so q must reach a widget that no longer has it bound, and the
@@ -631,6 +731,67 @@ func switcherWindow(t *testing.T, env *testEnv, tmuxTmpdir, workDir string) stri
 func selectInSwitcher(t *testing.T, tmuxTmpdir, window string) {
 	t.Helper()
 	tmuxRunWithTmpdir(t, tmuxTmpdir, "send-keys", "-t", "=work:"+window, "Enter")
+}
+
+// The button codes an SGR mouse report carries for the two wheel directions.
+const (
+	wheelUpSGR   = 64
+	wheelDownSGR = 65
+)
+
+// switcherWheelRows is how many command rows the tall project contributes: more
+// than the list rows an 80x24 pane has left after the title line and the hint
+// line, so the second project's head starts below the fold.
+const switcherWheelRows = 24
+
+// switcherWheelNotches is spun in either direction — enough that the offset ends
+// on its clamp rather than somewhere the pane's exact height decides.
+const switcherWheelNotches = 6
+
+// spinWheel reports n wheel notches over the switcher's list. The bytes are an
+// SGR mouse report — ESC [ < button ; column ; row M, both coordinates
+// one-based and pane-local — written into the pane literally, which is what a
+// terminal reporting a wheel does.
+func spinWheel(t *testing.T, tmuxTmpdir, window string, button, n int) {
+	t.Helper()
+	report := fmt.Sprintf("\x1b[<%d;5;10M", button)
+	for range n {
+		tmuxRunWithTmpdir(t, tmuxTmpdir, "send-keys", "-t", "=work:"+window, "-l", report)
+	}
+}
+
+// waitForPaneShowing is waitForPane over a predicate: a scrolled list is as much
+// about the line that left the screen as about the one that arrived, and a
+// substring search alone cannot say that something is gone. what names the
+// screen being waited for, for the failure message.
+func waitForPaneShowing(
+	t *testing.T,
+	tmuxTmpdir, window, what string,
+	showing func(string) bool,
+	deadline time.Duration,
+) {
+	t.Helper()
+	end := time.Now().Add(deadline)
+	var last string
+	for time.Now().Before(end) {
+		last = capturePane(t, tmuxTmpdir, "=work:"+window)
+		if showing(last) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("window %q never showed %s; last capture:\n%s", window, what, last)
+}
+
+// wheelFillerYAML is a project of n commands that are never started. Only the
+// count matters: the rows are there to make the list taller than the pane.
+func wheelFillerYAML(project string, n int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "name: %s\ncommands:\n", project)
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&b, "  filler%02d:\n    args: [sleep, \"300\"]\n", i)
+	}
+	return b.String()
 }
 
 // launcherMuxYAML is a project with a mux: section on tmux's default socket, so
