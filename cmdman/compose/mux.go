@@ -28,6 +28,9 @@ func WithFrameSvc(svc mux.FrameSvc) ServiceOption {
 type MuxUpOption struct {
 	// Selection is the resolved compose project; it must declare a "mux:" section.
 	Selection ProjectSelection
+	// WindowName overrides the display name of a newly created window. Empty
+	// preserves [ProjectSelection.MuxWindowName].
+	WindowName string
 	// Layout selects a layout by name or 0-based index. Empty cycles to the next,
 	// unless KeepLayout says otherwise.
 	Layout string
@@ -47,6 +50,13 @@ type MuxUpOption struct {
 	// Stdout is where the attach hint is printed when running outside a
 	// multiplexer. Empty defaults to os.Stdout (see [mux.RunOptions.Stdout]).
 	Stdout io.Writer
+}
+
+func (o MuxUpOption) windowName() string {
+	if o.WindowName != "" {
+		return o.WindowName
+	}
+	return o.Selection.MuxWindowName()
 }
 
 // MuxUp builds the project's mux dashboard and applies a layout, reading any
@@ -99,7 +109,7 @@ func (s *Service) MuxUp(ctx context.Context, opts MuxUpOption) error {
 
 	return mux.Run(ctx, built, mux.RunOptions{
 		SessionName:       opts.SessionName,
-		WindowName:        selection.MuxWindowName(),
+		WindowName:        opts.windowName(),
 		Identity:          selection.ProjectIdentity(),
 		Layout:            opts.Layout,
 		KeepLayout:        opts.KeepLayout,
@@ -116,9 +126,19 @@ type MuxLandOption struct {
 	// need not declare a "mux:" section: a project without one still gets a
 	// window to land in (D9).
 	Selection ProjectSelection
+	// WindowName overrides the display name of a newly created window. Empty
+	// preserves [ProjectSelection.MuxWindowName].
+	WindowName string
 	// SessionName targets a specific multiplexer session. Empty searches the
 	// whole server and creates in the caller's current session.
 	SessionName string
+}
+
+func (o MuxLandOption) windowName() string {
+	if o.WindowName != "" {
+		return o.WindowName
+	}
+	return o.Selection.MuxWindowName()
 }
 
 // MuxLand takes the caller to the project's window, creating a bare shell
@@ -143,7 +163,7 @@ func (s *Service) MuxLand(ctx context.Context, opts MuxLandOption) (mux.LandResu
 	return mux.Land(ctx, mux.LandOptions{
 		Driver:      driver,
 		SessionName: opts.SessionName,
-		WindowName:  selection.MuxWindowName(),
+		WindowName:  opts.windowName(),
 		Identity:    selection.ProjectIdentity(),
 		WorkDir:     selection.WorkDir,
 	})

@@ -60,6 +60,27 @@ func TestServiceMuxUp_LeafResolverError(t *testing.T) {
 	assert.Assert(t, errors.Is(err, wantErr))
 }
 
+func TestMuxWindowNameOptions(t *testing.T) {
+	selection := ProjectSelection{Project: "web"}
+	optionResolvers := map[string]func(string) string{
+		"mux up": func(windowName string) string {
+			return (MuxUpOption{Selection: selection, WindowName: windowName}).windowName()
+		},
+		"mux land": func(windowName string) string {
+			return (MuxLandOption{Selection: selection, WindowName: windowName}).windowName()
+		},
+	}
+
+	for option, resolve := range optionResolvers {
+		t.Run(option+" explicit override", func(t *testing.T) {
+			assert.Equal(t, resolve("launcher"), "launcher")
+		})
+		t.Run(option+" empty fallback", func(t *testing.T) {
+			assert.Equal(t, resolve(""), "cmdman-web")
+		})
+	}
+}
+
 // MuxCycleScale likewise resolves leaves before any tmux call.
 func TestServiceMuxCycleScale_LeafResolverError(t *testing.T) {
 	wantErr := errors.New("list boom")

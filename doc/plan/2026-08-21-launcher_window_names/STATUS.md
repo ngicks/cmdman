@@ -1,6 +1,6 @@
 # Status
 
-State: **implementation in progress — steps 1–2 complete**.
+State: **implementation in progress — steps 1–3 complete**.
 
 ## Checklist
 
@@ -14,10 +14,10 @@ State: **implementation in progress — steps 1–2 complete**.
 - [x] Traceability gate passed: UC1–UC4 and D1–D4 map to steps; no handoff
 - [x] Step 1: D2 — reuse the existing bounded Git probe and preserve launcher listing
 - [x] Step 2: D3/D4 — apply detached-HEAD fallback and the complete 10-cell limit
-- [ ] Step 3: add default-preserving compose window-name overrides
+- [x] Step 3: D1/UC4 — add launcher-only overrides with existing compose defaults
 - [ ] Step 4: thread one title through launcher dashboard and landing paths
 - [ ] Step 5: run tests and required Go review skills
 
 ## Next action
 
-Begin step 3 by adding default-preserving compose window-name overrides.
+Begin step 4 by threading one computed title through both launcher paths.
