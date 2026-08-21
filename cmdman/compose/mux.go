@@ -273,6 +273,12 @@ type MuxCycleScaleOption struct {
 	Command string
 	// Position is the target replica (1-based). 0 means "advance by one".
 	Position int
+	// Env is the invoker's process env, consulted for driver autodetection (see
+	// [mux.CycleScaleOptions.Env]). It is carried rather than read here because
+	// the process doing the cycling need not be the one the user invoked, and
+	// only the invoker's $TMUX names the server they are looking at. Empty
+	// defaults to os.Environ().
+	Env []string
 }
 
 // MuxCycleScale advances the replica position for a command across all matching
@@ -310,6 +316,7 @@ func (s *Service) MuxCycleScale(
 		SessionName: opts.SessionName,
 		Command:     opts.Command,
 		Position:    opts.Position,
+		Env:         opts.Env,
 	})
 }
 

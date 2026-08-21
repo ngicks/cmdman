@@ -1,12 +1,15 @@
 package commands
 
 import (
+	"context"
+
 	"github.com/spf13/cobra"
 
+	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/mux"
 )
 
-func muxDownCmd(parent *cobra.Command, parentSession *string) {
+func muxDownCmd(parent *cobra.Command, rf *rootFlags, parentSession *string) {
 	var flagSession string
 
 	cmd := &cobra.Command{
@@ -31,7 +34,7 @@ any pane, run-shell, or outside tmux. --session narrows the scan to one session.
 			if !cmd.Flags().Changed("session") && parentSession != nil {
 				sess = *parentSession
 			}
-			return runMuxDown(cmd, args, sess)
+			return runMuxDown(cmd, rf, args, sess)
 		},
 	}
 	cmd.Flags().StringVarP(
@@ -46,18 +49,37 @@ any pane, run-shell, or outside tmux. --session narrows the scan to one session.
 // optional: it is only read when an explicit path is given, to extract the
 // driver configuration. With the stdin default ("-") teardown uses the default
 // driver rather than blocking on stdin.
-func runMuxDown(cmd *cobra.Command, args []string, session string) error {
-	path := "-"
-	if len(args) == 1 {
-		path = args[0]
+func runMuxDown(cmd *cobra.Command, rf *rootFlags, args []string, session string) error {
+	logName, err := muxSpecLogName(cmd.Context(), specPathArg(args), session)
+	if err != nil {
+		return err
 	}
+	svc, err := cmdmanService(cmd, rf)
+	if err != nil {
+		return err
+	}
+	defer svc.Close()
 
-	driver, err := specDriver(path)
+	opts := muxOpOptions(cmd, svc, logName)
+	return cli.RunMuxOp(cmd.Context(), opts, func(ctx context.Context) error {
+		return muxDownOp(ctx, cmd, args, session)
+	})
+}
+
+// muxDownOp is everything `mux down` does, split out so [cli.RunMuxOp] decides
+// where it runs: here, or in a worker that outlives the invoking pane.
+func muxDownOp(
+	ctx context.Context,
+	cmd *cobra.Command,
+	args []string,
+	session string,
+) error {
+	driver, err := specDriver(specPathArg(args))
 	if err != nil {
 		return err
 	}
 
-	return mux.Down(cmd.Context(), mux.DownOptions{
+	return mux.Down(ctx, mux.DownOptions{
 		Driver:      driver,
 		SessionName: session,
 		Stdout:      cmd.OutOrStdout(),

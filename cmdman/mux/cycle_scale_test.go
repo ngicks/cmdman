@@ -260,3 +260,38 @@ func TestCycleScaleNotATarget(t *testing.T) {
 	})
 	assert.ErrorContains(t, err, "not a cycle-scale target")
 }
+
+// TestCycleScaleEnvResolvesServer verifies that the server the cycle acts on is
+// resolved from the caller's Env and not from this process's own. The two
+// disagree on purpose: the process env says tmux while the option says zellij,
+// and the unimplemented-driver complaint is what says which one was believed.
+//
+// It matters because the process carrying the cycle out need not be the one the
+// user invoked — a worker that outlives the pane has an env of its own, and
+// picking a server from it would leave the user's dashboard untouched.
+func TestCycleScaleEnvResolvesServer(t *testing.T) {
+	// Not parallel: t.Setenv is what makes the process env disagree.
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+
+	// "web" is an unpinned leaf, so the cycle gets past the target check and
+	// reaches server resolution.
+	spec := Spec{
+		Layouts: []Layout{
+			{
+				Name: "web-view",
+				Root: PaneSpec{Command: "web", Scale: 0},
+			},
+		},
+	}
+	dummyReplicas := ReplicaCounter(func(_ context.Context, _ string) (int, error) {
+		return 3, nil
+	})
+
+	_, err := CycleScale(context.Background(), CycleScaleOptions{
+		Spec:     spec,
+		Replicas: dummyReplicas,
+		Command:  "web",
+		Env:      []string{"ZELLIJ=/tmp/zellij-1000/fake"},
+	})
+	assert.ErrorContains(t, err, `driver "zellij" is not implemented`)
+}

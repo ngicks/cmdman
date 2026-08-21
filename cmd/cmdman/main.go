@@ -38,6 +38,13 @@ func main() {
 	if err == nil {
 		return
 	}
+	// A mux operation carried out by a detached worker reports the worker's own
+	// exit status. Whatever the worker had to say was streamed to this
+	// process's stderr as the worker wrote it, so there is nothing to print
+	// here — only a status to exit with.
+	if exitErr, ok := errors.AsType[*cli.ExitCodeError](err); ok {
+		os.Exit(exitErr.ExitStatus())
+	}
 	// ErrForceExit means the user hit the force-exit sequence during an attach;
 	// the terminal is already restored and the message is intentionally silent.
 	if !errors.Is(err, cli.ErrForceExit) {

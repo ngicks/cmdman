@@ -98,12 +98,7 @@ func Down(ctx context.Context, opts DownOptions) error {
 	// supply Identity explicitly, bypassing this path entirely.
 	identity := opts.Identity
 	if identity == "" {
-		sessionName := resolveSessionName(
-			opts.SessionName,
-			env,
-			func() (string, bool, error) { return server.CurrentSessionName(ctx) },
-		)
-		identity = deriveIdentity("", opts.WindowName, sessionName)
+		identity = currentIdentity(ctx, server, opts.SessionName, opts.WindowName, env)
 	}
 
 	// SessionName here is purely a narrowing filter for ListWindows —

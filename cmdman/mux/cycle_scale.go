@@ -28,6 +28,9 @@ type CycleScaleOptions struct {
 	Command string
 	// Position is the target replica (1-based). 0 means "advance by one".
 	Position int
+	// Env is the process env consulted for driver autodetection ($TMUX /
+	// $ZELLIJ). Empty defaults to os.Environ().
+	Env []string
 }
 
 // CycleScaleWindowResult is the per-window result from [CycleScale].
@@ -86,7 +89,12 @@ func CycleScale(ctx context.Context, opts CycleScaleOptions) (CycleScaleResult, 
 		)
 	}
 
-	server, err := resolveServer(ctx, opts.Spec.Driver, os.Environ())
+	env := opts.Env
+	if env == nil {
+		env = os.Environ()
+	}
+
+	server, err := resolveServer(ctx, opts.Spec.Driver, env)
 	if err != nil {
 		return CycleScaleResult{}, err
 	}

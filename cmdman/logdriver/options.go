@@ -24,6 +24,17 @@ type ReaderOption struct {
 	Until  time.Time
 	Head   int
 	Tail   int
+	// StartOffset bounds the read to what was stored from one driver-specific
+	// position onward — the value a [Record.Offset] or an [OffsetWriter]
+	// carries, so it is opaque here and only the driver that minted it can read
+	// it. Nil, or a driver's zero value, reads everything retained.
+	//
+	// It picks where the read starts, so it stands in place of Since and Tail
+	// rather than beside them; Since, Until and Head still apply to the records
+	// it does reach. A position the driver can no longer honour — its file
+	// rotated away or truncated under it — reads everything retained, because
+	// what was cut is gone either way and the alternative is reading nothing.
+	StartOffset any
 }
 
 // Validate rejects incompatible log reader options.

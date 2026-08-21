@@ -138,6 +138,11 @@ func (b *serviceBackend) SetScale(
 // advances by one. No session is named, so every dashboard window of the
 // project moves together — a session-narrowed cycle is what makes the windows
 // disagree and their shown replica unknowable (D14).
+//
+// The cycle runs in this process. `cmdman compose mux cycle-scale` hands the
+// same work to a worker of its own because the pane it is typed in may be one of
+// the panes being replaced; the panel is not one of them, so there is nothing
+// here for a worker to outlive.
 func (b *serviceBackend) CycleScale(
 	ctx context.Context, projectName, composeFile, workDir, command string, set int,
 ) error {
@@ -151,6 +156,7 @@ func (b *serviceBackend) CycleScale(
 		Selection: selection,
 		Command:   command,
 		Position:  set,
+		Env:       os.Environ(),
 	})
 	return err
 }

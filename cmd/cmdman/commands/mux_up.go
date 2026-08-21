@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -50,12 +51,41 @@ func runMuxUp(
 	args []string,
 	session string,
 ) error {
-	path := "-"
-	if len(args) == 1 {
-		path = args[0]
+	op := func(ctx context.Context) error {
+		return muxUpOp(ctx, cmd, rf, args, session)
 	}
 
-	src, closer, err := openSpecSource(path)
+	path := specPathArg(args)
+	if path == "-" {
+		// The spec exists only on this process's stdin, so there is no file for
+		// a worker to re-read (see openSpecSource).
+		return cli.RunMuxOp(cmd.Context(), cli.MuxOpOptions{InProcess: true}, op)
+	}
+
+	logName, err := muxSpecLogName(cmd.Context(), path, session)
+	if err != nil {
+		return err
+	}
+	svc, err := cmdmanService(cmd, rf)
+	if err != nil {
+		return err
+	}
+	defer svc.Close()
+
+	opts := muxOpOptions(cmd, svc, logName)
+	return cli.RunMuxOp(cmd.Context(), opts, op)
+}
+
+// muxUpOp is everything `mux up` does, split out so [cli.RunMuxOp] decides
+// where it runs: here, or in a worker that outlives the invoking pane.
+func muxUpOp(
+	ctx context.Context,
+	cmd *cobra.Command,
+	rf *rootFlags,
+	args []string,
+	session string,
+) error {
+	src, closer, err := openSpecSource(specPathArg(args))
 	if err != nil {
 		return err
 	}
@@ -78,7 +108,7 @@ func runMuxUp(
 		return fmt.Errorf("locate cmdman binary: %w", err)
 	}
 
-	built, err := mux.Build(cmd.Context(), mux.BuildOptions{
+	built, err := mux.Build(ctx, mux.BuildOptions{
 		Spec: spec,
 		// Standalone mux names concrete cmdman commands, so there is no replica
 		// cycling (nil counter). A leaf may still pin an explicit scale index,
@@ -95,7 +125,7 @@ func runMuxUp(
 		return err
 	}
 
-	return mux.Run(cmd.Context(), built, mux.RunOptions{
+	return mux.Run(ctx, built, mux.RunOptions{
 		SessionName: session,
 		Config:      cfg,
 		Svc:         cli.NewFrameSvc(svc),

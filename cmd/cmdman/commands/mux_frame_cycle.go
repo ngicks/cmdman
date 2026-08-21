@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"context"
+
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/mux"
 	"github.com/spf13/cobra"
@@ -45,7 +47,31 @@ func runMuxFrameCycle(cmd *cobra.Command, rf *rootFlags, session string) error {
 	}
 	defer svc.Close()
 
-	return mux.FrameCycle(cmd.Context(), mux.FrameOptions{
+	opts, err := muxFrameOpOptions(cmd, svc, session)
+	if err != nil {
+		return err
+	}
+	return cli.RunMuxOp(cmd.Context(), opts, func(ctx context.Context) error {
+		return muxFrameCycleOp(ctx, cmd, rf, session)
+	})
+}
+
+// muxFrameCycleOp is everything `mux frame cycle` does, split out so
+// [cli.RunMuxOp] decides where it runs: here, or in a worker that outlives the
+// invoking pane.
+func muxFrameCycleOp(
+	ctx context.Context,
+	cmd *cobra.Command,
+	rf *rootFlags,
+	session string,
+) error {
+	svc, err := cmdmanService(cmd, rf)
+	if err != nil {
+		return err
+	}
+	defer svc.Close()
+
+	return mux.FrameCycle(ctx, mux.FrameOptions{
 		Session: session,
 		Config:  svc.Config(),
 		Svc:     cli.NewFrameSvc(svc),

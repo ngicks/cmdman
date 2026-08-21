@@ -383,6 +383,35 @@ func setLeafCmd(node *muxctl.PaneSpec, name string, argv []string) bool {
 	return false
 }
 
+// FrameTargetWindow reports the driver-native id of the window the frame verbs
+// would act on under opts, without acting on it. Only Session, Driver and Env
+// are read; the def and the service the verbs need have no bearing on which
+// window is the target.
+//
+// ok=false with a nil error means there is no window to act on from here — the
+// caller is outside the multiplexer and named no session, or the named session
+// has no current window. The verbs turn that into an error in their own words;
+// a caller asking ahead of time simply has nothing to name.
+func FrameTargetWindow(ctx context.Context, opts FrameOptions) (string, bool, error) {
+	env := frameEnv(opts)
+	if !frameTargetPointedAt(opts.Session, env) {
+		return "", false, nil
+	}
+	server, err := resolveServer(ctx, opts.Driver, env)
+	if err != nil {
+		return "", false, err
+	}
+	return server.CurrentWindowID(ctx, opts.Session)
+}
+
+// frameTargetPointedAt reports whether the caller has pointed at a window at
+// all. A frame is a per-window fixture with no window selector — the user points
+// at one by being there — so a session name or an enclosing multiplexer is what
+// makes the question answerable.
+func frameTargetPointedAt(session string, env []string) bool {
+	return session != "" || envOf(env, "TMUX") != "" || envOf(env, "ZELLIJ") != ""
+}
+
 // frameWindowID resolves the window a frame verb acts on: the current window of
 // the named session, or the one the caller is sitting in when no session is
 // named. There is no window selector — a frame is a per-window fixture the user
@@ -394,7 +423,7 @@ func frameWindowID(
 	session string,
 	env []string,
 ) (string, error) {
-	if session == "" && envOf(env, "TMUX") == "" && envOf(env, "ZELLIJ") == "" {
+	if !frameTargetPointedAt(session, env) {
 		return "", errors.New(
 			"mux: frame: not inside a multiplexer; run this inside tmux or name a session",
 		)

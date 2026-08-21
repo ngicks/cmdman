@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -70,6 +72,32 @@ func runComposeMuxCycleScale(
 	cf *composeFlags,
 	arg, session string,
 ) error {
+	logName, err := composeMuxLogName(cf)
+	if err != nil {
+		return err
+	}
+	svc, err := cmdmanService(cmd, rf)
+	if err != nil {
+		return err
+	}
+	defer svc.Close()
+
+	opts := muxOpOptions(cmd, svc, logName)
+	return cli.RunMuxOp(cmd.Context(), opts, func(ctx context.Context) error {
+		return composeMuxCycleScaleOp(ctx, cmd, rf, cf, arg, session)
+	})
+}
+
+// composeMuxCycleScaleOp is everything `compose mux cycle-scale` does, split
+// out so [cli.RunMuxOp] decides where it runs: here, or in a worker that
+// outlives the invoking pane.
+func composeMuxCycleScaleOp(
+	ctx context.Context,
+	cmd *cobra.Command,
+	rf *rootFlags,
+	cf *composeFlags,
+	arg, session string,
+) error {
 	command, posStr, hasPos := strings.Cut(arg, "=")
 	if command == "" {
 		return fmt.Errorf("cycle-scale: command name is empty in argument %q", arg)
@@ -101,12 +129,16 @@ func runComposeMuxCycleScale(
 	defer svc.Close()
 
 	result, cycleErr := compose.NewService(svc).MuxCycleScale(
-		cmd.Context(),
+		ctx,
 		compose.MuxCycleScaleOption{
 			Selection:   selection,
 			SessionName: session,
 			Command:     command,
 			Position:    position,
+			// The env is taken here, in the invocation the user typed, because
+			// the cycling itself may be carried out by another process (see
+			// [cli.RunMuxOp]) whose own $TMUX names a different server, or none.
+			Env: os.Environ(),
 		},
 	)
 	cli.RenderCycleScaleResult(cmd.OutOrStdout(), result)
