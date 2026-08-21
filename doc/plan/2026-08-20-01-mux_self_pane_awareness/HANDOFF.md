@@ -70,6 +70,23 @@ invalidated; the new behavior is just undocumented.
 Follow-up: a docs pass adding the worker model, the stdin exception, and
 where failure logs land.
 
+## H8 — compose.GenerateName has a non-injective name join (2026-08-21)
+
+What: `compose.GenerateName` (`cmdman/compose/hash.go:33`) joins escaped
+halves with a single `-` while each half doubles only its own dashes, so
+project `"a-"` + command `"b"` collides with project `"a"` + command
+`"-b"` — the same defect fixed for mux op names (`cli.MuxOpLogName`, which
+now joins with `-_`). `GenerateProjectIdentity` is safe (the hex workdir
+hash anchors its separator).
+
+Why not done here: it feeds command names across the whole compose layer;
+changing the encoding renames existing registered commands and was out of
+scope for the mux-op fix.
+
+Follow-up: apply the same unambiguous-join treatment to `GenerateName`,
+with a migration story for existing registered names (or acceptance that
+the app was never deployed).
+
 ## H1 — driver pane classification is floating-pane-blind (out-of-scope discovery, 2026-08-21)
 
 What: tmux 3.7 floating panes (`new-pane`, `pane_floating_flag`) are full

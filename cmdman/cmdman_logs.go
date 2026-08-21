@@ -23,6 +23,13 @@ type LogsRequest struct {
 	Until    time.Time
 	Head     int
 	Tail     int
+	// StartOffset begins the replay of stored output at one driver-specific
+	// position instead of at the start of what is retained — see
+	// [logdriver.ReaderOption.StartOffset]. A caller that noted where a log
+	// stood before a run started reads back that run and nothing before it,
+	// which is what a position rather than a time buys: a host clock that steps
+	// backwards moves no boundary.
+	StartOffset any
 	// Sticky keeps the follow stream alive across command restarts: when the
 	// running instance exits, an injected MetaPrefix-tagged line records the
 	// exit (or other terminal state), and the reader waits for the next
@@ -62,10 +69,11 @@ func (s *Service) Logs(ctx context.Context, req LogsRequest) (logdriver.Reader, 
 		cfg.CommandDir,
 		opts,
 		logdriver.ReaderOption{
-			Since: req.Since,
-			Until: req.Until,
-			Head:  req.Head,
-			Tail:  req.Tail,
+			Since:       req.Since,
+			Until:       req.Until,
+			Head:        req.Head,
+			Tail:        req.Tail,
+			StartOffset: req.StartOffset,
 		},
 	)
 	if err != nil {

@@ -75,13 +75,13 @@ func TestMuxOpLogName(t *testing.T) {
 			name:     "a named server is part of which window this is",
 			server:   "work",
 			identity: "dev",
-			want:     "work-dev",
+			want:     "work-_dev",
 		},
 		{
 			name:     "both halves are escaped",
 			server:   "work-sock",
 			identity: "dev-box",
-			want:     "work--sock-dev--box",
+			want:     "work--sock-_dev--box",
 		},
 	}
 
@@ -90,6 +90,45 @@ func TestMuxOpLogName(t *testing.T) {
 			assert.Equal(t, MuxOpLogName(tt.server, tt.identity), tt.want)
 		})
 	}
+}
+
+// The join has to say which dashes came from which half. A dash at the edge of
+// one is where doubling alone stops answering that: the run it leaves runs
+// straight into the separator, and one name would then stand for two windows —
+// one lock and one log file between them.
+func TestMuxOpLogNameJoinsUnambiguously(t *testing.T) {
+	pairs := [][2]string{
+		{"", "dev"},
+		{"", "-dev"},
+		{"", "dev-"},
+		{"work", "dev"},
+		{"work-", "dev"},
+		{"work", "-dev"},
+		{"work--", "dev"},
+		{"work", "--dev"},
+		{"work-", "-dev"},
+		{"work_", "dev"},
+		{"work", "_dev"},
+		{"work-", "_dev"},
+		{"work", "-_dev"},
+	}
+
+	seen := map[string][2]string{}
+	for _, pair := range pairs {
+		got := MuxOpLogName(pair[0], pair[1])
+		if prev, dup := seen[got]; dup {
+			t.Errorf("server/identity %q and %q share the name %q", prev, pair, got)
+		}
+		seen[got] = pair
+	}
+
+	// The compose namespace is the other side of the same question: a server
+	// named like the namespace must not name a compose project's window.
+	assert.Assert(
+		t,
+		MuxOpLogName("compose", "0123456789ab-app") !=
+			ComposeMuxOpLogName("0123456789ab-app"),
+	)
 }
 
 // Two multiplexer servers can each hold a session of the same name, and they are

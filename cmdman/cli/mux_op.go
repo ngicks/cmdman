@@ -179,20 +179,32 @@ func RunMuxOp(ctx context.Context, opts MuxOpOptions, op func(context.Context) e
 // a session called "cmdman", and an operation on one must not be refused because
 // an operation is under way on the other.
 //
-// Every '-' in either is doubled so neither can be mistaken for the '-' that
-// separates them, nor for the one that separates the "compose" namespace
-// [ComposeMuxOpLogName] uses; that is the same escaping compose applies when it
-// builds its own names.
+// The two are joined so that no pair of them can be read as another pair, which
+// is what keeps two windows off one lock and one log file. Every '-' in either
+// half is doubled, so a run of dashes inside a half is always of even length,
+// and the halves are then joined by [muxOpNameSeparator] rather than by a bare
+// '-': doubling alone leaves the join ambiguous, since a server "work-" beside
+// an identity "dev" and a server "work" beside an identity "-dev" would both
+// come out as "work---dev".
 func MuxOpLogName(server, identity string) string {
 	name := escapeMuxOpNamePart(identity)
 	if server != "" {
-		name = escapeMuxOpNamePart(server) + "-" + name
+		name = escapeMuxOpNamePart(server) + muxOpNameSeparator + name
 	}
 	return sanitizeMuxOpName(name)
 }
 
-// escapeMuxOpNamePart doubles every '-' in one component of a name so it cannot
-// be mistaken for the '-' that separates components.
+// muxOpNameSeparator joins the server half of a name to the identity half.
+//
+// The '_' is what makes the join readable back: it ends the dash run the
+// separator falls in, and an escaped half's own dash runs are all of even
+// length, so the separator is the one dash in the whole name that closes a run
+// of odd length. No pair of halves can produce that anywhere else.
+const muxOpNameSeparator = "-_"
+
+// escapeMuxOpNamePart doubles every '-' in one component of a name, which is
+// what leaves the component's dash runs even and so tells them apart from the
+// separator between components.
 func escapeMuxOpNamePart(s string) string {
 	return strings.ReplaceAll(s, "-", "--")
 }

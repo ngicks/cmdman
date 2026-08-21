@@ -101,8 +101,10 @@ Window discovery is server-wide with no dependence on `$TMUX`: `down` works
 from any pane, from `run-shell`, or from outside tmux entirely. `--session`
 narrows the scan to one session.
 
-`down` needs no cmdman service or leaf resolution — only the project identity
-derived from the compose file (workdir and project name) is required.
+`down` resolves no leaves and touches none of the project's commands — only the
+project identity derived from the compose file (workdir and project name) is
+required. It still opens a cmdman service, because the teardown is carried out
+by a registered worker process that outlives the pane the command was typed in.
 
 Each restored window prints one line:
 

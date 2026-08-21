@@ -80,6 +80,12 @@ func runMuxOpWorker(
 	start func(ctx context.Context, idOrName string) error,
 ) error {
 	svc := opts.Svc
+	logPath := req.LogOpts[logdriver.LogOptPath]
+
+	// Read before anything is registered, so the boundary is ahead of the first
+	// byte this run can write: everything past it belongs to this run, and
+	// everything before it to the runs that used the window before.
+	from := muxOpLogEnd(ctx, logPath)
 
 	// The exit status has to come off the event log rather than the command
 	// record, because the record does not survive the exit: the worker is
@@ -101,7 +107,7 @@ func runMuxOpWorker(
 		return fmt.Errorf("start mux op worker: %w", err)
 	}
 
-	followMuxOpOutput(ctx, opts, id, req.LogOpts[logdriver.LogOptPath])
+	followMuxOpOutput(ctx, opts, id, logPath, from)
 	return waitMuxOpExit(ctx, svc, sub, id)
 }
 
@@ -258,14 +264,8 @@ func createMuxOpCommand(
 				existing.State,
 			)
 		}
-		results, err := svc.Remove(ctx, cmdman.RemoveRequest{Targets: []string{existing.ID}})
-		if err != nil {
+		if err := removeMuxOpLeftover(ctx, svc, existing.ID); err != nil {
 			return "", fmt.Errorf("remove leftover mux op %q: %w", req.Name, err)
-		}
-		for _, r := range results {
-			if r.Err != nil {
-				return "", fmt.Errorf("remove leftover mux op %q: %w", req.Name, r.Err)
-			}
 		}
 	}
 
@@ -274,6 +274,33 @@ func createMuxOpCommand(
 		return "", fmt.Errorf("register mux op worker: %w", err)
 	}
 	return res.ID, nil
+}
+
+// removeMuxOpLeftover takes the finished worker's record off the books.
+//
+// Two invocations aimed at one window can read the same leftover and both go to
+// remove it; the one that gets there second is told there is no such command,
+// because the id it names has already been deleted. That is the outcome asked
+// for, not a failure — the record is gone either way — so the removal counts as
+// done whenever the record is no longer there, and only a record that outlived
+// the attempt is reported.
+func removeMuxOpLeftover(ctx context.Context, svc *cmdman.Service, id string) error {
+	results, err := svc.Remove(ctx, cmdman.RemoveRequest{Targets: []string{id}})
+	if err == nil {
+		for _, r := range results {
+			if r.Err != nil {
+				err = r.Err
+				break
+			}
+		}
+	}
+	if err == nil {
+		return nil
+	}
+	if present, findErr := findCommandByID(ctx, svc, id); findErr == nil && !present {
+		return nil
+	}
+	return err
 }
 
 // muxOpRecordIsLive reports whether the record found under the worker's name

@@ -15,6 +15,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/eventlog"
 	"github.com/ngicks/cmdman/cmdman/logdriver"
+	"github.com/ngicks/cmdman/cmdman/logdriver/k8sfile"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/monitor"
 )
@@ -172,43 +173,150 @@ func TestWaitMuxOpExit(t *testing.T) {
 		assert.Assert(t, ok, "got %v", err)
 		assert.Equal(t, exitErr.Code, 2)
 	})
+
+	// A worker can also fail without ever running: the monitor reports that as a
+	// failure rather than as an exit, and there is no status to carry back — only
+	// what it says, when it says anything.
+	failures := []struct {
+		name  string
+		id    string
+		error string
+		want  string
+	}{
+		{
+			name:  "passes on what the worker failed with",
+			id:    "aaaa11112222",
+			error: "exec: \"cmdman\": file does not exist",
+			want:  "mux op worker failed: exec: \"cmdman\": file does not exist",
+		},
+		{
+			name: "reports a failure that said nothing",
+			id:   "bbbb33334444",
+			want: "mux op worker failed",
+		},
+	}
+	for _, tt := range failures {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := frameSvcConfig(t)
+			svc := cmdman.NewService(cfg)
+			defer svc.Close()
+
+			appendMuxOpEvent(t, cfg, model.Event{
+				Time:  time.Now(),
+				Type:  model.EventTypeFailed,
+				ID:    tt.id,
+				Error: tt.error,
+			})
+
+			sub, err := subscribeMuxOpExit(t.Context(), svc, tt.id)
+			assert.NilError(t, err)
+			defer func() { assert.NilError(t, sub.Close()) }()
+
+			err = waitMuxOpExit(t.Context(), svc, sub, tt.id)
+			assert.Error(t, err, tt.want)
+		})
+	}
+
+	// A worker that was killed outright never says anything at all. Its record
+	// going away is the only sign, and waiting on the event alone would then wait
+	// for good — so the wait ends, once the event has had its grace period to
+	// turn up after the record went.
+	t.Run("gives up on a worker that died without reporting an exit", func(t *testing.T) {
+		cfg := frameSvcConfig(t)
+		svc := cmdman.NewService(cfg)
+		defer svc.Close()
+
+		// Nothing is ever registered under this id and nothing is ever appended
+		// for it: the record is already gone, as it is for a worker killed
+		// between its last output and its exit.
+		const id = "cccc55556666"
+		sub, err := subscribeMuxOpExit(t.Context(), svc, id)
+		assert.NilError(t, err)
+		defer func() { assert.NilError(t, sub.Close()) }()
+
+		err = waitMuxOpExitWithin(
+			t.Context(), svc, sub, id, 5*time.Millisecond, 10*time.Millisecond,
+		)
+		assert.Error(t, err, "mux op worker died without reporting an exit")
+	})
+}
+
+// writeMuxOpRun appends one run's line to the log at logPath, through a writer
+// of its own: an identity can be operated on again, and the run after adds to
+// what the run before left rather than erasing it, exactly as two workers'
+// monitors do over one path.
+func writeMuxOpRun(t *testing.T, logPath, line string) {
+	t.Helper()
+	w, err := logdriver.NewWriter(
+		t.Context(),
+		string(logdriver.DriverK8sFile),
+		"",
+		map[string]string{logdriver.LogOptPath: logPath},
+	)
+	assert.NilError(t, err)
+	assert.NilError(t, w.WriteLogLine(logdriver.LogLine{
+		Time:   time.Now(),
+		Stream: logdriver.StreamStdout,
+		Line:   []byte(line),
+	}))
+	assert.NilError(t, w.Close())
 }
 
 // A worker that finishes before following starts takes its record with it, and
 // the follow plumbing reads that record. Replaying the log file is what is left,
-// and it has to reach the same place the live stream would have.
+// and it has to reach the same place the live stream would have — this run's
+// output, and only this run's.
 func TestReplayMuxOpLog(t *testing.T) {
 	cfg := frameSvcConfig(t)
 	svc := cmdman.NewService(cfg)
 	defer svc.Close()
 
-	logPath, err := muxOpLogPath(cfg, "replay")
-	assert.NilError(t, err)
-
-	// Two separate writers over one path: an identity can be operated on again,
-	// and the second run must add to the record rather than erase the first.
-	for _, line := range []string{"first run\n", "second run\n"} {
-		w, err := logdriver.NewWriter(
-			t.Context(),
-			string(logdriver.DriverK8sFile),
-			"",
-			map[string]string{logdriver.LogOptPath: logPath},
-		)
-		assert.NilError(t, err)
-		assert.NilError(t, w.WriteLogLine(logdriver.LogLine{
-			Time:   time.Now(),
-			Stream: logdriver.StreamStdout,
-			Line:   []byte(line),
-		}))
-		assert.NilError(t, w.Close())
+	replay := func(t *testing.T, logPath string, from k8sfile.Offset) string {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		opts := muxOpTestOptions(t, svc)
+		opts.Stdout = &stdout
+		opts.Stderr = &stderr
+		replayMuxOpLog(t.Context(), opts, logPath, from)
+		assert.Equal(t, stderr.String(), "")
+		return stdout.String()
 	}
 
-	var stdout, stderr bytes.Buffer
-	opts := muxOpTestOptions(t, svc)
-	opts.Stdout = &stdout
-	opts.Stderr = &stderr
-	replayMuxOpLog(t.Context(), opts, logPath)
+	t.Run("prints the whole file when no run has been marked off", func(t *testing.T) {
+		logPath, err := muxOpLogPath(cfg, "replay-whole")
+		assert.NilError(t, err)
+		writeMuxOpRun(t, logPath, "first run\n")
+		writeMuxOpRun(t, logPath, "second run\n")
 
-	assert.Equal(t, stdout.String(), "first run\nsecond run\n")
-	assert.Equal(t, stderr.String(), "")
+		assert.Equal(t, replay(t, logPath, k8sfile.Offset{}), "first run\nsecond run\n")
+	})
+
+	// What the runs before this one printed is still in the file, and printing it
+	// again would put a failed run's error under the run that succeeded.
+	t.Run("prints this run and not the runs before it", func(t *testing.T) {
+		logPath, err := muxOpLogPath(cfg, "replay-boundary")
+		assert.NilError(t, err)
+		writeMuxOpRun(t, logPath, "error: the run before this one\n")
+
+		from := muxOpLogEnd(t.Context(), logPath)
+		writeMuxOpRun(t, logPath, "this run\n")
+
+		assert.Equal(t, replay(t, logPath, from), "this run\n")
+	})
+
+	// A log that reached its size limit is replaced rather than kept, so a
+	// boundary taken before that points past the end of the file that is there
+	// now. What it marked off is gone either way; what is left is this run's.
+	t.Run("prints what is left when the log was rotated under it", func(t *testing.T) {
+		logPath, err := muxOpLogPath(cfg, "replay-rotated")
+		assert.NilError(t, err)
+		writeMuxOpRun(t, logPath, "the run before this one\n")
+		writeMuxOpRun(t, logPath, "and the one before that\n")
+
+		from := muxOpLogEnd(t.Context(), logPath)
+		assert.NilError(t, os.Remove(logPath))
+		writeMuxOpRun(t, logPath, "this run\n")
+
+		assert.Equal(t, replay(t, logPath, from), "this run\n")
+	})
 }

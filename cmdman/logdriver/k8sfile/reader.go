@@ -176,6 +176,19 @@ func closeUnselectedSpans(spans []fileSpan, selected []readSpan) {
 }
 
 func selectReadSpans(spans []fileSpan, ro logdriver.ReaderOption) ([]readSpan, error) {
+	from, ok, err := startOffset(ro)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		selected, honoured, err := selectSpansFrom(spans, from)
+		if err != nil {
+			return nil, err
+		}
+		if honoured {
+			return selected, nil
+		}
+	}
 	if ro.Tail > 0 {
 		return selectTailSpans(spans, ro.Tail)
 	}
@@ -208,6 +221,55 @@ func selectReadSpans(spans []fileSpan, ro logdriver.ReaderOption) ([]readSpan, e
 		readSpans = append(readSpans, readSpan{fileSpan: span})
 	}
 	return readSpans, nil
+}
+
+// startOffset reads the driver-specific position ro asks the read to begin at.
+// ok is false when none was asked for; an offset minted by another driver is an
+// error rather than a position to guess at.
+func startOffset(ro logdriver.ReaderOption) (Offset, bool, error) {
+	if ro.StartOffset == nil {
+		return Offset{}, false, nil
+	}
+	off, ok := ro.StartOffset.(Offset)
+	if !ok {
+		return Offset{}, false, fmt.Errorf(
+			"logdriver: k8s-file: unexpected start offset type %T", ro.StartOffset,
+		)
+	}
+	if off.Path == "" || off.Bytes <= 0 {
+		return Offset{}, false, nil
+	}
+	return off, true, nil
+}
+
+// selectSpansFrom bounds the read to what was written from off onward: the rest
+// of the file off names, and then whatever is newer than it. Everything else
+// lies behind the position, archives included.
+//
+// honoured is false when the position says nothing about the files that are
+// here now: the file it names is not among them, or it has since been cut back
+// past the position — a size limit reached with nothing kept replaces the active
+// file rather than renaming it, and there is then no history left to skip.
+func selectSpansFrom(spans []fileSpan, off Offset) ([]readSpan, bool, error) {
+	for i, span := range spans {
+		if span.Path != off.Path {
+			continue
+		}
+		stat, err := span.File.Stat()
+		if err != nil {
+			return nil, false, fmt.Errorf("logdriver: stat log file %s: %w", span.Path, err)
+		}
+		if stat.Size() < off.Bytes {
+			return nil, false, nil
+		}
+		selected := make([]readSpan, 0, len(spans)-i)
+		selected = append(selected, readSpan{fileSpan: span, Start: off.Bytes})
+		for _, newer := range spans[i+1:] {
+			selected = append(selected, readSpan{fileSpan: newer})
+		}
+		return selected, true, nil
+	}
+	return nil, false, nil
 }
 
 func selectTailSpans(spans []fileSpan, tail int) ([]readSpan, error) {

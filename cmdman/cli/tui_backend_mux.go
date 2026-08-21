@@ -117,8 +117,12 @@ func muxWorkerError(err error, printed string) error {
 }
 
 // MuxDown tears the project's dashboard windows down via
-// compose.Service.MuxDown, the same path `cmdman compose mux down` takes. The
-// supervised commands keep running: only the disposable viewer goes away.
+// compose.Service.MuxDown — the teardown `cmdman compose mux down` performs,
+// but performed here in this process rather than in a worker of its own. The
+// TUI is not sitting in the region a teardown clears, so there is no pane to
+// outlive; CycleMux takes the worker because applying a layout rebuilds the
+// window the TUI itself is in. The supervised commands keep running either way:
+// only the disposable viewer goes away.
 //
 // The project is named as CycleMux names it, resolution included — a project
 // whose file declares no mux: section never reaches the teardown, and the
@@ -385,8 +389,10 @@ func layoutsOf(ctx context.Context, selection compose.ProjectSelection) tui.Layo
 }
 
 // ApplyLayout applies the named layout to the project's running dashboard,
-// starting one at that layout when none is running (D6). It reuses CycleMux's
-// MuxUp path with an explicit layout selector, workDir included.
+// starting one at that layout when none is running (D6). It calls the MuxUp
+// CycleMux hands its worker, with an explicit layout selector and workDir
+// included — but calls it here, in this process, rather than through a worker of
+// its own.
 func (b *serviceBackend) ApplyLayout(
 	ctx context.Context, projectName, composeFile, workDir, layoutName string,
 ) error {

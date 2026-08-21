@@ -137,6 +137,32 @@ func TestCreateMuxOpCommand(t *testing.T) {
 	})
 }
 
+// Two invocations aimed at one window can find the same leftover and both set
+// about removing it. The second one to get there is telling the store to delete
+// an id that is no longer in it — which is the state it wanted the store in, so
+// it must carry on and try to register rather than report the window unusable.
+func TestRemoveMuxOpLeftoverAlreadyGone(t *testing.T) {
+	cfg := frameSvcConfig(t)
+	svc := cmdman.NewService(cfg)
+	defer svc.Close()
+
+	req, err := muxOpCreateRequest(muxOpTestOptions(t, svc))
+	assert.NilError(t, err)
+
+	stale, err := createMuxOpCommand(t.Context(), svc, req)
+	assert.NilError(t, err)
+
+	// The winner's removal.
+	assert.NilError(t, removeMuxOpLeftover(t.Context(), svc, stale))
+	// The loser's, of the record it read before the winner got there.
+	assert.NilError(t, removeMuxOpLeftover(t.Context(), svc, stale))
+
+	// And the name is free again, which is what the loser goes on to use.
+	entry, err := findCommandByName(t.Context(), svc, req.Name)
+	assert.NilError(t, err)
+	assert.Assert(t, entry == nil)
+}
+
 // The worker is this binary re-run with what the user typed, and it has to land
 // in the same store: it inherits the environment but not the flags, so the
 // resolved dirs travel as flags of their own.

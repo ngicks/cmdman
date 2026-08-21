@@ -19,6 +19,21 @@ code.
 Rejected: stdin forwarding (extra plumbing for a rare flow); hard error
 (would break a working outside-pane piped invocation).
 
+## D18: follower output bounded to the current run; log file stays append-only [automatic] (2026-08-21)
+
+Decision: fix the reviewer-confirmed defect (every follow replayed ALL
+previous runs' output from the shared per-identity log — a failed run's
+stale error reprinted verbatim by the next succeeding run) by making the
+follower skip content that predates the current run, NOT by truncating the
+file at create time. The shared, append-only per-identity file is the
+user's explicit design (one window's history in one place); the follower
+just must not re-print history as if it were live output. No time-based
+filtering (backwards clock steps burned us once already) — bound by
+position/offset.
+
+Rejected: truncate-on-create (destroys the cross-run history the shared
+file exists to keep); time-based since filtering (clock-skew fragile).
+
 ## D8: approach pivot — supervise the operation instead of spare-then-settle (2026-08-21)
 
 Decision: pane-destroying mux verbs run as a cmdman-supervised operation (the

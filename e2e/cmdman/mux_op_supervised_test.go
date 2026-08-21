@@ -147,6 +147,89 @@ func TestMuxOp_UpFromInsideTheDashboard(t *testing.T) {
 	assertLayoutStamp(t, socket, wid, "0")
 }
 
+// muxOpSoloComposeYAML is a project of one command shown on its own, which is
+// the smallest dashboard a compose project can ask for.
+func muxOpSoloComposeYAML(project, socket string) string {
+	return fmt.Sprintf(`name: %s
+commands:
+  web:
+    args: [sleep, "300"]
+mux:
+  driver:
+    name: tmux
+    socket: %s
+  layouts:
+    - name: main
+      root:
+        command: web
+`, project, socket)
+}
+
+// TestMuxOp_ComposeUpTakesOverTheWindowItWasTypedIn is the shell-window takeover
+// again, asked for the way a compose project asks for it. The verb resolves its
+// dashboard from the compose file rather than from a spec path, and the window
+// it takes over is the one the command is typed in, so the pane holding the
+// command is the first thing the layout claims.
+//
+// The frame is what says the run reached its end: putting it up is the last
+// thing an up does, and it is the half that goes missing when the run cannot
+// outlive the pane it was typed in.
+func TestMuxOp_ComposeUpTakesOverTheWindowItWasTypedIn(t *testing.T) {
+	t.Parallel()
+	requireTmux(t)
+	ctx := frameCleanupContext(t)
+	env := newTestEnv(t)
+
+	socket := muxSocket(t)
+	t.Cleanup(func() { killTmuxServer(t, socket) })
+
+	writeDefaultFrameConfig(t, env, "dev")
+
+	wd := composeWorkdir(t)
+	project := "takeover"
+	composePath := writeComposeFile(t, wd, muxOpSoloComposeYAML(project, socket))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	if _, stderr, err := env.exec(
+		ctx, "compose", "--workdir", wd, "-f", composePath, "up",
+	); err != nil {
+		t.Fatalf("compose up: %v\nstderr:\n%s", err, stderr)
+	}
+	for _, e := range env.lsJSON(ctx,
+		"-l", "cmdman.compose.workdir="+wd,
+		"-l", "cmdman.compose.project="+project,
+	) {
+		env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
+	}
+
+	// The window wears the name the project's dashboard takes, so the window the
+	// command is typed in is the window the up wants in name as well as in place.
+	selection := compose.ProjectSelection{WorkDir: wd, Project: project}
+	windowName := selection.MuxWindowName()
+	shellWid, shellPane := startMuxOpSession(t, env, socket, "work", windowName)
+
+	c := sendMuxOpCommand(t, socketSender(t, socket), shellPane, fmt.Sprintf(
+		"%s compose --workdir %s -f %s mux up", cmdmanBin, wd, composePath,
+	))
+
+	waitForMuxOp(t, "the dashboard never came up inside its frame",
+		func() string { return tmuxWindowOption(t, socket, shellWid, "@cmdman_frame_def") },
+		"dev", c)
+	waitForWindowSettled(t, socket, shellWid, c)
+
+	if got := tmuxWindowIDByIdentity(t, socket, selection.ProjectIdentity()); got != shellWid {
+		t.Fatalf("the dashboard is on window %s, want the shell window %s it was typed in",
+			got, shellWid)
+	}
+	if got, want := muxOpPaneTitles(t, socket, shellWid), []string{
+		"frame-0", "web-1",
+	}; !slices.Equal(got, want) {
+		t.Fatalf("pane titles = %v, want the project's one pane beside the frame's bar %v",
+			got, want)
+	}
+	assertLayoutStamp(t, socket, shellWid, "0")
+}
+
 // TestMuxOp_UpWithNoPaneToRunIn drives the verb the way a key binding does:
 // through tmux itself, with no pane behind the invocation at all. Nothing is
 // destroyed here and nothing is watching either, so the whole run — layout and
@@ -507,6 +590,13 @@ func TestMuxOp_FailureIsReportedAndLogged(t *testing.T) {
 	if !strings.Contains(stderr, "ghost") {
 		t.Fatalf("the error does not name the command that could not be resolved:\n%s", stderr)
 	}
+	// The run before this one used the same window, so its output is in the same
+	// log — the file is one window's history, appended to by every run. Only this
+	// run's half of it belongs on this caller's screen.
+	if strings.Contains(stdout+stderr, "tmux attach -t work") {
+		t.Errorf("the failing run printed the earlier run's output:\nstdout:\n%s\nstderr:\n%s",
+			stdout, stderr)
+	}
 
 	// The record outlives the run that wrote it: the process carrying an
 	// operation out is registered as a command and takes itself off the books on
@@ -530,6 +620,18 @@ func TestMuxOp_FailureIsReportedAndLogged(t *testing.T) {
 		t.Fatalf("the dashboard reads %v after the failed run, want the untouched %v", got, want)
 	}
 	assertLayoutStamp(t, socket, wid, "0")
+
+	// The run after a failed one reads back over the record the failure left. A
+	// run that succeeds while printing "error: ... ghost" is a run the user
+	// cannot make sense of, so what the earlier run said stays with that run.
+	stdout, stderr, err = env.muxExec(ctx, "mux", "up", specPath, "-s", "work")
+	if err != nil {
+		t.Fatalf("mux up after the failed run: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if strings.Contains(stdout+stderr, "ghost") {
+		t.Fatalf("the run after the failure repeated it:\nstdout:\n%s\nstderr:\n%s",
+			stdout, stderr)
+	}
 }
 
 // TestMuxOp_OutputAndStatusReachTheCaller: an invocation that is not standing

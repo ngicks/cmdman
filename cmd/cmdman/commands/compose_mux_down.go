@@ -90,8 +90,9 @@ func composeMuxDownOp(
 		return err
 	}
 
-	// Down needs no cmdman service — only the project identity derived from the
-	// compose file (see this command's Long help). Pass a nil service.
+	// The teardown itself reaches none of the project's commands — the project
+	// identity derived from the compose file is all it works from (see this
+	// command's Long help) — so the compose service is built without one.
 	return compose.NewService(nil).MuxDown(ctx, compose.MuxDownOption{
 		Selection:   selection,
 		SessionName: session,
