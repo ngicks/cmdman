@@ -28,7 +28,7 @@ implementation steps detailed; traceability gate walked. Ready to implement.
       capture before removal
 - [x] Step 4: wire `mux up` / `compose mux up` / `mux down` / `cycle-scale`
       / `mux frame *` and widget CycleMux (D14) through the wrapper
-- [ ] Step 5: e2e — matrix rows 3/4 all-✅ (D1 absorb, D3 no extra
+- [x] Step 5: e2e — matrix rows 3/4 all-✅ (D1 absorb, D3 no extra
       feedback), paneless invocation, multi-window from inside, frame
       replacement, failure injection (D6/D9/D11: log file present, no viewer
       restore, `remain-on-exit off`), UC7 sync-UX regression
