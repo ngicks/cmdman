@@ -499,7 +499,12 @@ func TestMux_KillingSessionLeavesCommandRunning(t *testing.T) {
 	socket := muxSocket(t)
 	t.Cleanup(func() { killTmuxServer(t, socket) })
 
-	env.run(ctx, "run", "-n", "solo", "--", "/bin/sh", "-c", "sleep 300")
+	const title = "still-supervised"
+	env.run(
+		ctx,
+		"run", "-t", "-n", "solo", "--", "/bin/sh", "-c",
+		"printf '\033]2;"+title+"\007'; sleep 300",
+	)
 	t.Cleanup(func() { env.cleanupCommand(ctx, "solo") })
 	env.waitForState(ctx, "solo", "running", defaultTimeout)
 	pidBefore := env.livePID(ctx, "solo")
@@ -512,6 +517,7 @@ func TestMux_KillingSessionLeavesCommandRunning(t *testing.T) {
 	if got := len(tmuxPaneField(t, socket, wid, "#{pane_title}")); got != 1 {
 		t.Fatalf("want 1 pane before kill, got %d", got)
 	}
+	waitForPaneTitle(t, socket, wid, title, 3*time.Second)
 
 	killTmuxServer(t, socket)
 	// Let any SIGHUP-driven teardown that would (wrongly) reach the command
@@ -532,6 +538,14 @@ func TestMux_KillingSessionLeavesCommandRunning(t *testing.T) {
 			pidAfter,
 		)
 	}
+
+	// A fresh viewer receives the monitor's current terminal title even though
+	// the command emitted OSC 2 only once, before the first viewer attached.
+	if _, stderr, err := env.muxExec(ctx, "mux", specPath); err != nil {
+		t.Fatalf("cmdman mux after server restart failed: %v\nstderr:\n%s", err, stderr)
+	}
+	wid = tmuxWindowID(t, socket, "cmdman")
+	waitForPaneTitle(t, socket, wid, title, 3*time.Second)
 }
 
 // livePID returns the live OS pid of a running command from `cmdman inspect`.
