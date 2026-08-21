@@ -12,6 +12,8 @@ dependencies:
     - git: github.com/ngicks/agents-package
       path: hooks/go-vet-ngcheckers
     - git: github.com/ngicks/agents-package
+      path: hooks/markdown-mermaid-lint
+    - git: github.com/ngicks/agents-package
       path: instructions/ngicks.base.env.instructions.md
     - git: github.com/ngicks/agents-package
       path: instructions/ngicks.base.preference.instructions.md
