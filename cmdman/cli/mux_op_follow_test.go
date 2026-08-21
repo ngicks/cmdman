@@ -13,6 +13,7 @@ import (
 	"gotest.tools/v3/assert"
 
 	"github.com/ngicks/cmdman/cmdman"
+	"github.com/ngicks/cmdman/cmdman/eventlog"
 	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/monitor"
@@ -108,6 +109,69 @@ func TestRunMuxOpWorker(t *testing.T) {
 	logged, err := os.ReadFile(req.LogOpts[logdriver.LogOptPath])
 	assert.NilError(t, err)
 	assert.Assert(t, strings.Contains(string(logged), "applied"), "log: %q", logged)
+}
+
+// appendMuxOpEvent writes one event to the service's event log, the way the
+// worker's monitor does.
+func appendMuxOpEvent(t *testing.T, cfg cmdman.CmdmanConfig, e model.Event) {
+	t.Helper()
+
+	path, err := cfg.EventLogPath()
+	assert.NilError(t, err)
+	w, err := eventlog.NewWriter(path)
+	assert.NilError(t, err)
+	assert.NilError(t, w.Append(e))
+}
+
+// What the follower is told about the worker's exit comes off the event log,
+// and the entry it is looking for cannot be selected by when it was written.
+func TestWaitMuxOpExit(t *testing.T) {
+	// A host clock can step backwards, and a worker that exits after it has
+	// done so stamps its exit earlier than the moment the follower subscribed.
+	// The operation succeeded all the same, so that exit has to be delivered
+	// rather than passed over as history from before the subscription.
+	t.Run("delivers an exit stamped before the subscription", func(t *testing.T) {
+		cfg := frameSvcConfig(t)
+		svc := cmdman.NewService(cfg)
+		defer svc.Close()
+
+		const id = "0123456789ab"
+		appendMuxOpEvent(t, cfg, model.Event{
+			Time:     time.Now().Add(-time.Hour),
+			Type:     model.EventTypeExited,
+			ID:       id,
+			ExitCode: new(0),
+		})
+
+		sub, err := subscribeMuxOpExit(t.Context(), svc, id)
+		assert.NilError(t, err)
+		defer func() { assert.NilError(t, sub.Close()) }()
+
+		assert.NilError(t, waitMuxOpExit(t.Context(), svc, sub, id))
+	})
+
+	t.Run("reports the status the worker exited with", func(t *testing.T) {
+		cfg := frameSvcConfig(t)
+		svc := cmdman.NewService(cfg)
+		defer svc.Close()
+
+		const id = "ba9876543210"
+		appendMuxOpEvent(t, cfg, model.Event{
+			Time:     time.Now(),
+			Type:     model.EventTypeExited,
+			ID:       id,
+			ExitCode: new(2),
+		})
+
+		sub, err := subscribeMuxOpExit(t.Context(), svc, id)
+		assert.NilError(t, err)
+		defer func() { assert.NilError(t, sub.Close()) }()
+
+		err = waitMuxOpExit(t.Context(), svc, sub, id)
+		exitErr, ok := errors.AsType[*ExitCodeError](err)
+		assert.Assert(t, ok, "got %v", err)
+		assert.Equal(t, exitErr.Code, 2)
+	})
 }
 
 // A worker that finishes before following starts takes its record with it, and

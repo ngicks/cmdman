@@ -86,20 +86,14 @@ func runMuxOpWorker(
 	// auto-removed, and removal takes its state, its exit code and its exit
 	// history with it. The monitor appends the exit event before it removes
 	// anything, and the event log is append-only, so the event outlives the
-	// record. Subscribing from before the command exists means no exit of it
-	// can be missed however fast the operation turns out to be.
-	since := time.Now()
+	// record.
 	id, err := createMuxOpCommand(ctx, svc, req)
 	if err != nil {
 		return err
 	}
-	sub, err := svc.Events(ctx, cmdman.EventsRequest{
-		Since:      since,
-		IDFilter:   []string{id},
-		TypeFilter: []model.EventType{model.EventTypeExited, model.EventTypeFailed},
-	})
+	sub, err := subscribeMuxOpExit(ctx, svc, id)
 	if err != nil {
-		return fmt.Errorf("watch mux op worker: %w", err)
+		return err
 	}
 	defer sub.Close()
 
@@ -109,6 +103,35 @@ func runMuxOpWorker(
 
 	followMuxOpOutput(ctx, opts, id, req.LogOpts[logdriver.LogOptPath])
 	return waitMuxOpExit(ctx, svc, sub, id)
+}
+
+// subscribeMuxOpExit watches the event log for the end of the worker's run.
+//
+// The log is read from its start rather than tailed, so an exit that landed
+// before the subscription opened is still delivered — however fast the
+// operation turns out to be, its exit cannot be missed.
+//
+// No time bound goes with that, deliberately. The worker's id was minted a
+// moment ago and belongs to nothing else that was ever written to the log, so
+// selecting on it already leaves out every older entry, and a lower bound on
+// time would only add a way to go wrong: a host clock can step backwards
+// between subscribing and the worker exiting, and an exit event stamped before
+// the subscription would then be dropped as history — a finished operation
+// left looking like a worker that died without saying anything.
+func subscribeMuxOpExit(
+	ctx context.Context,
+	svc *cmdman.Service,
+	id string,
+) (*cmdman.EventsSubscription, error) {
+	sub, err := svc.Events(ctx, cmdman.EventsRequest{
+		FromStart:  true,
+		IDFilter:   []string{id},
+		TypeFilter: []model.EventType{model.EventTypeExited, model.EventTypeFailed},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("watch mux op worker: %w", err)
+	}
+	return sub, nil
 }
 
 // muxOpCreateRequest describes the worker as a command record.

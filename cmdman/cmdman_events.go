@@ -20,10 +20,17 @@ type EventsRequest struct {
 	NoFollow bool
 	// Since/Until clamp the event time window. When NoFollow=false
 	// (tailing) and BOTH Since and Until are zero, the subscription
-	// skips entries already on disk — set either to read history.
+	// skips entries already on disk — set either one, or FromStart, to
+	// read history.
 	// Until=zero combined with NoFollow=false tails indefinitely.
 	Since time.Time
 	Until time.Time
+	// FromStart reads the log from its beginning even while tailing.
+	// It is for a subscriber that must not miss an entry appended
+	// before it opened but has no time window to say so with: a filter
+	// on something unique, such as a freshly created command's id,
+	// already excludes everything older than the subscription.
+	FromStart bool
 	// IDFilter restricts delivery to events whose ID matches any value.
 	// Empty/nil means no filter.
 	IDFilter []string
@@ -53,12 +60,13 @@ func (s *Service) Events(ctx context.Context, req EventsRequest) (*EventsSubscri
 	}
 	follow := !req.NoFollow
 	// Skip historical entries (seek to EOF) only when the caller is
-	// tailing AND has not asked for any time window — otherwise we must
-	// read the file from the start so the Since/Until/one-shot semantics
-	// produce the expected output. In particular --until alone implies
-	// "deliver history up to that point", which requires reading from
-	// the start even when tailing.
-	fromEnd := follow && req.Since.IsZero() && req.Until.IsZero()
+	// tailing AND has asked neither for a time window nor for history —
+	// otherwise we must read the file from the start so the
+	// Since/Until/FromStart/one-shot semantics produce the expected
+	// output. In particular --until alone implies "deliver history up to
+	// that point", which requires reading from the start even when
+	// tailing.
+	fromEnd := follow && !req.FromStart && req.Since.IsZero() && req.Until.IsZero()
 
 	r, err := eventlog.NewReader(path, eventlog.ReaderOption{
 		Follow:      follow,
