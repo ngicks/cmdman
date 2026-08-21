@@ -26,6 +26,50 @@ List→Remove window between two conflicting invocations remains a
 theoretical TOCTOU, made practically unreachable by the grace; no further
 action planned.
 
+## H4 — StatWindow marker breaks on unmarked user-split panes (2026-08-21)
+
+What: `pkg/muxctl/tmux/stat.go:63-80` — one unmarked user-split pane makes
+the window's layout marker read `-1`, which breaks `cycle-scale`
+("marker -1 out of range [0,1)") and makes a cycling `mux up` re-apply
+layout 0. Contradicts `pkg/muxctl/tmux/reuse.go:82`'s stated support for
+user splits. e2e worked around it (frame-pane invoker, single-layout spec)
+rather than pinning it.
+
+Follow-up: decide whether StatWindow should ignore unmarked panes when
+deriving the marker; then pin cycle-scale with a user split in e2e.
+
+## H5 — monitor hard-death paths append no exit event (2026-08-21)
+
+What: `monitor.MarkMonitorDied` (cmdman/monitor/mon_clean.go:74-103)
+deletes auto-remove records without appending any event, and `emitEvent`
+(mon.go:162) warns-and-continues on append failure. The mux-op follower
+covers this via its liveness poll + grace, but any other event-log consumer
+sees such commands vanish silently.
+
+Follow-up: consider appending a synthetic failed/exited event in
+MarkMonitorDied.
+
+## H6 — follower fallback replay reprints earlier runs' output (2026-08-21)
+
+What: the mux op log file is shared per identity by design; when the op
+record is already gone the follower falls back to `replayMuxOpLog`
+(cmdman/cli/mux_op_follow.go), which reads from the start of the file and
+so reprints previous runs' lines.
+
+Follow-up: remember the log offset at op start (or replay only since the
+last run marker) if the reprint proves confusing.
+
+## H7 — worker mechanism undocumented in doc/man (2026-08-21)
+
+What: the supervised-worker execution of mux verbs — including that a spec
+piped on stdin runs in-process and so gives up surviving its own pane, and
+the `<runtime-dir>/mux/*.log` diagnostic location — is not described in
+doc/man (cmdman-mux.1.md, cmdman-compose-mux.1.md). Nothing existing is
+invalidated; the new behavior is just undocumented.
+
+Follow-up: a docs pass adding the worker model, the stdin exception, and
+where failure logs land.
+
 ## H1 — driver pane classification is floating-pane-blind (out-of-scope discovery, 2026-08-21)
 
 What: tmux 3.7 floating panes (`new-pane`, `pane_floating_flag`) are full
