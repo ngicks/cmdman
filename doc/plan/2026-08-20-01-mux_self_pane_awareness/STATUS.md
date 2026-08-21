@@ -1,8 +1,10 @@
 # Status
 
-State: **plan finalized** — idea gate passed (re-confirmed after the D8
-pivot, 2026-08-21); all open questions resolved (D1–D3, D6, D8–D12);
-implementation steps detailed; traceability gate walked. Ready to implement.
+State: **implemented** (2026-08-21) — all five steps landed and committed;
+final review + full-test gate passed after one fix round (follower output
+bounded to the current run, injective op-name join, leftover-race error,
+stale docs, test gaps). Awaiting user review; HANDOFF.md entries (H1,
+H4–H8) await triage.
 
 ## Checklist
 
