@@ -14,6 +14,7 @@ import (
 
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/store"
+	"github.com/ngicks/cmdman/internal/templateutil"
 )
 
 // The launcher's landing (PLAN.md phase 1 step 5, D4/D8/D9/D10): `S` brings the
@@ -51,7 +52,7 @@ func TestLauncherLanding_FocusesProjectWindow(t *testing.T) {
 	}
 
 	launchAndLand(t, env, tmuxTmpdir, wd, project)
-	window := "cmdman-" + project
+	window := launcherFallbackWindowName(wd)
 	waitForTmuxWindow(t, tmuxTmpdir, window, 30*time.Second)
 	waitForActiveWindow(t, tmuxTmpdir, "work", window, 30*time.Second)
 
@@ -103,7 +104,7 @@ func TestLauncherLanding_AttachesFromOutsideTmux(t *testing.T) {
 	w.send(t, "S")
 
 	// Outside tmux the session is the default "cmdman" one the bring-up creates.
-	window := "cmdman-" + project
+	window := launcherFallbackWindowName(wd)
 	waitForTmuxWindow(t, tmuxTmpdir, window, 30*time.Second)
 	waitForSessionAttached(t, tmuxTmpdir, "cmdman", 30*time.Second)
 	waitForActiveWindow(t, tmuxTmpdir, "cmdman", window, 30*time.Second)
@@ -137,7 +138,7 @@ func TestLauncherLanding_MuxlessProjectGetsShellWindow(t *testing.T) {
 	}
 
 	launcher := launchAndLand(t, env, tmuxTmpdir, wd, project)
-	window := "cmdman-" + project
+	window := launcherFallbackWindowName(wd)
 	waitForTmuxWindow(t, tmuxTmpdir, window, 30*time.Second)
 	waitForActiveWindow(t, tmuxTmpdir, "work", window, 30*time.Second)
 
@@ -239,12 +240,18 @@ func launchAndLand(
 		cmdmanBin+" tui widget launcher --workdir "+workDir,
 	)
 	waitForPane(t, tmuxTmpdir, name, project, 20*time.Second)
-	if got := activeWindowName(t, tmuxTmpdir, "work"); got == "cmdman-"+project {
+	if got := activeWindowName(t, tmuxTmpdir, "work"); got == launcherFallbackWindowName(workDir) {
 		t.Fatalf("the project window is already focused; the landing would prove nothing")
 	}
 	tmuxRunWithTmpdir(t, tmuxTmpdir, "send-keys", "-t", "=work:"+name, "Enter")
 	tmuxRunWithTmpdir(t, tmuxTmpdir, "send-keys", "-t", "=work:"+name, "-l", "S")
 	return name
+}
+
+// launcherFallbackWindowName mirrors the launcher's non-Git naming for the
+// temporary work directories used by these e2e tests.
+func launcherFallbackWindowName(workDir string) string {
+	return templateutil.Trunc(filepath.Base(filepath.Clean(workDir)), 10)
 }
 
 // waitForPane polls a window's rendered contents until it shows what, which is

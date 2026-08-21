@@ -43,10 +43,10 @@ func (s ProjectSelection) ProjectIdentity() string {
 
 // MuxWindowName derives the cmdman-owned window name for a compose project:
 // "cmdman-<project>", or plain "cmdman" when the project is unnamed. It is the
-// value passed as [mux.RunOptions.WindowName] / [mux.DownOptions.WindowName] for
-// compose mux dashboards — the label the window wears, not what it is found by
-// (that is [ProjectSelection.ProjectIdentity]), so two projects sharing a name
-// may well share it.
+// default [mux.RunOptions.WindowName] for compose mux dashboards when the
+// caller supplies no display-name override — the label the window wears, not
+// what it is found by (that is [ProjectSelection.ProjectIdentity]), so two
+// projects sharing a name may well share it.
 func (s ProjectSelection) MuxWindowName() string {
 	if s.Project != "" {
 		return "cmdman-" + s.Project

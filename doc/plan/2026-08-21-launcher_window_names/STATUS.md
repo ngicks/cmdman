@@ -1,6 +1,6 @@
 # Status
 
-State: **implementation in progress — steps 1–4 complete**.
+State: **implemented and verified**.
 
 ## Checklist
 
@@ -16,8 +16,10 @@ State: **implementation in progress — steps 1–4 complete**.
 - [x] Step 2: D3/D4 — apply detached-HEAD fallback and the complete 10-cell limit
 - [x] Step 3: D1/UC4 — add launcher-only overrides with existing compose defaults
 - [x] Step 4: UC1–UC4 — thread one computed title through dashboard and landing paths
-- [ ] Step 5: run tests and required Go review skills
+- [x] Step 5: verify focused/e2e/full suites and apply all required Go review gates
 
 ## Next action
 
-Begin step 5 with the full test suite and required parallel Go review gate.
+Implementation complete. Focused packages, affected launcher e2e tests, and
+`go test ./...` pass; the multi-focus review blocker and two low-risk findings
+were resolved before the final step commit.

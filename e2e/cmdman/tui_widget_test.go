@@ -329,7 +329,8 @@ func TestTUIWidget_LauncherStartsFromAnywhere(t *testing.T) {
 	w.waitFor(t, project, 10*time.Second)
 	w.send(t, "\r") // enter: the input hands the keyboard to the locations list
 	w.send(t, "s")  // start the enabled (history) projects here
-	waitForTmuxWindow(t, tmuxTmpdir, "cmdman-"+project, 30*time.Second)
+	window := launcherFallbackWindowName(wd)
+	waitForTmuxWindow(t, tmuxTmpdir, window, 30*time.Second)
 
 	// The window name alone would pass even for a dashboard built under the
 	// wrong work directory; the ownership stamp is what encodes it. Expected
@@ -337,7 +338,7 @@ func TestTUIWidget_LauncherStartsFromAnywhere(t *testing.T) {
 	// is not the one the launcher process is standing in.
 	want := compose.ProjectSelection{WorkDir: wd, Project: project}.ProjectIdentity()
 	if got := tmuxWindowOptionTmpdir(
-		t, tmuxTmpdir, "cmdman-"+project, "@cmdman_window",
+		t, tmuxTmpdir, window, "@cmdman_window",
 	); got != want {
 		t.Errorf("dashboard identity = %q, want %q (built under the wrong work dir?)", got, want)
 	}

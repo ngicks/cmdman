@@ -42,3 +42,18 @@ Rationale: confirmed by the user; this makes the tmux window-name width a true
 upper bound, including for wide Unicode names.
 
 Rejected: allowing ten content cells plus an additional ellipsis cell.
+
+## D5: keep pre-existing-window coverage at the service seam [automatic] (2026-08-21)
+
+Decision: retain the focused compose/launcher tests that prove identity remains
+separate from the optional title and do not add another tmux e2e case solely
+for landing on a pre-existing direct-compose window. Update the existing live
+launcher tests to assert the new title for windows the launcher creates.
+
+Rationale: the service tests cover empty-name fallback, explicit override
+forwarding, and shared identity lookup, while the updated e2e tests cover both
+dashboard and mux-less launcher creation. A further tmux scenario would
+duplicate those seams without covering a new production branch.
+
+Rejected: expanding step 5 with a second direct-compose-to-launcher lifecycle
+test after the required focused and full suites already cover the changed paths.

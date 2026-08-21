@@ -8,10 +8,6 @@ import (
 )
 
 func TestLauncherWindowName(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not installed")
-	}
-
 	testRoot := t.TempDir()
 	tests := []struct {
 		name    string
@@ -109,6 +105,9 @@ func launcherTestRepo(
 	origin string,
 ) string {
 	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
 	dir := launcherTestDir(t, root, name)
 	runLauncherGit(t, dir, "init", "-b", branch)
 	if err := os.WriteFile(filepath.Join(dir, "tracked"), []byte("content\n"), 0o600); err != nil {
