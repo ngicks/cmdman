@@ -5,16 +5,17 @@ import (
 	"time"
 )
 
-// defaultTitleDebounce is how long a title change waits for a quieter moment
-// before it reaches subscribers. Shells retitle on every prompt, so an
-// undebounced stream would spend its messages on transients nobody reads.
-const defaultTitleDebounce = 150 * time.Millisecond
+// defaultTitleThrottleInterval bounds how frequently title-only changes reach
+// subscribers. Changes arriving within one interval are collapsed into the
+// newest title, without requiring the producer to become quiet.
+const defaultTitleThrottleInterval = 150 * time.Millisecond
 
 // streamRuntimeState sends st's current state, then one message per change,
 // until ctx ends or the monitor leaves an active state. A title-only change is
-// held back for debounce and re-read when it elapses, so a burst costs one
-// message carrying the last title; every other change (bell, reported status)
-// goes out at once and carries the pending title with it.
+// held until the current throttle window elapses and then re-read, so a burst
+// costs one message carrying the last title without continuous changes starving
+// the stream; every other change (bell, reported status) goes out at once and
+// carries the pending title with it.
 //
 // states may be nil, in which case only ctx ends the stream. This runs on the
 // gRPC handler goroutine and touches the runtime state's own lock only - never
@@ -23,7 +24,7 @@ func streamRuntimeState(
 	ctx context.Context,
 	st *commandRuntimeState,
 	states <-chan monitorStateChange,
-	debounce time.Duration,
+	throttleInterval time.Duration,
 	send func(runtimeView) error,
 ) error {
 	// Subscribe before taking the first snapshot: a change landing between the
@@ -37,10 +38,10 @@ func streamRuntimeState(
 		return err
 	}
 
-	timer := time.NewTimer(debounce)
+	timer := time.NewTimer(throttleInterval)
 	timer.Stop()
 	defer timer.Stop()
-	// fire is non-nil only while a title change waits out the debounce window.
+	// fire is non-nil only while a title change waits out a throttle window.
 	var fire <-chan time.Time
 
 	flush := func() error {
@@ -62,8 +63,13 @@ func streamRuntimeState(
 				continue
 			}
 			if titleOnlyChange(sent, cur) {
-				timer.Reset(debounce)
-				fire = timer.C
+				// Arm one fixed window. Later title changes are represented by the
+				// snapshot read when it fires; they must not postpone it, or a
+				// continuously animated title can starve forever.
+				if fire == nil {
+					timer.Reset(throttleInterval)
+					fire = timer.C
+				}
 				continue
 			}
 			timer.Stop()
@@ -81,7 +87,7 @@ func streamRuntimeState(
 			if ok && isMonitorActiveState(state.State) {
 				continue
 			}
-			// The run is over; hand over whatever the debounce still holds
+			// The run is over; hand over whatever the throttle window still holds
 			// rather than dropping the last title of the run.
 			return flush()
 		case <-ctx.Done():

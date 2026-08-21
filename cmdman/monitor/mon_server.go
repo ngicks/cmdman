@@ -310,7 +310,7 @@ func (s *monitorServer) WatchRuntimeState(
 		stream.Context(),
 		s.monitor.runtimeState,
 		states,
-		defaultTitleDebounce,
+		defaultTitleThrottleInterval,
 		func(v runtimeView) error {
 			return stream.Send(&pb.WatchRuntimeStateResponse{State: protoRuntimeState(v)})
 		},

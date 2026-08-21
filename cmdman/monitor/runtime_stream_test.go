@@ -2,6 +2,8 @@ package monitor
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,7 +25,7 @@ type runtimeStream struct {
 func startRuntimeStream(
 	t *testing.T,
 	st *commandRuntimeState,
-	debounce time.Duration,
+	throttleInterval time.Duration,
 ) *runtimeStream {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
@@ -34,7 +36,7 @@ func startRuntimeStream(
 	}
 	go func() {
 		defer close(s.done)
-		s.err = streamRuntimeState(ctx, st, s.states, debounce, func(v runtimeView) error {
+		s.err = streamRuntimeState(ctx, st, s.states, throttleInterval, func(v runtimeView) error {
 			s.sends <- v
 			return nil
 		})
@@ -82,7 +84,7 @@ func TestStreamRuntimeState_SnapshotThenPush(t *testing.T) {
 	st := newCommandRuntimeState()
 	st.latchTitle("already set")
 
-	stream := startRuntimeStream(t, st, defaultTitleDebounce)
+	stream := startRuntimeStream(t, st, defaultTitleThrottleInterval)
 
 	assert.Equal(t, stream.recv(t), runtimeView{Title: "already set"})
 
@@ -102,7 +104,7 @@ func TestStreamRuntimeState_SnapshotThenPush(t *testing.T) {
 	})
 }
 
-func TestStreamRuntimeState_DebouncesTitle(t *testing.T) {
+func TestStreamRuntimeState_ThrottlesTitleBurst(t *testing.T) {
 	st := newCommandRuntimeState()
 	stream := startRuntimeStream(t, st, 50*time.Millisecond)
 	assert.Equal(t, stream.recv(t), runtimeView{})
@@ -115,6 +117,40 @@ func TestStreamRuntimeState_DebouncesTitle(t *testing.T) {
 
 	assert.Equal(t, stream.recv(t), runtimeView{Title: "third"})
 	stream.assertSilent(t, 200*time.Millisecond)
+}
+
+func TestStreamRuntimeState_ContinuousTitlesDoNotStarve(t *testing.T) {
+	const interval = 50 * time.Millisecond
+	st := newCommandRuntimeState()
+	stream := startRuntimeStream(t, st, interval)
+	assert.Equal(t, stream.recv(t), runtimeView{})
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval / 5)
+		defer ticker.Stop()
+		for i := 1; ; i++ {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				st.latchTitle(fmt.Sprintf("frame-%d", i))
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		close(stop)
+		<-done
+	})
+
+	select {
+	case got := <-stream.sends:
+		assert.Assert(t, strings.HasPrefix(got.Title, "frame-"), "title = %q", got.Title)
+	case <-time.After(4 * interval):
+		t.Fatal("continuous title changes starved the runtime-state stream")
+	}
 }
 
 func TestStreamRuntimeState_SendsPendingTitleWithOtherChange(t *testing.T) {
@@ -157,7 +193,7 @@ func TestStreamRuntimeState_FlushesPendingTitleOnExit(t *testing.T) {
 
 func TestStreamRuntimeState_EndsWhenStateChannelCloses(t *testing.T) {
 	st := newCommandRuntimeState()
-	stream := startRuntimeStream(t, st, defaultTitleDebounce)
+	stream := startRuntimeStream(t, st, defaultTitleThrottleInterval)
 	assert.Equal(t, stream.recv(t), runtimeView{})
 
 	// The monitor closes the state broadcaster once the command is gone.
@@ -167,7 +203,7 @@ func TestStreamRuntimeState_EndsWhenStateChannelCloses(t *testing.T) {
 
 func TestStreamRuntimeState_StaysOpenAcrossRestart(t *testing.T) {
 	st := newCommandRuntimeState()
-	stream := startRuntimeStream(t, st, defaultTitleDebounce)
+	stream := startRuntimeStream(t, st, defaultTitleThrottleInterval)
 	assert.Equal(t, stream.recv(t), runtimeView{})
 
 	stream.states <- monitorStateChange{State: model.EventTypeRunning}

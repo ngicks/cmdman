@@ -9,11 +9,11 @@ import (
 	"time"
 )
 
-// The two titles the supervised command wears, in that order. They differ from
-// their very first character on purpose: the terminal is repainted by diffing
-// against what it already shows, so two titles sharing a prefix could reach the
-// captured stream as the tail that changed, which the transcript search would
-// never find.
+// The initial title and the prefix of the continuously changing titles the
+// supervised command wears, in that order. They differ from their very first
+// character on purpose: the terminal is repainted by diffing against what it
+// already shows, so two titles sharing a prefix could reach the captured stream
+// as the tail that changed, which the transcript search would never find.
 const (
 	liveTitleFirst  = "alphaready"
 	liveTitleSecond = "omega-shifted"
@@ -38,16 +38,20 @@ func TestTUIWidget_SwitcherShowsRetitleWithoutLifecycleEvent(t *testing.T) {
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
-	// The command holds its second title until the test releases it with a
-	// marker file, so the retitle provably happens after the switcher is on
-	// screen wearing the first one. A sleep here would race the push under test.
+	// The command holds its first title until the test releases it with a marker
+	// file, then retitles continuously, so the changes provably happen after the
+	// switcher is on screen. A sleep here would race the push under test.
 	stage := t.TempDir()
 	script := filepath.Join(stage, "retitle.sh")
 	must(t, os.WriteFile(script, fmt.Appendf(nil, `#!/bin/sh
 printf '\033]0;%[2]s\007'
 until [ -e "%[1]s/retitle" ]; do sleep 0.05; done
-printf '\033]0;%[3]s\007'
-sleep 300
+i=0
+while :; do
+  printf '\033]0;%[3]s-%%s\007' "$i"
+  i=$((i + 1))
+  sleep 0.05
+done
 `, stage, liveTitleFirst, liveTitleSecond), 0o755))
 
 	wd := composeWorkdir(t)
@@ -84,8 +88,9 @@ commands:
 
 	must(t, os.WriteFile(filepath.Join(stage, "retitle"), nil, 0o600))
 
-	// 150ms of server-side title debounce plus a repaint; the budget is wide
-	// enough that scheduling noise cannot turn a working push into a failure.
+	// The command keeps changing its title faster than the server's 150ms
+	// throttle interval. The switcher must still receive a bounded update;
+	// waiting for the producer to become quiet would starve this indefinitely.
 	w.waitFor(t, liveTitleSecond, 15*time.Second)
 
 	if after := env.run(ctx, "events", "--no-follow"); after != before {
