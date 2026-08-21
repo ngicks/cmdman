@@ -35,6 +35,7 @@ const (
 type runtimeSnapshot struct {
 	Gen          uint64
 	Title        string
+	TitleSet     bool
 	Status       reportedStatus
 	Detail       string
 	BellUnread   bool
@@ -75,6 +76,7 @@ type commandRuntimeState struct {
 	mu         sync.Mutex
 	gen        uint64
 	title      string
+	titleSet   bool
 	status     reportedStatus
 	detail     string
 	bellUnread bool
@@ -140,6 +142,7 @@ func (s *commandRuntimeState) snapshot() runtimeSnapshot {
 	return runtimeSnapshot{
 		Gen:          s.gen,
 		Title:        s.title,
+		TitleSet:     s.titleSet,
 		Status:       s.status,
 		Detail:       s.detail,
 		BellUnread:   s.bellUnread,
@@ -169,12 +172,15 @@ func sanitizeTermString(s string) string {
 
 // latchTitle records the window title. The hook fires on a real change only: a
 // shell retitles on every prompt, and a title is a value, not an occurrence.
+// titleSet distinguishes an explicit empty title from no title sequence, so a
+// new attach can faithfully clear a viewer's pre-existing title.
 func (s *commandRuntimeState) latchTitle(title string) {
 	title = sanitizeTermString(title)
 	changed := s.mutate(func() bool {
-		if s.title == title {
+		if s.titleSet && s.title == title {
 			return false
 		}
+		s.titleSet = true
 		s.title = title
 		return true
 	})
@@ -270,11 +276,12 @@ func (s *commandRuntimeState) clearReport() {
 // worse than no status at all.
 func (s *commandRuntimeState) reset() {
 	s.mutate(func() bool {
-		if s.title == "" && s.status == reportedStatusNone && s.detail == "" &&
+		if !s.titleSet && s.status == reportedStatusNone && s.detail == "" &&
 			!s.bellUnread && s.notif == nil {
 			return false
 		}
 		s.title, s.status, s.detail, s.bellUnread, s.notif = "", reportedStatusNone, "", false, nil
+		s.titleSet = false
 		return true
 	})
 }

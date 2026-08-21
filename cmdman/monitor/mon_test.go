@@ -502,23 +502,48 @@ func TestMonitorSubscribeCapturesOffsetAndLiveRecordsUnderLock(t *testing.T) {
 	}
 }
 
-func TestMonitorSubscribeWithScrollbackIncludesTerminalModeReplay(t *testing.T) {
+func TestMonitorSubscribeWithScrollbackIncludesTerminalStateReplay(t *testing.T) {
+	runtimeState := newCommandRuntimeState()
 	m := &Monitor{
 		ring:              newRingBuffer(16),
 		outputBridge:      newBroadcaster[logdriver.LogLine](),
 		stateChangeBridge: newBroadcaster[monitorStateChange](),
 		terminalState:     newTerminalPaneState(),
-		// A non-TTY command: scrollback is the raw ring buffer (no screen mirror).
-		cfg: &model.CommandConfig{},
+		runtimeState:      runtimeState,
+		// With no screen mirror, a TTY subscription falls back to raw ring bytes.
+		cfg: &model.CommandConfig{Tty: true},
 	}
 	m.terminalState.Observe([]byte("\x1b[?1000;1006;2004h"))
+	runtimeState.latchTitle("build")
 	_, _ = m.ring.Write([]byte("tail-only\n"))
 
 	sub := m.subscribeOutput(true)
 	defer sub.Unsub()
 
 	assert.Equal(t, string(sub.Scrollback), "tail-only\n")
-	assert.Equal(t, string(sub.TerminalMode), "\x1b[?1000;1006;2004h")
+	assert.Equal(
+		t,
+		string(sub.TerminalState),
+		"\x1b[?1000;1006;2004h\x1b]2;build\x07",
+	)
+}
+
+func TestMonitorSubscribeReplaysExplicitlyClearedTitle(t *testing.T) {
+	runtimeState := newCommandRuntimeState()
+	runtimeState.latchTitle("")
+	m := &Monitor{
+		ring:              newRingBuffer(16),
+		outputBridge:      newBroadcaster[logdriver.LogLine](),
+		stateChangeBridge: newBroadcaster[monitorStateChange](),
+		terminalState:     newTerminalPaneState(),
+		runtimeState:      runtimeState,
+		cfg:               &model.CommandConfig{Tty: true},
+	}
+
+	sub := m.subscribeOutput(true)
+	defer sub.Unsub()
+
+	assert.Equal(t, string(sub.TerminalState), "\x1b]2;\x07")
 }
 
 func TestMonitorStateChangeBroadcastsTerminalStateAndCloses(t *testing.T) {

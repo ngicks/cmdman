@@ -8,6 +8,7 @@ import (
 
 	pb "github.com/ngicks/cmdman/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/cmdman/logdriver"
+	ansi "github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-ansi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -19,13 +20,13 @@ type monitorServer struct {
 }
 
 type monitorSubscription struct {
-	Records      <-chan logdriver.LogLine
-	StateChanges <-chan monitorStateChange
-	unsubRecords func()
-	unsubState   func()
-	Offset       any
-	Scrollback   []byte
-	TerminalMode []byte
+	Records       <-chan logdriver.LogLine
+	StateChanges  <-chan monitorStateChange
+	unsubRecords  func()
+	unsubState    func()
+	Offset        any
+	Scrollback    []byte
+	TerminalState []byte
 }
 
 func (s monitorSubscription) Unsub() {
@@ -61,7 +62,14 @@ func (m *Monitor) subscribeOutput(scrollback bool) monitorSubscription {
 		if sub.Scrollback == nil {
 			sub.Scrollback = m.ring.Bytes()
 		}
-		sub.TerminalMode = m.terminalState.Replay()
+		sub.TerminalState = m.terminalState.Replay()
+		runtime := m.runtimeState.snapshot()
+		if runtime.TitleSet {
+			sub.TerminalState = append(
+				sub.TerminalState,
+				ansi.SetWindowTitle(runtime.Title)...,
+			)
+		}
 	}
 	sub.StateChanges, sub.unsubState = m.subscribeStateChange()
 	return sub
@@ -109,8 +117,8 @@ func (s *monitorServer) Attach(stream pb.CommandMonitorService_AttachServer) err
 			return err
 		}
 	}
-	if len(sub.TerminalMode) > 0 {
-		if err := stream.Send(&pb.AttachResponse{Stdout: sub.TerminalMode}); err != nil {
+	if terminalState := filter.filter(sub.TerminalState); len(terminalState) > 0 {
+		if err := stream.Send(&pb.AttachResponse{Stdout: terminalState}); err != nil {
 			return err
 		}
 	}
