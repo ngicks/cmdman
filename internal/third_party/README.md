@@ -9,6 +9,13 @@ refuse the module) and are imported by their
 API for anyone else. `.golangci.yaml` excludes the directory from lint
 and formatting so the copies keep upstream style.
 
+Both copies are from [charmbracelet/x](https://github.com/charmbracelet/x),
+MIT licensed; each directory retains the upstream
+[`LICENSE`](https://github.com/charmbracelet/x/blob/main/LICENSE)
+([charmbracelet-x-ansi/LICENSE](./charmbracelet-x-ansi/LICENSE),
+[charmbracelet-x-vt/LICENSE](./charmbracelet-x-vt/LICENSE)) as the MIT
+terms require.
+
 ## charmbracelet-x-ansi
 
 `github.com/charmbracelet/x/ansi` **v0.11.7** plus the fix from upstream
