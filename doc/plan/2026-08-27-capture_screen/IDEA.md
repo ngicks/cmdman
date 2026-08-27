@@ -1,6 +1,6 @@
 # Capture screen — how it should be
 
-Gate: not confirmed
+Gate: confirmed by user, 2026-08-28
 
 Take a snapshot of a supervised TTY command's current screen contents and print
 it to stdout, mirroring `tmux capture-pane`. cmdman has no paste-buffer concept,
@@ -47,13 +47,25 @@ so output always goes to stdout (as if tmux `-p` were always given).
   explicitly requests the alternate screen and fails when the program is not
   using one — unless `-q` is also given, matching tmux.
 
+### 5. Composable primitive (edit-in-editor and friends)
+
+- **Actor**: a user composing capture with ordinary shell tools.
+- **Situation**: e.g. wants the captured screen in a file, opened in
+  `${VISUAL:-$EDITOR}` to annotate or reuse:
+  `cmdman capture-screen mytui > snap.txt && $EDITOR snap.txt`.
+- **Intent**: capture is a narrow primitive; workflows like edit-in-editor
+  are things users build with it, not cmdman features (D13).
+- **Requirements this puts on capture**: `Service.CaptureScreen` returns
+  bytes (CLI printing is a thin wrapper, per the repo's service-first
+  layering); default plain-text output is editor-clean — no escape
+  sequences, no cursor addressing, one line per row, trailing `\n`.
+
 ## Decision flow
 
 ```mermaid
 flowchart TD
     A[capture-screen ID] --> C{tty: true?}
-    C -- no --> L[emit `cmdman logs` output<br/>screen flags ignored, works when stopped]
-    L --> K
+    C -- no --> E2[error: no screen; hint 'cmdman logs']
     C -- yes --> B{command running?}
     B -- no --> E1[error: not running]
     B -- yes --> D{-a given?}
@@ -79,15 +91,13 @@ flowchart TD
 - **Defaults match the common case**: no flags = plain text of the visible
   screen, trailing whitespace trimmed per line, one line per screen row,
   trailing `\n` — the greppable form scripts want.
-- **Non-TTY fallback** (user decision, D7): a non-TTY command has no screen,
-  so `capture-screen` emits what `cmdman logs` (non-follow) would print — the
-  caller always gets the command's current output, whatever its mode. Since
-  logs read persisted storage, this works even when the command is stopped.
-  Screen-shaped flags (`-e -a -q -N -S -E`) are accepted and ignored on this
-  path (D11) so one script line works across TTY and non-TTY targets.
+- **TTY-only** (user decision, D14, superseding an earlier logs-fallback
+  idea): a non-TTY command has no screen, so `capture-screen` rejects it
+  with an error hinting at `cmdman logs`.
 - **Failure experience**: every refusal says why and what to do instead —
-  a stopped TTY command errors as not running, explaining the screen only
-  exists while the monitor runs (D10).
+  a non-TTY target points at `cmdman logs` (D14); a stopped TTY command
+  errors as not running, explaining the screen only exists while the
+  monitor runs (D10).
 - **Discoverability**: shell completion for ID|NAME limited to running
   commands, like `send-keys`.
 - **Non-interference**: capturing never perturbs the command — read-only

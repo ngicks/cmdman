@@ -35,7 +35,7 @@ alias, tmux-compat `capture-pane`/`capturep` aliases.
 **Decided by user (2026-08-27).** `cmdman compose capture-screen`, mirroring
 `compose send-keys`. Rejected: deferring to a follow-up.
 
-## D7 — Non-TTY commands emit `cmdman logs` output
+## D7 — Non-TTY commands emit `cmdman logs` output [superseded by D14]
 
 **Decided by user (2026-08-27):** "just emit `cmdman logs` output". A non-TTY
 command has no emulator screen; `capture-screen` falls back to the same
@@ -62,9 +62,34 @@ screen). Rejected: int flags plus a `--whole-history` bool.
 error explains that. Rejected: falling back to logs output (raw TUI escape
 soup is not a screen snapshot).
 
-## D11 — Screen-shaped flags are accepted and ignored on the logs fallback
+## D11 — Screen-shaped flags on the logs fallback [moot — see D14]
 
 **Decided by user (2026-08-27).** On a non-TTY target (D7 logs path),
 `-e -a -q -N -S -E` are accepted and ignored so one script line works across
 TTY and non-TTY targets; the behavior is documented in help and man page.
 Rejected: warning per ignored flag; hard error.
+
+## D12 — No changes to the vendored vt package
+
+**Decided by user (2026-08-28):** expanding `internal/third_party/
+charmbracelet-x-vt` is to be avoided. Verified feasible: `-a` only renders
+when the program is in alt-screen mode (tmux errors otherwise unless `-q`),
+and in alt mode the alt screen is the current screen, so the existing
+exported surface — `Render()`, `CellAt(x, y)`, `Scrollback().Line(i)`,
+`IsAltScreen()` — covers every capture path. Rejected: adding
+screen-selectable line accessors to the vendored emulator.
+
+## D13 — edit-in-editor is not a cmdman feature
+
+**Decided by user (2026-08-28):** "It is something users can do. Not a
+feature of cmdman." Capture stays a narrow, composable primitive; workflows
+like capture → file → `${VISUAL:-$EDITOR}` are user shell compositions.
+Rejected: shipping an `edit-screen` command now or planning it for later.
+
+## D14 — Non-TTY commands are rejected (supersedes D7 and D11)
+
+**Decided by user (2026-08-28):** "Reject if command has no tty enabled."
+`capture-screen` errors on a non-TTY target with a hint to use
+`cmdman logs`. This supersedes D7 (logs-output fallback) and makes D11
+(flag handling on that fallback) moot. Rejected: the earlier logs fallback;
+emulating the ring buffer.

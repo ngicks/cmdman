@@ -3,9 +3,6 @@
 Add `cmdman capture-screen`: print a snapshot of a TTY command's screen (tmux
 `capture-pane` semantics, minus buffers — always `-p`).
 
-> **Skeleton until the IDEA.md gate passes.** Goal/scope/context/open questions
-> are current; contracts and steps firm up after the idea gate.
-
 ## Goal / success criteria
 
 - `cmdman capture-screen ID|NAME` prints the visible screen of a running
@@ -19,13 +16,18 @@ Add `cmdman capture-screen`: print a snapshot of a TTY command's screen (tmux
 
 CLI subcommand, `Service.CaptureScreen`, new `CaptureScreen` RPC, monitor-side
 capture rendering from the existing `screenTracker` emulator, plus
-`compose capture-screen` (D6) and the non-TTY logs fallback (D7).
+`compose capture-screen` (D6). TTY-only: non-TTY targets are rejected (D14).
 
 ## Non-goals
 
 - tmux buffers, `-b`, `-J`, `-C`, `-P`, `-M`, `-L`, `-F`, `-H`, `-T`
   (see IDEA.md "Explicitly not mirrored").
 - Any change to attach/subscribe streaming behavior.
+- An `edit-screen` command (D13: capture → file → `$EDITOR` is user shell
+  composition, not a cmdman feature).
+- Any output for non-TTY commands (D14: rejected with a hint at
+  `cmdman logs`).
+- Changes to the vendored vt emulator (D12).
 
 ## Adopted tmux semantics (quoted, man tmux)
 
@@ -68,9 +70,12 @@ capture rendering from the existing `screenTracker` emulator, plus
   Neither vt nor ultraviolet records per-line wrap flags (checked
   `uv.LineData`, vt `screen.go`/`buffer.go`) → `-J` infeasible without
   emulator surgery.
-- The vendored vt only renders the *current* screen (`e.scr`); capturing the
-  alt screen explicitly (or main-under-alt) needs a small exported accessor
-  added to the vendored package (it is `internal/third_party`, ours to edit).
+- **No vendored vt changes** (user decision, D12): the exported surface
+  already suffices. `-a` only renders when the program is in alt mode (tmux
+  errors otherwise unless `-q`), and in alt mode the alt screen *is* the
+  current screen — so `Render()` / `CellAt(x, y)` on the current screen plus
+  `Scrollback().Line(i)` and `IsAltScreen()` cover every capture path; the
+  main-screen-under-alt case is never rendered.
 - RPC pattern to copy: `WriteStdin` (unary) in
   `api/schema/proto/cmdman/v1/cmdman.proto`, server in
   `cmdman/monitor/mon_server.go`, client dial in `Service.SendKeys`
@@ -97,7 +102,7 @@ sequenceDiagram
     CLI->>CLI: write to stdout
 ```
 
-## Public surface delta (draft — finalize after gate)
+## Public surface delta (final)
 
 ```proto
 // api/schema/proto/cmdman/v1/cmdman.proto
@@ -155,26 +160,48 @@ Flags: `-e/--escapes`, `-a/--alt-screen`, `-q/--quiet`,
 `-N/--preserve-trailing-spaces`, `-S/--start-line`, `-E/--end-line`
 (string-typed to admit `-`).
 
-## Implementation steps (detailed after gate)
+## Traceability (decision → owning step)
 
-1. **Vendored vt accessor** — expose what capture needs from
-   `internal/third_party/charmbracelet-x-vt` (e.g. `Emulator.AltScreenActive()`
-   already exists as `IsAltScreen`; add screen-selectable line access:
-   `Emulator.VisibleLine(i)` / alt-screen line access). Unit tests beside it.
+| Decision (operative clause) | Owner |
+| --- | --- |
+| D1 stdout-only, no buffers | steps 2, 6 (no `-b` flag) |
+| D2/D3 drop `-J`/`-C` | non-goals |
+| D4 no hook filter on capture | step 4 |
+| D5 `capture-screen`, no alias | step 6 |
+| D6 compose variant | step 7 |
+| D8 flag set `-e -a -q -N -S -E`; trim default, `-N` preserves | steps 2, 6 |
+| D9 `-S`/`-E` string syntax `N`/`-N`/`-` | steps 5 (parse), 6 (flags) |
+| D10 stopped TTY → not-running error | step 5, e2e step 8 |
+| D12 no vendored vt edits | step 2 |
+| D13 no edit-screen | non-goals |
+| D14 non-TTY rejected, hint `cmdman logs` | step 5, e2e step 8 |
+| C1 capture under `outputMu` | step 4 |
+| C2 recover→unhealthy | step 2 |
+| C3 new renderer, not `snapshot()` | step 2 |
+
+IDEA.md use cases: 1 (plain) → steps 2–6; 2 (styled `-e`) → 2, 6;
+3 (history `-S`) → 2; 4 (alt `-a`/`-q`) → 2, 4; 5 (composable bytes API)
+→ 5. All owned.
+
+## Implementation steps
+
+1. *(removed — D12: no vendored vt changes needed; capture uses the existing
+   exported emulator surface.)*
 2. **`screenTracker.capture`** — new method in
    `cmdman/monitor/terminal_screen.go` taking capture options, returning
-   `([]byte, error)`; honors C2 (recover→unhealthy), renders per C3 with
-   `uv.Line.String()`/`Render()`, resolves `-S`/`-E` against
-   `ScrollbackLen()` + screen height, clamps out-of-range like tmux.
-   Table-driven tests in `terminal_screen_test.go`.
+   `([]byte, error)`; honors C2 (recover→unhealthy), renders per C3 using
+   only existing emulator surface: visible rows via `CellAt` (plain,
+   cell-accurate trailing spaces) / `Render()`-derived styling, history via
+   `Scrollback().Line(i)` (`uv.Line.String()`/`Render()`); resolves
+   `-S`/`-E` against `ScrollbackLen()` + screen height, clamps out-of-range
+   like tmux. Table-driven tests in `terminal_screen_test.go`.
 3. **Proto + regen** — add RPC + messages to
    `api/schema/proto/cmdman/v1/cmdman.proto`; `buf generate`.
 4. **Monitor server handler** — `CaptureScreen` in
    `cmdman/monitor/mon_server.go`: take `outputMu` (C1), call
    `screen.capture`, map alt-absent to a gRPC error unless quiet.
 5. **`Service.CaptureScreen`** — `cmdman/cmdman_capture-screen.go`: resolve
-   ID; non-TTY targets take the logs fallback (D7/D11: reuse the
-   `Service.Logs` non-follow read path, screen flags ignored); TTY targets
+   ID; reject non-TTY targets with an error hinting at `cmdman logs` (D14);
    require running state (D10), dial socket (copy `dialMonitorForStatus`
    pattern), parse `-S`/`-E` strings (D9) into proto fields, return bytes.
 6. **CLI** — `cmd/cmdman/commands/capture-screen.go` + wire into `root.go`;
@@ -205,5 +232,5 @@ Flags: `-e/--escapes`, `-a/--alt-screen`, `-q/--quiet`,
 
 ## Open questions
 
-None. Q1–Q4 resolved as D5–D8, Q5–Q7 as D9–D11 (see DECISION.md). Pending
-only the IDEA.md gate confirmation before steps are finalized.
+None. Q1–Q8 resolved as D5–D13 (D7/D11 later superseded by D14: non-TTY
+targets are rejected). Pending only the IDEA.md gate confirmation.
