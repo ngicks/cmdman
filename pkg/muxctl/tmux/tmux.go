@@ -18,6 +18,22 @@ import (
 // across layout re-applies.
 const ownerOption = "@cmdman_window"
 
+// createdOption is the window-level tmux user option marking a window cmdman
+// created itself, as opposed to one it borrowed by taking over the window the
+// caller was sitting in. Only a created window may be killed on teardown:
+// kill-window SIGHUPs everything in the window, and a borrowed one holds the
+// user's own shell — cmdman's panes hold viewers it can afford to lose, that
+// shell holds work it cannot.
+//
+// It records where the window came from, not whether cmdman is still in it, so
+// it outlives a per-side teardown and is cleared only when the window is handed
+// back whole (see [Session.releaseWindowIfLast]).
+const createdOption = userOptionPrefix + "created"
+
+// createdStamp is the value written into createdOption; only its
+// non-emptiness is meaningful to readers.
+const createdStamp = "1"
+
 // Server is a tmux server bound once by [Driver.Connect]. It builds, enumerates,
 // and stores per-window state for cmdman-owned windows through a single shared
 // executor — the tmux binary and -L socket captured at Connect time — so its
@@ -137,6 +153,17 @@ func (srv *Server) New(ctx context.Context, cfg muxctl.Config) (muxctl.Session, 
 				)
 			}
 			wid = created
+
+			// Record that this window is cmdman's own, so a teardown that
+			// wants the window gone may kill it. Only this branch stamps:
+			// the two paths above address a window the caller handed over,
+			// and killing one of those takes the shell it was running down
+			// with it.
+			if _, err := e.run(
+				ctx, "set-option", "-w", "-t", wid, createdOption, createdStamp,
+			); err != nil {
+				return nil, fmt.Errorf("tmux: stamp %s: %w", createdOption, err)
+			}
 		}
 	}
 

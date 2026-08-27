@@ -42,8 +42,19 @@ type DownOptions struct {
 	// Env is the process env consulted for driver autodetection. Empty defaults
 	// to os.Environ().
 	Env []string
-	// Stdout is where per-restored-window lines and the zero-match note are
-	// written. Empty defaults to os.Stdout.
+	// KillCreated closes the windows cmdman created outright instead of
+	// restoring them, so a teardown leaves no shell pane and no frame behind —
+	// nothing of the window at all. Windows cmdman borrowed by taking over the
+	// one the caller was sitting in are restored either way: closing one would
+	// take the user's own shell down with it, which is not what tearing a
+	// dashboard down was asked to do.
+	//
+	// Off by default, which is `cmdman compose mux down` typed at a prompt: a
+	// window that goes away underneath a command line is a surprise, and the
+	// restored one is the answer that has always been given there.
+	KillCreated bool
+	// Stdout is where per-window lines and the zero-match note are written.
+	// Empty defaults to os.Stdout.
 	Stdout io.Writer
 }
 
@@ -53,6 +64,13 @@ type DownOptions struct {
 // dashboard's panes to a single default pane, and unsets the tmux ownership
 // option. The supervised commands keep running — only the disposable viewers
 // are torn down.
+//
+// With opts.KillCreated the windows cmdman created are closed instead, leaving
+// nothing behind rather than an emptied window; the ones it borrowed from the
+// caller are restored as ever, because the shell in a borrowed window is the
+// user's and closing the window would end it. Closing SIGHUPs what the panes
+// were running, which costs nothing here: a mux pane runs a viewer or a frame
+// component, never a supervised command.
 //
 // A frame shown around the dashboard is not the project's to remove: the
 // window is left framed and projectless. With the ownership stamp gone the
@@ -148,6 +166,21 @@ func Down(ctx context.Context, opts DownOptions) error {
 		if !ok {
 			// Window disappeared between ListWindows and Open; not
 			// an error — another process or the user already tore it down.
+			continue
+		}
+		if opts.KillCreated && row.Created {
+			if closeErr := sess.Close(ctx); closeErr != nil {
+				errs = append(errs, fmt.Errorf(
+					"mux: close window %s (%s in session %s): %w",
+					row.WindowName, row.WindowID, row.SessionName, closeErr,
+				))
+				continue
+			}
+			fmt.Fprintf(
+				stdout,
+				"Removed window %s (%s) in session %s\n",
+				row.WindowName, row.WindowID, row.SessionName,
+			)
 			continue
 		}
 		if detachErr := sess.Detach(ctx); detachErr != nil {

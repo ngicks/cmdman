@@ -8,7 +8,7 @@ State: not started — plan finalized 2026-08-28; Q1-Q4 resolved (D3-D6).
       populated by `MuxDownCmd`/`ComposeDownCmd`
 - [x] Step 2 — D1: launcher resets `Running`/`starting` on successful
       `ComposeDownMsg`/`MuxDownMsg`; `s` after `D`/`d` starts again
-- [ ] Step 3 — D5 "stamps a window it creates … kills stamped windows … still
+- [x] Step 3 — D5 "stamps a window it creates … kills stamped windows … still
       restores unstamped ones" + D6 "KillCreated is set by
       serviceBackend.MuxDown": `@cmdman_created` stamp in `Server.New`,
       `WindowRow.Created`, `DownOptions.KillCreated`,
@@ -23,4 +23,4 @@ State: not started — plan finalized 2026-08-28; Q1-Q4 resolved (D3-D6).
 
 ## Next action
 
-Implement step 3.
+Implement step 4.

@@ -124,6 +124,12 @@ func muxWorkerError(err error, printed string) error {
 // window the TUI itself is in. The supervised commands keep running either way:
 // only the disposable viewer goes away.
 //
+// Taking a project down here means the window goes too, where cmdman opened it:
+// the user asked for the dashboard to be gone, and an emptied window with a
+// stray shell in it is not gone. A window cmdman borrowed from the user is
+// restored instead — the command line's answer, and the only safe one, since
+// closing it would end the shell they were sitting in.
+//
 // The project is named as CycleMux names it, resolution included — a project
 // whose file declares no mux: section never reaches the teardown, and the
 // resolver's complaint is what the caller shows. No SessionName is passed, so
@@ -139,8 +145,9 @@ func (b *serviceBackend) MuxDown(
 		return err
 	}
 	return b.compose.MuxDown(ctx, compose.MuxDownOption{
-		Selection: selection,
-		Stdout:    io.Discard,
+		Selection:   selection,
+		KillCreated: true,
+		Stdout:      io.Discard,
 	})
 }
 

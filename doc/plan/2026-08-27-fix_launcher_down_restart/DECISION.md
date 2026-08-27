@@ -70,3 +70,15 @@ surrounding file already does (launcher.go:503, :940). The reasoning is
 spelled out in plain words in the comment itself; the token is only a
 cross-reference consistent with the file's established convention, so it
 stays rather than diverging from neighboring comments.
+
+## Clear @cmdman_created at window release, not in Detach [automatic]
+
+`hasCmdmanState` scans the whole `@cmdman_` namespace, so a surviving
+`@cmdman_created` would keep a window "owned" forever and break the
+existing collapse-to-clean-pane behavior. Clearing only in Detach would
+leave a frame-only window captive (it never passes through Detach). The
+stamp is instead unset in `releaseWindowIfLast` — the shared release
+point — so it means provenance: it survives one side's teardown (re-up
+then TUI down still kills the window) and dies only when the window
+becomes nobody's, preventing a stale stamp from marking a later takeover
+as cmdman-created. `hasCmdmanState` skips the stamp by option name.

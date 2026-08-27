@@ -115,6 +115,14 @@ type Window struct {
 	// as an unframed one does.
 	Frame string
 
+	// Created reports that cmdman built this window itself rather than
+	// borrowing the one the caller was sitting in (see
+	// [Config.ReuseCurrentWindow]). It is what tells a teardown whether the
+	// window may be closed: closing a borrowed window takes the user's own
+	// shell with it, while a created one holds nothing but the viewers cmdman
+	// put there.
+	Created bool
+
 	// Marker is the layout index last applied to the window (see
 	// [Session.StatWindow]), or -1 when no layout has been applied yet or the
 	// panes carry inconsistent markers.
