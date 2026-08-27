@@ -62,3 +62,11 @@ switcher `d` acts on windows brought up by CLI `mux up`).
 (cmd/cmdman/commands/compose_mux_down.go) leaves it false and keeps today's
 restore behavior.
 Rejected: flipping `mux.Down`'s default so the CLI kills created windows too.
+
+## Keep the existing D31 cross-reference style in launcher.go comments [automatic]
+
+The new onMuxDown/onComposeDown doc comment cites (D31) the same way the
+surrounding file already does (launcher.go:503, :940). The reasoning is
+spelled out in plain words in the comment itself; the token is only a
+cross-reference consistent with the file's established convention, so it
+stays rather than diverging from neighboring comments.
