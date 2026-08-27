@@ -51,6 +51,21 @@ commands:
 `, name)
 }
 
+// composeCaptureYAML defines a TTY command whose screen carries a marker
+// alongside a command created without a TTY, so a capture test can exercise both
+// the rendered screen and the TTY-only refusal.
+func composeCaptureYAML(name string) string {
+	return fmt.Sprintf(`name: %s
+commands:
+  alpha:
+    tty: true
+    args: [sh, -c, "echo CAPTURE_MARKER; sleep 300"]
+  plain:
+    tty: false
+    args: [sh, -c, "echo NO_SCREEN; sleep 300"]
+`, name)
+}
+
 // TestComposeFormatJSON verifies --format json and Go-template output for
 // compose ps and compose ls.
 func TestComposeFormatJSON(t *testing.T) {
@@ -304,6 +319,56 @@ func TestComposeSendKeysRequiresSeparator(t *testing.T) {
 	}
 	if !strings.Contains(stdout+stderr, "--") {
 		t.Fatalf("expected error mentioning the `--` separator; got:\n%s\n%s", stdout, stderr)
+	}
+}
+
+// TestComposeCaptureScreen verifies capture-screen renders a running compose
+// command's screen, refuses a command created without a TTY, and rejects an
+// unknown service by name.
+func TestComposeCaptureScreen(t *testing.T) {
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-capture"
+	writeComposeFile(t, wd, composeCaptureYAML(project))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	composePath := filepath.Join(wd, "cmd-compose.yaml")
+	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up"); err != nil {
+		t.Fatalf("compose up failed: %v", err)
+	}
+	for _, name := range []string{"alpha", "plain"} {
+		for _, e := range env.lsJSON(ctx,
+			"-l", "cmdman.compose.command="+name,
+			"-l", "cmdman.compose.project="+project,
+		) {
+			env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
+		}
+	}
+
+	waitUntil(t, defaultTimeout, func() bool {
+		out, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath,
+			"capture-screen", "alpha")
+		return err == nil && strings.Contains(out, "CAPTURE_MARKER")
+	}, "CAPTURE_MARKER did not appear in the captured screen")
+
+	// A command created without a TTY has no screen at all.
+	stdout, stderr, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath,
+		"capture-screen", "plain")
+	if err == nil {
+		t.Fatalf("capture-screen of a non-TTY command should fail; stdout=%q", stdout)
+	}
+	if !strings.Contains(stdout+stderr, "no terminal screen") {
+		t.Fatalf("expected a TTY-only error; got:\n%s\n%s", stdout, stderr)
+	}
+
+	stdout, stderr, err = env.exec(ctx, "compose", "--workdir", wd, "-f", composePath,
+		"capture-screen", "ghost")
+	if err == nil {
+		t.Fatalf("capture-screen of an unknown service should fail; stdout=%q", stdout)
+	}
+	if !strings.Contains(stdout+stderr, "ghost") {
+		t.Fatalf("expected the unknown service name in the error; got:\n%s\n%s", stdout, stderr)
 	}
 }
 
