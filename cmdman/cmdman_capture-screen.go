@@ -119,6 +119,10 @@ func (s *Service) CaptureScreen(
 			EndLine:                end.line,
 			EndExtreme:             end.extreme,
 		},
+		// A whole-history capture of a wide, styled screen can exceed gRPC's
+		// default 4MiB receive cap; the emulator holds at most 10k history
+		// lines, so 64MiB comfortably bounds the worst case.
+		grpc.MaxCallRecvMsgSize(64<<20),
 	)
 	if err != nil {
 		return nil, captureScreenRPCError(idOrName, err)
