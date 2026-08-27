@@ -42,4 +42,4 @@ cmdman compose logs --follow api worker
 
 ## See Also
 
-[cmdman-logs(1)](./cmdman-logs.1.md), [cmdman-compose-events(1)](./cmdman-compose-events.1.md)
+[cmdman-logs(1)](./cmdman-logs.1.md), [cmdman-compose-events(1)](./cmdman-compose-events.1.md), [cmdman-compose-capture-screen(1)](./cmdman-compose-capture-screen.1.md)
