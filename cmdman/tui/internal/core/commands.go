@@ -55,9 +55,14 @@ type DownTarget struct {
 }
 
 // MuxDownMsg reports a dashboard teardown reaching its end.
+//
+// Target repeats what the teardown acted on. Name is the line's wording and a
+// project name alone does not pick out a row, so a consumer that has to find
+// the row again reads Target instead of matching on Name.
 type MuxDownMsg struct {
-	Name string
-	Err  error
+	Name   string
+	Target DownTarget
+	Err    error
 }
 
 // Status is the line a widget puts on its status line for a finished dashboard
@@ -72,8 +77,10 @@ func (msg MuxDownMsg) Status() string {
 }
 
 // ComposeDownMsg reports a compose teardown reaching its end, with what it did.
+// Target carries the project it acted on for the same reason MuxDownMsg does.
 type ComposeDownMsg struct {
 	Name    string
+	Target  DownTarget
 	Summary DownSummary
 	Err     error
 }
@@ -164,8 +171,9 @@ func SummonProjectManagerCmd(
 func MuxDownCmd(ctx context.Context, backend Backend, target DownTarget) tea.Cmd {
 	return func() tea.Msg {
 		return MuxDownMsg{
-			Name: target.Project,
-			Err:  backend.MuxDown(ctx, target.Project, target.Path, target.WorkDir),
+			Name:   target.Project,
+			Target: target,
+			Err:    backend.MuxDown(ctx, target.Project, target.Path, target.WorkDir),
 		}
 	}
 }
@@ -173,6 +181,11 @@ func MuxDownCmd(ctx context.Context, backend Backend, target DownTarget) tea.Cmd
 func ComposeDownCmd(ctx context.Context, backend Backend, target DownTarget) tea.Cmd {
 	return func() tea.Msg {
 		summary, err := backend.ComposeDown(ctx, target.Project, target.Path, target.WorkDir)
-		return ComposeDownMsg{Name: target.Project, Summary: summary, Err: err}
+		return ComposeDownMsg{
+			Name:    target.Project,
+			Target:  target,
+			Summary: summary,
+			Err:     err,
+		}
 	}
 }

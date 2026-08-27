@@ -4,7 +4,7 @@ State: not started — plan finalized 2026-08-28; Q1-Q4 resolved (D3-D6).
 
 ## Checklist
 
-- [ ] Step 1 — D1: `Target DownTarget` added to `MuxDownMsg`/`ComposeDownMsg`,
+- [x] Step 1 — D1: `Target DownTarget` added to `MuxDownMsg`/`ComposeDownMsg`,
       populated by `MuxDownCmd`/`ComposeDownCmd`
 - [ ] Step 2 — D1: launcher resets `Running`/`starting` on successful
       `ComposeDownMsg`/`MuxDownMsg`; `s` after `D`/`d` starts again
@@ -23,4 +23,4 @@ State: not started — plan finalized 2026-08-28; Q1-Q4 resolved (D3-D6).
 
 ## Next action
 
-Implement step 1.
+Implement step 2.
