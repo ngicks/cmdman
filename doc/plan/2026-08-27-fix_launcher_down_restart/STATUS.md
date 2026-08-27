@@ -13,7 +13,7 @@ State: not started — plan finalized 2026-08-28; Q1-Q4 resolved (D3-D6).
       serviceBackend.MuxDown": `@cmdman_created` stamp in `Server.New`,
       `WindowRow.Created`, `DownOptions.KillCreated`,
       `MuxDownOption.KillCreated`; CLI `compose mux down` unchanged
-- [ ] Step 4 — D2 (direct `mux.Down` by identity, mux-less D9 window
+- [x] Step 4 — D2 (direct `mux.Down` by identity, mux-less D9 window
       included) + D3 (TUI-only) + D4 (only on fully successful down) + D6
       (`KillCreated: true`): `serviceBackend.ComposeDown` removes windows
       behind a testable seam
@@ -23,4 +23,4 @@ State: not started — plan finalized 2026-08-28; Q1-Q4 resolved (D3-D6).
 
 ## Next action
 
-Implement step 4.
+Implement step 5.
