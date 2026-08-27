@@ -15,10 +15,10 @@ type CaptureScreenOption struct {
 	// ScaleIndex selects the replica (1-based); 0 means "the sole replica".
 	ScaleIndex int
 
-	Escapes               bool
-	AltScreen             bool
-	Quiet                 bool
-	PreserveTrailingSpace bool
+	Escapes                bool
+	AltScreen              bool
+	Quiet                  bool
+	PreserveTrailingSpaces bool
 	// StartLine and EndLine are the -S/-E range as spelled on the CLI; see
 	// [cmdman.CaptureScreenRequest] for the line index space they share.
 	StartLine string
@@ -44,12 +44,12 @@ func (s *Service) CaptureScreen(
 	}
 
 	content, err := s.svc.CaptureScreen(ctx, id, cmdman.CaptureScreenRequest{
-		Escapes:               opts.Escapes,
-		AltScreen:             opts.AltScreen,
-		Quiet:                 opts.Quiet,
-		PreserveTrailingSpace: opts.PreserveTrailingSpace,
-		StartLine:             opts.StartLine,
-		EndLine:               opts.EndLine,
+		Escapes:                opts.Escapes,
+		AltScreen:              opts.AltScreen,
+		Quiet:                  opts.Quiet,
+		PreserveTrailingSpaces: opts.PreserveTrailingSpaces,
+		StartLine:              opts.StartLine,
+		EndLine:                opts.EndLine,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("capture-screen command %q (%s): %w", opts.CommandName, id, err)

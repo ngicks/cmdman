@@ -74,14 +74,14 @@ func runComposeCaptureScreen(
 		cmd.Context(),
 		selection,
 		compose.CaptureScreenOption{
-			CommandName:           serviceName,
-			ScaleIndex:            scaleIndex,
-			Escapes:               f.Escapes,
-			AltScreen:             f.AltScreen,
-			Quiet:                 f.Quiet,
-			PreserveTrailingSpace: f.PreserveTrailingSpaces,
-			StartLine:             f.StartLine,
-			EndLine:               f.EndLine,
+			CommandName:            serviceName,
+			ScaleIndex:             scaleIndex,
+			Escapes:                f.Escapes,
+			AltScreen:              f.AltScreen,
+			Quiet:                  f.Quiet,
+			PreserveTrailingSpaces: f.PreserveTrailingSpaces,
+			StartLine:              f.StartLine,
+			EndLine:                f.EndLine,
 		},
 	)
 	if err != nil {

@@ -127,13 +127,13 @@ func TestCaptureScreenTargetsResolvedCommand(t *testing.T) {
 		context.Background(),
 		ProjectSelection{WorkDir: "/wd"},
 		CaptureScreenOption{
-			CommandName:           "alpha",
-			Escapes:               true,
-			AltScreen:             true,
-			Quiet:                 true,
-			PreserveTrailingSpace: true,
-			StartLine:             "-",
-			EndLine:               "10",
+			CommandName:            "alpha",
+			Escapes:                true,
+			AltScreen:              true,
+			Quiet:                  true,
+			PreserveTrailingSpaces: true,
+			StartLine:              "-",
+			EndLine:                "10",
 		},
 	)
 	if err != nil {
@@ -146,12 +146,12 @@ func TestCaptureScreenTargetsResolvedCommand(t *testing.T) {
 		t.Fatalf("expected capture against id-alpha, got %q", gotID)
 	}
 	want := cmdman.CaptureScreenRequest{
-		Escapes:               true,
-		AltScreen:             true,
-		Quiet:                 true,
-		PreserveTrailingSpace: true,
-		StartLine:             "-",
-		EndLine:               "10",
+		Escapes:                true,
+		AltScreen:              true,
+		Quiet:                  true,
+		PreserveTrailingSpaces: true,
+		StartLine:              "-",
+		EndLine:                "10",
 	}
 	if gotReq != want {
 		t.Fatalf("unexpected request: %#v, want %#v", gotReq, want)

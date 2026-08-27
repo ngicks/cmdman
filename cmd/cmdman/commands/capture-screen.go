@@ -77,12 +77,12 @@ func runCaptureScreen(
 	defer svc.Close()
 
 	content, err := svc.CaptureScreen(cmd.Context(), args[0], cmdman.CaptureScreenRequest{
-		Escapes:               f.Escapes,
-		AltScreen:             f.AltScreen,
-		Quiet:                 f.Quiet,
-		PreserveTrailingSpace: f.PreserveTrailingSpaces,
-		StartLine:             f.StartLine,
-		EndLine:               f.EndLine,
+		Escapes:                f.Escapes,
+		AltScreen:              f.AltScreen,
+		Quiet:                  f.Quiet,
+		PreserveTrailingSpaces: f.PreserveTrailingSpaces,
+		StartLine:              f.StartLine,
+		EndLine:                f.EndLine,
 	})
 	if err != nil {
 		return err

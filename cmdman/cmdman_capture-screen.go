@@ -7,6 +7,7 @@ import (
 
 	cmdmanv1pb "github.com/ngicks/cmdman/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/cmdman/model"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 )
@@ -14,10 +15,10 @@ import (
 // CaptureScreenRequest selects what a capture renders. The fields mirror the
 // flags of tmux's capture-pane, the de facto convention for this operation.
 type CaptureScreenRequest struct {
-	Escapes               bool
-	AltScreen             bool
-	Quiet                 bool
-	PreserveTrailingSpace bool
+	Escapes                bool
+	AltScreen              bool
+	Quiet                  bool
+	PreserveTrailingSpaces bool
 	// StartLine and EndLine are the -S/-E range as spelled on the CLI. Both
 	// share one line index space: 0 is the topmost visible row and negative
 	// numbers reach into history. An empty string leaves that end unset, and
@@ -110,7 +111,7 @@ func (s *Service) CaptureScreen(
 			Escapes:                req.Escapes,
 			AltScreen:              req.AltScreen,
 			Quiet:                  req.Quiet,
-			PreserveTrailingSpaces: req.PreserveTrailingSpace,
+			PreserveTrailingSpaces: req.PreserveTrailingSpaces,
 			HasStart:               start.set,
 			StartLine:              start.line,
 			StartExtreme:           start.extreme,
