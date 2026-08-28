@@ -380,9 +380,12 @@ func TestTUIWidget_SwitcherMarksWindowProject(t *testing.T) {
 	// position a process running in one of its panes would be in.
 	tmuxRunWithTmpdir(t, tmuxTmpdir, "select-window", "-t", wid)
 
-	// $TMUX is the whole of what a pane process inherits that says which window
-	// it is in: the driver passes no target and never reads $TMUX_PANE, so the
-	// answer follows the session named here (verified against a live tmux).
+	// $TMUX is the whole of what the active-project probe reads: it passes no
+	// target and never consults $TMUX_PANE, so the answer follows the session
+	// named here (verified against a live tmux). The pane variable addresses a
+	// window too — a teardown reads it to tell whether it is inside the window it
+	// was asked to close — and tmuxTmpdirEnv strips any inherited one, so nothing
+	// here rides on it.
 	inWindow := append(tmuxTmpdirEnv(tmuxTmpdir), "TMUX="+tmuxEnvValue(t, tmuxTmpdir, wid))
 
 	// Unrelated on both counts the cwd probe could match: the process directory

@@ -256,6 +256,71 @@ func TestLauncherDown_MuxDownRestoresABorrowedWindow(t *testing.T) {
 	w.quitWith(t, "\x03")
 }
 
+// TestLauncherDown_MuxDownRestoresTheWindowTheWidgetRunsIn is the other bound
+// on the kill: a widget docked in a pane of the project's own dashboard window,
+// taking that project down. Closing the window would SIGHUP the teardown
+// half-done — the rest of the project's windows never torn down, the result
+// never shown — so this one window is handed back instead.
+//
+// A pane hands its address to what it starts through $TMUX_PANE and nothing
+// else, so naming the dashboard's pane in the widget's environment puts the
+// widget where a docked one stands. The window is the only thing that can answer
+// whether it was spared, so it is read from the server afterwards.
+func TestLauncherDown_MuxDownRestoresTheWindowTheWidgetRunsIn(t *testing.T) {
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	tmuxTmpdir := t.TempDir()
+	t.Cleanup(func() { killDefaultTmuxServer(t, tmuxTmpdir) })
+	// A session of the test's own, so a window that was wrongly closed leaves a
+	// server behind to read the absence from.
+	tmuxRunWithTmpdir(t, tmuxTmpdir, "new-session", "-d", "-s", "keep", "-n", "home")
+
+	wd := composeWorkdir(t)
+	const project = "lnchself"
+	composePath := writeComposeFile(t, wd, launcherMuxYAML(project))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	// The dashboard is built from outside tmux, so cmdman opens the window rather
+	// than taking one over: without that stamp the teardown would restore it for
+	// the borrowed-window reason instead of the one under test.
+	if _, stderr, err := env.muxExecWithTmpdir(
+		ctx, tmuxTmpdir, "compose", "--workdir", wd, "-f", composePath, "up", "--mux",
+	); err != nil {
+		t.Fatalf("compose up --mux failed: %v\nstderr:\n%s", err, stderr)
+	}
+	identity := compose.ProjectSelection{WorkDir: wd, Project: project}.ProjectIdentity()
+	dashboard := waitForStampedWindow(t, tmuxTmpdir, identity, 30*time.Second)
+	if got := tmuxWindowOptionTmpdir(
+		t, tmuxTmpdir, "cmdman-"+project, "@cmdman_created",
+	); got == "" {
+		t.Fatalf("the dashboard window is not stamped created; it was taken over, not opened")
+	}
+	panes := tmuxRunWithTmpdir(t, tmuxTmpdir, "list-panes", "-t", dashboard, "-F", "#{pane_id}")
+	hostingPane, _, _ := strings.Cut(panes, "\n")
+
+	inDashboard := append(tmuxTmpdirEnv(tmuxTmpdir),
+		"TMUX="+tmuxEnvValue(t, tmuxTmpdir, dashboard),
+		"TMUX_PANE="+hostingPane,
+	)
+	w := startWidgetEnv(t, ctx, env, wd, t.TempDir(), "launcher", inDashboard)
+	w.waitFor(t, project, 10*time.Second)
+	w.send(t, "\r")
+	w.send(t, "d")
+	w.waitFor(t, "commands still running", 40*time.Second)
+
+	// Down as far as anything looking for the project is concerned…
+	waitForNoStampedWindow(t, tmuxTmpdir, identity, 20*time.Second)
+	// …but the window itself is still there, which is the whole difference.
+	if ids := windowIDsTmpdir(t, tmuxTmpdir); !slices.Contains(ids, dashboard) {
+		t.Fatalf("the window the widget runs in (%s) was closed underneath it; windows: %v",
+			dashboard, ids)
+	}
+
+	w.quitWith(t, "\x03")
+}
+
 // TestLauncherDown_ComposeDownRemovesTheMuxlessLandingWindow is the project
 // with nothing to build a dashboard from. `S` still lands it (D9), in the bare
 // shell window the landing synthesizes at the project directory, and that

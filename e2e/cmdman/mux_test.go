@@ -174,14 +174,20 @@ func (e *testEnv) muxExecInDir(
 }
 
 // tmuxTmpdirEnv returns a copy of the current environment with the inherited
-// TMUX=, ZELLIJ=, and TMUX_TMPDIR= entries stripped and TMUX_TMPDIR set to
-// tmuxTmpdir. Stripping TMUX= (and ZELLIJ=) is what keeps a flagless `tmux`
-// invocation from ever reaching the enclosing interactive server: tmux
+// TMUX=, TMUX_PANE=, ZELLIJ=, and TMUX_TMPDIR= entries stripped and TMUX_TMPDIR
+// set to tmuxTmpdir. Stripping TMUX= (and ZELLIJ=) is what keeps a flagless
+// `tmux` invocation from ever reaching the enclosing interactive server: tmux
 // resolves its target from $TMUX ahead of TMUX_TMPDIR, so leaving $TMUX in
 // place would let a bare `tmux kill-server` kill the developer's real session.
+//
+// TMUX_PANE goes for a related reason: a teardown reads it to tell whether it is
+// running inside the window it was asked to close, and a pane id inherited from
+// the developer's own tmux names a pane on the test's server just as readily —
+// pane ids are small numbers, and both servers start counting at the same place.
 func tmuxTmpdirEnv(tmuxTmpdir string) []string {
 	env := slices.DeleteFunc(os.Environ(), func(s string) bool {
 		return strings.HasPrefix(s, "TMUX=") ||
+			strings.HasPrefix(s, "TMUX_PANE=") ||
 			strings.HasPrefix(s, "ZELLIJ=") ||
 			strings.HasPrefix(s, "TMUX_TMPDIR=")
 	})

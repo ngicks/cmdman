@@ -82,3 +82,16 @@ point — so it means provenance: it survives one side's teardown (re-up
 then TUI down still kills the window) and dies only when the window
 becomes nobody's, preventing a stale stamp from marking a later takeover
 as cmdman-created. `hasCmdmanState` skips the stamp by option name.
+
+## Restore, not kill, the window hosting the teardown's own process [automatic]
+
+Review found that `d` pressed in the switcher (a frame pane inside the
+dashboard window) on its own project would kill-window the window
+hosting it, SIGHUPing the switcher mid-Down: the result never renders,
+remaining rows are never torn down. Fix: `muxctl.Server` gains
+`EnclosingWindowID(ctx, env)` (tmux: resolve `TMUX_PANE` to its window)
+and `mux.Down`'s kill branch skips the caller's own window, restoring
+it instead. A popup (the launcher) has `$TMUX` but no `$TMUX_PANE`, so
+it still kills framed dashboard windows outright — no carve-out for
+framed windows in general. No answer from the driver means kill,
+otherwise the launcher would never kill anything.

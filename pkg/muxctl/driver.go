@@ -287,6 +287,30 @@ type Server interface {
 	// failure. Like the other session-less queries it opens nothing and mutates
 	// no state.
 	CurrentWindowID(ctx context.Context, session string) (id string, ok bool, err error)
+
+	// EnclosingWindowID reports the driver-native id of the window whose pane
+	// the process carrying env is running in. It answers a different question
+	// from [Server.CurrentWindowID]: that one is client-relative — the window a
+	// session is displaying, which changes as the user moves around — while this
+	// one is process-relative and keeps answering with the window a background
+	// pane lives in.
+	//
+	// env is a process environment in "KEY=VALUE" form, as os.Environ returns
+	// it. It is the whole of the input because a pane hands its address down to
+	// what it runs through the environment and nothing else; which variable
+	// carries it is the driver's own business.
+	//
+	// ok is false with a nil error whenever the caller cannot be placed: the
+	// environment names no pane (a multiplexer popup gets none — it is summoned
+	// over a window rather than run inside one), the server is not running, or
+	// the pane it names is gone. Not being in a pane is an answer, not a
+	// failure. Like the other session-less queries it opens nothing and mutates
+	// no state.
+	//
+	// The named pane is taken at face value: an environment inherited from a
+	// pane on another server can name a live pane here by coincidence, and the
+	// caller decides what a possible mismatch is worth.
+	EnclosingWindowID(ctx context.Context, env []string) (id string, ok bool, err error)
 }
 
 var (

@@ -8,10 +8,13 @@ import (
 	"time"
 )
 
-// muxlessEnv is the process environment with $TMUX and $ZELLIJ stripped, the
-// way muxExec builds the environment it runs the CLI under: a suite run from
-// inside tmux would otherwise let the widget's enclosing-window probe reach the
-// developer's own server.
+// muxlessEnv is the process environment with $TMUX, $TMUX_PANE and $ZELLIJ
+// stripped, the way muxExec builds the environment it runs the CLI under: a
+// suite run from inside tmux would otherwise let the widget's enclosing-window
+// probe reach the developer's own server. TMUX_PANE goes with them because a
+// teardown reads it to tell whether it is running inside the window it was asked
+// to close, and a pane id inherited from the developer's own tmux names a pane
+// on the fixture's server just as readily.
 //
 // TMUX_TMPDIR is deliberately left alone. tmux resolves a -L socket name under
 // it, so redirecting it — as tmuxTmpdirEnv does for the tests that need the
@@ -19,7 +22,9 @@ import (
 // dashboard the fixture built on its dedicated one.
 func muxlessEnv() []string {
 	return slices.DeleteFunc(os.Environ(), func(s string) bool {
-		return strings.HasPrefix(s, "TMUX=") || strings.HasPrefix(s, "ZELLIJ=")
+		return strings.HasPrefix(s, "TMUX=") ||
+			strings.HasPrefix(s, "TMUX_PANE=") ||
+			strings.HasPrefix(s, "ZELLIJ=")
 	})
 }
 
