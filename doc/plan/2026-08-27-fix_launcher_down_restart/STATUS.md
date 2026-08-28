@@ -1,6 +1,6 @@
 # STATUS — fix_launcher_down_restart
 
-State: not started — plan finalized 2026-08-28; Q1-Q4 resolved (D3-D6).
+State: done 2026-08-28.
 
 ## Checklist
 
@@ -23,4 +23,6 @@ State: not started — plan finalized 2026-08-28; Q1-Q4 resolved (D3-D6).
 
 ## Next action
 
-All steps implemented; final review/test gate.
+Done — all 5 steps implemented; review gate passed after one fix
+(restore-not-kill for the self-hosting window); full suite green modulo
+the pre-existing TestStatus_WithoutRunningMonitor failure.
