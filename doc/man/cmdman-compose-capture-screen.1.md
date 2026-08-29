@@ -17,7 +17,7 @@ terminal screen to standard output. Unlike the project-wide compose operations
 this targets exactly one replica: a capture is a single screen, so there is
 nothing to aggregate.
 
-The flags mirror tmux's `capture-pane` and behave like direct
+The flags behave like direct
 [`cmdman capture-screen`](./cmdman-capture-screen.1.md): the target must have
 `tty: true` and be running, the default range is the visible screen, `-S` and
 `-E` share one line index space where `0` is the top visible row and negative
@@ -57,5 +57,6 @@ cmdman compose capture-screen --scale 2 -e worker > worker2.ansi
 ## See Also
 
 [cmdman-capture-screen(1)](./cmdman-capture-screen.1.md),
+[cmdman-compose-attach(1)](./cmdman-compose-attach.1.md),
 [cmdman-compose-send-keys(1)](./cmdman-compose-send-keys.1.md),
 [cmdman-compose-logs(1)](./cmdman-compose-logs.1.md)

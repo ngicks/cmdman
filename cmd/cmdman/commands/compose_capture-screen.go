@@ -13,13 +13,12 @@ func composeCaptureScreenCmd(parent *cobra.Command, rf *rootFlags, cf *composeFl
 	)
 
 	cmd := &cobra.Command{
-		Use: "capture-screen [flags] SERVICE",
-		Short: "Capture a snapshot of a running compose command's screen " +
-			"(mirrors tmux capture-pane)",
+		Use:   "capture-screen [flags] SERVICE",
+		Short: "Capture a snapshot of a running compose command's screen",
 		Long: `Capture a snapshot of a running compose command's screen.
 
-The flags mirror tmux's capture-pane. Only a command created with a TTY has a
-screen to capture; for one without, read its output with cmdman compose logs.`,
+Only a command created with a TTY has a screen to capture; for one without,
+read its output with cmdman compose logs.`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -22,13 +22,12 @@ func captureScreenCmd(parent *cobra.Command, rf *rootFlags) {
 		// No alias: capture-screen is spelled out on purpose so the vocabulary
 		// stays on the one name, and a bare `capture` would read as if cmdman
 		// had panes to capture from.
-		Use: "capture-screen [flags] ID|NAME",
-		Short: "Capture a snapshot of a running TTY command's screen " +
-			"(mirrors tmux capture-pane)",
+		Use:   "capture-screen [flags] ID|NAME",
+		Short: "Capture a snapshot of a running TTY command's screen",
 		Long: `Capture a snapshot of a running TTY command's screen.
 
-The flags mirror tmux's capture-pane. Only a command created with a TTY has a
-screen to capture; for one without, read its output with cmdman logs.`,
+Only a command created with a TTY has a screen to capture; for one without,
+read its output with cmdman logs.`,
 		Args: cobra.ExactArgs(1),
 		// Only one positional is a command target; nothing follows it.
 		ValidArgsFunction: func(

@@ -13,8 +13,8 @@ cmdman capture-screen [flags] ID|NAME
 ## Description
 
 Writes a snapshot of a running command's terminal screen to standard output.
-The flags mirror tmux's `capture-pane`; there is no buffer concept, so a
-capture always goes to stdout and is redirected or piped like any other output.
+There is no capture buffer to hold the result: a capture always goes to stdout
+and is redirected or piped like any other output.
 
 Only a command created with a TTY has a screen to capture. A command without
 one is rejected: it has only a byte stream, which is read back with
@@ -53,5 +53,6 @@ cmdman capture-screen -e server > screen.ansi
 
 ## See Also
 
+[cmdman-attach(1)](./cmdman-attach.1.md),
 [cmdman-send-keys(1)](./cmdman-send-keys.1.md), [cmdman-logs(1)](./cmdman-logs.1.md),
 [cmdman-compose-capture-screen(1)](./cmdman-compose-capture-screen.1.md)
