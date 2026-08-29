@@ -16,7 +16,9 @@ State: **done** — implemented, reviewed (approve-with-nits; nits fixed), full 
 - [x] 6. CLI `capture-screen` command + completion
 - [x] 7. compose variant (pending Q2)
 - [x] 8. e2e coverage (plain / -e / -S / non-TTY error / stopped error)
-- [x] 9. man page + README
+- [x] 9. man page + README (QA 2026-08-29: README half not done — README
+      covers no interaction commands at all; folded into
+      `doc/plan/issue/issue.md` as a broader README-coverage issue)
 
 ## Next action
 
