@@ -12,8 +12,7 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 )
 
-// CaptureScreenRequest selects what a capture renders. The fields mirror the
-// flags of tmux's capture-pane, the de facto convention for this operation.
+// CaptureScreenRequest selects what a capture renders.
 type CaptureScreenRequest struct {
 	Escapes                bool
 	AltScreen              bool

@@ -88,9 +88,7 @@ func (t *screenTracker) snapshot() (out []byte) {
 	return buf.Bytes()
 }
 
-// captureOptions selects what capture renders. Each field mirrors a flag of
-// tmux's capture-pane: escapes is -e, altScreen -a, quiet -q,
-// preserveTrailingSpaces -N, and the remaining fields the -S/-E line range.
+// captureOptions selects what capture renders.
 // Range values share one index space: 0 is the topmost visible row, rows-1 the
 // bottommost, and -1 the newest history line.
 type captureOptions struct {
@@ -115,7 +113,7 @@ type captureOptions struct {
 // alternate screen while it is inactive returns errNoAltScreen unless quiet is
 // set, in which case the capture is empty. While the alternate screen is
 // active but not requested, the visible rows are the alternate screen's while
-// history stays the main screen's, which is what tmux reports as well.
+// history stays the main screen's.
 func (t *screenTracker) capture(opts captureOptions) (out []byte, err error) {
 	if t == nil || !t.healthy {
 		return nil, fmt.Errorf("capture: %w", errScreenUnavailable)
@@ -161,8 +159,8 @@ func (t *screenTracker) capture(opts captureOptions) (out []byte, err error) {
 	return buf.Bytes(), nil
 }
 
-// captureRange clamps the requested range to the lines that exist, as tmux
-// does, rather than rejecting it.
+// captureRange clamps the requested range to the lines that exist rather
+// than rejecting it.
 func captureRange(opts captureOptions, histLen, rows int) (start, end int) {
 	first, last := -histLen, rows-1
 	clamp := func(v int) int { return min(max(v, first), last) }
