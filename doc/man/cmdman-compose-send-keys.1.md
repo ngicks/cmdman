@@ -43,4 +43,6 @@ cmdman compose send-keys --literal repl -- 'exit()' Enter
 
 ## See Also
 
-[cmdman-send-keys(1)](./cmdman-send-keys.1.md), [cmdman-compose-attach(1)](./cmdman-compose-attach.1.md)
+[cmdman-send-keys(1)](./cmdman-send-keys.1.md),
+[cmdman-compose-capture-screen(1)](./cmdman-compose-capture-screen.1.md),
+[cmdman-compose-attach(1)](./cmdman-compose-attach.1.md)

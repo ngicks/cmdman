@@ -3,6 +3,7 @@ package compose
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
 	"strings"
@@ -96,6 +97,107 @@ func TestSendKeysRequiresKeys(t *testing.T) {
 		SendKeysOption{},
 	); err == nil {
 		t.Fatal("expected error when no keys are supplied")
+	}
+}
+
+func TestCaptureScreenTargetsResolvedCommand(t *testing.T) {
+	var (
+		gotID  string
+		gotReq cmdman.CaptureScreenRequest
+	)
+	svc := &Service{svc: testCmdmanSvc{
+		list: func(context.Context, cmdman.ListRequest) ([]store.CommandEntry, error) {
+			return []store.CommandEntry{
+				buildTestEntry("id-alpha", "alpha"),
+				buildTestEntry("id-beta", "beta"),
+			}, nil
+		},
+		capture: func(
+			_ context.Context,
+			id string,
+			req cmdman.CaptureScreenRequest,
+		) ([]byte, error) {
+			gotID = id
+			gotReq = req
+			return []byte("screen"), nil
+		},
+	}}
+
+	content, err := svc.CaptureScreen(
+		context.Background(),
+		ProjectSelection{WorkDir: "/wd"},
+		CaptureScreenOption{
+			CommandName:            "alpha",
+			Escapes:                true,
+			AltScreen:              true,
+			Quiet:                  true,
+			PreserveTrailingSpaces: true,
+			StartLine:              "-",
+			EndLine:                "10",
+		},
+	)
+	if err != nil {
+		t.Fatalf("CaptureScreen failed: %v", err)
+	}
+	if string(content) != "screen" {
+		t.Fatalf("expected the captured bytes passed through, got %q", content)
+	}
+	if gotID != "id-alpha" {
+		t.Fatalf("expected capture against id-alpha, got %q", gotID)
+	}
+	want := cmdman.CaptureScreenRequest{
+		Escapes:                true,
+		AltScreen:              true,
+		Quiet:                  true,
+		PreserveTrailingSpaces: true,
+		StartLine:              "-",
+		EndLine:                "10",
+	}
+	if gotReq != want {
+		t.Fatalf("unexpected request: %#v, want %#v", gotReq, want)
+	}
+}
+
+func TestCaptureScreenUnknownCommandErrors(t *testing.T) {
+	svc := &Service{svc: testCmdmanSvc{
+		list: func(context.Context, cmdman.ListRequest) ([]store.CommandEntry, error) {
+			return []store.CommandEntry{buildTestEntry("id-alpha", "alpha")}, nil
+		},
+	}}
+
+	if _, err := svc.CaptureScreen(
+		context.Background(),
+		ProjectSelection{WorkDir: "/wd"},
+		CaptureScreenOption{CommandName: "ghost"},
+	); err == nil {
+		t.Fatal("expected error for an unknown command name")
+	}
+}
+
+// TestCaptureScreenErrorNamesComposeCommand verifies the underlying capture
+// error stays readable and reachable while naming the service the caller asked
+// for - the resolved cmdman ID alone means nothing to them.
+func TestCaptureScreenErrorNamesComposeCommand(t *testing.T) {
+	want := errors.New("command has no terminal screen")
+	svc := &Service{svc: testCmdmanSvc{
+		list: func(context.Context, cmdman.ListRequest) ([]store.CommandEntry, error) {
+			return []store.CommandEntry{buildTestEntry("id-alpha", "alpha")}, nil
+		},
+		capture: func(context.Context, string, cmdman.CaptureScreenRequest) ([]byte, error) {
+			return nil, want
+		},
+	}}
+
+	_, err := svc.CaptureScreen(
+		context.Background(),
+		ProjectSelection{WorkDir: "/wd"},
+		CaptureScreenOption{CommandName: "alpha"},
+	)
+	if !errors.Is(err, want) {
+		t.Fatalf("expected the underlying error wrapped, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `"alpha"`) {
+		t.Fatalf("expected the compose command name in the error, got: %v", err)
 	}
 }
 

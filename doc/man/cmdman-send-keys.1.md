@@ -36,4 +36,5 @@ cmdman send-keys --hex app 03
 
 ## See Also
 
-[cmdman-attach(1)](./cmdman-attach.1.md), [cmdman-compose-send-keys(1)](./cmdman-compose-send-keys.1.md)
+[cmdman-attach(1)](./cmdman-attach.1.md), [cmdman-capture-screen(1)](./cmdman-capture-screen.1.md),
+[cmdman-compose-send-keys(1)](./cmdman-compose-send-keys.1.md)

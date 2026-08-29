@@ -19,7 +19,9 @@ import (
 	"github.com/ngicks/cmdman/cmdman/store"
 	"github.com/ngicks/go-common/contextkey"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"gotest.tools/v3/assert"
 )
 
@@ -590,6 +592,80 @@ func TestMonitorStateChangeBroadcastsTerminalStateAndCloses(t *testing.T) {
 		assert.Assert(t, !ok)
 	case <-time.After(time.Second):
 		t.Fatal("late subscriber blocked on closed state bridge")
+	}
+}
+
+func TestMonitorServerCaptureScreen(t *testing.T) {
+	const cols, rows = 20, 3
+
+	for _, tc := range []struct {
+		name     string
+		withTty  bool
+		feed     string
+		req      *pb.CaptureScreenRequest
+		want     string
+		wantCode codes.Code
+	}{
+		{
+			name:    "visible screen",
+			withTty: true,
+			feed:    "a\r\nb\r\n",
+			req:     &pb.CaptureScreenRequest{},
+			want:    "a\nb\n\n",
+		},
+		{
+			// Proves the range fields reach captureOptions: without has_start the
+			// negative start_line would be ignored and history stay out.
+			name:    "history range fields map through",
+			withTty: true,
+			feed:    "a\r\nb\r\nc\r\nd\r\n",
+			req: &pb.CaptureScreenRequest{
+				HasStart:  true,
+				StartLine: -1,
+				HasEnd:    true,
+				EndLine:   0,
+			},
+			// Four lines on a three-row screen scroll "a" and "b" into history,
+			// so -1..0 is the newest history line plus the topmost visible one.
+			want: "b\nc\n",
+		},
+		{
+			name:     "no alternate screen",
+			withTty:  true,
+			feed:     "a\r\n",
+			req:      &pb.CaptureScreenRequest{AltScreen: true},
+			wantCode: codes.FailedPrecondition,
+		},
+		{
+			name:    "quiet alternate screen captures nothing",
+			withTty: true,
+			feed:    "a\r\n",
+			req:     &pb.CaptureScreenRequest{AltScreen: true, Quiet: true},
+			want:    "",
+		},
+		{
+			name:     "no screen mirror",
+			req:      &pb.CaptureScreenRequest{},
+			wantCode: codes.FailedPrecondition,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &Monitor{cfg: &model.CommandConfig{Tty: tc.withTty}}
+			if tc.withTty {
+				m.screen = newScreenTracker(cols, rows, newCommandRuntimeState())
+				t.Cleanup(m.screen.close)
+				m.screen.feed([]byte(tc.feed))
+			}
+
+			s := &monitorServer{monitor: m}
+			resp, err := s.CaptureScreen(context.Background(), tc.req)
+			if tc.wantCode != codes.OK {
+				assert.Equal(t, status.Code(err), tc.wantCode)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Equal(t, string(resp.Content), tc.want)
+		})
 	}
 }
 

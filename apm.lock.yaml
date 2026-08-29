@@ -1,5 +1,5 @@
 lockfile_version: '1'
-generated_at: '2026-08-20T19:50:36.885761+00:00'
+generated_at: '2026-08-28T23:54:57.840926+00:00'
 apm_version: 0.28.0
 dependencies:
 - repo_url: ngicks/agents-package
@@ -109,10 +109,10 @@ dependencies:
   package_type: hook_package
   content_hash: sha256:55d6da41fbbabb28f30bf4e4831443fe6b37cb970babb0ae86fca508dc488557
 - repo_url: ngicks/agents-package
-  name: markdown-mermaid-lint
+  name: agents-package
   host: github.com
   resolved_commit: cb5cf5ce216942b1236e96e81038873884d060d6
-  version: 1.0.0
+  version: unknown
   virtual_path: hooks/markdown-mermaid-lint
   is_virtual: true
   package_type: hook_package
@@ -374,7 +374,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:0e52daa3eb1d0b47b9e924aacaf06ee8c312d8341a89507e0e74f1904afbb105
+  content_hash: sha256:035f1202633125f463a4471523a06b351432d317bb9c632f1529851fcc3d247e
 - kind: project-relative
   target: claude
   value: .claude/agents/ng-command-invoker.md
@@ -536,7 +536,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:08cc4f13376ca42bbc89389c71b63798ff3c9539474c13974d1de80e18a477da
+  content_hash: sha256:4b98ea3e9d8e20b950e8b8b769e1c464cb6c5104879b43f71c44cccd203adab4
 - kind: project-relative
   target: claude
   value: .claude/skills/go-check-outdated-patterns
@@ -572,7 +572,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:0e52daa3eb1d0b47b9e924aacaf06ee8c312d8341a89507e0e74f1904afbb105
+  content_hash: sha256:035f1202633125f463a4471523a06b351432d317bb9c632f1529851fcc3d247e
 - kind: project-relative
   target: claude
   value: .claude/skills/go-edit-cobra
@@ -1391,7 +1391,7 @@ local_deployed_files:
 - .claude/skills/go-cmdman-review-checklist
 - .claude/skills/go-cmdman-review-checklist/SKILL.md
 local_deployed_file_hashes:
-  .agents/skills/go-cmdman-review-checklist/SKILL.md: sha256:0e52daa3eb1d0b47b9e924aacaf06ee8c312d8341a89507e0e74f1904afbb105
+  .agents/skills/go-cmdman-review-checklist/SKILL.md: sha256:035f1202633125f463a4471523a06b351432d317bb9c632f1529851fcc3d247e
   .claude/rules/base.local.md: sha256:47ae93b32673214ad610883920d767e658ed64c8b32719ee598916457b862ed8
-  .claude/rules/project-overview.local.md: sha256:08cc4f13376ca42bbc89389c71b63798ff3c9539474c13974d1de80e18a477da
-  .claude/skills/go-cmdman-review-checklist/SKILL.md: sha256:0e52daa3eb1d0b47b9e924aacaf06ee8c312d8341a89507e0e74f1904afbb105
+  .claude/rules/project-overview.local.md: sha256:4b98ea3e9d8e20b950e8b8b769e1c464cb6c5104879b43f71c44cccd203adab4
+  .claude/skills/go-cmdman-review-checklist/SKILL.md: sha256:035f1202633125f463a4471523a06b351432d317bb9c632f1529851fcc3d247e

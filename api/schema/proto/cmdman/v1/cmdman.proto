@@ -37,6 +37,9 @@ service CommandMonitorService {
 
   // Clear the status the command reported about itself.
   rpc DeleteReportedStatus(DeleteReportedStatusRequest) returns (DeleteReportedStatusResponse);
+
+  // Capture a snapshot of the command's terminal screen.
+  rpc CaptureScreen(CaptureScreenRequest) returns (CaptureScreenResponse);
 }
 
 message AttachRequest {
@@ -157,3 +160,22 @@ message GetReportedStatusResponse {
 message DeleteReportedStatusRequest {}
 
 message DeleteReportedStatusResponse {}
+
+message CaptureScreenRequest {
+  bool escapes = 1; // include SGR escape sequences (tmux -e)
+  bool alt_screen = 2; // tmux -a
+  bool quiet = 3; // tmux -q
+  bool preserve_trailing_spaces = 4; // tmux -N
+  // Line range (tmux -S/-E): 0 = first visible row; negative = history.
+  // has_* distinguishes unset; *_extreme encodes tmux's literal '-'.
+  bool has_start = 5;
+  sint32 start_line = 6;
+  bool start_extreme = 7; // start of history
+  bool has_end = 8;
+  sint32 end_line = 9;
+  bool end_extreme = 10; // end of visible screen
+}
+
+message CaptureScreenResponse {
+  bytes content = 1; // captured lines joined with \n, trailing \n included
+}

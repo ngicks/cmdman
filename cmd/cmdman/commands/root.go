@@ -80,6 +80,7 @@ It simply starts a monitor process and the monitor damonizes itself and starts s
 	configCmd(cmd, &rf)
 
 	attachCmd(cmd, &rf)
+	captureScreenCmd(cmd, &rf)
 	createCmd(cmd, &rf)
 	eventsCmd(cmd, &rf)
 	inspectCmd(cmd, &rf)

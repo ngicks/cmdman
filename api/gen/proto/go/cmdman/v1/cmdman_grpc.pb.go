@@ -29,6 +29,7 @@ const (
 	CommandMonitorService_SetReportedStatus_FullMethodName    = "/cmdman.v1.CommandMonitorService/SetReportedStatus"
 	CommandMonitorService_GetReportedStatus_FullMethodName    = "/cmdman.v1.CommandMonitorService/GetReportedStatus"
 	CommandMonitorService_DeleteReportedStatus_FullMethodName = "/cmdman.v1.CommandMonitorService/DeleteReportedStatus"
+	CommandMonitorService_CaptureScreen_FullMethodName        = "/cmdman.v1.CommandMonitorService/CaptureScreen"
 )
 
 // CommandMonitorServiceClient is the client API for CommandMonitorService service.
@@ -58,6 +59,8 @@ type CommandMonitorServiceClient interface {
 	GetReportedStatus(ctx context.Context, in *GetReportedStatusRequest, opts ...grpc.CallOption) (*GetReportedStatusResponse, error)
 	// Clear the status the command reported about itself.
 	DeleteReportedStatus(ctx context.Context, in *DeleteReportedStatusRequest, opts ...grpc.CallOption) (*DeleteReportedStatusResponse, error)
+	// Capture a snapshot of the command's terminal screen.
+	CaptureScreen(ctx context.Context, in *CaptureScreenRequest, opts ...grpc.CallOption) (*CaptureScreenResponse, error)
 }
 
 type commandMonitorServiceClient struct {
@@ -189,6 +192,16 @@ func (c *commandMonitorServiceClient) DeleteReportedStatus(ctx context.Context, 
 	return out, nil
 }
 
+func (c *commandMonitorServiceClient) CaptureScreen(ctx context.Context, in *CaptureScreenRequest, opts ...grpc.CallOption) (*CaptureScreenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CaptureScreenResponse)
+	err := c.cc.Invoke(ctx, CommandMonitorService_CaptureScreen_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CommandMonitorServiceServer is the server API for CommandMonitorService service.
 // All implementations must embed UnimplementedCommandMonitorServiceServer
 // for forward compatibility.
@@ -216,6 +229,8 @@ type CommandMonitorServiceServer interface {
 	GetReportedStatus(context.Context, *GetReportedStatusRequest) (*GetReportedStatusResponse, error)
 	// Clear the status the command reported about itself.
 	DeleteReportedStatus(context.Context, *DeleteReportedStatusRequest) (*DeleteReportedStatusResponse, error)
+	// Capture a snapshot of the command's terminal screen.
+	CaptureScreen(context.Context, *CaptureScreenRequest) (*CaptureScreenResponse, error)
 	mustEmbedUnimplementedCommandMonitorServiceServer()
 }
 
@@ -255,6 +270,9 @@ func (UnimplementedCommandMonitorServiceServer) GetReportedStatus(context.Contex
 }
 func (UnimplementedCommandMonitorServiceServer) DeleteReportedStatus(context.Context, *DeleteReportedStatusRequest) (*DeleteReportedStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteReportedStatus not implemented")
+}
+func (UnimplementedCommandMonitorServiceServer) CaptureScreen(context.Context, *CaptureScreenRequest) (*CaptureScreenResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CaptureScreen not implemented")
 }
 func (UnimplementedCommandMonitorServiceServer) mustEmbedUnimplementedCommandMonitorServiceServer() {}
 func (UnimplementedCommandMonitorServiceServer) testEmbeddedByValue()                               {}
@@ -432,6 +450,24 @@ func _CommandMonitorService_DeleteReportedStatus_Handler(srv interface{}, ctx co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CommandMonitorService_CaptureScreen_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CaptureScreenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CommandMonitorServiceServer).CaptureScreen(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CommandMonitorService_CaptureScreen_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CommandMonitorServiceServer).CaptureScreen(ctx, req.(*CaptureScreenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CommandMonitorService_ServiceDesc is the grpc.ServiceDesc for CommandMonitorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -466,6 +502,10 @@ var CommandMonitorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteReportedStatus",
 			Handler:    _CommandMonitorService_DeleteReportedStatus_Handler,
+		},
+		{
+			MethodName: "CaptureScreen",
+			Handler:    _CommandMonitorService_CaptureScreen_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -36,4 +36,5 @@ Uses the compose selection flags documented in
 
 ## See Also
 
-[cmdman-attach(1)](./cmdman-attach.1.md), [cmdman-compose-send-keys(1)](./cmdman-compose-send-keys.1.md)
+[cmdman-attach(1)](./cmdman-attach.1.md), [cmdman-compose-send-keys(1)](./cmdman-compose-send-keys.1.md),
+[cmdman-compose-capture-screen(1)](./cmdman-compose-capture-screen.1.md)

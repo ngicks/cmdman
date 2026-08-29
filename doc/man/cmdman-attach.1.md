@@ -39,4 +39,4 @@ cmdman attach --detach-keys ctrl-a,ctrl-d shell
 
 ## See Also
 
-[cmdman-send-keys(1)](./cmdman-send-keys.1.md), [cmdman-logs(1)](./cmdman-logs.1.md)
+[cmdman-send-keys(1)](./cmdman-send-keys.1.md), [cmdman-logs(1)](./cmdman-logs.1.md), [cmdman-capture-screen(1)](./cmdman-capture-screen.1.md)

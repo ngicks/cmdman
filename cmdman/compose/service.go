@@ -33,6 +33,11 @@ type cmdmanSvc interface {
 	Events(ctx context.Context, req cmdman.EventsRequest) (*cmdman.EventsSubscription, error)
 	OpenAttachSession(ctx context.Context, idOrName string) (*cmdman.Session, error)
 	SendKeys(ctx context.Context, idOrName string, req cmdman.SendKeysRequest) error
+	CaptureScreen(
+		ctx context.Context,
+		idOrName string,
+		req cmdman.CaptureScreenRequest,
+	) ([]byte, error)
 	RecordComposeHistory(ctx context.Context, req cmdman.ComposeHistoryRequest) error
 	RuntimeStates(
 		ctx context.Context,

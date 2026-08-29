@@ -66,6 +66,7 @@ func composeCmd(parent *cobra.Command, rf *rootFlags) {
 	composeWaitCmd(cmd, rf, &flags)
 	composeAttachCmd(cmd, rf, &flags)
 	composeSendKeysCmd(cmd, rf, &flags)
+	composeCaptureScreenCmd(cmd, rf, &flags)
 	composeMuxCmd(cmd, rf, &flags)
 
 	parent.AddCommand(cmd)

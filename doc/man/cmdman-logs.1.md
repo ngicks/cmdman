@@ -43,4 +43,4 @@ cmdman logs --sticky worker
 
 ## See Also
 
-[cmdman-attach(1)](./cmdman-attach.1.md), [cmdman-events(1)](./cmdman-events.1.md)
+[cmdman-attach(1)](./cmdman-attach.1.md), [cmdman-events(1)](./cmdman-events.1.md), [cmdman-capture-screen(1)](./cmdman-capture-screen.1.md)

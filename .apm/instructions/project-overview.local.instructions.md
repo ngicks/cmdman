@@ -136,7 +136,7 @@ closing/rebuilding a session must never stop a supervised process. Driver autode
 
 ## CLI surface
 
-Top-level: `attach config create events inspect logs ls migrate mux restart rm run send-keys
+Top-level: `attach capture-screen config create events inspect logs ls migrate mux restart rm run send-keys
 signal start status stop tui version wait compose` (+ hidden `__monitor`, and `tui __child`).
 Root carries the persistent flags `--config`, `--data-dir`, `--runtime-dir`.
 `config` prints the resolved configuration (indented JSON, or `--format` template).

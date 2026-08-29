@@ -3,6 +3,7 @@ package monitor
 import (
 	"context"
 	"encoding"
+	"errors"
 	"io"
 	"syscall"
 
@@ -356,6 +357,49 @@ func (s *monitorServer) DeleteReportedStatus(
 ) (*pb.DeleteReportedStatusResponse, error) {
 	s.monitor.runtimeState.clearReport()
 	return &pb.DeleteReportedStatusResponse{}, nil
+}
+
+// CaptureScreen renders the screen mirror the monitor keeps for a TTY command.
+//
+// Unlike Attach, the response is not run through the hook filter. Attach
+// forwards the bytes the command wrote, so a blocked sequence would otherwise
+// reach the viewer verbatim; capture output is built from the emulator's cells
+// instead, so no raw sequence of the command's survives into it to be blocked.
+func (s *monitorServer) CaptureScreen(
+	_ context.Context,
+	req *pb.CaptureScreenRequest,
+) (*pb.CaptureScreenResponse, error) {
+	opts := captureOptions{
+		escapes:                req.Escapes,
+		altScreen:              req.AltScreen,
+		quiet:                  req.Quiet,
+		preserveTrailingSpaces: req.PreserveTrailingSpaces,
+		start:                  int(req.StartLine),
+		startSet:               req.HasStart,
+		startWholeHistory:      req.StartExtreme,
+		end:                    int(req.EndLine),
+		endSet:                 req.HasEnd,
+		endWholeScreen:         req.EndExtreme,
+	}
+
+	// capture reads the emulator without locking, and every emulator write
+	// happens under outputMu; the tracker itself is swapped under that lock on
+	// each run, so it is read inside the section rather than before it.
+	s.monitor.outputMu.Lock()
+	content, err := s.monitor.screen.capture(opts)
+	s.monitor.outputMu.Unlock()
+
+	switch {
+	case errors.Is(err, errNoAltScreen):
+		// A non-TTY command has no mirror at all, so it lands on the branch
+		// below instead of here.
+		return nil, status.Error(codes.FailedPrecondition, "command has no alternate screen")
+	case errors.Is(err, errScreenUnavailable):
+		return nil, status.Error(codes.FailedPrecondition, "terminal screen unavailable")
+	case err != nil:
+		return nil, status.Errorf(codes.Internal, "capture screen: %v", err)
+	}
+	return &pb.CaptureScreenResponse{Content: content}, nil
 }
 
 func protoRuntimeState(v runtimeView) *pb.RuntimeState {

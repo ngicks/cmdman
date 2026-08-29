@@ -76,3 +76,42 @@ layer: changing the encoding renames existing commands.
 Fix direction: apply the same unambiguous-join treatment, either with a
 migration story for existing registered names or accepting the rename
 outright (the app has never been deployed).
+
+## compose-attach man page omits --scale (2026-08-28)
+
+`doc/man/cmdman-compose-attach.1.md` lists the command's options but not
+the existing `--scale` flag (`cmd/cmdman/commands/compose_attach.go:41`),
+which picks the 1-based replica of a scaled service and is required when a
+service has more than one replica. Noticed while documenting
+`compose capture-screen`, whose page does document its identical flag.
+
+Fix direction: add the flag to the compose-attach page's options list,
+matching the wording used by `cmdman-compose-capture-screen.1.md`.
+
+## e2e TestStatus_WithoutRunningMonitor is not hermetic (2026-08-28)
+
+`e2e/cmdman/status_test.go` (missing-identity case, around line 141)
+expects `cmdman status get` with no argument to fail with a
+missing-identity error, but `testEnv.execFull`
+(`e2e/cmdman/main_test.go:129`) passes `os.Environ()` through to the
+binary, so a `CMDMAN_CMD_ID` inherited from a cmdman-supervised shell is
+resolved instead and the test fails with a different error. Reproduces
+deterministically when the suite itself runs under cmdman.
+
+Fix direction: strip `CMDMAN_CMD_ID` (and any other identity-carrying
+variables) from the child environment in `execFull`, or explicitly in that
+test.
+
+## README does not cover the interaction commands (2026-08-29)
+
+`README.md` never mentions `capture-screen` — nor `send-keys`, `attach`, or
+the other interaction verbs; it currently only covers the TUI. The
+capture-screen plan's step 9 ("man page under `doc/man`, README mention
+beside send-keys", `doc/plan/2026-08-27-capture_screen/PLAN.md:215`) was
+checked off in STATUS.md, but the README half never landed because there is
+no send-keys mention to sit beside. Noticed during capture-screen QA.
+
+Fix direction: give the README a short CLI-surface overview (or at least an
+interaction-commands paragraph linking to `doc/man/`) so future "README
+mention" plan steps have a place to land; add `capture-screen` beside
+`send-keys` there.
