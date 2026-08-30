@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -135,6 +137,108 @@ func TestSwitcherActiveIdentityMsgRebuilds(t *testing.T) {
 	if g, _ := m.selectedGroup(); g.Active {
 		t.Errorf("an unanswered probe should drop back to cwd matching: %+v", g)
 	}
+}
+
+// TestSwitcherFollowsActiveDir drives the real chdir: the widget stands in the
+// directory of the project its own window holds, which is the directory the
+// multiplexer then reports for the pane it draws in.
+func TestSwitcherFollowsActiveDir(t *testing.T) {
+	start := t.TempDir()
+	t.Chdir(start) // and back out again when the test ends
+	dir := t.TempDir()
+
+	m := New(t.Context(), core.Options{Backend: &coretest.FakeBackend{Dir: start}})
+	m, _ = updWidget(t, m, core.ProjectsLoadedMsg{Infos: []core.ProjectInfo{
+		{Name: "api", Workdir: dir, Identity: "id-api"},
+	}})
+	if got, want := getwd(t), realDir(t, start); got != want {
+		t.Fatalf("nothing is active yet, so the directory should still be %q: %q", want, got)
+	}
+
+	m, _ = updWidget(t, m, core.ActiveIdentityLoadedMsg{Identity: "id-api", OK: true})
+	if got, want := getwd(t), realDir(t, dir); got != want {
+		t.Errorf("working directory = %q, want the active project's %q", got, want)
+	}
+}
+
+// TestSwitcherChdirsOncePerActiveDir is what keeps the move off the rebuild
+// path's back: rebuild runs on every listing, probe and runtime push, and only a
+// change of active project is a change of directory.
+func TestSwitcherChdirsOncePerActiveDir(t *testing.T) {
+	var moved []string
+	m := New(t.Context(), core.Options{Backend: &coretest.FakeBackend{Dir: "/elsewhere"}})
+	m.chdir = func(dir string) error {
+		moved = append(moved, dir)
+		return nil
+	}
+	projs := []core.ProjectInfo{
+		{Name: "api", Workdir: "/work/api", Identity: "id-api"},
+		{Name: "blog", Workdir: "/work/blog", Identity: "id-blog"},
+	}
+
+	m, _ = updWidget(t, m, core.ProjectsLoadedMsg{Infos: projs})
+	m, _ = updWidget(t, m, core.ActiveIdentityLoadedMsg{Identity: "id-api", OK: true})
+	// A re-list resolving the same active project again, and a probe repeating it.
+	m, _ = updWidget(t, m, core.ProjectsLoadedMsg{Infos: projs})
+	m, _ = updWidget(t, m, core.ActiveIdentityLoadedMsg{Identity: "id-api", OK: true})
+	if want := []string{"/work/api"}; !slices.Equal(moved, want) {
+		t.Fatalf("chdir calls = %v, want %v", moved, want)
+	}
+
+	m, _ = updWidget(t, m, core.ActiveIdentityLoadedMsg{Identity: "id-blog", OK: true})
+	if want := []string{"/work/api", "/work/blog"}; !slices.Equal(moved, want) {
+		t.Errorf("chdir calls = %v, want %v", moved, want)
+	}
+
+	// A probe that stops answering leaves the widget where it stands rather than
+	// walking it back out of the project it is showing.
+	m, _ = updWidget(t, m, core.ActiveIdentityLoadedMsg{})
+	if want := []string{"/work/api", "/work/blog"}; !slices.Equal(moved, want) {
+		t.Errorf("chdir calls = %v, want %v", moved, want)
+	}
+}
+
+// TestSwitcherChdirFailureIsRetried pins the best-effort half: a directory the
+// process cannot enter costs the widget nothing, and is not remembered as
+// entered either, so the next resolve tries it again.
+func TestSwitcherChdirFailureIsRetried(t *testing.T) {
+	var moved []string
+	m := New(t.Context(), core.Options{Backend: &coretest.FakeBackend{Dir: "/elsewhere"}})
+	m.chdir = func(dir string) error {
+		moved = append(moved, dir)
+		return errors.New("no such directory")
+	}
+	projs := []core.ProjectInfo{{Name: "api", Workdir: "/work/api", Identity: "id-api"}}
+
+	m, _ = updWidget(t, m, core.ProjectsLoadedMsg{Infos: projs})
+	m, _ = updWidget(t, m, core.ActiveIdentityLoadedMsg{Identity: "id-api", OK: true})
+	m, _ = updWidget(t, m, core.ProjectsLoadedMsg{Infos: projs})
+	if want := []string{"/work/api", "/work/api"}; !slices.Equal(moved, want) {
+		t.Errorf("chdir calls = %v, want %v", moved, want)
+	}
+	if m.status != "" {
+		t.Errorf("a failed chdir should say nothing to the user, got %q", m.status)
+	}
+}
+
+// getwd is the process directory as the tests compare it: through the same
+// symlink resolution a temp directory's path may need.
+func getwd(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd(): %v", err)
+	}
+	return realDir(t, wd)
+}
+
+func realDir(t *testing.T, dir string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", dir, err)
+	}
+	return resolved
 }
 
 // TestSwitcherRenderAlignment renders the grouped list and checks the property
