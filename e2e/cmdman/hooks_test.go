@@ -1,18 +1,13 @@
 package cmdman_test
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/ngicks/cmdman/cmdman"
 )
 
@@ -160,24 +155,7 @@ func attachedOutput(t *testing.T, ctx context.Context, env *testEnv, name string
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
 	env.waitForState(ctx, id, "running", defaultTimeout)
 
-	attach := exec.CommandContext(ctx, cmdmanBin, "attach", id)
-	attach.Env = append(
-		hermeticEnviron(),
-		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
-		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
-		cmdman.ENV_CMDMAN_CONF+"="+env.confPath,
-	)
-
-	ptmx, err := pty.Start(attach)
-	must(t, err)
-	defer ptmx.Close()
-
-	var output lockedBuffer
-	doneRead := make(chan struct{})
-	go func() {
-		_, _ = io.Copy(&output, ptmx)
-		close(doneRead)
-	}()
+	sess := env.Cmd("attach", id).StartPTY(ctx, t)
 
 	// The bell of each pair is ordered ahead of the marker that proves the pair
 	// arrived, so one marker already means one bell went through the filter.
@@ -185,34 +163,19 @@ func attachedOutput(t *testing.T, ctx context.Context, env *testEnv, name string
 	// at most one marker even if the erase above ever stops working, which keeps
 	// this a liveness gate rather than a restatement of the replay.
 	waitUntil(t, defaultTimeout, func() bool {
-		return strings.Count(output.String(), bellMarker) >= 2
-	}, "attach never streamed %q live; received %q", bellMarker, output.String())
+		return strings.Count(sess.Output(), bellMarker) >= 2
+	}, "attach never streamed %q live; received %q", bellMarker, sess.Output())
 
-	if _, err := ptmx.Write([]byte{0x10, 0x11}); err != nil {
-		t.Fatalf("send detach keys: %v", err)
+	sess.Send(detachKeys)
+	res, exited := sess.WaitWithin(t, 3*time.Second)
+	if !exited {
+		t.Fatal("attach did not exit")
 	}
-	waitAttachExit(t, attach, 3*time.Second)
-	_ = ptmx.Close()
-	<-doneRead
+	if res.Err != nil {
+		t.Fatalf("attach exited with error: %v", res.Err)
+	}
 
-	return output.String()
-}
-
-// lockedBuffer lets the poller above read what the viewer has received so far
-// while the io.Copy goroutine is still appending to it.
-type lockedBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *lockedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *lockedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
+	// Not the trimmed Result: the bell the caller looks for sits at the head of
+	// a marker pair, and what surrounds it is not this test's to assume.
+	return sess.Output()
 }

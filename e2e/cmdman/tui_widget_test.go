@@ -1,19 +1,16 @@
 package cmdman_test
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
@@ -37,7 +34,7 @@ func TestTUIWidget_SwitcherRendersAndQuits(t *testing.T) {
 	// reaches the column once discovery has found the project sitting there.
 	w.waitFor(t, filepath.Base(wd), 5*time.Second)
 	// The widget is a single view: the full TUI's tab bar must not be there.
-	if snap := w.snapshot(); strings.Contains(snap, "Compose") {
+	if snap := w.Output(); strings.Contains(snap, "Compose") {
 		t.Errorf("switcher widget rendered the full TUI chrome; got:\n%q", snap)
 	}
 	w.quit(t)
@@ -228,12 +225,12 @@ func TestTUIWidget_NoQuitSurvivesTheQuitKey(t *testing.T) {
 	wd := composeWorkdir(t)
 	writeComposeFile(t, wd, composeBasicYAML("widgetnq"))
 
-	w := startWidgetEnv(t, ctx, env, wd, wd, "switcher", hermeticEnviron(), "--no-quit")
+	w := startWidgetCmd(t, ctx, widgetCmd(env, wd, wd, "switcher", "--no-quit"))
 	w.waitFor(t, filepath.Base(wd), 5*time.Second)
-	if snap := w.snapshot(); strings.Contains(snap, "q quit") {
+	if snap := w.Output(); strings.Contains(snap, "q quit") {
 		t.Errorf("a --no-quit switcher must not offer a key it does not have; got:\n%q", snap)
 	}
-	w.send(t, "q")
+	w.Send("q")
 	w.mustStayUp(t, time.Second)
 }
 
@@ -251,9 +248,9 @@ func TestTUIWidget_LauncherRendersAndQuits(t *testing.T) {
 	w.waitFor(t, "locations", 5*time.Second)
 	// The empty input is history mode (D28), and this project has never been
 	// brought up — typing is what reaches a location discovered on disk.
-	w.send(t, "widgetlnch")
+	w.Send("widgetlnch")
 	w.waitFor(t, "widgetlnch", 5*time.Second)
-	if snap := w.snapshot(); strings.Contains(snap, "Compose") {
+	if snap := w.Output(); strings.Contains(snap, "Compose") {
 		t.Errorf("launcher widget rendered the full TUI chrome; got:\n%q", snap)
 	}
 	// A bare letter types into the filter, so the dismissal is ctrl+c.
@@ -291,7 +288,8 @@ func TestTUIWidget_LauncherMarksRunningProject(t *testing.T) {
 	// Run the launcher from a directory that is not the project's: a popup is
 	// summoned from wherever the user is standing, so nothing about the listing
 	// or the marker may depend on the process working directory.
-	w := startWidgetEnv(t, ctx, env, wd, t.TempDir(), "launcher", tmuxTmpdirEnv(tmuxTmpdir))
+	w := startWidgetCmd(t, ctx,
+		widgetCmd(env, wd, t.TempDir(), "launcher").WithTmuxTmpdir(tmuxTmpdir))
 	w.waitFor(t, project, 10*time.Second)
 	// The running marker: the hollow circle a project with no reported state
 	// carries. A cold entry's slot is blank, so its presence is the assertion.
@@ -325,10 +323,11 @@ func TestTUIWidget_LauncherStartsFromAnywhere(t *testing.T) {
 		t.Fatalf("compose create failed: %v\nstderr:\n%s", err, stderr)
 	}
 
-	w := startWidgetEnv(t, ctx, env, wd, t.TempDir(), "launcher", tmuxTmpdirEnv(tmuxTmpdir))
+	w := startWidgetCmd(t, ctx,
+		widgetCmd(env, wd, t.TempDir(), "launcher").WithTmuxTmpdir(tmuxTmpdir))
 	w.waitFor(t, project, 10*time.Second)
-	w.send(t, "\r") // enter: the input hands the keyboard to the locations list
-	w.send(t, "s")  // start the enabled (history) projects here
+	w.Send("\r") // enter: the input hands the keyboard to the locations list
+	w.Send("s")  // start the enabled (history) projects here
 	window := launcherFallbackWindowName(wd)
 	waitForTmuxWindow(t, tmuxTmpdir, window, 30*time.Second)
 
@@ -380,18 +379,20 @@ func TestTUIWidget_SwitcherMarksWindowProject(t *testing.T) {
 	// position a process running in one of its panes would be in.
 	tmuxRunWithTmpdir(t, tmuxTmpdir, "select-window", "-t", wid)
 
+	// Unrelated on both counts the cwd probe could match: the process directory
+	// and the --workdir override.
+	elsewhere := t.TempDir()
+
 	// $TMUX is the whole of what the active-project probe reads: it passes no
 	// target and never consults $TMUX_PANE, so the answer follows the session
 	// named here (verified against a live tmux). The pane variable addresses a
 	// window too — a teardown reads it to tell whether it is inside the window it
-	// was asked to close — and tmuxTmpdirEnv strips any inherited one, so nothing
-	// here rides on it.
-	inWindow := append(tmuxTmpdirEnv(tmuxTmpdir), "TMUX="+tmuxEnvValue(t, tmuxTmpdir, wid))
-
-	// Unrelated on both counts the cwd probe could match: the process directory
-	// and the --workdir override.
-	elsewhere := t.TempDir()
-	w := startWidgetEnv(t, ctx, env, elsewhere, elsewhere, "switcher", inWindow)
+	// was asked to close — and WithTmuxTmpdir strips any inherited one, so
+	// nothing here rides on it.
+	inWindow := widgetCmd(env, elsewhere, elsewhere, "switcher").
+		WithTmuxTmpdir(tmuxTmpdir).
+		WithEnv("TMUX=" + tmuxEnvValue(t, tmuxTmpdir, wid))
+	w := startWidgetCmd(t, ctx, inWindow)
 	// The head is the project's own directory, so its presence proves the row is
 	// the project's — and "active" beside it is the mark under test.
 	w.waitFor(t, filepath.Base(wd), 10*time.Second)
@@ -455,7 +456,7 @@ func TestTUIWidget_SwitcherSummonsProjectManager(t *testing.T) {
 	sessionA := tmuxSessionOfWindow(t, tmuxTmpdir, windowA)
 	tmuxRunWithTmpdir(t, tmuxTmpdir, "select-window", "-t",
 		tmuxWindowIDTmpdir(t, tmuxTmpdir, windowA))
-	client := attachTmuxClient(t, ctx, tmuxTmpdir, sessionA)
+	client := attachTmuxClient(t, ctx, env, tmuxTmpdir, sessionA)
 
 	// The switcher goes in a window of its own, left in the background so the
 	// client keeps looking at A: a switcher that believes it sits in project A,
@@ -473,7 +474,7 @@ func TestTUIWidget_SwitcherSummonsProjectManager(t *testing.T) {
 	waitForPaneText(t, tmuxTmpdir, pane, "active", 20*time.Second)
 	waitForPaneText(t, tmuxTmpdir, pane, filepath.Base(wdB), 10*time.Second)
 
-	if snap := client.snapshot(); strings.Contains(snap, serviceB) ||
+	if snap := client.Output(); strings.Contains(snap, serviceB) ||
 		strings.Contains(snap, "×3") {
 		t.Fatalf("%s or its replica count was on the client screen before the "+
 			"summon, so its presence proves nothing; got:\n%q", serviceB, snap)
@@ -489,7 +490,7 @@ func TestTUIWidget_SwitcherSummonsProjectManager(t *testing.T) {
 	// the spec all the same and the row reads ×0.
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		snap := client.snapshot()
+		snap := client.Output()
 		if strings.Contains(snap, serviceB) && strings.Contains(snap, "×3") {
 			break
 		}
@@ -503,7 +504,7 @@ func TestTUIWidget_SwitcherSummonsProjectManager(t *testing.T) {
 
 	// The popup holds the keyboard while it is up, so the quit key reaches it
 	// through the client rather than through the switcher's pane.
-	client.send(t, "q")
+	client.Send("q")
 }
 
 // TestTUIWidget_SwitcherSummonWithNoPopupSaysWhy is the summon's other outcome
@@ -524,19 +525,19 @@ func TestTUIWidget_SwitcherSummonWithNoPopupSaysWhy(t *testing.T) {
 	const project = "swpopup"
 	writeComposeFile(t, wd, composeBasicYAML(project))
 
-	// tmuxTmpdirEnv over a fresh directory is both halves of "outside any
+	// WithTmuxTmpdir over a fresh directory is both halves of "outside any
 	// multiplexer": $TMUX and $ZELLIJ are stripped, so nothing points the widget
 	// at a server, and TMUX_TMPDIR redirects the default socket to a directory
 	// that holds none — against the developer's own the popup would really open.
-	w := startWidgetEnv(t, ctx, env, wd, wd, "switcher", tmuxTmpdirEnv(t.TempDir()))
+	w := startWidgetCmd(t, ctx, widgetCmd(env, wd, wd, "switcher").WithTmuxTmpdir(t.TempDir()))
 	w.waitFor(t, filepath.Base(wd), 10*time.Second)
 
 	// The message is one line and wider than the default 80 columns. What the
 	// renderer clips is never written to the terminal at all, so the widening
 	// comes before the key rather than after it: a resize afterwards would redraw
 	// the view, but only if the widget still holds the message it clipped.
-	w.resize(t, 20, 200)
-	w.send(t, "m")
+	w.Resize(20, 200)
+	w.Send("m")
 
 	// The switcher's own framing, the seam the summon went through, and then the
 	// parentheses — popupDiag puts them there only when the popup process wrote
@@ -588,16 +589,20 @@ func tmuxSessionOfWindow(t *testing.T, tmuxTmpdir, window string) string {
 }
 
 // attachTmuxClient attaches a real client to the session under a pty and
-// captures what tmux draws on it.
+// captures what tmux draws on it. A popup is drawn on the client's own
+// terminal, so that terminal is the only place its content can be read from.
 func attachTmuxClient(
 	t *testing.T,
 	ctx context.Context,
+	env *testEnv,
 	tmuxTmpdir, session string,
-) *widgetSession {
+) *Session {
 	t.Helper()
-	cmd := exec.CommandContext(ctx, "tmux", "attach-session", "-t", "="+session)
-	cmd.Env = append(tmuxTmpdirEnv(tmuxTmpdir), "TERM=xterm-256color")
-	c := ptySession(t, cmd, 40, 140)
+	c := env.Tool("tmux", "attach-session", "-t", "="+session).
+		WithTmuxTmpdir(tmuxTmpdir).
+		WithEnv("TERM=xterm-256color").
+		WithSize(40, 140).
+		StartPTY(ctx, t)
 	waitForSessionAttached(t, tmuxTmpdir, session, 10*time.Second)
 	return c
 }
@@ -813,17 +818,30 @@ mux:
 `, project)
 }
 
-// widgetSession is a widget running under a PTY, with its output captured.
+// widgetSession is a widget running under a pty: a harness session plus the
+// gestures these tests make on one.
 type widgetSession struct {
-	cmd  *exec.Cmd
-	ptmx *os.File
-
-	mu  sync.Mutex
-	out bytes.Buffer
+	*Session
 }
 
-// startWidget launches `cmdman tui widget <name>` under a PTY, scoped to
-// workDir so project discovery is the test's own.
+// widgetCmd builds `cmdman tui widget <name>` the way a frame pane runs it —
+// scoped to workDir so project discovery is the test's own, standing in runDir,
+// on a terminal of a docked pane's size.
+//
+// An empty workDir omits --workdir entirely, which is the documented token
+// binding: the key sends nothing but --mux-token, so the process directory is
+// the only work directory the invocation carries.
+func widgetCmd(env *testEnv, workDir, runDir, name string, extraArgs ...string) *Cmd {
+	args := []string{"tui", "widget", name}
+	if workDir != "" {
+		args = append(args, "--workdir", workDir)
+	}
+	args = append(args, extraArgs...)
+	return env.Cmd(args...).InDir(runDir).WithEnv("TERM=xterm-256color").WithSize(20, 80)
+}
+
+// startWidget launches a widget scoped to and standing in workDir: the plain
+// case, with no multiplexer of the test's own for it to reach.
 func startWidget(
 	t *testing.T,
 	ctx context.Context,
@@ -831,111 +849,23 @@ func startWidget(
 	workDir, name string,
 ) *widgetSession {
 	t.Helper()
-	return startWidgetEnv(t, ctx, env, workDir, workDir, name, hermeticEnviron())
+	return startWidgetCmd(t, ctx, widgetCmd(env, workDir, workDir, name))
 }
 
-// startWidgetEnv is startWidget over an explicit process directory and base
-// environment: for a widget that has to reach the same multiplexer server the
-// test drives (TMUX_TMPDIR), and for one whose resolution must be shown not to
-// ride on the process directory happening to be the target directory — a popup
-// runs wherever it was summoned from.
-//
-// An empty workDir omits --workdir entirely, which is the documented token
-// binding: the key sends nothing but --mux-token, so the process directory is
-// the only work directory the invocation carries.
-func startWidgetEnv(
-	t *testing.T,
-	ctx context.Context,
-	env *testEnv,
-	workDir, runDir, name string,
-	baseEnv []string,
-	extraArgs ...string,
-) *widgetSession {
+// startWidgetCmd starts an invocation the caller composed itself: for a widget
+// that has to reach the same multiplexer server the test drives, and for one
+// whose resolution must be shown not to ride on the process directory happening
+// to be the target directory — a popup runs wherever it was summoned from.
+func startWidgetCmd(t *testing.T, ctx context.Context, c *Cmd) *widgetSession {
 	t.Helper()
-
-	args := []string{"tui", "widget", name}
-	if workDir != "" {
-		args = append(args, "--workdir", workDir)
-	}
-	args = append(args, extraArgs...)
-	cmd := exec.CommandContext(ctx, cmdmanBin, args...)
-	cmd.Dir = runDir
-	// The same three the test env pins for every other invocation: without the
-	// config path the widget would read the developer's own config.
-	cmd.Env = append(slices.Clone(baseEnv),
-		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
-		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
-		cmdman.ENV_CMDMAN_CONF+"="+env.confPath,
-		"TERM=xterm-256color")
-
-	return ptySession(t, cmd, 20, 80)
+	return &widgetSession{c.StartPTY(ctx, t)}
 }
 
-// ptySession starts cmd under a pty of the given size and captures everything
-// written to it. Both a widget under test and an attached tmux client are read
-// this way: a popup is drawn on the client's own terminal, so that terminal is
-// the only place its content can be read from.
-func ptySession(t *testing.T, cmd *exec.Cmd, rows, cols uint16) *widgetSession {
-	t.Helper()
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
-	if err != nil {
-		t.Fatalf("start %s under a pty: %v", cmd.Path, err)
-	}
-	t.Cleanup(func() { ptmx.Close() })
-
-	w := &widgetSession{cmd: cmd, ptmx: ptmx}
-	go func() {
-		b := make([]byte, 8192)
-		for {
-			n, rerr := ptmx.Read(b)
-			if n > 0 {
-				w.mu.Lock()
-				w.out.Write(b[:n])
-				w.mu.Unlock()
-			}
-			if rerr != nil {
-				return
-			}
-		}
-	}()
-	return w
-}
-
-func (w *widgetSession) snapshot() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.out.String()
-}
-
+// waitFor waits for literal text: a widget draws plenty of characters a pattern
+// would read as syntax.
 func (w *widgetSession) waitFor(t *testing.T, what string, deadline time.Duration) {
 	t.Helper()
-	end := time.Now().Add(deadline)
-	for time.Now().Before(end) {
-		if strings.Contains(w.snapshot(), what) {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("widget never rendered %q; got:\n%q", what, w.snapshot())
-}
-
-// send writes keystrokes to the widget's terminal.
-func (w *widgetSession) send(t *testing.T, keys string) {
-	t.Helper()
-	if _, err := w.ptmx.Write([]byte(keys)); err != nil {
-		t.Fatalf("write %q to the widget: %v", keys, err)
-	}
-}
-
-// resize changes the widget's terminal size. The renderer only writes the cells
-// that changed, so a value updated in place never reaches the captured stream as
-// the whole row it sits in; a resize is what makes the widget draw the screen it
-// is currently showing rather than the difference from the last one.
-func (w *widgetSession) resize(t *testing.T, rows, cols uint16) {
-	t.Helper()
-	if err := pty.Setsize(w.ptmx, &pty.Winsize{Rows: rows, Cols: cols}); err != nil {
-		t.Fatalf("resize the widget's terminal to %dx%d: %v", rows, cols, err)
-	}
+	w.Expect(t, regexp.QuoteMeta(what), deadline)
 }
 
 func (w *widgetSession) quit(t *testing.T) {
@@ -944,35 +874,28 @@ func (w *widgetSession) quit(t *testing.T) {
 }
 
 // mustStayUp is quitWith's opposite: it proves the widget outlived the keys sent
-// to it. The process is killed afterwards, since the run it survived is over.
+// to it.
 func (w *widgetSession) mustStayUp(t *testing.T, d time.Duration) {
 	t.Helper()
-	done := make(chan error, 1)
-	go func() { done <- w.cmd.Wait() }()
-	select {
-	case err := <-done:
+	if res, exited := w.WaitWithin(t, d); exited {
 		t.Fatalf("widget exited (%v) though its quit keys were unbound; got:\n%q",
-			err, w.snapshot())
-	case <-time.After(d):
+			res.Err, w.Output())
 	}
-	_ = w.cmd.Process.Kill()
 }
 
 // quitWith dismisses the widget with the given keys. Which key that is belongs
 // to the widget: the docked ones quit on q, while in the launcher a bare letter
-// types into its filter and the dismissal is ctrl+c (or esc).
+// types into its filter and the dismissal is ctrl+c (or esc). The keys are sent
+// tolerantly because a landing dismisses the launcher on its own, leaving
+// nothing to write to.
 func (w *widgetSession) quitWith(t *testing.T, keys string) {
 	t.Helper()
-	_, _ = w.ptmx.Write([]byte(keys))
-	done := make(chan error, 1)
-	go func() { done <- w.cmd.Wait() }()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("widget exited with error: %v\noutput:\n%q", err, w.snapshot())
-		}
-	case <-time.After(4 * time.Second):
-		_ = w.cmd.Process.Kill()
-		t.Fatalf("widget did not quit on %q within 4s; got:\n%q", keys, w.snapshot())
+	w.SendIfUp(keys)
+	res, exited := w.WaitWithin(t, 4*time.Second)
+	if !exited {
+		t.Fatalf("widget did not quit on %q within 4s; got:\n%q", keys, w.Output())
+	}
+	if res.Err != nil {
+		t.Fatalf("widget exited with error: %v\noutput:\n%q", res.Err, w.Output())
 	}
 }

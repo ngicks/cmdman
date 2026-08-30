@@ -4,14 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/creack/pty"
-	"github.com/ngicks/cmdman/cmdman"
 )
 
 // parseJSONArray decodes a JSON array document into a slice of generic objects.
@@ -184,8 +180,7 @@ func TestComposeEvents(t *testing.T) {
 	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
 
 	// A standalone command sharing the event log; its events must be filtered out.
-	unrelatedID := env.run(ctx, "run", "-n", "tc-events-unrelated", "--", "/bin/sh", "-c", "exit 0")
-	t.Cleanup(func() { env.cleanupCommand(ctx, unrelatedID) })
+	unrelatedID := env.Run(ctx, "tc-events-unrelated", "/bin/sh", "-c", "exit 0")
 
 	composePath := filepath.Join(wd, "cmd-compose.yaml")
 	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up"); err != nil {
@@ -395,26 +390,20 @@ func TestComposeAttachDetach(t *testing.T) {
 	}
 	env.waitForState(ctx, alphaID, "running", defaultTimeout)
 
-	attach := exec.CommandContext(ctx, cmdmanBin,
-		"compose", "--workdir", wd, "-f", composePath, "attach", "alpha")
-	attach.Env = append(
-		hermeticEnviron(),
-		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
-		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
-	)
-
-	ptmx, err := pty.Start(attach)
-	if err != nil {
-		t.Fatalf("start compose attach pty: %v", err)
-	}
-	defer ptmx.Close()
-
+	sess := env.Cmd("compose", "--workdir", wd, "-f", composePath, "attach", "alpha").
+		StartPTY(ctx, t)
+	// Attaching to an idle command prints nothing to wait on; the pause is for
+	// attach to have its stdin forwarder up before the keys arrive.
 	time.Sleep(300 * time.Millisecond)
-	if _, err := ptmx.Write([]byte{0x10, 0x11}); err != nil {
-		t.Fatalf("send detach keys: %v", err)
-	}
+	sess.Send(detachKeys)
 
-	waitAttachExit(t, attach, 3*time.Second)
+	res, exited := sess.WaitWithin(t, 3*time.Second)
+	if !exited {
+		t.Fatal("attach did not exit")
+	}
+	if res.Err != nil {
+		t.Fatalf("attach exited with error: %v", res.Err)
+	}
 	// The command must still be running after a detach.
 	env.waitForState(ctx, alphaID, "running", defaultTimeout)
 }

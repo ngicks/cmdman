@@ -27,7 +27,7 @@ import (
 //
 // Only the server can answer either question, so these tests bring the launcher
 // up against a real tmux and read the windows afterwards. Tests that keep the
-// launcher alive across a teardown drive it under a PTY (startWidgetEnv) rather
+// launcher alive across a teardown drive it under a PTY (startWidgetCmd) rather
 // than as a tmux window, since the key that presses `s` a second time has to
 // reach a process the landing did not dismiss.
 
@@ -64,10 +64,11 @@ func TestLauncherDown_ComposeDownRemovesTheWindowAndSStartsItAgain(t *testing.T)
 	}
 	identity := compose.ProjectSelection{WorkDir: wd, Project: project}.ProjectIdentity()
 
-	w := startWidgetEnv(t, ctx, env, wd, t.TempDir(), "launcher", tmuxTmpdirEnv(tmuxTmpdir))
+	w := startWidgetCmd(t, ctx,
+		widgetCmd(env, wd, t.TempDir(), "launcher").WithTmuxTmpdir(tmuxTmpdir))
 	w.waitFor(t, project, 10*time.Second)
-	w.send(t, "\r") // enter: the input hands the keyboard to the locations list
-	w.send(t, "s")
+	w.Send("\r") // enter: the input hands the keyboard to the locations list
+	w.Send("s")
 	// The marker before the window: it is the row learning the bring-up
 	// finished, and a teardown that overtook that reply would be undone by it.
 	w.waitFor(t, "○", 40*time.Second)
@@ -75,9 +76,9 @@ func TestLauncherDown_ComposeDownRemovesTheWindowAndSStartsItAgain(t *testing.T)
 
 	// `D` asks before it acts, so the question has to be on screen before the
 	// answer is sent — otherwise y is spent on a launcher that never asked.
-	w.send(t, "D")
+	w.Send("D")
 	w.waitFor(t, project+"? y/n", 10*time.Second)
-	w.send(t, "y")
+	w.Send("y")
 	// The counts are the teardown's own line, and waiting for them is what puts
 	// the window reading after the teardown rather than beside it.
 	w.waitFor(t, "stopped 1, removed 1", 40*time.Second)
@@ -89,7 +90,7 @@ func TestLauncherDown_ComposeDownRemovesTheWindowAndSStartsItAgain(t *testing.T)
 
 	// The same key on the same row: a row left marked running would answer
 	// "already up here" and never reach the backend.
-	w.send(t, "s")
+	w.Send("s")
 	second := waitForStampedWindow(t, tmuxTmpdir, identity, 40*time.Second)
 	if second == first {
 		t.Errorf("the restart landed on window %s, the very one the teardown removed", first)
@@ -126,10 +127,11 @@ func TestLauncherDown_MuxDownRemovesTheWindowAndKeepsCommands(t *testing.T) {
 	}
 	identity := compose.ProjectSelection{WorkDir: wd, Project: project}.ProjectIdentity()
 
-	w := startWidgetEnv(t, ctx, env, wd, t.TempDir(), "launcher", tmuxTmpdirEnv(tmuxTmpdir))
+	w := startWidgetCmd(t, ctx,
+		widgetCmd(env, wd, t.TempDir(), "launcher").WithTmuxTmpdir(tmuxTmpdir))
 	w.waitFor(t, project, 10*time.Second)
-	w.send(t, "\r")
-	w.send(t, "s")
+	w.Send("\r")
+	w.Send("s")
 	w.waitFor(t, "○", 40*time.Second)
 	dashboard := waitForStampedWindow(t, tmuxTmpdir, identity, 30*time.Second)
 
@@ -139,7 +141,7 @@ func TestLauncherDown_MuxDownRemovesTheWindowAndKeepsCommands(t *testing.T) {
 	}
 
 	// `d` asks nothing first: nothing supervised is lost.
-	w.send(t, "d")
+	w.Send("d")
 	w.waitFor(t, "commands still running", 40*time.Second)
 
 	waitForNoStampedWindow(t, tmuxTmpdir, identity, 20*time.Second)
@@ -160,7 +162,7 @@ func TestLauncherDown_MuxDownRemovesTheWindowAndKeepsCommands(t *testing.T) {
 	}
 
 	// The row is startable again, and `s` builds the dashboard back.
-	w.send(t, "s")
+	w.Send("s")
 	rebuilt := waitForStampedWindow(t, tmuxTmpdir, identity, 40*time.Second)
 	if rebuilt == dashboard {
 		t.Errorf("the rebuild landed on window %s, the very one `d` removed", dashboard)
@@ -228,13 +230,13 @@ func TestLauncherDown_MuxDownRestoresABorrowedWindow(t *testing.T) {
 		t.Fatalf("the borrowed window is stamped created (%q); it was opened, not taken over", got)
 	}
 
-	// $TMUX is stripped but TMUX_TMPDIR is left alone (muxlessEnv): the driver
+	// $TMUX is stripped but TMUX_TMPDIR is left alone (Muxless): the driver
 	// comes from the compose file's socket, and redirecting the tmpdir would
 	// resolve that socket name under a different path.
-	w := startWidgetEnv(t, ctx, env, wd, t.TempDir(), "launcher", muxlessEnv())
+	w := startWidgetCmd(t, ctx, widgetCmd(env, wd, t.TempDir(), "launcher").Muxless())
 	w.waitFor(t, project, 10*time.Second)
-	w.send(t, "\r")
-	w.send(t, "d")
+	w.Send("\r")
+	w.Send("d")
 	w.waitFor(t, "commands still running", 40*time.Second)
 
 	if ids := windowIDsOnSocket(t, socket); !slices.Contains(ids, shellWid) {
@@ -300,14 +302,16 @@ func TestLauncherDown_MuxDownRestoresTheWindowTheWidgetRunsIn(t *testing.T) {
 	panes := tmuxRunWithTmpdir(t, tmuxTmpdir, "list-panes", "-t", dashboard, "-F", "#{pane_id}")
 	hostingPane, _, _ := strings.Cut(panes, "\n")
 
-	inDashboard := append(tmuxTmpdirEnv(tmuxTmpdir),
-		"TMUX="+tmuxEnvValue(t, tmuxTmpdir, dashboard),
-		"TMUX_PANE="+hostingPane,
-	)
-	w := startWidgetEnv(t, ctx, env, wd, t.TempDir(), "launcher", inDashboard)
+	inDashboard := widgetCmd(env, wd, t.TempDir(), "launcher").
+		WithTmuxTmpdir(tmuxTmpdir).
+		WithEnv(
+			"TMUX="+tmuxEnvValue(t, tmuxTmpdir, dashboard),
+			"TMUX_PANE="+hostingPane,
+		)
+	w := startWidgetCmd(t, ctx, inDashboard)
 	w.waitFor(t, project, 10*time.Second)
-	w.send(t, "\r")
-	w.send(t, "d")
+	w.Send("\r")
+	w.Send("d")
 	w.waitFor(t, "commands still running", 40*time.Second)
 
 	// Down as far as anything looking for the project is concerned…

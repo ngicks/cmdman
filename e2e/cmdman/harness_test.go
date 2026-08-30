@@ -38,6 +38,7 @@ type Cmd struct {
 	timeout  time.Duration
 	stdin    io.Reader
 	muxless  bool
+	winsize  *pty.Winsize
 }
 
 // execTimeout bounds a single invocation. It is generous because a cold start
@@ -81,9 +82,43 @@ func (c *Cmd) Muxless() *Cmd {
 	return c
 }
 
+// WithTmuxTmpdir points the child at a private default tmux socket: TMUX_TMPDIR
+// is where tmux resolves that socket's path. Muxless goes with it because tmux
+// reads $TMUX ahead of TMUX_TMPDIR, so an inherited one would send the child to
+// the developer's own server instead.
+func (c *Cmd) WithTmuxTmpdir(dir string) *Cmd {
+	return c.Muxless().WithEnv("TMUX_TMPDIR=" + dir)
+}
+
+// WithSize fixes the size of the terminal StartPTY hands the child, for the
+// tests whose subject is what it draws in one.
+func (c *Cmd) WithSize(rows, cols int) *Cmd {
+	c.winsize = &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)}
+	return c
+}
+
 func (c *Cmd) WithStdin(r io.Reader) *Cmd {
 	c.stdin = r
 	return c
+}
+
+// muxlessEnv is hermeticEnviron with $TMUX, $TMUX_PANE and $ZELLIJ stripped: a
+// suite run from inside tmux would otherwise let a child's enclosing-window
+// probe reach the developer's own server. TMUX_PANE goes with them because a
+// teardown reads it to tell whether it is running inside the window it was asked
+// to close, and a pane id inherited from the developer's own tmux names a pane
+// on the fixture's server just as readily.
+//
+// TMUX_TMPDIR is deliberately left alone. tmux resolves a -L socket name under
+// it, so redirecting it — as WithTmuxTmpdir does for the tests that need the
+// default socket — would point the child at a different socket path than the
+// dashboard the fixture built on its dedicated one.
+func muxlessEnv() []string {
+	return slices.DeleteFunc(hermeticEnviron(), func(s string) bool {
+		return strings.HasPrefix(s, "TMUX=") ||
+			strings.HasPrefix(s, "TMUX_PANE=") ||
+			strings.HasPrefix(s, "ZELLIJ=")
+	})
 }
 
 func (c *Cmd) environ() []string {
@@ -173,15 +208,16 @@ type Session struct {
 	waitErr    error
 }
 
-// StartPTY starts the command on a pty and reads from it until it exits. The
-// pty is left at its default size: what attach does with the size it is handed
-// is what several tests assert, so the harness must not pick one.
+// StartPTY starts the command on a pty and reads from it until it exits.
+// Without WithSize the pty is left at its default size: what attach does with
+// the size it is handed is what several tests assert, so the harness must not
+// pick one for them.
 func (c *Cmd) StartPTY(ctx context.Context, t *testing.T) *Session {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 
 	cmd := c.build(ctx)
-	ptmx, err := pty.Start(cmd)
+	ptmx, err := pty.StartWithSize(cmd, c.winsize)
 	if err != nil {
 		cancel()
 		t.Fatalf("start %s under a pty: %v", c.desc(), err)
@@ -243,6 +279,13 @@ func (s *Session) Send(keys string) {
 	}
 }
 
+// SendIfUp writes keys the way Send does but accepts a terminal whose child has
+// already exited, which refuses the write. It is for the dismissals that race a
+// process ending on its own.
+func (s *Session) SendIfUp(keys string) {
+	_, _ = s.ptmx.WriteString(keys)
+}
+
 func (s *Session) Resize(rows, cols int) {
 	s.t.Helper()
 	size := &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)}
@@ -295,6 +338,20 @@ func (s *Session) expectFrom(t *testing.T, off int, pattern string, timeout time
 	}
 }
 
+// WaitWithin is Wait bounded by the caller's own patience, reporting whether
+// the session ended within d. It is for the tests whose subject is that a key
+// ends the process promptly: waiting out the command timeout instead would
+// report a hang as an exit signal long after the fact.
+func (s *Session) WaitWithin(t *testing.T, d time.Duration) (Result, bool) {
+	t.Helper()
+	select {
+	case <-s.done:
+		return s.Wait(t), true
+	case <-time.After(d):
+		return Result{}, false
+	}
+}
+
 // Wait blocks until the session's process exits. The process is bounded by the
 // command timeout, so a session that never exits fails there rather than here.
 func (s *Session) Wait(t *testing.T) Result {
@@ -307,24 +364,4 @@ func (s *Session) Wait(t *testing.T) Result {
 	case <-time.After(time.Second):
 	}
 	return Result{Stdout: strings.TrimSpace(s.Output()), Err: s.waitErr}
-}
-
-// waitAttachExit reaps a pty command the test started by hand, for the tests
-// that have not moved to Session yet.
-func waitAttachExit(t *testing.T, cmd *exec.Cmd, timeout time.Duration) {
-	t.Helper()
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("attach exited with error: %v", err)
-		}
-	case <-time.After(timeout):
-		t.Fatal("attach did not exit")
-	}
 }

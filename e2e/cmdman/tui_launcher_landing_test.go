@@ -96,12 +96,13 @@ func TestLauncherLanding_AttachesFromOutsideTmux(t *testing.T) {
 		t.Fatalf("compose create failed: %v\nstderr:\n%s", err, stderr)
 	}
 
-	// TMUX is stripped from the launcher's environment (tmuxTmpdirEnv), which is
+	// TMUX is stripped from the launcher's environment (WithTmuxTmpdir), which is
 	// exactly what "summoned from outside tmux" means to the driver.
-	w := startWidgetEnv(t, ctx, env, wd, t.TempDir(), "launcher", tmuxTmpdirEnv(tmuxTmpdir))
+	w := startWidgetCmd(t, ctx,
+		widgetCmd(env, wd, t.TempDir(), "launcher").WithTmuxTmpdir(tmuxTmpdir))
 	w.waitFor(t, project, 10*time.Second)
-	w.send(t, "\r") // the input hands the keyboard to the locations list
-	w.send(t, "S")
+	w.Send("\r") // the input hands the keyboard to the locations list
+	w.Send("S")
 
 	// Outside tmux the session is the default "cmdman" one the bring-up creates.
 	window := launcherFallbackWindowName(wd)
@@ -193,16 +194,16 @@ func TestLauncherLanding_StaleEntryForgotten(t *testing.T) {
 
 	// Run the launcher from a directory that is not the project's, so nothing
 	// re-discovers the project by walking into it.
-	w := startWidgetEnv(t, ctx, env, wd, t.TempDir(), "launcher", hermeticEnviron())
+	w := startWidgetCmd(t, ctx, widgetCmd(env, wd, t.TempDir(), "launcher"))
 	w.waitFor(t, project, 10*time.Second)
-	w.send(t, "\r") // the input hands the keyboard to the locations list
-	w.send(t, "S")  // a stale entry cannot land: the reason surfaces on its row
+	w.Send("\r") // the input hands the keyboard to the locations list
+	w.Send("S")  // a stale entry cannot land: the reason surfaces on its row
 	// The row's message names the file that is gone; the removal offer sits at
 	// the end of the same line and is clipped in a pane this narrow, so the
 	// offer's presence is asserted in the launcher unit tests instead.
 	w.waitFor(t, "missing", 10*time.Second)
 
-	w.send(t, "\x04") // ctrl+d: forget it
+	w.Send("\x04") // ctrl+d: forget it
 	w.waitFor(t, "removed from history", 10*time.Second)
 
 	st, err := store.OpenStore(ctx, filepath.Join(env.dataHome, "commands.db"), true)

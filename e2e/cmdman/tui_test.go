@@ -1,18 +1,35 @@
 package cmdman_test
 
 import (
-	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/ngicks/cmdman/cmdman"
 )
+
+// tuiCmd builds `cmdman tui` on the terminal these tests read it in.
+func tuiCmd(env *testEnv, args ...string) *Cmd {
+	return env.Cmd(append([]string{"tui"}, args...)...).
+		WithEnv("TERM=xterm-256color").
+		WithSize(30, 100)
+}
+
+// quitTUI presses 'q' and requires the TUI to go, which is the other half of
+// every render assertion: a screen that never comes back is not a working TUI.
+func quitTUI(t *testing.T, sess *Session) {
+	t.Helper()
+	sess.Send("q")
+	res, exited := sess.WaitWithin(t, 4*time.Second)
+	if !exited {
+		t.Fatalf("TUI did not quit on 'q' within 4s; got:\n%q", sess.Output())
+	}
+	if res.Err != nil {
+		t.Fatalf("tui exited with error: %v\noutput:\n%q", res.Err, sess.Output())
+	}
+}
 
 // Live smoke test for the bubbletea-v2 TUI: launch `cmdman tui` under a PTY,
 // confirm it renders the shell (does not hang on startup), responds to a tab
@@ -22,100 +39,45 @@ func TestTUISmoke_RendersAndQuits(t *testing.T) {
 	env := newTestEnv(t)
 
 	// Give the TUI some content to list.
-	id := env.run(ctx, "run", "-n", "tui-smoke", "--", "/bin/sh", "-c", "sleep 60")
-	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
+	id := env.Run(ctx, "tui-smoke", "/bin/sh", "-c", "sleep 60")
 	env.waitForState(ctx, id, "running", defaultTimeout)
 
-	tuiCmd := exec.CommandContext(ctx, cmdmanBin, "tui")
-	tuiCmd.Env = append(hermeticEnviron(),
-		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
-		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
-		"TERM=xterm-256color")
-
-	ptmx, err := pty.StartWithSize(tuiCmd, &pty.Winsize{Rows: 30, Cols: 100})
-	if err != nil {
-		t.Fatalf("start tui pty: %v", err)
-	}
-	defer ptmx.Close()
-
-	var mu sync.Mutex
-	var out bytes.Buffer
-	go func() {
-		b := make([]byte, 8192)
-		for {
-			n, rerr := ptmx.Read(b)
-			if n > 0 {
-				mu.Lock()
-				out.Write(b[:n])
-				mu.Unlock()
-			}
-			if rerr != nil {
-				return
-			}
-		}
-	}()
-	snapshot := func() string {
-		mu.Lock()
-		defer mu.Unlock()
-		return out.String()
-	}
+	sess := tuiCmd(env).StartPTY(ctx, t)
 
 	// 1) It must render the shell within a few seconds (no startup hang).
-	waitFor := func(what string, deadline time.Duration) {
-		t.Helper()
-		end := time.Now().Add(deadline)
-		for time.Now().Before(end) {
-			if strings.Contains(snapshot(), what) {
-				return
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		t.Fatalf("TUI never rendered %q; got:\n%q", what, snapshot())
-	}
-	waitFor("cmdman tui", 5*time.Second)
+	sess.Expect(t, "cmdman tui", 5*time.Second)
 	for _, want := range []string{"Commands", "Compose", "Filter"} {
-		if !strings.Contains(snapshot(), want) {
-			t.Errorf("TUI render missing %q; got:\n%q", want, snapshot())
+		if !strings.Contains(sess.Output(), want) {
+			t.Errorf("TUI render missing %q; got:\n%q", want, sess.Output())
 		}
 	}
 	// The running command must flow from the backend into the render (proves the
 	// data path, not just the chrome, works under v2).
-	if !strings.Contains(snapshot(), "tui-smoke") {
-		t.Errorf("TUI did not list the running command %q; got:\n%q", "tui-smoke", snapshot())
+	if !strings.Contains(sess.Output(), "tui-smoke") {
+		t.Errorf("TUI did not list the running command %q; got:\n%q", "tui-smoke", sess.Output())
 	}
-	t.Logf("initial render ok (%d bytes captured)", len(snapshot()))
 
-	// 2) Drive a tab switch (Commands -> Compose) and confirm the screen
-	// actually repaints in response to input.
-	before := len(snapshot())
-	_, _ = ptmx.Write([]byte("\t"))
-	time.Sleep(300 * time.Millisecond)
-	if len(snapshot()) <= before {
-		t.Errorf("tab switch produced no further output (input not handled)")
-	}
-	// Open the filter, type, and escape back out.
-	_, _ = ptmx.Write([]byte("/"))
+	// 2) Drive a tab switch (Commands -> Compose) and confirm the screen actually
+	// repaints in response to input. Further output at all is the assertion: the
+	// renderer repaints the cells that changed, so the new tab's own strings need
+	// never reach the stream contiguously.
+	mark := len(sess.Output())
+	sess.Send("\t")
+	waitUntil(t, 5*time.Second, func() bool { return len(sess.Output()) > mark },
+		"tab switch produced no further output (input not handled)")
+
+	// Open the filter, type, and escape back out. The pauses keep the escape from
+	// arriving in the same read as the text before it, where the input decoder
+	// would take it for the head of an escape sequence rather than a bare esc.
+	sess.Send("/")
 	time.Sleep(100 * time.Millisecond)
-	_, _ = ptmx.Write([]byte("abc"))
+	sess.Send("abc")
 	time.Sleep(100 * time.Millisecond)
-	_, _ = ptmx.Write([]byte("\x1b")) // esc out of filter
+	sess.Send("\x1b")
 	time.Sleep(100 * time.Millisecond)
 
 	// 3) Quit cleanly with 'q'.
-	_, _ = ptmx.Write([]byte("q"))
-
-	done := make(chan error, 1)
-	go func() { done <- tuiCmd.Wait() }()
-	select {
-	case werr := <-done:
-		if werr != nil {
-			t.Fatalf("tui exited with error: %v\noutput:\n%q", werr, snapshot())
-		}
-	case <-time.After(4 * time.Second):
-		_ = tuiCmd.Process.Kill()
-		t.Fatalf("TUI did not quit on 'q' within 4s; got:\n%q", snapshot())
-	}
-	t.Logf("TUI quit cleanly on 'q'")
+	quitTUI(t, sess)
 }
 
 // --tab validation happens in RunE (via tui.ParseTab) before the TUI launches,
@@ -146,68 +108,13 @@ func TestTUI_TabFlagStartsOnCompose(t *testing.T) {
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
-	tuiCmd := exec.CommandContext(ctx, cmdmanBin, "tui", "--tab=compose")
-	tuiCmd.Env = append(hermeticEnviron(),
-		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
-		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
-		"TERM=xterm-256color")
+	sess := tuiCmd(env, "--tab=compose").StartPTY(ctx, t)
 
-	ptmx, err := pty.StartWithSize(tuiCmd, &pty.Winsize{Rows: 30, Cols: 100})
-	if err != nil {
-		t.Fatalf("start tui pty: %v", err)
-	}
-	defer ptmx.Close()
-
-	var mu sync.Mutex
-	var out bytes.Buffer
-	go func() {
-		b := make([]byte, 8192)
-		for {
-			n, rerr := ptmx.Read(b)
-			if n > 0 {
-				mu.Lock()
-				out.Write(b[:n])
-				mu.Unlock()
-			}
-			if rerr != nil {
-				return
-			}
-		}
-	}()
-	snapshot := func() string {
-		mu.Lock()
-		defer mu.Unlock()
-		return out.String()
-	}
-
-	waitFor := func(what string, deadline time.Duration) {
-		t.Helper()
-		end := time.Now().Add(deadline)
-		for time.Now().Before(end) {
-			if strings.Contains(snapshot(), what) {
-				return
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		t.Fatalf("TUI never rendered %q; got:\n%q", what, snapshot())
-	}
-	waitFor("cmdman tui", 5*time.Second)
+	sess.Expect(t, "cmdman tui", 5*time.Second)
 	// The Compose-tab body box title proves we started on the Compose tab.
-	waitFor("Compose projects", 5*time.Second)
+	sess.Expect(t, "Compose projects", 5*time.Second)
 
-	// Quit cleanly with 'q'.
-	_, _ = ptmx.Write([]byte("q"))
-	done := make(chan error, 1)
-	go func() { done <- tuiCmd.Wait() }()
-	select {
-	case werr := <-done:
-		if werr != nil {
-			t.Fatalf("tui exited with error: %v\noutput:\n%q", werr, snapshot())
-		}
-	case <-time.After(4 * time.Second):
-		_ = tuiCmd.Process.Kill()
-		t.Fatalf("TUI did not quit on 'q' within 4s; got:\n%q", snapshot())
-	}
+	quitTUI(t, sess)
 }
 
 // --workdir overrides the effective work directory used to discover the
@@ -222,70 +129,14 @@ func TestTUI_WorkdirFlagDiscoversComposeProject(t *testing.T) {
 	wd := composeWorkdir(t)
 	writeComposeFile(t, wd, composeBasicYAML("tuiwd"))
 
-	tuiCmd := exec.CommandContext(ctx, cmdmanBin, "tui", "--workdir", wd, "--tab=compose")
-	tuiCmd.Dir = wd
-	tuiCmd.Env = append(hermeticEnviron(),
-		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
-		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
-		"TERM=xterm-256color")
+	sess := tuiCmd(env, "--workdir", wd, "--tab=compose").InDir(wd).StartPTY(ctx, t)
 
-	ptmx, err := pty.StartWithSize(tuiCmd, &pty.Winsize{Rows: 30, Cols: 100})
-	if err != nil {
-		t.Fatalf("start tui pty: %v", err)
-	}
-	defer ptmx.Close()
-
-	var mu sync.Mutex
-	var out bytes.Buffer
-	go func() {
-		b := make([]byte, 8192)
-		for {
-			n, rerr := ptmx.Read(b)
-			if n > 0 {
-				mu.Lock()
-				out.Write(b[:n])
-				mu.Unlock()
-			}
-			if rerr != nil {
-				return
-			}
-		}
-	}()
-	snapshot := func() string {
-		mu.Lock()
-		defer mu.Unlock()
-		return out.String()
-	}
-
-	waitFor := func(what string, deadline time.Duration) {
-		t.Helper()
-		end := time.Now().Add(deadline)
-		for time.Now().Before(end) {
-			if strings.Contains(snapshot(), what) {
-				return
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		t.Fatalf("TUI never rendered %q; got:\n%q", what, snapshot())
-	}
-	waitFor("Compose projects", 5*time.Second)
+	sess.Expect(t, "Compose projects", 5*time.Second)
 	// The never-run project is discoverable only via the workdir's compose file,
 	// so listing it proves --workdir reached the backend discovery path.
-	waitFor("tuiwd", 5*time.Second)
+	sess.Expect(t, "tuiwd", 5*time.Second)
 
-	// Quit cleanly with 'q'.
-	_, _ = ptmx.Write([]byte("q"))
-	done := make(chan error, 1)
-	go func() { done <- tuiCmd.Wait() }()
-	select {
-	case werr := <-done:
-		if werr != nil {
-			t.Fatalf("tui exited with error: %v\noutput:\n%q", werr, snapshot())
-		}
-	case <-time.After(4 * time.Second):
-		_ = tuiCmd.Process.Kill()
-		t.Fatalf("TUI did not quit on 'q' within 4s; got:\n%q", snapshot())
-	}
+	quitTUI(t, sess)
 }
 
 // The TUI's top bar shows the working directory it is scoped to (the process
@@ -302,70 +153,14 @@ func TestTUI_TopBarShowsCwd(t *testing.T) {
 		t.Fatalf("mkdir workdir: %v", err)
 	}
 
-	tuiCmd := exec.CommandContext(ctx, cmdmanBin, "tui", "--workdir", wd)
-	tuiCmd.Dir = wd
-	tuiCmd.Env = append(hermeticEnviron(),
-		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
-		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
-		"TERM=xterm-256color")
+	sess := tuiCmd(env, "--workdir", wd).InDir(wd).StartPTY(ctx, t)
 
-	ptmx, err := pty.StartWithSize(tuiCmd, &pty.Winsize{Rows: 30, Cols: 100})
-	if err != nil {
-		t.Fatalf("start tui pty: %v", err)
-	}
-	defer ptmx.Close()
-
-	var mu sync.Mutex
-	var out bytes.Buffer
-	go func() {
-		b := make([]byte, 8192)
-		for {
-			n, rerr := ptmx.Read(b)
-			if n > 0 {
-				mu.Lock()
-				out.Write(b[:n])
-				mu.Unlock()
-			}
-			if rerr != nil {
-				return
-			}
-		}
-	}()
-	snapshot := func() string {
-		mu.Lock()
-		defer mu.Unlock()
-		return out.String()
-	}
-
-	waitFor := func(what string, deadline time.Duration) {
-		t.Helper()
-		end := time.Now().Add(deadline)
-		for time.Now().Before(end) {
-			if strings.Contains(snapshot(), what) {
-				return
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		t.Fatalf("TUI never rendered %q; got:\n%q", what, snapshot())
-	}
-	waitFor("cmdman tui", 5*time.Second)
+	sess.Expect(t, "cmdman tui", 5*time.Second)
 	// The top bar labels the working directory and keeps its leaf visible.
-	waitFor("cwd:", 5*time.Second)
-	waitFor("cwdmarker", 5*time.Second)
+	sess.Expect(t, "cwd:", 5*time.Second)
+	sess.Expect(t, "cwdmarker", 5*time.Second)
 
-	// Quit cleanly with 'q'.
-	_, _ = ptmx.Write([]byte("q"))
-	done := make(chan error, 1)
-	go func() { done <- tuiCmd.Wait() }()
-	select {
-	case werr := <-done:
-		if werr != nil {
-			t.Fatalf("tui exited with error: %v\noutput:\n%q", werr, snapshot())
-		}
-	case <-time.After(4 * time.Second):
-		_ = tuiCmd.Process.Kill()
-		t.Fatalf("TUI did not quit on 'q' within 4s; got:\n%q", snapshot())
-	}
+	quitTUI(t, sess)
 }
 
 // TestTUI_PopupRunsTheFullTUI guards the other user of the popup seam: `cmdman
@@ -383,7 +178,7 @@ func TestTUI_PopupRunsTheFullTUI(t *testing.T) {
 	writeComposeFile(t, wd, composeBasicYAML("popupfull"))
 
 	tmuxRunWithTmpdir(t, tmuxTmpdir, "new-session", "-d", "-s", "popup", "-n", "shell")
-	client := attachTmuxClient(t, ctx, tmuxTmpdir, "popup")
+	client := attachTmuxClient(t, ctx, env, tmuxTmpdir, "popup")
 
 	pane := tmuxRunWithTmpdir(t, tmuxTmpdir,
 		"new-window", "-d", "-a", "-t", "=popup:", "-P", "-F", "#{pane_id}",
@@ -395,15 +190,15 @@ func TestTUI_PopupRunsTheFullTUI(t *testing.T) {
 
 	// The tab bar is the full TUI and nothing else: a widget popup has no tabs.
 	deadline := time.Now().Add(20 * time.Second)
-	for !strings.Contains(client.snapshot(), "Compose") {
+	for !strings.Contains(client.Output(), "Compose") {
 		if time.Now().After(deadline) {
 			t.Fatalf("the popup never rendered the full TUI.\nclient:\n%q\nlauncher pane:\n%s",
-				client.snapshot(), capturePane(t, tmuxTmpdir, pane))
+				client.Output(), capturePane(t, tmuxTmpdir, pane))
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	client.send(t, "q")
+	client.Send("q")
 }
 
 // The popup geometry flags only apply with --popup; using one without it is

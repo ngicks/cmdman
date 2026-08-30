@@ -1,7 +1,6 @@
 package cmdman_test
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -13,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
@@ -134,11 +132,11 @@ func windowMarker(t *testing.T, socket, windowID string) int {
 	return marker
 }
 
-// muxExec runs the cmdman binary like testEnv.exec, but with $TMUX and $ZELLIJ
-// stripped from the environment so the mux driver deterministically takes the
-// "outside a multiplexer" path (build detached + print the attach hint),
-// regardless of whether the test process itself is running inside tmux. The
-// target server is still the dedicated driver_opt.socket from the spec.
+// muxExec runs the cmdman binary like testEnv.exec, but muxless, so the mux
+// driver deterministically takes the "outside a multiplexer" path (build
+// detached + print the attach hint) regardless of whether the test process
+// itself is running inside tmux. The target server is still the dedicated
+// driver_opt.socket from the spec.
 func (e *testEnv) muxExec(ctx context.Context, args ...string) (string, string, error) {
 	return e.muxExecInDir(ctx, "", args...)
 }
@@ -152,25 +150,8 @@ func (e *testEnv) muxExecInDir(
 	args ...string,
 ) (string, string, error) {
 	e.t.Helper()
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, cmdmanBin, args...)
-	cmd.Dir = dir
-	base := slices.DeleteFunc(hermeticEnviron(), func(s string) bool {
-		return strings.HasPrefix(s, "TMUX=") || strings.HasPrefix(s, "ZELLIJ=")
-	})
-	base = append(base,
-		cmdman.ENV_CMDMAN_DATA_DIR+"="+e.dataHome,
-		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+e.runtimeDir,
-		cmdman.ENV_CMDMAN_CONF+"="+e.confPath,
-	)
-	cmd.Env = base
-	cmd.WaitDelay = 3 * time.Second
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
+	res := e.Cmd(args...).InDir(dir).Muxless().Exec(ctx)
+	return res.Stdout, res.Stderr, res.Err
 }
 
 // tmuxTmpdirEnv returns a copy of the current environment with the inherited
@@ -204,22 +185,8 @@ func (e *testEnv) muxExecWithTmpdir(
 	args ...string,
 ) (string, string, error) {
 	e.t.Helper()
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, cmdmanBin, args...)
-	base := append(
-		tmuxTmpdirEnv(tmuxTmpdir),
-		cmdman.ENV_CMDMAN_DATA_DIR+"="+e.dataHome,
-		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+e.runtimeDir,
-		cmdman.ENV_CMDMAN_CONF+"="+e.confPath,
-	)
-	cmd.Env = base
-	cmd.WaitDelay = 3 * time.Second
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
+	res := e.Cmd(args...).WithTmuxTmpdir(tmuxTmpdir).Exec(ctx)
+	return res.Stdout, res.Stderr, res.Err
 }
 
 // tmuxRunWithTmpdir is like tmuxRun but sets TMUX_TMPDIR so the command finds

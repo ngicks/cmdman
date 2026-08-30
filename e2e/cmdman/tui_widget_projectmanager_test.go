@@ -1,31 +1,10 @@
 package cmdman_test
 
 import (
-	"slices"
 	"strings"
 	"testing"
 	"time"
 )
-
-// muxlessEnv is the process environment with $TMUX, $TMUX_PANE and $ZELLIJ
-// stripped, the way muxExec builds the environment it runs the CLI under: a
-// suite run from inside tmux would otherwise let the widget's enclosing-window
-// probe reach the developer's own server. TMUX_PANE goes with them because a
-// teardown reads it to tell whether it is running inside the window it was asked
-// to close, and a pane id inherited from the developer's own tmux names a pane
-// on the fixture's server just as readily.
-//
-// TMUX_TMPDIR is deliberately left alone. tmux resolves a -L socket name under
-// it, so redirecting it — as tmuxTmpdirEnv does for the tests that need the
-// default socket — would point the widget at a different socket path than the
-// dashboard the fixture built on its dedicated one.
-func muxlessEnv() []string {
-	return slices.DeleteFunc(hermeticEnviron(), func(s string) bool {
-		return strings.HasPrefix(s, "TMUX=") ||
-			strings.HasPrefix(s, "TMUX_PANE=") ||
-			strings.HasPrefix(s, "ZELLIJ=")
-	})
-}
 
 // The project-manager widget against live projects (PLAN step 8): the token
 // probe standing alone, the probe trail when nothing answers, and the two
@@ -64,8 +43,9 @@ func TestTUIWidget_ProjectManagerResolvesByToken(t *testing.T) {
 	// token is matched against the listed windows, so no client is attached and
 	// the dashboard is left where `up --mux` put it — in the background.
 	elsewhere := t.TempDir()
-	w := startWidgetEnv(t, ctx, env, elsewhere, elsewhere, "project-manager",
-		tmuxTmpdirEnv(tmuxTmpdir), "--mux-token", wid)
+	w := startWidgetCmd(t, ctx,
+		widgetCmd(env, elsewhere, elsewhere, "project-manager", "--mux-token", wid).
+			WithTmuxTmpdir(tmuxTmpdir))
 
 	// The head names the project the token resolved to, and the service row is
 	// that project's own — neither string is reachable from where the process
@@ -77,7 +57,7 @@ func TestTUIWidget_ProjectManagerResolvesByToken(t *testing.T) {
 	// commands, so ×3 is what proves the load carried the resolved project's
 	// work directory rather than falling back to the panel's own.
 	w.waitFor(t, "×3", 20*time.Second)
-	if snap := w.snapshot(); strings.Contains(snap, "no project") {
+	if snap := w.Output(); strings.Contains(snap, "no project") {
 		t.Errorf("the token probe should have answered; got:\n%q", snap)
 	}
 	w.quit(t)
@@ -120,13 +100,14 @@ func TestTUIWidget_ProjectManagerActsOnTheProjectItShows(t *testing.T) {
 	// leaves running replicas behind.
 	elsewhere := t.TempDir()
 	t.Cleanup(func() { cleanupProject(ctx, env, elsewhere, project) })
-	w := startWidgetEnv(t, ctx, env, "", elsewhere, "project-manager",
-		tmuxTmpdirEnv(tmuxTmpdir), "--mux-token", wid)
+	w := startWidgetCmd(t, ctx,
+		widgetCmd(env, "", elsewhere, "project-manager", "--mux-token", wid).
+			WithTmuxTmpdir(tmuxTmpdir))
 
 	// The count has to be on screen before the key is sent: a key that arrives
 	// while the list is still loading selects no row and does nothing.
 	w.waitFor(t, "×3", 20*time.Second)
-	w.send(t, "+")
+	w.Send("+")
 	w.waitFor(t, service+" scaled to 4", 60*time.Second)
 
 	// Read the moment the scale reported back, before the row is expected to
@@ -143,14 +124,14 @@ func TestTUIWidget_ProjectManagerActsOnTheProjectItShows(t *testing.T) {
 		t.Fatalf("+ on the token path: the project holds %d replicas (want 4), "+
 			"the panel's own directory holds %d commands (want 0), and %d commands "+
 			"carry the project label anywhere (want 4); panel:\n%q",
-			atProject, atPanel, anywhere, w.snapshot())
+			atProject, atPanel, anywhere, w.Output())
 	}
 
 	// The count is redrawn in place, one cell of an otherwise unchanged row, so
 	// the row only reaches the captured stream whole once the widget repaints —
 	// and the repaint is also what says the reload behind the key has answered,
 	// which is what unblocks the next action key.
-	w.resize(t, 24, 80)
+	w.Resize(24, 80)
 	w.waitFor(t, "×4", 20*time.Second)
 
 	// The cycle is the same question asked of the dashboard: the position is
@@ -159,13 +140,13 @@ func TestTUIWidget_ProjectManagerActsOnTheProjectItShows(t *testing.T) {
 	// no window). The note is drawn only once the reload behind it answered,
 	// which is what makes the state below readable — the pane is respawned
 	// before the position is written (cmdman/mux/cycle_scale.go:237-252).
-	w.send(t, "l")
+	w.Send("l")
 	w.waitFor(t, "cycled shown replica of "+service, 30*time.Second)
 	if got := tmuxWindowOptionTmpdir(t, tmuxTmpdir, window, "@cmdman_scale"); !strings.Contains(
 		got, service+"=2",
 	) {
 		t.Fatalf("@cmdman_scale = %q, want it to carry %s=2; panel:\n%q",
-			got, service, w.snapshot())
+			got, service, w.Output())
 	}
 	w.quit(t)
 }
@@ -181,8 +162,9 @@ func TestTUIWidget_ProjectManagerBogusTokenNamesEveryProbe(t *testing.T) {
 	// A TMUX_TMPDIR of its own with no server under it, so the token cannot
 	// match a window anywhere and no developer session is reachable either.
 	elsewhere := t.TempDir()
-	w := startWidgetEnv(t, ctx, env, elsewhere, elsewhere, "project-manager",
-		tmuxTmpdirEnv(t.TempDir()), "--mux-token", "@999")
+	w := startWidgetCmd(t, ctx,
+		widgetCmd(env, elsewhere, elsewhere, "project-manager", "--mux-token", "@999").
+			WithTmuxTmpdir(t.TempDir()))
 
 	// Single tokens, not phrases: the trail is word-wrapped into the popup
 	// width, so "enclosing window" can straddle a line break while the words it
@@ -225,18 +207,18 @@ func TestTUIWidget_ProjectManagerScalesService(t *testing.T) {
 
 	// The panel stands in the project's own directory: the cwd probe is what
 	// resolves it, and the scale it runs loads the compose file from there too.
-	w := startWidgetEnv(t, ctx, env, wd, wd, "project-manager", muxlessEnv())
+	w := startWidgetCmd(t, ctx, widgetCmd(env, wd, wd, "project-manager").Muxless())
 
 	// The count has to be on screen before the key is sent: a key that arrives
 	// while the list is still loading selects no row and does nothing.
 	w.waitFor(t, "×3", 20*time.Second)
-	w.send(t, "+")
+	w.Send("+")
 	// The panel's own report that the backend call returned, which is also what
 	// tells the reload below apart from the load before the key.
 	w.waitFor(t, "web scaled to 4", 60*time.Second)
 	// The count is redrawn in place, one cell of an otherwise unchanged row, so
 	// the row only reaches the captured stream whole once the widget repaints.
-	w.resize(t, 24, 80)
+	w.Resize(24, 80)
 	w.waitFor(t, "×4", 20*time.Second)
 
 	// The row is the panel's own reading; the store is what the scale actually
@@ -247,7 +229,7 @@ func TestTUIWidget_ProjectManagerScalesService(t *testing.T) {
 	)
 	if len(entries) != 4 {
 		t.Fatalf("project holds %d replicas after +, want 4; panel:\n%q",
-			len(entries), w.snapshot())
+			len(entries), w.Output())
 	}
 	w.quit(t)
 }
@@ -287,12 +269,12 @@ func TestTUIWidget_ProjectManagerCyclesShownReplica(t *testing.T) {
 	wid := tmuxWindowID(t, socket, "cmdman-"+project)
 	waitForPaneTitle(t, socket, wid, "web-1", 5*time.Second)
 
-	w := startWidgetEnv(t, ctx, env, wd, wd, "project-manager", muxlessEnv())
+	w := startWidgetCmd(t, ctx, widgetCmd(env, wd, wd, "project-manager").Muxless())
 
 	// Nothing has been cycled yet, so no window holds a position: the unknown
 	// badge is both the loaded state and the proof the row is a cycle target.
 	w.waitFor(t, "[?]", 20*time.Second)
-	w.send(t, "l")
+	w.Send("l")
 
 	waitForPaneTitle(t, socket, wid, "web-2", 20*time.Second)
 	// The note is only drawn once the reload behind it has answered — while it
@@ -303,9 +285,9 @@ func TestTUIWidget_ProjectManagerCyclesShownReplica(t *testing.T) {
 	// while @cmdman_scale is still unset.
 	w.waitFor(t, "cycled shown replica of web", 20*time.Second)
 	if got := tmuxWindowOption(t, socket, wid, "@cmdman_scale"); !strings.Contains(got, "web=2") {
-		t.Fatalf("@cmdman_scale = %q, want it to carry web=2; panel:\n%q", got, w.snapshot())
+		t.Fatalf("@cmdman_scale = %q, want it to carry web=2; panel:\n%q", got, w.Output())
 	}
-	w.resize(t, 24, 80)
+	w.Resize(24, 80)
 	w.waitFor(t, "[2]", 20*time.Second)
 	w.quit(t)
 }

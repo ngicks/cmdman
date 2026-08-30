@@ -18,8 +18,7 @@ func TestStale_DetectedOnLs(t *testing.T) {
 	env := newTestEnv(t)
 
 	// Start a command.
-	id := env.run(ctx, "run", "-n", "stale-target", "--", "/bin/sh", "-c", "sleep 300")
-	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
+	env.Run(ctx, "stale-target", "/bin/sh", "-c", "sleep 300")
 	env.waitForState(ctx, "stale-target", "running", defaultTimeout)
 
 	// Get the monitor PID from inspect.
@@ -69,6 +68,9 @@ func TestStale_DetectedOnStop(t *testing.T) {
 	}
 
 	id := "stale-stop-test-id"
+	// Not an invocation the harness builder could compose: this is the recorded
+	// configuration of a command nothing ever spawns, planted so `stop` finds a
+	// row whose monitor is already gone.
 	cfg := &model.CommandConfig{
 		Argv:            []string{"/bin/sh", "-c", "sleep 300"},
 		Dir:             env.dataHome,
@@ -124,7 +126,8 @@ func TestStale_AutoRemoveOnStale(t *testing.T) {
 	}
 	defer st.Close()
 
-	// Create a fake command that looks running but has a dead PID.
+	// Create a fake command that looks running but has a dead PID. Its Env, like
+	// the one above, is recorded configuration and not a child being spawned.
 	id := "stale-auto-rm-test-id"
 	cfg := &model.CommandConfig{
 		Argv:            []string{"/bin/sh", "-c", "echo fake"},

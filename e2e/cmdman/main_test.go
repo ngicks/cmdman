@@ -158,6 +158,16 @@ func (e *testEnv) Create(ctx context.Context, name string, argv ...string) strin
 	return id
 }
 
+// Run is Create for a command that has to be running: create and start in one,
+// with the same registered removal.
+func (e *testEnv) Run(ctx context.Context, name string, argv ...string) string {
+	e.t.Helper()
+	id := e.Cmd(slices.Concat([]string{"run", "-n", name, "--"}, argv)...).Run(ctx, e.t)
+	// Not ctx: cleanup runs after the test's context is already cancelled.
+	e.t.Cleanup(func() { e.cleanupCommand(context.Background(), name) })
+	return id
+}
+
 // waitForState polls "cmdman inspect" until the command reaches the desired state
 // or the timeout is reached.
 func (e *testEnv) waitForState(ctx context.Context, idOrName, state string, timeout time.Duration) {

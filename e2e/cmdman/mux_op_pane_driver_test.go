@@ -93,21 +93,19 @@ func startMuxOpSession(
 ) (windowID, paneID string) {
 	t.Helper()
 
-	env := [][2]string{
+	res := e.Tool("tmux", "-L", socket,
+		"new-session", "-d", "-s", session, "-n", window, "-x", "200", "-y", "50").
+		Exec(t.Context())
+	if res.Err != nil {
+		t.Fatalf("tmux new-session %s: %v\n%s", session, res.Err, res.Stderr)
+	}
+	// Tool carried these into the process that started the server; the server
+	// needs its own copy for the panes it opens later.
+	for _, kv := range [][2]string{
 		{cmdman.ENV_CMDMAN_DATA_DIR, e.dataHome},
 		{cmdman.ENV_CMDMAN_RUNTIME_DIR, e.runtimeDir},
 		{cmdman.ENV_CMDMAN_CONF, e.confPath},
-	}
-	cmd := exec.Command("tmux", "-L", socket,
-		"new-session", "-d", "-s", session, "-n", window, "-x", "200", "-y", "50")
-	cmd.Env = hermeticEnviron()
-	for _, kv := range env {
-		cmd.Env = append(cmd.Env, kv[0]+"="+kv[1])
-	}
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("tmux new-session %s: %v\n%s", session, err, strings.TrimSpace(string(out)))
-	}
-	for _, kv := range env {
+	} {
 		tmuxRun(t, socket, "set-environment", "-g", kv[0], kv[1])
 	}
 
@@ -339,8 +337,7 @@ func muxOpPaneTitles(t *testing.T, socket, windowID string) []string {
 func startMuxOpCommands(t *testing.T, ctx context.Context, e *testEnv, names ...string) {
 	t.Helper()
 	for _, name := range names {
-		e.run(ctx, "run", "-n", name, "--", "/bin/sh", "-c", "sleep 300")
-		t.Cleanup(func() { e.cleanupCommand(ctx, name) })
+		e.Run(ctx, name, "/bin/sh", "-c", "sleep 300")
 		e.waitForState(ctx, name, "running", defaultTimeout)
 	}
 }
