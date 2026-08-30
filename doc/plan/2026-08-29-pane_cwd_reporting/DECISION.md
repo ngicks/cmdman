@@ -101,6 +101,16 @@ CLI-output struct in `cmdman/cmdman_runtime_state.go`) and its
 inspect/status cwd field. Watch tests updated: the opening snapshot now
 carries the seeded configured dir instead of being empty.
 
+## D9 — replay re-emit terminates with ST, not BEL [automatic]
+
+Decided during implementation (2026-08-30, user away): the synthesized OSC 7
+in the attach replay ends with `ESC \` instead of `\x07`. The seed puts the
+sequence in every replay, and a BEL terminator tripped the bell-block e2e
+guarantee (TestHooks_BlockKeepsBellFromViewers scans the viewer stream for
+any 0x07): a viewer that blocks bells must not receive a stray BEL from the
+monitor itself. The payload still goes out verbatim; only the terminator
+differs from the plan's literal, and terminals/tmux accept both.
+
 ## D6 — frame workdir via self-resolve, enabled by the token (decided 2026-08-30, "then self-resolve")
 
 Open question 6 resolved: no `--workdir` flag. Once the switcher holds a

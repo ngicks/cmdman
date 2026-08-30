@@ -16,18 +16,22 @@ Worktree: `feat-pane-cwd` (branch `feat-pane-cwd`, based on `main` @ c9d6ff4).
       synthesized OSC 7 at replay start" (d6b2e96)
 - [x] 4. hook_filter accounting — delivers PLAN scope "hook-filter
       accounting for the newly captured kind" (f8fd743)
-- [ ] 5. Proto `RuntimeState.cwd` + buf regen — delivers D3 "add cwd to
-      proto RuntimeState now"
-- [ ] 6. Viewer chdir (`AttachOptions.WorkDir`) — delivers IDEA U1 "chdir'd
+- [x] 5. Proto `RuntimeState.cwd` + buf regen — delivers D3 "add cwd to
+      proto RuntimeState now"; also mirrored on the exported service
+      RuntimeState struct (D8) (e011ef5)
+- [x] 6. Viewer chdir (`AttachOptions.WorkDir`) — delivers IDEA U1 "chdir'd
       to the command's Dir at attach start" and U4 best-effort failure
-- [ ] 7. Switcher `--mux-token` via frame argv — delivers D5 "the frame
-      builder passes the enclosing window's id as --mux-token"
-- [ ] 8. Frame chdir on active-group resolve — delivers D4 "frame/switcher
+      (e33cbca)
+- [x] 7. Switcher `--mux-token` via frame argv — delivers D5 "the frame
+      builder passes the enclosing window's id as --mux-token" (640a05d;
+      flag not hoisted to the widget parent — launcher has no identity)
+- [x] 8. Frame chdir on active-group resolve — delivers D4 "frame/switcher
       panes join Leg A" per D6 "chdirs when the active group resolves"
-- [ ] 9. E2E coverage — repo rule "implement e2e tests if any existing test
-      is not covering the case"
-- [ ] 10. Man page + inspect/status + widget-flag docs — checklist docs
-      coverage
+      (ba5029b)
+- [x] 9. E2E coverage — repo rule "implement e2e tests if any existing test
+      is not covering the case" (3487e52)
+- [x] 10. Man page + inspect/status + widget-flag docs — checklist docs
+      coverage (b73d187)
 
 ## Next action
 
