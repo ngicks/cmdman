@@ -116,10 +116,13 @@ half of what the first entry left, not half of the window.
 
 - `switcher`: the project switcher.
 
-A component entry runs `cmdman tui widget <name> --no-quit` in its pane, using
-the same cmdman binary that docked the frame. The widgets and their key
-bindings are described in [cmdman-tui(1)](./cmdman-tui.1.md). `--no-quit` is
-always applied, so no keypress can leave a frame pane empty.
+A component entry runs `cmdman tui widget <name> --no-quit --mux-token <window>`
+in its pane, using the same cmdman binary that docked the frame. The widgets and
+their key bindings are described in [cmdman-tui(1)](./cmdman-tui.1.md).
+`--no-quit` is always applied, so no keypress can leave a frame pane empty. The
+token names the window the frame is carved around, so a docked widget acts on
+that window's project rather than on whichever window the multiplexer client
+last looked at; it is left off only where no window resolved.
 
 Any other `component:` value is an error. A widget that is not built in is
 docked as a `command:` entry naming its own argv, for example
