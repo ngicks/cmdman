@@ -231,11 +231,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case launcherForgotMsg:
 		return m.onForgot(msg), nil
 	case core.MuxDownMsg:
-		m.note = msg.Status()
-		return m, nil
+		return m.onMuxDown(msg), nil
 	case core.ComposeDownMsg:
-		m.note = msg.Status()
-		return m, nil
+		return m.onComposeDown(msg), nil
 	case core.ReloadTickMsg:
 		return m.resolveTyped(msg)
 	case launcherResolvedMsg:
@@ -343,6 +341,42 @@ func (m Model) onForgot(msg launcherForgotMsg) Model {
 	m.failedLoc, m.failedPrj, m.failedMsg = -1, -1, ""
 	m.note = "removed from history — " + msg.target.Project
 	return m.clampRight()
+}
+
+// onMuxDown and onComposeDown report a teardown and take its row back to
+// not-running. The rows are the listing taken at open, so a teardown is what
+// makes that snapshot wrong: a row left marked running is a row the next `s`
+// skips as already up (D31), which is the one project the user just took down.
+//
+// A teardown that failed leaves the row alone — what it says is still what is
+// up.
+func (m Model) onMuxDown(msg core.MuxDownMsg) Model {
+	if msg.Err == nil {
+		m = m.clearRunning(msg.Target)
+	}
+	m.note = msg.Status()
+	return m
+}
+
+func (m Model) onComposeDown(msg core.ComposeDownMsg) Model {
+	if msg.Err == nil {
+		m = m.clearRunning(msg.Target)
+	}
+	m.note = msg.Status()
+	return m
+}
+
+// clearRunning unmarks the row a teardown acted on. The target is matched the
+// way every other async reply is (see find), the teardown carrying back what it
+// was asked for rather than a name the launcher would have to guess a row from.
+func (m Model) clearRunning(t core.DownTarget) Model {
+	li, pi, ok := m.find(core.LaunchTarget{WorkDir: t.WorkDir, Project: t.Project})
+	if !ok {
+		return m
+	}
+	m.locs[li].projects[pi].Running = false
+	m.locs[li].projects[pi].starting = false
+	return m
 }
 
 // --- typed paths (D28) ------------------------------------------------------

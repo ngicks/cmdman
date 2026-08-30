@@ -781,6 +781,93 @@ func TestLauncherComposeDownReportsPartialTeardown(t *testing.T) {
 	}
 }
 
+// TestLauncherComposeDownThenStart pins what a teardown leaves behind: the row
+// it took down no longer reads as running, so the `s` that follows brings the
+// project back up instead of skipping it as already up (D31).
+func TestLauncherComposeDownThenStart(t *testing.T) {
+	m, fb := seedLauncher(t, 100, 20)
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+
+	next, _ := m.Update(coretest.Kr("D"))
+	next, cmd := next.(Model).Update(coretest.Kr("y"))
+	m = updLauncher(t, next.(Model), cmd())
+	if m.locs[0].projects[0].Running || m.locs[0].projects[0].starting {
+		t.Fatalf("a finished teardown should leave the row idle, got %+v",
+			m.locs[0].projects[0])
+	}
+
+	next, cmd = m.Update(coretest.Kr("s"))
+	m = next.(Model)
+	drainLauncherCmd(t, cmd)
+	if len(fb.StartedProjects) != 1 || fb.StartedProjects[0].Project != "devenv" {
+		t.Fatalf("s after a teardown started %v, want the project that was taken down",
+			fb.StartedProjects)
+	}
+	if strings.Contains(m.note, "already up here") {
+		t.Errorf("s must not refuse the project it just tore down, note = %q", m.note)
+	}
+}
+
+// TestLauncherMuxDownThenStart is the same for `d`: the dashboard is gone, so
+// `s` is what builds it again — the bring-up finds the commands already up and
+// rebuilds the windows around them.
+func TestLauncherMuxDownThenStart(t *testing.T) {
+	m, fb := seedLauncher(t, 100, 20)
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+
+	next, cmd := m.Update(coretest.Kr("d"))
+	m = updLauncher(t, next.(Model), cmd())
+	if m.locs[0].projects[0].Running || m.locs[0].projects[0].starting {
+		t.Fatalf("a finished dashboard teardown should leave the row idle, got %+v",
+			m.locs[0].projects[0])
+	}
+
+	next, cmd = m.Update(coretest.Kr("s"))
+	m = next.(Model)
+	drainLauncherCmd(t, cmd)
+	if len(fb.StartedProjects) != 1 || fb.StartedProjects[0].Project != "devenv" {
+		t.Fatalf("s after a dashboard teardown started %v, want the project it tore down",
+			fb.StartedProjects)
+	}
+	if strings.Contains(m.note, "already up here") {
+		t.Errorf("s must not refuse a project whose dashboard is gone, note = %q", m.note)
+	}
+}
+
+// TestLauncherFailedDownKeepsTheRow is the other half of both: a teardown that
+// came back with an error took nothing down that the launcher can count on, so
+// the row keeps what it said and `s` still skips it.
+func TestLauncherFailedDownKeepsTheRow(t *testing.T) {
+	m, fb := seedLauncher(t, 100, 20)
+	fb.MuxDownErr = errors.New(`project "devenv" has no mux: section`)
+	fb.ComposeDownErr = errors.New("remove watcher: still running")
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+
+	next, cmd := m.Update(coretest.Kr("d"))
+	m = updLauncher(t, next.(Model), cmd())
+	if !m.locs[0].projects[0].Running {
+		t.Fatalf("a refused dashboard teardown should leave the row running")
+	}
+
+	next, _ = m.Update(coretest.Kr("D"))
+	next, cmd = next.(Model).Update(coretest.Kr("y"))
+	m = updLauncher(t, next.(Model), cmd())
+	if !m.locs[0].projects[0].Running {
+		t.Fatalf("a failed teardown should leave the row running")
+	}
+
+	next, cmd = m.Update(coretest.Kr("s"))
+	m = next.(Model)
+	drainLauncherCmd(t, cmd)
+	if len(fb.StartedProjects) != 0 {
+		t.Fatalf("s should still skip the row nothing took down, started %v",
+			fb.StartedProjects)
+	}
+	if !strings.Contains(m.note, "already up here") {
+		t.Errorf("s with nothing left to start should say so, note = %q", m.note)
+	}
+}
+
 // TestLauncherMarkerPrecedence pins D29's marker order: a bring-up in flight
 // outranks an unread bell, which outranks the status dot, and an entry that is
 // neither running nor starting keeps a blank slot (D31).

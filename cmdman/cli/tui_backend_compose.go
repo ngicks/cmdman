@@ -3,12 +3,15 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/ngicks/cmdman/cmdman/compose"
+	"github.com/ngicks/cmdman/cmdman/mux"
 	"github.com/ngicks/cmdman/cmdman/tui"
+	"github.com/ngicks/go-common/contextkey"
 )
 
 // ListProjects merges store-known project counts with never-run projects found
@@ -243,6 +246,20 @@ func (s *composeUpStream) Close() error {
 	return nil
 }
 
+// composeDownSvc is the teardown half of compose.Service the down action uses,
+// named at the consumer so the branch that follows a teardown can be exercised
+// without a store behind it.
+type composeDownSvc interface {
+	Down(
+		context.Context, compose.ProjectSelection, compose.DownOption,
+	) (*compose.DownResult, error)
+}
+
+// muxTeardown removes a project's multiplexer windows — [mux.Down] as the down
+// action calls it, taken as a value so the call can be observed without a
+// multiplexer server to make it against.
+type muxTeardown func(context.Context, mux.DownOptions) error
+
 // ComposeDown stops and removes the project's commands, wrapping
 // compose.Service.Down — the whole-project teardown `cmdman compose down`
 // performs, orphans of the project included.
@@ -255,8 +272,21 @@ func (s *composeUpStream) Close() error {
 // The summary travels back with the aggregated failure rather than instead of
 // it: a teardown that could not remove one command removed the others, and the
 // caller has both halves to report.
+//
+// A teardown that got all the way through takes the project's multiplexer
+// windows with it (see removeProjectWindows): what would be left is a window of
+// dead panes still claiming the project is running.
 func (b *serviceBackend) ComposeDown(
 	ctx context.Context, projectName, composeFile, workDir string,
+) (tui.DownSummary, error) {
+	return b.composeDown(ctx, projectName, composeFile, workDir, b.compose, mux.Down)
+}
+
+func (b *serviceBackend) composeDown(
+	ctx context.Context,
+	projectName, composeFile, workDir string,
+	composeSvc composeDownSvc,
+	muxDown muxTeardown,
 ) (tui.DownSummary, error) {
 	opts := compose.NormalizeOpts{
 		File:        composeFile,
@@ -270,11 +300,59 @@ func (b *serviceBackend) ComposeDown(
 	if err != nil {
 		return tui.DownSummary{}, err
 	}
-	result, err := b.compose.Down(ctx, selection, compose.DownOption{})
+	result, err := composeSvc.Down(ctx, selection, compose.DownOption{})
 	if err != nil {
 		return tui.DownSummary{}, err
 	}
-	return downSummary(result), DownResultErr(result)
+	summary := downSummary(result)
+	if downErr := DownResultErr(result); downErr != nil {
+		// A command that would not go away is a command the window still has
+		// something to show, so the window stays until the teardown is asked for
+		// again and gets all the way through.
+		return summary, downErr
+	}
+	removeProjectWindows(ctx, selection, muxDown)
+	return summary, nil
+}
+
+// removeProjectWindows takes the project's multiplexer windows down after a
+// teardown that removed every command: their panes view commands that no longer
+// exist, and the ownership stamp they carry would report the project as running
+// the next time the launcher lists it.
+//
+// It is the teardown the TUI asks for, not the one `cmdman compose down` does:
+// a window that closes underneath a command line is a surprise, while the TUI
+// issued the gesture that emptied it.
+//
+// The windows are found by the project's identity alone, which is why this goes
+// to mux directly rather than through the compose mux verbs: a project with no
+// mux: section has no dashboard but does have the bare shell window its landing
+// synthesized, under that same identity, and the compose verbs are only for a
+// project that declares the section. Only a declared section has a driver to
+// name; without one the driver is left to autodetect.
+//
+// Failing to remove a window is not the down failing: the commands are gone
+// either way, and the summary the caller reports is about them. There is
+// nowhere in that summary to say so, so it is said in the log.
+func removeProjectWindows(
+	ctx context.Context,
+	selection compose.ProjectSelection,
+	muxDown muxTeardown,
+) {
+	opts := mux.DownOptions{
+		Identity:    selection.ProjectIdentity(),
+		KillCreated: true,
+		Stdout:      io.Discard,
+	}
+	if selection.Spec != nil && selection.Spec.Mux != nil {
+		opts.Driver = selection.Spec.Mux.Driver
+	}
+	if err := muxDown(ctx, opts); err != nil {
+		contextkey.ValueSlogLoggerDefault(ctx).WarnContext(
+			ctx, "compose down: remove project window",
+			"project", selection.Project, "workdir", selection.WorkDir, "error", err,
+		)
+	}
 }
 
 // downSummary counts what a teardown got through: the outcomes carrying no

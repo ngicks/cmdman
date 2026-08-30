@@ -71,10 +71,16 @@ it in any terminal or pane. Each widget is its own subcommand.
   instead. The two teardowns act on the whole project: `d` tears its dashboard
   windows down and leaves its commands running — the dashboard is only a viewer
   of them — and a project whose compose file declares no `mux:` section says so
-  on the hint line. `D` stops and removes the commands themselves: it asks
+  on the hint line. From the TUI a window cmdman opened for the project goes away
+  entirely, frame and all, rather than being emptied; one cmdman took over from a
+  window you were already sitting in is restored instead, as is the window the
+  widget you typed `d` in is itself running in — closing that one would take the
+  teardown with it. (`cmdman compose mux down` on a command line restores every
+  window either way.) `D` stops and removes the commands themselves: it asks
   `compose down <project>? y/n` on the hint line first, `y` goes ahead and any
   other key takes the question back, and what the teardown did — `stopped N,
-  removed M` — is reported there when it ends.
+  removed M` — is reported there when it ends; a `D` that got through every
+  command takes the project's windows down too, on the same terms as `d`.
 - `launcher`: quick-launch selector. The left pane lists target locations: with
   the input empty, the directories you have brought projects up in, most recent
   first, then the directories that the projects named under cmdman's config
@@ -94,7 +100,9 @@ it in any terminal or pane. Each widget is its own subcommand.
   a config-only row waits for its `space` — and `S` launches and lands in one;
   `d` and `D` tear the project `S` would launch back down — `d` its dashboard
   windows, leaving the commands running, `D` the commands themselves after the
-  `compose down <project>? y/n` confirm described under the switcher. In the
+  `compose down <project>? y/n` confirm described under the switcher, windows
+  included when it got through every command. Both remove a window cmdman opened
+  and restore one it borrowed, as described there. In the
   input every key is text, so ctrl+c is the dismissal that works from anywhere
   (unless `--no-quit` took the quit keys away).
 - `project-manager`: shortcuts over one project — the replica count of each of
@@ -111,8 +119,12 @@ it in any terminal or pane. Each widget is its own subcommand.
   cursor and `c` cycles to the next, with the running dashboard's own layout
   marked. `d` and `D` tear the project down — `d` its dashboard windows,
   leaving the commands running, `D` the commands themselves after the
-  `compose down <project>? y/n` confirm described under the switcher — and both
-  are the whole project's, so neither list has to have the keyboard for them.
+  `compose down <project>? y/n` confirm described under the switcher, and its
+  windows too when it got through every command — and both are the whole
+  project's, so neither list has to have the keyboard for them. Each removes a
+  window cmdman opened and restores one it borrowed, as described under the
+  switcher — the panel summoned in a floating pane is in no window of the
+  project's, so nothing there is spared on its account.
   `r` reloads what the panel shows; `q` quits. The project it manages is
   the one it detects — the window `--mux-token` names, else the window it runs
   in, else the project of the working directory — and `--file` and

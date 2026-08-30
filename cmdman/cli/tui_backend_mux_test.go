@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
 // outsideMux clears the two variables the enclosing-window probe is gated on
@@ -107,6 +109,50 @@ func TestMuxDownWithoutMuxSection(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "has no mux section") {
 		t.Fatalf("error = %v, want it to name the missing mux section", err)
+	}
+}
+
+// composeMuxDownRecorder stands in for compose.Service.MuxDown and keeps the
+// terms each teardown was asked for.
+type composeMuxDownRecorder struct {
+	calls []compose.MuxDownOption
+}
+
+func (r *composeMuxDownRecorder) down(_ context.Context, opts compose.MuxDownOption) error {
+	r.calls = append(r.calls, opts)
+	return nil
+}
+
+// TestMuxDownRemovesTheWindowsCmdmanOpened pins the one thing that separates
+// the TUI's `d` from `cmdman compose mux down`: the window goes away instead of
+// being emptied. Without it the gesture would leave a stray shell where the
+// dashboard was and read as having done nothing.
+func TestMuxDownRemovesTheWindowsCmdmanOpened(t *testing.T) {
+	outsideMux(t)
+	conf := t.TempDir()
+	t.Setenv("CMDMAN_CONF", filepath.Join(conf, "config.json"))
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cmd-compose.yaml")
+	if err := os.WriteFile(path, []byte(muxComposeYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	recorder := &composeMuxDownRecorder{}
+	b := &serviceBackend{workDir: dir}
+	if err := b.muxDown(t.Context(), "tools", path, "", recorder.down); err != nil {
+		t.Fatal(err)
+	}
+	if len(recorder.calls) != 1 {
+		t.Fatalf("mux teardown calls = %d, want 1", len(recorder.calls))
+	}
+	got := recorder.calls[0]
+	if !got.KillCreated {
+		t.Error("the TUI's `d` must remove the windows cmdman created, not restore them")
+	}
+	want := compose.ProjectSelection{WorkDir: dir, Project: "tools"}.ProjectIdentity()
+	if identity := got.Selection.ProjectIdentity(); identity != want {
+		t.Errorf("teardown identity = %q, want %q", identity, want)
 	}
 }
 

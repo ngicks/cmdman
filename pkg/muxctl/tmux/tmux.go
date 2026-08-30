@@ -18,6 +18,22 @@ import (
 // across layout re-applies.
 const ownerOption = "@cmdman_window"
 
+// createdOption is the window-level tmux user option marking a window cmdman
+// created itself, as opposed to one it borrowed by taking over the window the
+// caller was sitting in. Only a created window may be killed on teardown:
+// kill-window SIGHUPs everything in the window, and a borrowed one holds the
+// user's own shell — cmdman's panes hold viewers it can afford to lose, that
+// shell holds work it cannot.
+//
+// It records where the window came from, not whether cmdman is still in it, so
+// it outlives a per-side teardown and is cleared only when the window is handed
+// back whole (see [Session.releaseWindowIfLast]).
+const createdOption = userOptionPrefix + "created"
+
+// createdStamp is the value written into createdOption; only its
+// non-emptiness is meaningful to readers.
+const createdStamp = "1"
+
 // Server is a tmux server bound once by [Driver.Connect]. It builds, enumerates,
 // and stores per-window state for cmdman-owned windows through a single shared
 // executor — the tmux binary and -L socket captured at Connect time — so its
@@ -86,6 +102,53 @@ func (srv *Server) CurrentWindowID(
 	return out, true, nil
 }
 
+// paneEnvVar is the variable tmux exports into every pane it starts, holding
+// that pane's own id. It is what tells a process which pane — and so which
+// window — it is running in, and tmux sets it nowhere else: a `display-popup`
+// child gets $TMUX but no $TMUX_PANE, because a popup floats over a window
+// rather than living in one.
+const paneEnvVar = "TMUX_PANE"
+
+// EnclosingWindowID implements [muxctl.Server.EnclosingWindowID] by resolving
+// the pane $TMUX_PANE names to its window with
+// "display-message -p -t <pane> '#{window_id}'".
+//
+// The pane is addressed rather than the client, which is the whole point: the
+// bare display-message [Server.CurrentWindowID] runs answers with the window a
+// session is currently showing, so a process in a pane of a background window
+// would be told it is somewhere it is not.
+//
+// An environment with no pane in it, a server that is not running and a pane id
+// this server does not know all read as ok=false with a nil error, mirroring
+// [Server.CurrentSessionName]: "the caller is not in one of my panes" is an
+// answer.
+func (srv *Server) EnclosingWindowID(
+	ctx context.Context,
+	env []string,
+) (id string, ok bool, err error) {
+	pane := envValue(env, paneEnvVar)
+	if pane == "" {
+		return "", false, nil
+	}
+	out, runErr := srv.exec.run(ctx, "display-message", "-p", "-t", pane, "#{window_id}")
+	if runErr != nil || out == "" {
+		return "", false, nil
+	}
+	return out, true, nil
+}
+
+// envValue returns the value of key in an os.Environ-shaped slice, or "" when
+// the slice does not carry it.
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, kv := range env {
+		if v, found := strings.CutPrefix(kv, prefix); found {
+			return v
+		}
+	}
+	return ""
+}
+
 // New constructs a Session targeting either a known window (cfg.WindowID) or a
 // freshly created one named cfg.WindowName in cfg.SessionName. It does not apply
 // any layout — call [Session.ApplyLayout] to populate the window.
@@ -137,6 +200,17 @@ func (srv *Server) New(ctx context.Context, cfg muxctl.Config) (muxctl.Session, 
 				)
 			}
 			wid = created
+
+			// Record that this window is cmdman's own, so a teardown that
+			// wants the window gone may kill it. Only this branch stamps:
+			// the two paths above address a window the caller handed over,
+			// and killing one of those takes the shell it was running down
+			// with it.
+			if _, err := e.run(
+				ctx, "set-option", "-w", "-t", wid, createdOption, createdStamp,
+			); err != nil {
+				return nil, fmt.Errorf("tmux: stamp %s: %w", createdOption, err)
+			}
 		}
 	}
 

@@ -42,8 +42,20 @@ type DownOptions struct {
 	// Env is the process env consulted for driver autodetection. Empty defaults
 	// to os.Environ().
 	Env []string
-	// Stdout is where per-restored-window lines and the zero-match note are
-	// written. Empty defaults to os.Stdout.
+	// KillCreated closes the windows cmdman created outright instead of
+	// restoring them, so a teardown leaves no shell pane and no frame behind —
+	// nothing of the window at all. Windows cmdman borrowed by taking over the
+	// one the caller was sitting in are restored either way: closing one would
+	// take the user's own shell down with it, which is not what tearing a
+	// dashboard down was asked to do. So is the window a pane of which is
+	// running this teardown, for the reason the loop in [Down] gives.
+	//
+	// Off by default, which is `cmdman compose mux down` typed at a prompt: a
+	// window that goes away underneath a command line is a surprise, and the
+	// restored one is the answer that has always been given there.
+	KillCreated bool
+	// Stdout is where per-window lines and the zero-match note are written.
+	// Empty defaults to os.Stdout.
 	Stdout io.Writer
 }
 
@@ -54,11 +66,22 @@ type DownOptions struct {
 // option. The supervised commands keep running — only the disposable viewers
 // are torn down.
 //
-// A frame shown around the dashboard is not the project's to remove: the
-// window is left framed and projectless. With the ownership stamp gone the
-// next `mux up` no longer recognises it and builds a fresh window beside it.
-// Removing the frame is the frame verbs' own teardown, and whichever of the
-// two goes last hands the window back whole.
+// With opts.KillCreated the windows cmdman created are closed instead, leaving
+// nothing behind rather than an emptied window; the ones it borrowed from the
+// caller are restored as ever, because the shell in a borrowed window is the
+// user's and closing the window would end it. So is the window this process is
+// itself running in, which would otherwise take the teardown down with it — see
+// the guard in the loop below. Closing SIGHUPs what the panes were running,
+// which costs nothing here: a mux pane runs a viewer or a frame component,
+// never a supervised command.
+//
+// A window that is restored rather than closed keeps any frame shown around it:
+// the frame is not the project's to remove, so the window is left framed and
+// projectless. With the ownership stamp gone the next `mux up` no longer
+// recognises it and builds a fresh window beside it. Removing the frame is the
+// frame verbs' own teardown, and whichever of the two goes last hands the
+// window back whole. A closed window has no sides left to hand back: its frame
+// panes go with everything else in it.
 //
 // Down enumerates windows via [muxctl.Server.ListWindows], which requires no
 // $TMUX context and works from any pane, from run-shell, or from outside
@@ -71,7 +94,8 @@ type DownOptions struct {
 // observable behavior as the old "nothing to detach" path.
 //
 // When multiple windows match (e.g. the user ran `mux up` in two sessions
-// for the same project), every matching window is restored; a single joined
+// for the same project), every matching window is torn down — each one closed
+// or restored on its own terms, as opts.KillCreated describes; a single joined
 // error is returned if any individual teardown fails, after attempting all
 // remaining matches.
 //
@@ -132,6 +156,27 @@ func Down(ctx context.Context, opts DownOptions) error {
 		return nil
 	}
 
+	// The window this very process is sitting in is restored rather than closed,
+	// even when cmdman created it. Closing a window SIGHUPs everything in it, and
+	// one of the panes would be running this teardown: the windows still on the
+	// list would never be torn down, and neither the result nor the failure would
+	// ever reach the user who asked. The switcher docked in a dashboard's frame
+	// is exactly that caller — it takes the project it is displayed on down from
+	// inside the project's own window.
+	//
+	// Only the hosting window is spared, not every framed one: a caller summoned
+	// in a popup floats over a window instead of living in a pane of it, so it is
+	// not in the window and closes it as asked. An unanswerable probe is read the
+	// same way. A pane id inherited from another multiplexer server can name a
+	// live pane here by coincidence; all that costs is a window restored where it
+	// could have been closed, which is the harmless direction to be wrong in.
+	selfWindowID := ""
+	if opts.KillCreated {
+		if id, ok, selfErr := server.EnclosingWindowID(ctx, env); selfErr == nil && ok {
+			selfWindowID = id
+		}
+	}
+
 	var errs []error
 	for _, row := range rows {
 		sess, ok, openErr := server.Open(ctx, muxctl.Config{
@@ -148,6 +193,21 @@ func Down(ctx context.Context, opts DownOptions) error {
 		if !ok {
 			// Window disappeared between ListWindows and Open; not
 			// an error — another process or the user already tore it down.
+			continue
+		}
+		if opts.KillCreated && row.Created && row.WindowID != selfWindowID {
+			if closeErr := sess.Close(ctx); closeErr != nil {
+				errs = append(errs, fmt.Errorf(
+					"mux: close window %s (%s in session %s): %w",
+					row.WindowName, row.WindowID, row.SessionName, closeErr,
+				))
+				continue
+			}
+			fmt.Fprintf(
+				stdout,
+				"Removed window %s (%s) in session %s\n",
+				row.WindowName, row.WindowID, row.SessionName,
+			)
 			continue
 		}
 		if detachErr := sess.Detach(ctx); detachErr != nil {

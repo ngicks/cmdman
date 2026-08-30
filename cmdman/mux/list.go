@@ -34,6 +34,11 @@ type OwnedWindow struct {
 	// down under a frame that stayed), which is why it is listed alongside
 	// Identity rather than derived from it.
 	Frame string
+	// Created reports that cmdman built this window itself rather than taking
+	// over the window the caller was sitting in. It is what lets a teardown
+	// close the window instead of restoring it: the user's own window holds
+	// their shell, one cmdman opened holds only the viewers it put there.
+	Created bool
 	// Marker is the layout index last applied to this window (from
 	// [muxctl.Session.StatWindow]), or -1 when no layout has been applied or
 	// the panes carry inconsistent markers.
@@ -109,6 +114,7 @@ func List(ctx context.Context, opts ListOptions) ([]OwnedWindow, error) {
 			WindowName:     r.WindowName,
 			Identity:       r.Identity,
 			Frame:          r.Frame,
+			Created:        r.Created,
 			Marker:         r.Marker,
 			ScalePositions: decodeScalePositions(r.State[muxctl.StateKeyScale]),
 		}

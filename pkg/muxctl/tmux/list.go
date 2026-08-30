@@ -38,17 +38,17 @@ func (srv *Server) ListWindows(
 	// restricts to one. The format delivers all per-window fields we need in
 	// one round-trip; we read the marker per-window below.
 	//
-	// The base format string fetches five tab-separated fields per window, then
+	// The base format string fetches six tab-separated fields per window, then
 	// one field per requested state key. #{@cmdman_<key>} expands as a window
 	// option directly in list-windows -F, so no extra tmux call is needed to
 	// read the requested state (e.g. the cycle-scale positions). The frame def
-	// rides along as a base field rather than as a state key: it is part of
-	// every row's identity, so no caller has to ask for it. A caller that names
-	// it in opts.StateKeys simply gets the same option twice.
+	// and the created marker ride along as base fields rather than as state
+	// keys: they are part of every row, so no caller has to ask for them. A
+	// caller that names one in opts.StateKeys simply gets the same option twice.
 	var fmtBuf strings.Builder
 	fmtBuf.WriteString(
 		"#{window_id}\t#{session_name}\t#{window_name}\t#{" + ownerOption + "}" +
-			"\t#{" + frameDefOption + "}",
+			"\t#{" + frameDefOption + "}\t#{" + createdOption + "}",
 	)
 	for _, key := range opts.StateKeys {
 		fmtBuf.WriteString("\t#{" + stateOption(key) + "}")
@@ -88,16 +88,16 @@ func (srv *Server) ListWindows(
 	}
 
 	// nFields is the number of tab-separated fields the format string emits:
-	// five base fields plus one per state key.
-	nFields := 5 + len(opts.StateKeys)
+	// six base fields plus one per state key.
+	nFields := 6 + len(opts.StateKeys)
 
 	var rows []muxctl.Window
 	for line := range strings.SplitSeq(out, "\n") {
-		// tmux strips trailing empty fields from -F output: an unframed window
-		// with no requested state option set yields fewer fields. SplitN keeps
-		// internal empty fields, and the guards below default any missing
-		// trailing field (the frame slot, a state value, the whole state map)
-		// to empty.
+		// tmux strips trailing empty fields from -F output: a borrowed unframed
+		// window with no requested state option set yields fewer fields. SplitN
+		// keeps internal empty fields, and the guards below default any missing
+		// trailing field (the frame slot, the created marker, a state value, the
+		// whole state map) to empty.
 		parts := strings.SplitN(line, "\t", nFields)
 		if len(parts) < 4 {
 			continue
@@ -106,6 +106,10 @@ func (srv *Server) ListWindows(
 		frame := ""
 		if len(parts) > 4 {
 			frame = parts[4]
+		}
+		created := false
+		if len(parts) > 5 {
+			created = parts[5] == createdStamp
 		}
 		if identity == "" && frame == "" {
 			// Window carries neither identity — not ours.
@@ -123,8 +127,8 @@ func (srv *Server) ListWindows(
 			state = make(map[muxctl.StateKey]string, len(opts.StateKeys))
 			for i, key := range opts.StateKeys {
 				v := ""
-				if 5+i < len(parts) {
-					v = parts[5+i]
+				if 6+i < len(parts) {
+					v = parts[6+i]
 				}
 				state[key] = v
 			}
@@ -146,6 +150,7 @@ func (srv *Server) ListWindows(
 			WindowName:  wname,
 			Identity:    identity,
 			Frame:       frame,
+			Created:     created,
 			Marker:      marker,
 			State:       state,
 		})

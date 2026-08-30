@@ -93,6 +93,12 @@ func (s *Session) releaseWindowIfLast(ctx context.Context) error {
 	if left {
 		return nil
 	}
+	// The window is nobody's now, so where it came from stops meaning anything:
+	// what is handed back must carry no cmdman state at all, and a stamp left
+	// behind would have a later takeover of this same window read as a window
+	// cmdman built — and be killed for it.
+	_, _ = s.exec.run(ctx, "set-option", "-w", "-u", "-t", s.windowID, createdOption)
+
 	if _, err := s.exec.run(
 		ctx, "set-option", "-w", "-u", "-t", s.windowID, "pane-border-status",
 	); err != nil {
@@ -111,13 +117,24 @@ func (s *Session) releaseWindowIfLast(ctx context.Context) error {
 // ([muxctl.StateKey] maps any key to @cmdman_<key>), and a scan listing them by
 // name would quietly stop noticing a slot added later — a window would then be
 // released while it still held state.
+//
+// createdOption is the one exception, because it is the one option that is not
+// state: it says where the window came from, which stays true of a window
+// neither side is in any more. Counting it would make a window cmdman created
+// impossible to release — each side would keep finding the other's leftover —
+// and the release itself is what clears it.
 func (s *Session) hasCmdmanState(ctx context.Context) (bool, error) {
 	out, err := s.exec.run(ctx, "show-options", "-w", "-t", s.windowID)
 	if err != nil {
 		return false, fmt.Errorf("tmux: list window options for %s: %w", s.windowID, err)
 	}
 	for line := range strings.SplitSeq(out, "\n") {
-		if strings.HasPrefix(line, userOptionPrefix) {
+		// show-options prints "<name> <value>"; the name alone decides.
+		name, _, _ := strings.Cut(line, " ")
+		if name == createdOption {
+			continue
+		}
+		if strings.HasPrefix(name, userOptionPrefix) {
 			return true, nil
 		}
 	}

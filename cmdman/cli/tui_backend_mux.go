@@ -119,10 +119,19 @@ func muxWorkerError(err error, printed string) error {
 // MuxDown tears the project's dashboard windows down via
 // compose.Service.MuxDown — the teardown `cmdman compose mux down` performs,
 // but performed here in this process rather than in a worker of its own. The
-// TUI is not sitting in the region a teardown clears, so there is no pane to
-// outlive; CycleMux takes the worker because applying a layout rebuilds the
-// window the TUI itself is in. The supervised commands keep running either way:
-// only the disposable viewer goes away.
+// supervised commands keep running: only the disposable viewer goes away.
+//
+// Taking a project down here means the window goes too, where cmdman opened it:
+// the user asked for the dashboard to be gone, and an emptied window with a
+// stray shell in it is not gone. Two kinds of window are restored instead. One
+// cmdman borrowed from the user is — the command line's answer, and the only
+// safe one, since closing it would end the shell they were sitting in. So is the
+// one this TUI is running in, when it is running in a pane of a window it was
+// asked to remove: a docked switcher takes down the project whose window
+// displays it, and closing that window would SIGHUP the teardown half-done. mux
+// spares the hosting window on its own (see mux.Down), which is why no worker is
+// needed here — where CycleMux takes one, because applying a layout rebuilds the
+// TUI's own window whether or not the TUI is what asked for it.
 //
 // The project is named as CycleMux names it, resolution included — a project
 // whose file declares no mux: section never reaches the teardown, and the
@@ -132,15 +141,30 @@ func muxWorkerError(err error, printed string) error {
 func (b *serviceBackend) MuxDown(
 	ctx context.Context, projectName, composeFile, workDir string,
 ) error {
+	return b.muxDown(ctx, projectName, composeFile, workDir, b.compose.MuxDown)
+}
+
+// composeMuxTeardown removes a project's dashboard windows —
+// compose.Service.MuxDown as [serviceBackend.MuxDown] calls it, taken as a value
+// so the terms it is called on can be observed without a multiplexer server to
+// make the call against.
+type composeMuxTeardown func(context.Context, compose.MuxDownOption) error
+
+func (b *serviceBackend) muxDown(
+	ctx context.Context,
+	projectName, composeFile, workDir string,
+	down composeMuxTeardown,
+) error {
 	selection, err := compose.ResolveMuxSelectionByName(
 		projectName, composeFile, b.targetWorkDir(workDir),
 	)
 	if err != nil {
 		return err
 	}
-	return b.compose.MuxDown(ctx, compose.MuxDownOption{
-		Selection: selection,
-		Stdout:    io.Discard,
+	return down(ctx, compose.MuxDownOption{
+		Selection:   selection,
+		KillCreated: true,
+		Stdout:      io.Discard,
 	})
 }
 

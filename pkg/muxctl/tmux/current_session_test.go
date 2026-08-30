@@ -94,3 +94,49 @@ func TestCurrentWindowID_Session(t *testing.T) {
 		}
 	})
 }
+
+// TestEnclosingWindowID is the process-relative half of "where is the caller",
+// and the distinction from CurrentWindowID is the point: the pane named in the
+// environment is in the session's non-current window, so a client-relative
+// answer would name the other one.
+func TestEnclosingWindowID(t *testing.T) {
+	requireTmux(t)
+	socket := uniqueSocket(t)
+	t.Cleanup(func() { killServer(t, socket) })
+	run(t, socket, "new-session", "-d", "-s", "enclosing")
+	background := run(t, socket, "new-window", "-d", "-t", "enclosing", "-P", "-F", "#{window_id}")
+	pane := run(t, socket, "list-panes", "-t", background, "-F", "#{pane_id}")
+
+	server := newServer(t, socket)
+	id, ok, err := server.EnclosingWindowID(context.Background(), []string{"TMUX_PANE=" + pane})
+	if err != nil {
+		t.Fatalf("EnclosingWindowID: %v", err)
+	}
+	if !ok {
+		t.Fatal("want ok=true for a live pane")
+	}
+	if id != background {
+		t.Errorf("window id = %q, want the pane's own window %q", id, background)
+	}
+
+	t.Run("no pane in the environment", func(t *testing.T) {
+		// What a display-popup child is handed: inside tmux, but in no pane.
+		id, ok, err := server.EnclosingWindowID(context.Background(), []string{"TMUX=" + socket})
+		if err != nil {
+			t.Fatalf("EnclosingWindowID: want nil error, got %v", err)
+		}
+		if ok || id != "" {
+			t.Errorf("want ok=false/id=\"\" with no pane named, got ok=%v id=%q", ok, id)
+		}
+	})
+
+	t.Run("pane this server does not know", func(t *testing.T) {
+		id, ok, err := server.EnclosingWindowID(context.Background(), []string{"TMUX_PANE=%9999"})
+		if err != nil {
+			t.Fatalf("EnclosingWindowID: want nil error, got %v", err)
+		}
+		if ok || id != "" {
+			t.Errorf("want ok=false/id=\"\" for an unknown pane, got ok=%v id=%q", ok, id)
+		}
+	})
+}

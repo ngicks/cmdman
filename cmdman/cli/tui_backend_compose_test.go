@@ -1,14 +1,22 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/compose"
+	"github.com/ngicks/cmdman/cmdman/mux"
 	"github.com/ngicks/cmdman/cmdman/tui"
+	"github.com/ngicks/cmdman/pkg/muxctl"
+	"github.com/ngicks/go-common/contextkey"
 )
 
 func TestMergeProjectInfosAddsZeroCommandNamedProjects(t *testing.T) {
@@ -137,22 +145,43 @@ commands:
     args: [echo, b]
 `
 
+// muxDownRecorder stands in for [mux.Down] so a teardown can be watched without
+// a multiplexer server to run it against.
+type muxDownRecorder struct {
+	calls []mux.DownOptions
+	err   error
+}
+
+func (r *muxDownRecorder) down(_ context.Context, opts mux.DownOptions) error {
+	r.calls = append(r.calls, opts)
+	return r.err
+}
+
+// stubComposeDown returns a canned teardown result, which is how the partial
+// failure gets arranged: a real down of a real project succeeds on every
+// command or on none.
+type stubComposeDown struct {
+	result *compose.DownResult
+	err    error
+}
+
+func (s stubComposeDown) Down(
+	context.Context, compose.ProjectSelection, compose.DownOption,
+) (*compose.DownResult, error) {
+	return s.result, s.err
+}
+
 // TestComposeDownSummarizesTheTeardown drives the teardown against a real
 // cmdman service so the counts come from the store rather than from a fake that
 // could only echo them back. The commands are created and never started, which
 // spawns no monitor: a created command is already terminal, so the stop phase
 // covers it as a no-op and the remove phase is what actually takes it away.
+//
+// The mux teardown is the one thing faked: the window removal a completed down
+// asks for is checked here as a call, not made against whatever multiplexer the
+// test machine happens to be running.
 func TestComposeDownSummarizesTheTeardown(t *testing.T) {
-	// The compose config dir is derived from $CMDMAN_CONF; without the override
-	// the resolution would reach the projects the developer keeps in their own.
-	conf := t.TempDir()
-	t.Setenv("CMDMAN_CONF", filepath.Join(conf, "config.json"))
-	dir := t.TempDir()
-	path := filepath.Join(dir, "cmd-compose.yaml")
-	if err := os.WriteFile(path, []byte(downComposeYAML), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(dir)
+	dir, path := downProjectDir(t)
 
 	svc := cmdman.NewService(frameSvcConfig(t))
 	defer svc.Close()
@@ -166,13 +195,31 @@ func TestComposeDownSummarizesTheTeardown(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	recorder := &muxDownRecorder{}
 	b := &serviceBackend{svc: svc, compose: composeSvc, workDir: dir}
-	summary, err := b.ComposeDown(t.Context(), "downproj", path, dir)
+	summary, err := b.composeDown(t.Context(), "downproj", path, dir, composeSvc, recorder.down)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if summary.Stopped != 2 || summary.Removed != 2 {
 		t.Fatalf("summary = %+v, want both phases to cover the project's two commands", summary)
+	}
+
+	if len(recorder.calls) != 1 {
+		t.Fatalf("mux teardown calls = %d, want 1", len(recorder.calls))
+	}
+	got := recorder.calls[0]
+	want := compose.ProjectSelection{WorkDir: dir, Project: "downproj"}.ProjectIdentity()
+	if got.Identity != want {
+		t.Errorf("teardown Identity = %q, want %q", got.Identity, want)
+	}
+	if !got.KillCreated {
+		t.Error("teardown must remove the windows cmdman created, not restore them")
+	}
+	// This project declares no mux: section, so there is no driver to name and
+	// the window its landing synthesized is found by autodetection.
+	if !reflect.DeepEqual(got.Driver, muxctl.DriverSpec{}) {
+		t.Errorf("teardown Driver = %+v, want the autodetecting zero value", got.Driver)
 	}
 
 	cmds, err := b.ListCommands(t.Context())
@@ -184,6 +231,127 @@ func TestComposeDownSummarizesTheTeardown(t *testing.T) {
 			t.Fatalf("command %q survived the teardown", c.Name)
 		}
 	}
+}
+
+// TestComposeDownForwardsTheDeclaredDriver pins where the driver comes from for
+// a project that declares a mux: section: its own, so a dashboard built on a
+// non-default server is looked for on that server.
+func TestComposeDownForwardsTheDeclaredDriver(t *testing.T) {
+	conf := t.TempDir()
+	t.Setenv("CMDMAN_CONF", filepath.Join(conf, "config.json"))
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cmd-compose.yaml")
+	writeComposeFile(t, path, muxComposeYAML)
+	t.Chdir(dir)
+
+	recorder := &muxDownRecorder{}
+	b := &serviceBackend{workDir: dir}
+	if _, err := b.composeDown(
+		t.Context(), "tools", path, dir,
+		stubComposeDown{result: &compose.DownResult{}}, recorder.down,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(recorder.calls) != 1 {
+		t.Fatalf("mux teardown calls = %d, want 1", len(recorder.calls))
+	}
+	if got := recorder.calls[0].Driver.Name; got != "tmux" {
+		t.Errorf("teardown Driver.Name = %q, want the declared tmux", got)
+	}
+}
+
+// TestComposeDownSurvivesAFailedWindowRemoval pins the best-effort half: the
+// commands are gone whether or not their window could be closed, so the down
+// still reports what it did and the failure is left in the log.
+func TestComposeDownSurvivesAFailedWindowRemoval(t *testing.T) {
+	dir, path := downProjectDir(t)
+
+	var buf bytes.Buffer
+	ctx := contextkey.WithSlogLogger(
+		t.Context(), slog.New(slog.NewTextHandler(&buf, nil)),
+	)
+	recorder := &muxDownRecorder{err: errors.New("no server running")}
+	b := &serviceBackend{workDir: dir}
+	summary, err := b.composeDown(
+		ctx, "downproj", path, dir,
+		stubComposeDown{result: &compose.DownResult{
+			Stops:   []compose.StopOutcome{{Command: "a"}},
+			Removes: []compose.RemoveOutcome{{Command: "a"}},
+		}},
+		recorder.down,
+	)
+	if err != nil {
+		t.Fatalf("a window that would not close must not fail the down: %v", err)
+	}
+	if summary != (tui.DownSummary{Stopped: 1, Removed: 1}) {
+		t.Errorf("summary = %+v, want the commands the teardown got through", summary)
+	}
+	if !strings.Contains(buf.String(), "no server running") {
+		t.Errorf("the failure should be logged, got %q", buf.String())
+	}
+}
+
+// TestComposeDownKeepsWindowsOnPartialTeardown covers the half-done teardown:
+// a command that would not go away leaves the window something to show, so the
+// window is left alone and the failure is what comes back.
+func TestComposeDownKeepsWindowsOnPartialTeardown(t *testing.T) {
+	dir, path := downProjectDir(t)
+
+	for _, tc := range []struct {
+		name string
+		stub stubComposeDown
+		want tui.DownSummary
+	}{
+		{
+			name: "one command would not be removed",
+			stub: stubComposeDown{result: &compose.DownResult{
+				Stops: []compose.StopOutcome{{Command: "a"}, {Command: "b"}},
+				Removes: []compose.RemoveOutcome{
+					{Command: "a"},
+					{Command: "b", Err: errors.New("still running")},
+				},
+			}},
+			want: tui.DownSummary{Stopped: 2, Removed: 1},
+		},
+		{
+			name: "the teardown never ran",
+			stub: stubComposeDown{err: errors.New("no store")},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := &muxDownRecorder{}
+			b := &serviceBackend{workDir: dir}
+			summary, err := b.composeDown(
+				t.Context(), "downproj", path, dir, tc.stub, recorder.down,
+			)
+			if err == nil {
+				t.Fatal("a teardown that did not get through must report the failure")
+			}
+			if summary != tc.want {
+				t.Errorf("summary = %+v, want %+v", summary, tc.want)
+			}
+			if len(recorder.calls) != 0 {
+				t.Errorf("mux teardown calls = %d, want none", len(recorder.calls))
+			}
+		})
+	}
+}
+
+// downProjectDir writes the two-command project the down tests work on into a
+// temp directory and makes it the working directory. The compose config dir is
+// derived from $CMDMAN_CONF; without the override the resolution would reach
+// the projects the developer keeps in their own.
+func downProjectDir(t *testing.T) (dir, path string) {
+	t.Helper()
+	conf := t.TempDir()
+	t.Setenv("CMDMAN_CONF", filepath.Join(conf, "config.json"))
+	dir = t.TempDir()
+	path = filepath.Join(dir, "cmd-compose.yaml")
+	if err := os.WriteFile(path, []byte(downComposeYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	return dir, path
 }
 
 func TestAppendCwdProjectFillsPathWhenAlreadyListed(t *testing.T) {

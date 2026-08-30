@@ -175,7 +175,12 @@ type MuxDownOption struct {
 	Selection ProjectSelection
 	// SessionName narrows teardown to a single session. Empty is server-wide.
 	SessionName string
-	// Stdout is where per-restored-window lines are written. Empty defaults to
+	// KillCreated closes the windows cmdman created rather than emptying them,
+	// leaving no shell pane and no frame behind (see
+	// [mux.DownOptions.KillCreated]). A window cmdman borrowed from the caller
+	// is restored whatever this says.
+	KillCreated bool
+	// Stdout is where the per-window lines are written. Empty defaults to
 	// os.Stdout (see [mux.DownOptions.Stdout]).
 	Stdout io.Writer
 }
@@ -195,6 +200,7 @@ func (s *Service) MuxDown(ctx context.Context, opts MuxDownOption) error {
 		// identity. An explicit session keeps the scan in one session.
 		SessionName: opts.SessionName,
 		Identity:    selection.ProjectIdentity(),
+		KillCreated: opts.KillCreated,
 		Stdout:      opts.Stdout,
 	})
 }
