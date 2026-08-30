@@ -13,6 +13,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/ngicks/go-common/contextkey"
 	"github.com/ngicks/go-common/iopipe"
 	"golang.org/x/term"
 )
@@ -89,6 +90,11 @@ type AttachOptions struct {
 	SigProxy   bool
 	DetachKeys string
 
+	// WorkDir, when non-empty, is best-effort chdir'd into before the attach
+	// loop, so a terminal multiplexer derives the pane's path from the
+	// supervised command rather than from the invoker.
+	WorkDir string
+
 	// PauseSignals and ResumeSignals bracket Attach's signal forwarding so the
 	// process-global SIGINT/SIGTERM handler installed by the binary does not
 	// also fire while attached.
@@ -150,6 +156,8 @@ func Attach(ctx context.Context, session AttachSession, opts AttachOptions) erro
 	if err != nil {
 		return fmt.Errorf("invalid detach-keys: %w", err)
 	}
+
+	chdirWorkDir(ctx, opts.WorkDir)
 
 	attachCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -247,6 +255,20 @@ func Attach(ctx context.Context, session AttachSession, opts AttachOptions) erro
 	restoreTerminal()
 
 	return exitErr
+}
+
+// chdirWorkDir moves the process into dir. A directory that is gone or
+// unreadable is not a reason to refuse an attach that would otherwise work —
+// only the pane path is lost — so the failure is logged and nothing else.
+func chdirWorkDir(ctx context.Context, dir string) {
+	if dir == "" {
+		return
+	}
+	if err := os.Chdir(dir); err != nil {
+		contextkey.ValueSlogLoggerDefault(ctx).DebugContext(
+			ctx, "attach: chdir to work dir", "dir", dir, "error", err,
+		)
+	}
 }
 
 // setupRawTerminal puts stdin into raw mode (when applicable) and returns

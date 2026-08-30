@@ -65,10 +65,18 @@ func runAttach(
 	stdin, stdout, stopStdio := attachStdio(attachCtx)
 	defer stopStdio()
 
+	// Only the pane path depends on this, so an unreadable command config
+	// leaves it empty rather than failing an attach that would otherwise work.
+	var workDir string
+	if out, err := svc.Inspect(attachCtx, args[0]); err == nil && out.Config != nil {
+		workDir = out.Config.Dir
+	}
+
 	opts := cli.AttachOptions{
 		NoStdin:       flags.NoStdin,
 		SigProxy:      flags.SigProxy,
 		DetachKeys:    flags.DetachKeys,
+		WorkDir:       workDir,
 		PauseSignals:  pauseSignals,
 		ResumeSignals: resumeSignals,
 		Stdin:         os.Stdin,

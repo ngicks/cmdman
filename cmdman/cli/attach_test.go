@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"syscall"
@@ -111,6 +112,106 @@ func TestAttach_DefaultDetachKeysInterceptedNotForwarded(t *testing.T) {
 	// Only the literal bytes before the sequence are forwarded; 0x10,0x11 are
 	// swallowed by Attach and never sent to the remote command.
 	assert.Equal(t, string(session.sentStdin()), "hello")
+}
+
+// TestAttach_WorkDir covers the chdir the viewer performs so a terminal
+// multiplexer reports the supervised command's directory for the pane instead
+// of the directory attach was invoked from.
+//
+// Every case moves the process-wide cwd, so none of them may run in parallel.
+// t.Chdir both establishes a known starting point and restores the original
+// cwd when the subtest ends.
+func TestAttach_WorkDir(t *testing.T) {
+	// The chdir is best-effort: whatever it does or fails to do, the attach
+	// itself must reach the remote EOF that ends it.
+	t.Run("chdirs into WorkDir", func(t *testing.T) {
+		target := t.TempDir()
+		base := t.TempDir()
+		t.Chdir(base)
+
+		err := attachUntilRemoteEOF(t, target)
+
+		assert.Assert(t, errors.Is(err, ErrRemoteEOF))
+		assert.Equal(t, resolvedCwd(t), resolveDir(t, target))
+	})
+
+	t.Run("nonexistent WorkDir keeps the cwd and the attach", func(t *testing.T) {
+		base := t.TempDir()
+		t.Chdir(base)
+
+		err := attachUntilRemoteEOF(t, filepath.Join(base, "removed"))
+
+		assert.Assert(t, errors.Is(err, ErrRemoteEOF))
+		assert.Equal(t, resolvedCwd(t), resolveDir(t, base))
+	})
+
+	t.Run("empty WorkDir leaves the cwd alone", func(t *testing.T) {
+		base := t.TempDir()
+		t.Chdir(base)
+
+		err := attachUntilRemoteEOF(t, "")
+
+		assert.Assert(t, errors.Is(err, ErrRemoteEOF))
+		assert.Equal(t, resolvedCwd(t), resolveDir(t, base))
+	})
+}
+
+// attachUntilRemoteEOF runs Attach output-only against a session whose stream
+// is already at EOF, so it returns as soon as the WorkDir chdir has been
+// attempted. Stdin/Stdout are pipes rather than TTYs, so raw mode and resize
+// are skipped and nothing is written to them.
+func attachUntilRemoteEOF(t *testing.T, workDir string) error {
+	t.Helper()
+
+	stdinR, stdinW, err := os.Pipe()
+	assert.NilError(t, err)
+	stdoutR, stdoutW, err := os.Pipe()
+	assert.NilError(t, err)
+	t.Cleanup(func() {
+		_ = stdinR.Close()
+		_ = stdinW.Close()
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	stdinPipe := iopipe.NewReader(bytes.NewReader(nil))
+	stdoutPipe := iopipe.NewWriter(io.Discard)
+	var wg sync.WaitGroup
+	// Cleanup, not defer: both Run calls return only once ctx is done, and the
+	// deferred cancel above runs before any cleanup.
+	t.Cleanup(wg.Wait)
+	wg.Go(func() { stdinPipe.Run(ctx) })
+	wg.Go(func() { stdoutPipe.Run(ctx) })
+
+	return Attach(ctx, &recordingAttachSession{}, AttachOptions{
+		NoStdin:    true,
+		DetachKeys: DefaultDetachKeys,
+		WorkDir:    workDir,
+		Stdin:      stdinR,
+		Stdout:     stdoutW,
+		StdinPipe:  stdinPipe,
+		StdoutPipe: stdoutPipe,
+	})
+}
+
+func resolvedCwd(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	assert.NilError(t, err)
+	return resolveDir(t, dir)
+}
+
+// resolveDir puts both sides of a cwd comparison in the same terms: a temp root
+// is reached through a symlink on some platforms, so the path handed out by
+// t.TempDir and the one os.Getwd reports for it need not match textually.
+func resolveDir(t *testing.T, dir string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(dir)
+	assert.NilError(t, err)
+	return resolved
 }
 
 func TestRestoreDisplayModes(t *testing.T) {

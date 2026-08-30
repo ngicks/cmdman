@@ -77,6 +77,13 @@ func AttachSticky(
 		return errors.New("attach: AttachSticky requires all hooks set")
 	}
 
+	// Once for the whole loop rather than per re-attach: a work dir deleted
+	// while the loop sits at the wait prompt would otherwise be reported on
+	// every restart cycle. Clearing it is what keeps the Attach calls below
+	// from repeating it.
+	chdirWorkDir(ctx, opts.WorkDir)
+	opts.WorkDir = ""
+
 	for {
 		state, err := hooks.State(ctx)
 		if err != nil {
