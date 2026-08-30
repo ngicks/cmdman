@@ -1,46 +1,33 @@
 package cmdman_test
 
 import (
-	"bytes"
-	"io"
-	"os/exec"
 	"strings"
-	"sync"
 	"testing"
 	"time"
-
-	"github.com/creack/pty"
-	"github.com/ngicks/cmdman/cmdman"
 )
+
+// detachKeys is the default detach sequence, ctrl-p ctrl-q.
+const detachKeys = "\x10\x11"
 
 func TestAttach_DetachKeysExitWithoutStoppingCommand(t *testing.T) {
 	t.Parallel()
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
-	id := env.run(ctx, "run", "-t", "-n", "attach-detach", "--", "/bin/sh", "-c", "sleep 300")
+	id := env.Cmd("run", "-t", "-n", "attach-detach", "--", "/bin/sh", "-c", "sleep 300").
+		Run(ctx, t)
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
 	env.waitForState(ctx, id, "running", defaultTimeout)
 
-	attach := exec.CommandContext(ctx, cmdmanBin, "attach", id)
-	attach.Env = append(
-		hermeticEnviron(),
-		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
-		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
-	)
-
-	ptmx, err := pty.Start(attach)
-	if err != nil {
-		t.Fatalf("start attach pty: %v", err)
-	}
-	defer ptmx.Close()
-
+	sess := env.Cmd("attach", id).StartPTY(ctx, t)
+	// Attaching to an idle command prints nothing to wait on; the pause is for
+	// attach to have its stdin forwarder up before the keys arrive.
 	time.Sleep(300 * time.Millisecond)
-	if _, err := ptmx.Write([]byte{0x10, 0x11}); err != nil {
-		t.Fatalf("send detach keys: %v", err)
-	}
+	sess.Send(detachKeys)
 
-	waitAttachExit(t, attach, 3*time.Second)
+	if res := sess.Wait(t); res.Err != nil {
+		t.Fatalf("attach exited with error: %v", res.Err)
+	}
 	env.waitForState(ctx, id, "running", defaultTimeout)
 }
 
@@ -49,31 +36,20 @@ func TestAttach_ExitsWhenCommandStopsFromCtrlC(t *testing.T) {
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
-	id := env.run(ctx, "run", "-t", "-n", "attach-sigint", "--", "/bin/sh", "-c", "sleep 300")
+	id := env.Cmd("run", "-t", "-n", "attach-sigint", "--", "/bin/sh", "-c", "sleep 300").
+		Run(ctx, t)
 	env.waitForState(ctx, id, "running", defaultTimeout)
 
 	// --auto-exit: this test asserts the non-sticky behavior where attach exits
 	// once the command stops. Without it, attach defaults to sticky and drops to
 	// the restart prompt instead of exiting when ctrl-c stops the command.
-	attach := exec.CommandContext(ctx, cmdmanBin, "attach", "--auto-exit", id)
-	attach.Env = append(
-		hermeticEnviron(),
-		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
-		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
-	)
-
-	ptmx, err := pty.Start(attach)
-	if err != nil {
-		t.Fatalf("start attach pty: %v", err)
-	}
-	defer ptmx.Close()
-
+	sess := env.Cmd("attach", "--auto-exit", id).StartPTY(ctx, t)
 	time.Sleep(300 * time.Millisecond)
-	if _, err := ptmx.Write([]byte{0x03}); err != nil {
-		t.Fatalf("send ctrl-c: %v", err)
-	}
+	sess.Send("\x03")
 
-	waitAttachExit(t, attach, 3*time.Second)
+	if res := sess.Wait(t); res.Err != nil {
+		t.Fatalf("attach exited with error: %v", res.Err)
+	}
 	env.waitForState(ctx, id, "exited", defaultTimeout)
 }
 
@@ -82,63 +58,16 @@ func TestAttach_DetachRestoresShellTtyMode(t *testing.T) {
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
-	id := env.run(ctx, "run", "-t", "-n", "attach-tty", "--", "/bin/sh", "-c", "sleep 300")
+	id := env.Cmd("run", "-t", "-n", "attach-tty", "--", "/bin/sh", "-c", "sleep 300").
+		Run(ctx, t)
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
 	env.waitForState(ctx, id, "running", defaultTimeout)
 
-	script := strings.Join([]string{
-		"before=$(stty -g)",
-		cmdmanBin + " attach " + id,
-		"status=$?",
-		"after=$(stty -g)",
-		"printf 'STATUS:%s\\nBEFORE:%s\\nAFTER:%s\\n' \"$status\" \"$before\" \"$after\"",
-	}, "; ")
-
-	sh := exec.CommandContext(ctx, "/bin/sh", "-lc", script)
-	sh.Env = append(
-		hermeticEnviron(),
-		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
-		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
-	)
-
-	ptmx, err := pty.Start(sh)
-	if err != nil {
-		t.Fatalf("start shell pty: %v", err)
-	}
-	defer ptmx.Close()
-
-	var output bytes.Buffer
-	doneRead := make(chan struct{})
-	go func() {
-		_, _ = io.Copy(&output, ptmx)
-		close(doneRead)
-	}()
-
+	sess := env.Tool("/bin/sh", "-lc", ttyModeScript(cmdmanBin+" attach "+id)).StartPTY(ctx, t)
 	time.Sleep(300 * time.Millisecond)
-	if _, err := ptmx.Write([]byte{0x10, 0x11}); err != nil {
-		t.Fatalf("send detach keys: %v", err)
-	}
+	sess.Send(detachKeys)
 
-	waitAttachExit(t, sh, 3*time.Second)
-	_ = ptmx.Close()
-	<-doneRead
-
-	text := output.String()
-	before := extractMarkedLine(t, text, "BEFORE:")
-	after := extractMarkedLine(t, text, "AFTER:")
-	status := extractMarkedLine(t, text, "STATUS:")
-
-	if status != "0" {
-		t.Fatalf("shell script exited with status %q\noutput:\n%s", status, text)
-	}
-	if before != after {
-		t.Fatalf(
-			"tty mode changed across attach detach\nbefore=%q\nafter=%q\noutput:\n%s",
-			before,
-			after,
-			text,
-		)
-	}
+	assertTtyModeRestored(t, sess.Wait(t), "attach detach")
 }
 
 func TestAttach_CtrlCRestoresShellTtyMode(t *testing.T) {
@@ -146,50 +75,37 @@ func TestAttach_CtrlCRestoresShellTtyMode(t *testing.T) {
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
-	id := env.run(ctx, "run", "-t", "-n", "attach-tty-sigint", "--", "/bin/sh", "-c", "sleep 300")
+	id := env.Cmd("run", "-t", "-n", "attach-tty-sigint", "--", "/bin/sh", "-c", "sleep 300").
+		Run(ctx, t)
 	env.waitForState(ctx, id, "running", defaultTimeout)
 
 	// --auto-exit: assert the non-sticky path where attach exits (status 0) once
 	// the command stops, so the shell can capture the restored tty mode. Sticky
 	// would drop to the restart prompt and never return to the script.
-	script := strings.Join([]string{
+	script := ttyModeScript(cmdmanBin + " attach --auto-exit " + id)
+	sess := env.Tool("/bin/sh", "-lc", script).StartPTY(ctx, t)
+	time.Sleep(300 * time.Millisecond)
+	sess.Send("\x03")
+
+	assertTtyModeRestored(t, sess.Wait(t), "attach ctrl-c")
+}
+
+// ttyModeScript brackets attachCmd with the shell's own view of its terminal
+// mode, so what the shell is left holding is observable from outside.
+func ttyModeScript(attachCmd string) string {
+	return strings.Join([]string{
 		"before=$(stty -g)",
-		cmdmanBin + " attach --auto-exit " + id,
+		attachCmd,
 		"status=$?",
 		"after=$(stty -g)",
 		"printf 'STATUS:%s\\nBEFORE:%s\\nAFTER:%s\\n' \"$status\" \"$before\" \"$after\"",
 	}, "; ")
+}
 
-	sh := exec.CommandContext(ctx, "/bin/sh", "-lc", script)
-	sh.Env = append(
-		hermeticEnviron(),
-		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
-		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
-	)
+func assertTtyModeRestored(t *testing.T, res Result, what string) {
+	t.Helper()
 
-	ptmx, err := pty.Start(sh)
-	if err != nil {
-		t.Fatalf("start shell pty: %v", err)
-	}
-	defer ptmx.Close()
-
-	var output bytes.Buffer
-	doneRead := make(chan struct{})
-	go func() {
-		_, _ = io.Copy(&output, ptmx)
-		close(doneRead)
-	}()
-
-	time.Sleep(300 * time.Millisecond)
-	if _, err := ptmx.Write([]byte{0x03}); err != nil {
-		t.Fatalf("send ctrl-c: %v", err)
-	}
-
-	waitAttachExit(t, sh, 3*time.Second)
-	_ = ptmx.Close()
-	<-doneRead
-
-	text := output.String()
+	text := res.Stdout
 	before := extractMarkedLine(t, text, "BEFORE:")
 	after := extractMarkedLine(t, text, "AFTER:")
 	status := extractMarkedLine(t, text, "STATUS:")
@@ -199,7 +115,8 @@ func TestAttach_CtrlCRestoresShellTtyMode(t *testing.T) {
 	}
 	if before != after {
 		t.Fatalf(
-			"tty mode changed across attach ctrl-c\nbefore=%q\nafter=%q\noutput:\n%s",
+			"tty mode changed across %s\nbefore=%q\nafter=%q\noutput:\n%s",
+			what,
 			before,
 			after,
 			text,
@@ -230,81 +147,22 @@ while [ $n -lt 400 ]; do
 done
 printf '\033[10;1HFINAL-LINE-MARKER %s' "$pad"
 sleep 300`
-	id := env.run(ctx, "run", "-t", "-n", "snap-recon", "--scrollback-bytes", "4096",
-		"--", "/bin/sh", "-c", script)
+	id := env.Cmd("run", "-t", "-n", "snap-recon", "--scrollback-bytes", "4096",
+		"--", "/bin/sh", "-c", script).Run(ctx, t)
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
 	env.waitForState(ctx, id, "running", defaultTimeout)
 	time.Sleep(700 * time.Millisecond) // let the update loop finish and the screen settle
 
-	attach := exec.CommandContext(ctx, cmdmanBin, "attach", id)
-	attach.Env = append(hermeticEnviron(),
-		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
-		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir)
-	ptmx, err := pty.Start(attach)
-	if err != nil {
-		t.Fatalf("start attach pty: %v", err)
-	}
-	defer ptmx.Close()
+	sess := env.Cmd("attach", id).StartPTY(ctx, t)
 
-	var mu sync.Mutex
-	var out bytes.Buffer
-	doneRead := make(chan struct{})
-	go func() {
-		defer close(doneRead)
-		b := make([]byte, 8192)
-		for {
-			n, rerr := ptmx.Read(b)
-			if n > 0 {
-				mu.Lock()
-				out.Write(b[:n])
-				mu.Unlock()
-			}
-			if rerr != nil {
-				return
-			}
-		}
-	}()
-
-	// The snapshot (scrollback replacement) is sent immediately on attach.
-	deadline := time.Now().Add(3 * time.Second)
-	snapshot := func() string { mu.Lock(); defer mu.Unlock(); return out.String() }
-	for time.Now().Before(deadline) {
-		if strings.Contains(snapshot(), "HEADER-ONCE-MARKER") &&
-			strings.Contains(snapshot(), "FINAL-LINE-MARKER") {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	// The snapshot (scrollback replacement) is sent immediately on attach. The
+	// header was painted once and has long since rotated out of the byte ring:
+	// only the server-side screen mirror can still produce it.
+	sess.Expect(t, "HEADER-ONCE-MARKER", 3*time.Second)
+	sess.Expect(t, "FINAL-LINE-MARKER", 3*time.Second)
 
 	// Detach without stopping the command.
-	_, _ = ptmx.Write([]byte{0x10, 0x11})
-
-	got := snapshot()
-	if !strings.Contains(got, "HEADER-ONCE-MARKER") {
-		t.Fatalf("attach snapshot missing the scrolled-out header; the raw ring "+
-			"reconstruction bug is not fixed. got:\n%q", got)
-	}
-	if !strings.Contains(got, "FINAL-LINE-MARKER") {
-		t.Fatalf("attach snapshot missing the latest line. got:\n%q", got)
-	}
-}
-
-func waitAttachExit(t *testing.T, cmd *exec.Cmd, timeout time.Duration) {
-	t.Helper()
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("attach exited with error: %v", err)
-		}
-	case <-time.After(timeout):
-		t.Fatal("attach did not exit")
-	}
+	sess.Send(detachKeys)
 }
 
 // TestAttach_RestartReattachStreamsOutput reproduces the bug where, inside a
@@ -320,92 +178,25 @@ func TestAttach_RestartReattachStreamsOutput(t *testing.T) {
 	env := newTestEnv(t)
 
 	const marker = "RUNMARK"
-	id := env.run(ctx, "run", "-t", "-n", "attach-reattach",
-		"--", "/bin/sh", "-c", "sleep 0.3; echo "+marker+"; sleep 0.4")
+	id := env.Cmd("run", "-t", "-n", "attach-reattach",
+		"--", "/bin/sh", "-c", "sleep 0.3; echo "+marker+"; sleep 0.4").Run(ctx, t)
 	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
 
-	attach := exec.CommandContext(ctx, cmdmanBin, "attach", id)
-	attach.Env = append(
-		hermeticEnviron(),
-		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
-		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
-	)
-
-	ptmx, err := pty.Start(attach)
-	if err != nil {
-		t.Fatalf("start attach pty: %v", err)
-	}
-	defer ptmx.Close()
-
-	var mu sync.Mutex
-	var out bytes.Buffer
-	go func() {
-		b := make([]byte, 4096)
-		for {
-			n, rerr := ptmx.Read(b)
-			if n > 0 {
-				chunk := b[:n]
-				mu.Lock()
-				out.Write(chunk)
-				mu.Unlock()
-				// Answer the terminal-capability probes lipgloss/termenv emit at
-				// attach startup, the same way a real terminal would. Without a
-				// reply the probe blocks waiting for the \x1b[6n (DSR) response
-				// and the sticky prompt never renders.
-				if bytes.Contains(chunk, []byte("\x1b]11;?")) {
-					_, _ = ptmx.Write([]byte("\x1b]11;rgb:0000/0000/0000\x1b\\"))
-				}
-				if bytes.Contains(chunk, []byte("\x1b[6n")) {
-					_, _ = ptmx.Write([]byte("\x1b[1;1R"))
-				}
-			}
-			if rerr != nil {
-				return
-			}
-		}
-	}()
-	snapshot := func() (string, int) {
-		mu.Lock()
-		defer mu.Unlock()
-		return out.String(), out.Len()
-	}
+	sess := env.Cmd("attach", id).StartPTY(ctx, t)
 
 	// Wait for the first run to exit and the sticky restart prompt to appear.
-	promptDeadline := time.Now().Add(5 * time.Second)
-	for {
-		s, _ := snapshot()
-		if strings.Contains(s, "press 'r' to restart") {
-			break
-		}
-		if time.Now().After(promptDeadline) {
-			t.Fatalf("sticky restart prompt never appeared; output:\n%q", s)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	sess.Expect(t, "press 'r' to restart", 5*time.Second)
 
 	// Everything up to here (including the first run's marker) precedes mark;
 	// the reattached run's output must show up after it.
-	_, mark := snapshot()
-	if _, err := ptmx.Write([]byte("r")); err != nil {
-		t.Fatalf("send restart key: %v", err)
-	}
+	mark := len(sess.Output())
+	sess.Send("r")
+	sess.ExpectAfter(t, mark, marker, 6*time.Second)
 
-	deadline := time.Now().Add(6 * time.Second)
-	for {
-		s, _ := snapshot()
-		if len(s) >= mark && strings.Contains(s[mark:], marker) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("reattach streamed no output after restart; "+
-				"marker %q missing from post-restart output:\n%s", marker, s[min(mark, len(s)):])
-		}
-		time.Sleep(50 * time.Millisecond)
+	sess.Send(detachKeys)
+	if res := sess.Wait(t); res.Err != nil {
+		t.Fatalf("attach exited with error: %v", res.Err)
 	}
-
-	// Detach cleanly with the default detach keys (ctrl-p, ctrl-q).
-	_, _ = ptmx.Write([]byte{0x10, 0x11})
-	waitAttachExit(t, attach, 5*time.Second)
 }
 
 func extractMarkedLine(t *testing.T, text, prefix string) string {

@@ -1,7 +1,6 @@
 package cmdman_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,8 +11,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/ngicks/cmdman/cmdman"
 )
 
 // hermeticEnviron is os.Environ() with every CMDMAN_* variable removed: when
@@ -100,6 +97,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	return env
 }
 
+// The exec* / run* helpers below are the pre-builder spelling of testEnv.Cmd,
+// kept so tests that have not moved to the builder keep working off the same
+// single environment composition.
+
 func (e *testEnv) exec(ctx context.Context, args ...string) (string, string, error) {
 	return e.execFull(ctx, "", nil, args...)
 }
@@ -132,43 +133,29 @@ func (e *testEnv) execFull(
 	args ...string,
 ) (string, string, error) {
 	e.t.Helper()
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, cmdmanBin, args...)
-	cmd.Dir = dir
-	cmd.Env = append(
-		hermeticEnviron(),
-		cmdman.ENV_CMDMAN_DATA_DIR+"="+e.dataHome,
-		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+e.runtimeDir,
-		cmdman.ENV_CMDMAN_CONF+"="+e.confPath,
-	)
-	cmd.Env = append(cmd.Env, extraEnv...)
-	// WaitDelay ensures cmd.Wait returns even if spawned child processes
-	// hold stdout/stderr pipe FDs open (e.g. the detached monitor).
-	cmd.WaitDelay = 3 * time.Second
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
+	res := e.Cmd(args...).InDir(dir).WithEnv(extraEnv...).Exec(ctx)
+	return res.Stdout, res.Stderr, res.Err
 }
 
 func (e *testEnv) run(ctx context.Context, args ...string) string {
 	e.t.Helper()
-	stdout, _, err := e.exec(ctx, args...)
-	if err != nil {
-		e.t.Fatalf("cmdman %s failed: %v", strings.Join(args, " "), err)
-	}
-	return stdout
+	return e.Cmd(args...).Run(ctx, e.t)
 }
 
 func (e *testEnv) runExpectFail(ctx context.Context, args ...string) (string, string) {
 	e.t.Helper()
-	stdout, stderr, err := e.exec(ctx, args...)
-	if err == nil {
-		e.t.Fatalf("cmdman %s succeeded unexpectedly; stdout=%q", strings.Join(args, " "), stdout)
-	}
-	return stdout, stderr
+	res := e.Cmd(args...).ExpectFail(ctx, e.t)
+	return res.Stdout, res.Stderr
+}
+
+// Create creates a command and registers its removal, so a test that only needs
+// a command to exist does not carry the teardown half itself.
+func (e *testEnv) Create(ctx context.Context, name string, argv ...string) string {
+	e.t.Helper()
+	id := e.Cmd(slices.Concat([]string{"create", "-n", name, "--"}, argv)...).Run(ctx, e.t)
+	// Not ctx: cleanup runs after the test's context is already cancelled.
+	e.t.Cleanup(func() { e.cleanupCommand(context.Background(), name) })
+	return id
 }
 
 // waitForState polls "cmdman inspect" until the command reaches the desired state

@@ -43,7 +43,7 @@ func pollOutput(ctx context.Context, e *testEnv, want string, args ...string) {
 	var last string
 	deadline := time.Now().Add(defaultTimeout)
 	for time.Now().Before(deadline) {
-		last = e.run(ctx, args...)
+		last = e.Cmd(args...).Run(ctx, e.t)
 		if last == want {
 			return
 		}
@@ -60,7 +60,7 @@ func TestStatus_ReportedBySupervisedCommand(t *testing.T) {
 	dir := t.TempDir()
 	script, logPath := writeReporterScript(t, dir)
 
-	env.run(ctx, "run", "-n", "reporter", "--", "/bin/sh", script)
+	env.Cmd("run", "-n", "reporter", "--", "/bin/sh", script).Run(ctx, t)
 	t.Cleanup(func() { env.cleanupCommand(context.Background(), "reporter") })
 	env.waitForState(ctx, "reporter", "running", defaultTimeout)
 
@@ -74,19 +74,27 @@ func TestStatus_ReportedBySupervisedCommand(t *testing.T) {
 		t.Fatalf("supervised `status set` did not succeed; log:\n%s", report)
 	}
 
-	assertEq(t, env.run(ctx, "status", "get", "reporter", "--format", "{{.Status}}"), "waiting")
-	assertEq(t, env.run(ctx, "status", "get", "reporter", "--format", "{{.Detail}}"), "needs input")
+	assertEq(
+		t,
+		env.Cmd("status", "get", "reporter", "--format", "{{.Status}}").Run(ctx, t),
+		"waiting",
+	)
+	assertEq(
+		t,
+		env.Cmd("status", "get", "reporter", "--format", "{{.Detail}}").Run(ctx, t),
+		"needs input",
+	)
 
-	env.run(ctx, "status", "delete", "reporter")
-	assertEq(t, env.run(ctx, "status", "get", "reporter"), "")
+	env.Cmd("status", "delete", "reporter").Run(ctx, t)
+	assertEq(t, env.Cmd("status", "get", "reporter").Run(ctx, t), "")
 
 	// Set from outside, addressing the command by name, then restart: the report
 	// must die with the run (D13). The script's marker keeps the second run
 	// silent, so an empty read afterwards can only come from the restart.
-	env.run(ctx, "status", "set", "working", "reporter", "--detail", "from outside")
-	assertEq(t, env.run(ctx, "status", "get", "reporter"), "working\tfrom outside")
+	env.Cmd("status", "set", "working", "reporter", "--detail", "from outside").Run(ctx, t)
+	assertEq(t, env.Cmd("status", "get", "reporter").Run(ctx, t), "working\tfrom outside")
 
-	env.run(ctx, "restart", "reporter")
+	env.Cmd("restart", "reporter").Run(ctx, t)
 	env.waitForState(ctx, "reporter", "running", defaultTimeout)
 	pollOutput(ctx, env, "", "status", "get", "reporter")
 }
@@ -96,26 +104,17 @@ func TestStatus_WithoutRunningMonitor(t *testing.T) {
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
-	env.run(ctx, "create", "-n", "idle", "--", "/bin/sh", "-c", "sleep 30")
-	t.Cleanup(func() { env.cleanupCommand(context.Background(), "idle") })
+	env.Create(ctx, "idle", "/bin/sh", "-c", "sleep 30")
 
 	// A read has an answer - nothing - even with no monitor to ask.
-	stdout, _, err := env.exec(ctx, "status", "get", "idle")
-	if err != nil {
-		t.Fatalf("status get on a command that never ran failed: %v", err)
-	}
-	assertEq(t, stdout, "")
+	assertEq(t, env.Cmd("status", "get", "idle").Run(ctx, t), "")
 
 	// Writes do not: a report nobody holds is a report that was lost.
 	for _, args := range [][]string{
 		{"status", "set", "done", "idle"},
 		{"status", "delete", "idle"},
 	} {
-		if _, stderr := env.runExpectFail(ctx, args...); !strings.Contains(
-			stderr, "no running monitor",
-		) {
-			t.Errorf("%v: expected a no-monitor error, got %q", args, stderr)
-		}
+		env.Cmd(args...).ExpectFail(ctx, t, "no running monitor")
 	}
 
 	// An unknown command is an error for every verb, reads included.
@@ -124,26 +123,14 @@ func TestStatus_WithoutRunningMonitor(t *testing.T) {
 		{"status", "set", "done", "no-such-command"},
 		{"status", "delete", "no-such-command"},
 	} {
-		if _, stderr := env.runExpectFail(ctx, args...); !strings.Contains(
-			stderr, "resolve command",
-		) {
-			t.Errorf("%v: expected a resolve error, got %q", args, stderr)
-		}
+		env.Cmd(args...).ExpectFail(ctx, t, "resolve command")
 	}
 
 	// A status outside the vocabulary is rejected before anything is dialed.
-	if _, stderr := env.runExpectFail(ctx, "status", "set", "busy", "idle"); !strings.Contains(
-		stderr, "unknown status",
-	) {
-		t.Errorf("expected an unknown-status error, got %q", stderr)
-	}
+	env.Cmd("status", "set", "busy", "idle").ExpectFail(ctx, t, "unknown status")
 
 	// Neither an argument nor CMDMAN_CMD_ID: the verb says what is missing.
-	if _, stderr := env.runExpectFail(ctx, "status", "get"); !strings.Contains(
-		stderr, "CMDMAN_CMD_ID",
-	) {
-		t.Errorf("expected a missing-identity error, got %q", stderr)
-	}
+	env.Cmd("status", "get").ExpectFail(ctx, t, "CMDMAN_CMD_ID")
 }
 
 // TestStatus_AfterExit covers the other shape of "no monitor": a command whose
@@ -155,17 +142,17 @@ func TestStatus_AfterExit(t *testing.T) {
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
-	env.run(ctx, "run", "-n", "brief", "--", "/bin/sh", "-c", "exit 0")
+	env.Cmd("run", "-n", "brief", "--", "/bin/sh", "-c", "exit 0").Run(ctx, t)
 	t.Cleanup(func() { env.cleanupCommand(context.Background(), "brief") })
 	env.waitForState(ctx, "brief", "exited", defaultTimeout)
 
 	start := time.Now()
-	stdout, _, err := env.exec(ctx, "status", "get", "brief")
+	res := env.Cmd("status", "get", "brief").Exec(ctx)
 	elapsed := time.Since(start)
-	if err != nil {
-		t.Fatalf("status get on an exited command failed: %v", err)
+	if res.Err != nil {
+		t.Fatalf("status get on an exited command failed: %v", res.Err)
 	}
-	assertEq(t, stdout, "")
+	assertEq(t, res.Stdout, "")
 	// The read is bounded by the RPC deadline, not by the caller's patience.
 	if elapsed > 10*time.Second {
 		t.Errorf("status get on an exited command took %s", elapsed)
@@ -173,11 +160,7 @@ func TestStatus_AfterExit(t *testing.T) {
 
 	// A write still fails, with the same explanation an unstarted command gets:
 	// how the monitor came to be absent is not the user's problem.
-	if _, stderr := env.runExpectFail(ctx, "status", "set", "done", "brief"); !strings.Contains(
-		stderr, "no running monitor",
-	) {
-		t.Errorf("expected a no-monitor error, got %q", stderr)
-	}
+	env.Cmd("status", "set", "done", "brief").ExpectFail(ctx, t, "no running monitor")
 }
 
 func TestStatus_ComposeProjectView(t *testing.T) {
@@ -202,15 +185,13 @@ commands:
 	composeArgs := func(rest ...string) []string {
 		return slices.Concat([]string{"compose", "--workdir", wd, "-f", composePath}, rest)
 	}
-	if _, stderr, err := env.exec(ctx, composeArgs("up")...); err != nil {
-		t.Fatalf("compose up failed: %v\n%s", err, stderr)
-	}
+	env.Cmd(composeArgs("up")...).Run(ctx, t)
 
 	pollOutput(ctx, env, "quiet=\nreporter=waiting",
 		composeArgs("status", "--format", "{{.Command}}={{.Status}}")...)
 
 	// The default table carries the detail beside the status.
-	table := env.run(ctx, composeArgs("status")...)
+	table := env.Cmd(composeArgs("status")...).Run(ctx, t)
 	lines := strings.Split(table, "\n")
 	if len(lines) != 3 {
 		t.Fatalf("expected a header and two rows, got:\n%s", table)
@@ -225,14 +206,10 @@ commands:
 	// Command selection works exactly as it does for `compose ps`.
 	assertEq(
 		t,
-		env.run(ctx, composeArgs("status", "quiet", "--format", "{{.Command}}")...),
+		env.Cmd(composeArgs("status", "quiet", "--format", "{{.Command}}")...).Run(ctx, t),
 		"quiet",
 	)
-	if _, stderr := env.runExpectFail(ctx, composeArgs("status", "nope")...); !strings.Contains(
-		stderr, "unknown compose command",
-	) {
-		t.Errorf("expected an unknown-command error, got %q", stderr)
-	}
+	env.Cmd(composeArgs("status", "nope")...).ExpectFail(ctx, t, "unknown compose command")
 }
 
 func assertEq(t *testing.T, got, want string) {
