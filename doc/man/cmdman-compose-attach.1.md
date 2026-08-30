@@ -20,6 +20,10 @@ restarts and can request a restart through the sticky attach interface.
 
 Detaching affects only the client; it does not stop the compose service.
 
+The viewer reports the service command's working directory the same way
+`cmdman attach` does — see the working-directory paragraph in
+[cmdman-attach(1)](./cmdman-attach.1.md).
+
 ## Selection Flags
 
 Uses the compose selection flags documented in

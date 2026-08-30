@@ -93,6 +93,9 @@ type AttachOptions struct {
 	// WorkDir, when non-empty, is best-effort chdir'd into before the attach
 	// loop, so a terminal multiplexer derives the pane's path from the
 	// supervised command rather than from the invoker.
+	//
+	// It is an override: [AttachCommand] and [AttachCommandSticky] default it
+	// to the attached command's configured directory when it is left empty.
 	WorkDir string
 
 	// PauseSignals and ResumeSignals bracket Attach's signal forwarding so the

@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
@@ -89,41 +88,17 @@ func runComposeAttach(
 		StdoutPipe:    stdout,
 	}
 
-	if flags.AutoExit {
-		session, err := composeSvc.OpenAttachSession(attachCtx, selection, serviceName, scaleIndex)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = session.Close() }()
+	id, err := composeSvc.ResolveCommandID(attachCtx, selection, serviceName, scaleIndex)
+	if err != nil {
+		return err
+	}
 
-		err = cli.Attach(attachCtx, session, opts)
+	if flags.AutoExit {
+		err := cli.AttachCommand(attachCtx, svc, id, opts)
 		if errors.Is(err, cli.ErrRemoteEOF) {
 			return nil
 		}
 		return err
 	}
-
-	id, err := composeSvc.ResolveCommandID(attachCtx, selection, serviceName, scaleIndex)
-	if err != nil {
-		return err
-	}
-	hooks := cli.StickyHooks{
-		State: stickyStateFor(svc, id),
-		OpenSession: func(ctx context.Context) (cli.AttachSession, error) {
-			return svc.OpenAttachSession(ctx, id)
-		},
-		Restart: func(ctx context.Context) error {
-			results, err := svc.Restart(ctx, cmdman.RestartRequest{Targets: []string{id}})
-			if err != nil {
-				return err
-			}
-			for _, r := range results {
-				if r.Err != nil {
-					return r.Err
-				}
-			}
-			return nil
-		},
-	}
-	return cli.AttachSticky(attachCtx, hooks, opts)
+	return cli.AttachCommandSticky(attachCtx, svc, id, opts)
 }

@@ -168,21 +168,6 @@ it.
 Fix direction: mirror `TestStreamRuntimeState_ThrottlesTitleBurst`'s
 timing assertions.
 
-## Attach WorkDir should be completed by the service, not each command (2026-08-30)
-
-`cmd/cmdman/commands/attach.go` fills `AttachOptions.WorkDir` via
-`svc.Inspect` in the command wiring, which is the wrong layer: every
-attach entry point has to repeat it, and `compose attach`
-(`cmd/cmdman/commands/compose_attach.go`) already misses it — its viewers
-get the OSC 7 replay leg but not the chdir leg. The service/cli layer
-should complete the WorkDir option itself (resolve the command's
-configured dir when the caller leaves WorkDir empty), so all attach paths
-get it uniformly and `./cmd` stays thin.
-
-Fix direction: move the resolution into `cmdman/cli` (or the service
-attach path), defaulting WorkDir from the command's config; drop the
-per-command Inspect wiring.
-
 ## Window-level start dirs via multiplexer -c plumbing (2026-08-30)
 
 Viewer panes now report per-command cwd, but windows/panes created by the
