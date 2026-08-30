@@ -10,12 +10,12 @@ Worktree: `feat-pane-cwd` (branch `feat-pane-cwd`, based on `main` @ c9d6ff4).
 
 - [x] 1. Latch: `latchCwd` + `WorkingDirectory` callback wiring — delivers
       IDEA U2 "the monitor's VT emulator latches it" (967b834)
-- [ ] 2. Seed from config `Dir` — delivers IDEA "a freshly started silent
-      command still reports its configured Dir"
-- [ ] 3. Re-emit in `subscribeOutput` — delivers IDEA U2 "receives a
-      synthesized OSC 7 at replay start"
-- [ ] 4. hook_filter accounting — delivers PLAN scope "hook-filter
-      accounting for the newly captured kind"
+- [x] 2. Seed from config `Dir` — delivers IDEA "a freshly started silent
+      command still reports its configured Dir" (d212da1)
+- [x] 3. Re-emit in `subscribeOutput` — delivers IDEA U2 "receives a
+      synthesized OSC 7 at replay start" (d6b2e96)
+- [x] 4. hook_filter accounting — delivers PLAN scope "hook-filter
+      accounting for the newly captured kind" (f8fd743)
 - [ ] 5. Proto `RuntimeState.cwd` + buf regen — delivers D3 "add cwd to
       proto RuntimeState now"
 - [ ] 6. Viewer chdir (`AttachOptions.WorkDir`) — delivers IDEA U1 "chdir'd

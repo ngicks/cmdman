@@ -90,6 +90,17 @@ cwd-only latch. Not listed in the plan step, but required by the struct's
 documented "only for the current run" invariant — without it a restarted
 command would keep the previous run's cwd. Package-private; no surface delta.
 
+## D8 — service-side RuntimeState carries Cwd too [automatic]
+
+Decided during implementation (2026-08-30, user away): the proto field alone
+never reaches inspect/status readers — `cmdman.RuntimeState` (the exported
+CLI-output struct in `cmdman/cmdman_runtime_state.go`) and its
+`runtimeStateFromProto` mapping drop unknown fields. Added `Cwd string
+`json:",omitzero"`` there so `svc.RuntimeStates` / WatchRuntimeState /
+--format templates actually see it, matching the docs step's promise of an
+inspect/status cwd field. Watch tests updated: the opening snapshot now
+carries the seeded configured dir instead of being empty.
+
 ## D6 — frame workdir via self-resolve, enabled by the token (decided 2026-08-30, "then self-resolve")
 
 Open question 6 resolved: no `--workdir` flag. Once the switcher holds a

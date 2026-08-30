@@ -143,6 +143,15 @@ message RuntimeState {
 Per D3's sub-decision, proto `cwd` is the parsed path; the raw `file://`
 payload stays internal for the byte-exact replay re-emit.
 
+```go
+// cmdman/cmdman_runtime_state.go — the exported CLI-output struct mirrors the
+// proto field so inspect/status/--format readers actually see it (D8):
+type RuntimeState struct {
+    // ... existing fields ...
+    Cwd string `json:",omitzero"`
+}
+```
+
 ```sh
 # cmd/cmdman/commands — the switcher widget gains project-manager's existing
 # flag (D5); the frame builder passes it, and it stays usable by hand:
