@@ -403,6 +403,10 @@ func TestMonitorRunSeedsCwdFromConfiguredDir(t *testing.T) {
 		return m.runtimeState.snapshot().CwdSet
 	}, "the run never seeded its cwd")
 	assert.Equal(t, m.runtimeState.snapshot().Cwd, cwdURL(dir))
+	// Status and WatchRuntimeState carry the parsed path, so the directory a
+	// reader sees is the one the command was configured with.
+	assert.Equal(t, m.runtimeState.snapshot().view().Cwd, dir)
+	assert.Equal(t, protoRuntimeState(m.runtimeState.snapshot().view()).Cwd, dir)
 
 	select {
 	case err := <-runErr:

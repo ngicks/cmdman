@@ -75,6 +75,9 @@ func TestCommandRuntimeState_SeedsCwdFromConfiguredDir(t *testing.T) {
 	snap := st.snapshot()
 	assert.Equal(t, snap.Cwd, "file://localhost/home/me/my%20project")
 	assert.Equal(t, snap.CwdSet, true)
+	// What goes on the wire is the directory that was configured, back in the
+	// form a reader can use.
+	assert.Equal(t, snap.view().Cwd, "/home/me/my project")
 
 	// The seed is only a baseline: what the command reports itself wins.
 	feed("\x1b]7;file://host/tmp/real\x07")
@@ -85,6 +88,74 @@ func TestCommandRuntimeState_SeedsCwdFromConfiguredDir(t *testing.T) {
 	st.reset()
 	st.seedCwd("")
 	assert.Equal(t, st.snapshot().CwdSet, false)
+}
+
+func TestCwdPath(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{
+			name:    "host is dropped",
+			payload: "file://somehost/tmp/x",
+			want:    "/tmp/x",
+		},
+		{
+			name:    "empty host",
+			payload: "file:///tmp/x",
+			want:    "/tmp/x",
+		},
+		{
+			name:    "percent escapes are decoded",
+			payload: "file://localhost/home/me/my%20project",
+			want:    "/home/me/my project",
+		},
+		{
+			name:    "no path",
+			payload: "file://localhost",
+			want:    "",
+		},
+		{
+			// A payload that never reached the latch reads as unknown, not as
+			// the root directory.
+			name:    "nothing reported",
+			payload: "",
+			want:    "",
+		},
+		{
+			// Some shells emit a bare path. Guessing that it is a local
+			// directory would make the field mean two different things.
+			name:    "bare path is not a file url",
+			payload: "/tmp/x",
+			want:    "",
+		},
+		{
+			name:    "other scheme",
+			payload: "http://example.com/tmp/x",
+			want:    "",
+		},
+		{
+			name:    "unparseable payload",
+			payload: "file://host/%zz",
+			want:    "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, cwdPath(tc.payload), tc.want)
+		})
+	}
+}
+
+// A payload the view cannot parse costs the wire field, not the replay: an
+// attached viewer still gets the bytes the command sent.
+func TestCommandRuntimeState_UnparseableCwdIsEmptyOnTheWire(t *testing.T) {
+	st, feed := runtimeStateFeed(t)
+
+	feed("\x1b]7;file://host/%zz\x07")
+	snap := st.snapshot()
+	assert.Equal(t, snap.Cwd, "file://host/%zz")
+	assert.Equal(t, snap.view().Cwd, "")
 }
 
 func TestCommandRuntimeState_SanitizesInvalidUTF8(t *testing.T) {

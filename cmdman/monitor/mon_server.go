@@ -415,6 +415,7 @@ func (s *monitorServer) CaptureScreen(
 func protoRuntimeState(v runtimeView) *pb.RuntimeState {
 	return &pb.RuntimeState{
 		Title:      v.Title,
+		Cwd:        v.Cwd,
 		Status:     protoReportedStatus(v.Status),
 		Detail:     v.Detail,
 		BellUnread: v.BellUnread,

@@ -28,6 +28,10 @@ type RuntimeState struct {
 	Status     string `json:",omitzero"` // working, waiting, done, or empty
 	Detail     string `json:",omitzero"`
 	BellUnread bool
+	// Cwd is the command's reported working directory as an absolute path,
+	// parsed from its OSC 7 report or seeded from the configured dir; empty
+	// when the monitor could not make a path of it.
+	Cwd string `json:",omitzero"`
 }
 
 // RuntimeStatesOption tunes the fan-out of RuntimeStates. The zero value uses
@@ -130,6 +134,7 @@ func runtimeStateFromProto(state *cmdmanv1pb.RuntimeState) RuntimeState {
 		Status:     reportedStatusName(state.Status),
 		Detail:     state.Detail,
 		BellUnread: state.BellUnread,
+		Cwd:        state.Cwd,
 	}
 }
 
