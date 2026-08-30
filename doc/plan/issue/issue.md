@@ -88,20 +88,6 @@ service has more than one replica. Noticed while documenting
 Fix direction: add the flag to the compose-attach page's options list,
 matching the wording used by `cmdman-compose-capture-screen.1.md`.
 
-## e2e TestStatus_WithoutRunningMonitor is not hermetic (2026-08-28)
-
-`e2e/cmdman/status_test.go` (missing-identity case, around line 141)
-expects `cmdman status get` with no argument to fail with a
-missing-identity error, but `testEnv.execFull`
-(`e2e/cmdman/main_test.go:129`) passes `os.Environ()` through to the
-binary, so a `CMDMAN_CMD_ID` inherited from a cmdman-supervised shell is
-resolved instead and the test fails with a different error. Reproduces
-deterministically when the suite itself runs under cmdman.
-
-Fix direction: strip `CMDMAN_CMD_ID` (and any other identity-carrying
-variables) from the child environment in `execFull`, or explicitly in that
-test.
-
 ## README does not cover the interaction commands (2026-08-29)
 
 `README.md` never mentions `capture-screen` — nor `send-keys`, `attach`, or
