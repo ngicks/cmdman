@@ -82,6 +82,14 @@ enclosing window's id as `--mux-token <windowID>` (project-manager's
 existing flag pattern, `tui_widget_projectmanager.go:76`); the cli plumbing
 (`TUIWidgetOptions.MuxToken` → backend) already exists.
 
+## D7 — cwd latch cleared on run reset [automatic]
+
+Decided during implementation (2026-08-30, user away): `reset()` clears
+`cwd`/`cwdSet` alongside title/bell, and the no-change guard accounts for a
+cwd-only latch. Not listed in the plan step, but required by the struct's
+documented "only for the current run" invariant — without it a restarted
+command would keep the previous run's cwd. Package-private; no surface delta.
+
 ## D6 — frame workdir via self-resolve, enabled by the token (decided 2026-08-30, "then self-resolve")
 
 Open question 6 resolved: no `--workdir` flag. Once the switcher holds a
