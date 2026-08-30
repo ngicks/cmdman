@@ -356,6 +356,66 @@ func TestMonitorRunEndClearsRuntimeState(t *testing.T) {
 	assert.Assert(t, woke(changed))
 }
 
+// A command that never emits OSC 7 - here a pipe-wired one, which has no
+// emulator to emit it through at all - still reports the directory it was
+// started in, from the moment the run begins.
+func TestMonitorRunSeedsCwdFromConfiguredDir(t *testing.T) {
+	dir := t.TempDir()
+	appCfg := testConfig(t, dir)
+	dbPath, err := appCfg.DBPath()
+	assert.NilError(t, err)
+
+	st, err := store.OpenStore(t.Context(), dbPath, true)
+	assert.NilError(t, err)
+	defer st.Close()
+
+	id := "test-monitor-7"
+	commandDir, err := appCfg.CommandDir(id)
+	assert.NilError(t, err)
+	cfg := &model.CommandConfig{
+		Argv:            []string{"/bin/sh", "-c", "sleep 1"},
+		Dir:             dir,
+		Env:             testEnv(),
+		RestartPolicy:   model.RestartPolicyNo,
+		ScrollbackBytes: 4096,
+		LogDriver:       model.DefaultLogDriver,
+		CommandDir:      commandDir,
+	}
+
+	assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
+	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
+	assert.NilError(t, st.InsertCommandState(id, model.EventTypeCreated, &model.CommandState{}))
+
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	m, err := newMonitor(t.Context(), id, appCfg, logger)
+	assert.NilError(t, err)
+	defer m.Close()
+
+	// The run's error comes back to the test goroutine: a failed assertion calls
+	// FailNow, which only the test goroutine may do.
+	runErr := make(chan error, 1)
+	go func() {
+		_, err := m.runOnce(t.Context())
+		runErr <- err
+	}()
+
+	waitUntil(t, 10*time.Second, func() bool {
+		return m.runtimeState.snapshot().CwdSet
+	}, "the run never seeded its cwd")
+	assert.Equal(t, m.runtimeState.snapshot().Cwd, cwdURL(dir))
+
+	select {
+	case err := <-runErr:
+		assert.NilError(t, err)
+	case <-time.After(20 * time.Second):
+		t.Fatal("the run never finished")
+	}
+
+	// The seed is per-run state like everything else the run latched: it dies
+	// with the run rather than describing a process that is gone.
+	assert.Equal(t, m.runtimeState.snapshot().CwdSet, false)
+}
+
 func TestStaleEntryCleanup(t *testing.T) {
 	st := testStore(t)
 

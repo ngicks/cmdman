@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"bytes"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -216,6 +217,27 @@ func (s *commandRuntimeState) latchCwd(payload string) {
 		s.cwd = payload
 		return true
 	})
+}
+
+// seedCwd latches the command's configured working directory as the run's
+// baseline, so a command that never emits OSC 7 - a pipe-wired one cannot, it
+// has no emulator - still reports where it was started from. It goes through
+// the same latch as a real report, so the child's first OSC 7 simply replaces
+// it. An empty directory seeds nothing: reporting the bare `file://localhost`
+// a blank path encodes to would be worse than reporting nothing.
+func (s *commandRuntimeState) seedCwd(dir string) {
+	if dir == "" {
+		return
+	}
+	s.latchCwd(cwdURL(dir))
+}
+
+// cwdURL encodes a directory the way an OSC 7 payload carries one,
+// `file://localhost/path`, percent-encoding what the path needs. localhost is
+// the host a path on this machine takes.
+func cwdURL(dir string) string {
+	u := url.URL{Scheme: "file", Host: "localhost", Path: dir}
+	return u.String()
 }
 
 // latchBell marks the bell unread. It latches even while a viewer is attached:

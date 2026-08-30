@@ -68,6 +68,25 @@ func TestCommandRuntimeState_LatchesCwd(t *testing.T) {
 	assert.Equal(t, st.snapshot().Cwd, "file://host/tmp/�")
 }
 
+func TestCommandRuntimeState_SeedsCwdFromConfiguredDir(t *testing.T) {
+	st, feed := runtimeStateFeed(t)
+
+	st.seedCwd("/home/me/my project")
+	snap := st.snapshot()
+	assert.Equal(t, snap.Cwd, "file://localhost/home/me/my%20project")
+	assert.Equal(t, snap.CwdSet, true)
+
+	// The seed is only a baseline: what the command reports itself wins.
+	feed("\x1b]7;file://host/tmp/real\x07")
+	assert.Equal(t, st.snapshot().Cwd, "file://host/tmp/real")
+
+	// An empty directory is not a directory; seeding it would report the bare
+	// `file://localhost` the empty path encodes to.
+	st.reset()
+	st.seedCwd("")
+	assert.Equal(t, st.snapshot().CwdSet, false)
+}
+
 func TestCommandRuntimeState_SanitizesInvalidUTF8(t *testing.T) {
 	st, feed := runtimeStateFeed(t)
 
