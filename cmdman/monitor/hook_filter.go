@@ -315,7 +315,10 @@ func (f *hookFilter) oscDropEsc(out []byte, b byte) []byte {
 // false while the body is too short to tell. The forms recognized here mirror
 // what the monitor captures: OSC 0/2 titles (OSC 1 sets only the icon name,
 // which has no callback registered), and the OSC 9 / OSC 777 notification
-// forms accepted by parseOsc9Notification / parseOsc777Notification.
+// forms accepted by parseOsc9Notification / parseOsc777Notification. OSC 7
+// (working directory) is also captured, but only into the cwd latch: it is
+// idempotent state a viewer's multiplexer needs verbatim, it emits no hook,
+// and hookBlocks has no field for it, so it always passes through here.
 func (f *hookFilter) decideOsc(body []byte, terminated bool) (block, decided bool) {
 	num, rest, hasSep := bytes.Cut(body, []byte{';'})
 	if len(num) == 0 || !isDigits(num) {
