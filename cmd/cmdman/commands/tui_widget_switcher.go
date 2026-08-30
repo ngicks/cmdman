@@ -8,7 +8,10 @@ import (
 )
 
 func tuiWidgetSwitcherCmd(parent *cobra.Command, rf *rootFlags, noQuit *bool) {
-	var flagWorkDir string
+	var (
+		flagWorkDir  string
+		flagMuxToken string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "switcher",
@@ -28,15 +31,18 @@ first — any other key takes the question back.`,
 		ValidArgsFunction: cobra.NoFileCompletions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTuiWidget(cmd, args, rf, cli.TUIWidgetOptions{
-				Widget:  tui.WidgetSwitcher,
-				WorkDir: flagWorkDir,
-				NoQuit:  *noQuit,
+				Widget:   tui.WidgetSwitcher,
+				WorkDir:  flagWorkDir,
+				NoQuit:   *noQuit,
+				MuxToken: flagMuxToken,
 			})
 		},
 	}
 
 	cmd.Flags().StringVarP(&flagWorkDir, "workdir", "w", "",
 		"Override the effective work directory for compose project discovery")
+	cmd.Flags().StringVar(&flagMuxToken, "mux-token", "",
+		"Multiplexer window token to take the project from, e.g. tmux's #{window_id}")
 
 	parent.AddCommand(cmd)
 }

@@ -209,7 +209,7 @@ func (t frameTarget) show(
 
 	root, err := spec.Carve(
 		muxctl.PaneSpec{Leaf: muxctl.Leaf{Name: frameMainPane}},
-		frameComponentArgv(opts.Executable),
+		frameComponentArgv(opts.Executable, t.windowID),
 	)
 	if err != nil {
 		return fmt.Errorf("mux: frame def %q: %w", defName, err)
@@ -520,9 +520,28 @@ func nextFrameDef(names []string, shown string) string {
 }
 
 // frameComponentArgv resolves a component: entry to the widget invocation that
-// runs it (D37).
-func frameComponentArgv(exe string) frame.ComponentArgv {
-	return frame.WidgetArgv(frameExecutable(exe))
+// runs it (D37), naming the window the frame is carved around as the widget's
+// --mux-token.
+//
+// The token is what makes a docked widget's project deterministic. Without it a
+// widget falls back to asking the multiplexer which window is current, and that
+// answer is client-relative: the pane would report whichever cmdman window the
+// user's client last looked at rather than the one it is docked in. windowID is
+// empty only where no window was resolved, and then the flag is left off — an
+// empty token says no more than an absent one, and the argv stays one a person
+// can rerun by hand.
+func frameComponentArgv(exe, windowID string) frame.ComponentArgv {
+	widget := frame.WidgetArgv(frameExecutable(exe))
+	if windowID == "" {
+		return widget
+	}
+	return func(component string) ([]string, error) {
+		argv, err := widget(component)
+		if err != nil {
+			return nil, err
+		}
+		return append(argv, "--mux-token", windowID), nil
+	}
 }
 
 // frameExecutable is the cmdman binary a frame pane runs — for a component's
