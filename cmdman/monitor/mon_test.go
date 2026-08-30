@@ -619,7 +619,7 @@ func TestMonitorSubscribeReplaysLatchedCwdAfterTitle(t *testing.T) {
 	assert.Equal(
 		t,
 		string(sub.TerminalState),
-		"\x1b[?1000h\x1b]2;build\x07\x1b]7;"+testCwdPayload+"\x07",
+		"\x1b[?1000h\x1b]2;build\x07\x1b]7;"+testCwdPayload+"\x1b\\",
 	)
 }
 
@@ -638,7 +638,7 @@ func TestMonitorSubscribeReplaysLatchedCwdWithoutTitle(t *testing.T) {
 	sub := m.subscribeOutput(true)
 	defer sub.Unsub()
 
-	assert.Equal(t, string(sub.TerminalState), "\x1b]7;"+testCwdPayload+"\x07")
+	assert.Equal(t, string(sub.TerminalState), "\x1b]7;"+testCwdPayload+"\x1b\\")
 }
 
 func TestMonitorSubscribeReplaysExplicitlyClearedTitle(t *testing.T) {

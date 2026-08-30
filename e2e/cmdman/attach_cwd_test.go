@@ -56,7 +56,7 @@ sleep 300`
 	}, "the padded output never reached the screen")
 
 	attach := startAttachPty(ctx, t, env, id)
-	attach.waitContains(t, "\x1b]7;file://localhost"+reported+"\x07")
+	attach.waitContains(t, "\x1b]7;file://localhost"+reported+"\x1b\\")
 	attach.detach(t)
 }
 
@@ -79,7 +79,7 @@ func TestAttach_ReplaysSeededCwd(t *testing.T) {
 	attach := startAttachPty(ctx, t, env, id)
 	// A t.TempDir path is plain ASCII, so the payload is the directory appended
 	// to the scheme and host verbatim - nothing in it percent-encodes.
-	attach.waitContains(t, "\x1b]7;file://localhost"+dir+"\x07")
+	attach.waitContains(t, "\x1b]7;file://localhost"+dir+"\x1b\\")
 	attach.detach(t)
 }
 
