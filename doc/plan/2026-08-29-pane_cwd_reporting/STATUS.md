@@ -1,8 +1,13 @@
 # Status — pane cwd reporting
 
-Current state: **implementation in progress** (autonomous run, 2026-08-30) —
-step 1 landed and committed (967b834). Includes an unplanned but required
-reset() clear of the latch (D7 [automatic]).
+Current state: **implemented; verification passed** (autonomous run,
+2026-08-30). All 10 steps landed, one commit each. Post-review fixes:
+ST-terminated replay re-emit (D9 [automatic], 6af09a8) and a UTF-8 guard at
+the cwdPath wire boundary — url.Parse can percent-decode clean ASCII into
+invalid UTF-8, which would fail proto marshaling of the whole runtime-state
+response (a2a505d, the ng-reviewer's one blocking finding).
+
+Awaiting user review of the implementation.
 
 Worktree: `feat-pane-cwd` (branch `feat-pane-cwd`, based on `main` @ c9d6ff4).
 
