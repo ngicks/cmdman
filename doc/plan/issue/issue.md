@@ -76,3 +76,19 @@ layer: changing the encoding renames existing commands.
 Fix direction: apply the same unambiguous-join treatment, either with a
 migration story for existing registered names or accepting the rename
 outright (the app has never been deployed).
+
+## e2e harness leaks ambient CMDMAN_CMD_ID into tests (2026-08-30)
+
+`TestStatus_WithoutRunningMonitor` (`e2e/cmdman/status_test.go:142`) asserts
+that `status get` with neither an argument nor `CMDMAN_CMD_ID` errors
+naming the missing identity — but the e2e env inherits the parent process
+environment, so when the dev session itself runs under cmdman (as this one
+does), the ambient `CMDMAN_CMD_ID` reaches the child and the verb instead
+fails with `resolve command: no command found matching "<ambient id>"`.
+Noted as "pre-existing failure" during 2026-08-27-fix_launcher_down_restart;
+it is a test-harness env-hygiene gap, not a product bug, and only reproduces
+when the suite runs inside a cmdman-supervised command.
+
+Fix direction: have the e2e test env scrub `CMDMAN_CMD_ID` (and audit for
+other ambient `CMDMAN_*` vars the harness does not already override) when
+building the child environment.
