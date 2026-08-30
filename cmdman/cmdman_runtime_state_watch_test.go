@@ -73,9 +73,11 @@ until [ -e "%[1]s/exit" ]; do sleep 0.05; done
 	assert.NilError(t, err)
 	defer sub.Close()
 
-	// The command has written nothing yet, so the opening snapshot is the empty
-	// state - and it arrives without any change having happened at all.
-	assert.DeepEqual(t, recvRuntimeState(t, sub.Records()), RuntimeState{})
+	// The command has written nothing yet, so the opening snapshot holds only
+	// what the monitor itself seeded - the configured working directory - and
+	// it arrives without any change having happened at all.
+	assert.DeepEqual(t, recvRuntimeState(t, sub.Records()),
+		RuntimeState{Cwd: appCfg.DataDir})
 
 	advance("title")
 	assert.Equal(t, recvRuntimeState(t, sub.Records()).Title, "first")
@@ -99,6 +101,7 @@ until [ -e "%[1]s/exit" ]; do sleep 0.05; done
 	assert.DeepEqual(t, recvRuntimeState(t, late.Records()), RuntimeState{
 		Title:      "second",
 		BellUnread: true,
+		Cwd:        appCfg.DataDir,
 	})
 	assert.NilError(t, late.Close())
 	drainClosed(t, late.Records())
@@ -120,7 +123,8 @@ func TestServiceWatchRuntimeStateClose(t *testing.T) {
 
 	// Taking the snapshot leaves the pump parked in Recv; Close must unblock it
 	// and close the channel without reporting the cancellation as an error.
-	assert.DeepEqual(t, recvRuntimeState(t, sub.Records()), RuntimeState{})
+	assert.DeepEqual(t, recvRuntimeState(t, sub.Records()),
+		RuntimeState{Cwd: appCfg.DataDir})
 	assert.NilError(t, sub.Close())
 	drainClosed(t, sub.Records())
 }

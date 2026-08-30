@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ngicks/cmdman/cmdman/frame"
 	"github.com/ngicks/cmdman/pkg/muxctl"
 	"github.com/ngicks/cmdman/pkg/muxctl/tmux"
 )
@@ -673,5 +674,37 @@ func TestFrameList_ReportsDefsAndShownWindows(t *testing.T) {
 	}
 	if len(res.Shown) != 1 || res.Shown[windowID] != "dev" {
 		t.Errorf("Shown = %v, want the framed window %s showing dev", res.Shown, windowID)
+	}
+}
+
+// TestFrameComponentArgv pins what a component pane is spawned with: the widget
+// invocation for the component, and the window the frame is carved around named
+// as its token, so the widget reports the project it is docked beside rather
+// than whichever cmdman window the user's client last looked at.
+func TestFrameComponentArgv(t *testing.T) {
+	argv, err := frameComponentArgv("/opt/bin/cmdman", "@42")(frame.ComponentSwitcher)
+	if err != nil {
+		t.Fatalf("frameComponentArgv: %v", err)
+	}
+	want := []string{
+		"/opt/bin/cmdman", "tui", "widget", "switcher", "--no-quit", "--mux-token", "@42",
+	}
+	if !slices.Equal(argv, want) {
+		t.Errorf("argv = %v, want %v", argv, want)
+	}
+
+	// With no window resolved the flag is left off entirely: an empty token
+	// says no more than an absent one, and the argv is one to rerun by hand.
+	argv, err = frameComponentArgv("/opt/bin/cmdman", "")(frame.ComponentSwitcher)
+	if err != nil {
+		t.Fatalf("frameComponentArgv with no window: %v", err)
+	}
+	want = []string{"/opt/bin/cmdman", "tui", "widget", "switcher", "--no-quit"}
+	if !slices.Equal(argv, want) {
+		t.Errorf("argv = %v, want %v", argv, want)
+	}
+
+	if _, err := frameComponentArgv("/opt/bin/cmdman", "@42")("nope"); err == nil {
+		t.Error("an unknown component resolved; want it rejected before it reaches a pane")
 	}
 }

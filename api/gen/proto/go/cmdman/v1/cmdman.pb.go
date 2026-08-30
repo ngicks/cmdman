@@ -902,11 +902,15 @@ func (x *StatusResponse) GetRuntimeState() *RuntimeState {
 // the same message is carried by both Status and WatchRuntimeState so one-shot
 // and streaming consumers never diverge.
 type RuntimeState struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Title         string                 `protobuf:"bytes,1,opt,name=title,proto3" json:"title,omitempty"` // window title the command last set, "" if it set none
-	Status        ReportedStatus         `protobuf:"varint,2,opt,name=status,proto3,enum=cmdman.v1.ReportedStatus" json:"status,omitempty"`
-	Detail        string                 `protobuf:"bytes,3,opt,name=detail,proto3" json:"detail,omitempty"`                            // free-form detail accompanying status
-	BellUnread    bool                   `protobuf:"varint,4,opt,name=bell_unread,json=bellUnread,proto3" json:"bell_unread,omitempty"` // a bell rang and nobody has looked at the command since
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Title      string                 `protobuf:"bytes,1,opt,name=title,proto3" json:"title,omitempty"` // window title the command last set, "" if it set none
+	Status     ReportedStatus         `protobuf:"varint,2,opt,name=status,proto3,enum=cmdman.v1.ReportedStatus" json:"status,omitempty"`
+	Detail     string                 `protobuf:"bytes,3,opt,name=detail,proto3" json:"detail,omitempty"`                            // free-form detail accompanying status
+	BellUnread bool                   `protobuf:"varint,4,opt,name=bell_unread,json=bellUnread,proto3" json:"bell_unread,omitempty"` // a bell rang and nobody has looked at the command since
+	// cwd is the command's reported working directory as an absolute path,
+	// parsed from its OSC 7 report or seeded from the configured dir. It is
+	// empty when unknown.
+	Cwd           string `protobuf:"bytes,5,opt,name=cwd,proto3" json:"cwd,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -967,6 +971,13 @@ func (x *RuntimeState) GetBellUnread() bool {
 		return x.BellUnread
 	}
 	return false
+}
+
+func (x *RuntimeState) GetCwd() string {
+	if x != nil {
+		return x.Cwd
+	}
+	return ""
 }
 
 type WatchRuntimeStateRequest struct {
@@ -1501,13 +1512,14 @@ const file_cmdman_v1_cmdman_proto_rawDesc = "" +
 	"\x05state\x18\x01 \x01(\tR\x05state\x12\x1b\n" +
 	"\texit_code\x18\x02 \x01(\x05R\bexitCode\x12\x10\n" +
 	"\x03pid\x18\x03 \x01(\x05R\x03pid\x12<\n" +
-	"\rruntime_state\x18\x04 \x01(\v2\x17.cmdman.v1.RuntimeStateR\fruntimeState\"\x90\x01\n" +
+	"\rruntime_state\x18\x04 \x01(\v2\x17.cmdman.v1.RuntimeStateR\fruntimeState\"\xa2\x01\n" +
 	"\fRuntimeState\x12\x14\n" +
 	"\x05title\x18\x01 \x01(\tR\x05title\x121\n" +
 	"\x06status\x18\x02 \x01(\x0e2\x19.cmdman.v1.ReportedStatusR\x06status\x12\x16\n" +
 	"\x06detail\x18\x03 \x01(\tR\x06detail\x12\x1f\n" +
 	"\vbell_unread\x18\x04 \x01(\bR\n" +
-	"bellUnread\"\x1a\n" +
+	"bellUnread\x12\x10\n" +
+	"\x03cwd\x18\x05 \x01(\tR\x03cwd\"\x1a\n" +
 	"\x18WatchRuntimeStateRequest\"J\n" +
 	"\x19WatchRuntimeStateResponse\x12-\n" +
 	"\x05state\x18\x01 \x01(\v2\x17.cmdman.v1.RuntimeStateR\x05state\"e\n" +

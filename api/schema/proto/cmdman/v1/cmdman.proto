@@ -135,6 +135,10 @@ message RuntimeState {
   ReportedStatus status = 2;
   string detail = 3; // free-form detail accompanying status
   bool bell_unread = 4; // a bell rang and nobody has looked at the command since
+  // cwd is the command's reported working directory as an absolute path,
+  // parsed from its OSC 7 report or seeded from the configured dir. It is
+  // empty when unknown.
+  string cwd = 5;
 }
 
 message WatchRuntimeStateRequest {}

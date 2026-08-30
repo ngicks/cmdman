@@ -42,6 +42,129 @@ func TestCommandRuntimeState_LatchesTitle(t *testing.T) {
 	assert.Equal(t, st.snapshot().Title, "second title")
 }
 
+func TestCommandRuntimeState_LatchesCwd(t *testing.T) {
+	st, feed := runtimeStateFeed(t)
+
+	// Nothing reported yet is distinguishable from an explicitly empty payload.
+	assert.Equal(t, st.snapshot().CwdSet, false)
+
+	feed("\x1b]7;file://host/tmp/first\x07")
+	snap := st.snapshot()
+	// The payload is stored verbatim: a replay to a viewer re-emits these bytes.
+	assert.Equal(t, snap.Cwd, "file://host/tmp/first")
+	assert.Equal(t, snap.CwdSet, true)
+
+	feed("\x1b]7;file://host/tmp/second\x1b\\")
+	assert.Equal(t, st.snapshot().Cwd, "file://host/tmp/second")
+
+	// A shell re-emits OSC 7 on every prompt; the same directory is not news.
+	changed, unsub := st.subscribeChange()
+	t.Cleanup(unsub)
+	feed("\x1b]7;file://host/tmp/second\x07")
+	assert.Assert(t, !woke(changed))
+
+	// The latch sanitizes whatever the emulator hands it, as the title does.
+	st.latchCwd("file://host/tmp/\xe2")
+	assert.Equal(t, st.snapshot().Cwd, "file://host/tmp/�")
+}
+
+func TestCommandRuntimeState_SeedsCwdFromConfiguredDir(t *testing.T) {
+	st, feed := runtimeStateFeed(t)
+
+	st.seedCwd("/home/me/my project")
+	snap := st.snapshot()
+	assert.Equal(t, snap.Cwd, "file://localhost/home/me/my%20project")
+	assert.Equal(t, snap.CwdSet, true)
+	// What goes on the wire is the directory that was configured, back in the
+	// form a reader can use.
+	assert.Equal(t, snap.view().Cwd, "/home/me/my project")
+
+	// The seed is only a baseline: what the command reports itself wins.
+	feed("\x1b]7;file://host/tmp/real\x07")
+	assert.Equal(t, st.snapshot().Cwd, "file://host/tmp/real")
+
+	// An empty directory is not a directory; seeding it would report the bare
+	// `file://localhost` the empty path encodes to.
+	st.reset()
+	st.seedCwd("")
+	assert.Equal(t, st.snapshot().CwdSet, false)
+}
+
+func TestCwdPath(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{
+			name:    "host is dropped",
+			payload: "file://somehost/tmp/x",
+			want:    "/tmp/x",
+		},
+		{
+			name:    "empty host",
+			payload: "file:///tmp/x",
+			want:    "/tmp/x",
+		},
+		{
+			name:    "percent escapes are decoded",
+			payload: "file://localhost/home/me/my%20project",
+			want:    "/home/me/my project",
+		},
+		{
+			name:    "no path",
+			payload: "file://localhost",
+			want:    "",
+		},
+		{
+			// Clean ASCII in, invalid UTF-8 out: the decode itself mints the
+			// bad bytes, after the latch's sanitize pass already ran.
+			name:    "percent-decoded invalid utf-8",
+			payload: "file://localhost/tmp/%ff%fe",
+			want:    "",
+		},
+		{
+			// A payload that never reached the latch reads as unknown, not as
+			// the root directory.
+			name:    "nothing reported",
+			payload: "",
+			want:    "",
+		},
+		{
+			// Some shells emit a bare path. Guessing that it is a local
+			// directory would make the field mean two different things.
+			name:    "bare path is not a file url",
+			payload: "/tmp/x",
+			want:    "",
+		},
+		{
+			name:    "other scheme",
+			payload: "http://example.com/tmp/x",
+			want:    "",
+		},
+		{
+			name:    "unparseable payload",
+			payload: "file://host/%zz",
+			want:    "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, cwdPath(tc.payload), tc.want)
+		})
+	}
+}
+
+// A payload the view cannot parse costs the wire field, not the replay: an
+// attached viewer still gets the bytes the command sent.
+func TestCommandRuntimeState_UnparseableCwdIsEmptyOnTheWire(t *testing.T) {
+	st, feed := runtimeStateFeed(t)
+
+	feed("\x1b]7;file://host/%zz\x07")
+	snap := st.snapshot()
+	assert.Equal(t, snap.Cwd, "file://host/%zz")
+	assert.Equal(t, snap.view().Cwd, "")
+}
+
 func TestCommandRuntimeState_SanitizesInvalidUTF8(t *testing.T) {
 	st, feed := runtimeStateFeed(t)
 
@@ -253,7 +376,7 @@ func TestCommandRuntimeState_ResetDropsPreviousRun(t *testing.T) {
 	changed, unsub := st.subscribeChange()
 	t.Cleanup(unsub)
 
-	feed("\x1b]2;title\x07\a\x1b]9;ping\x07")
+	feed("\x1b]2;title\x07\a\x1b]9;ping\x07\x1b]7;file://host/tmp/old\x07")
 	st.setReport(reportedStatusWorking, "still going")
 	for woke(changed) {
 	}
@@ -262,6 +385,8 @@ func TestCommandRuntimeState_ResetDropsPreviousRun(t *testing.T) {
 
 	snap := st.snapshot()
 	assert.Equal(t, snap.Title, "")
+	assert.Equal(t, snap.Cwd, "")
+	assert.Equal(t, snap.CwdSet, false)
 	assert.Equal(t, snap.BellUnread, false)
 	assert.Assert(t, snap.Notification == nil)
 	// D13: the reported status dies with the run it described.

@@ -199,6 +199,7 @@ func (c *Cmd) ExpectFail(ctx context.Context, t *testing.T, wantStderr ...string
 type Session struct {
 	t    *testing.T
 	ptmx *os.File
+	pid  int
 
 	mu  sync.Mutex
 	out bytes.Buffer
@@ -226,6 +227,7 @@ func (c *Cmd) StartPTY(ctx context.Context, t *testing.T) *Session {
 	s := &Session{
 		t:          t,
 		ptmx:       ptmx,
+		pid:        cmd.Process.Pid,
 		readerDone: make(chan struct{}),
 		done:       make(chan struct{}),
 	}
@@ -270,6 +272,12 @@ func (s *Session) answerProbes(chunk []byte) {
 	if bytes.Contains(chunk, []byte("\x1b[6n")) {
 		_, _ = s.ptmx.Write([]byte("\x1b[1;1R"))
 	}
+}
+
+// Pid identifies the session's process, for the tests that observe it from the
+// outside - through /proc - rather than through what it writes.
+func (s *Session) Pid() int {
+	return s.pid
 }
 
 func (s *Session) Send(keys string) {

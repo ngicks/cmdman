@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/cli"
 )
 
@@ -78,37 +77,12 @@ func runAttach(
 	}
 
 	if flags.AutoExit {
-		session, err := svc.OpenAttachSession(attachCtx, args[0])
-		if err != nil {
-			return err
-		}
-		defer func() { _ = session.Close() }()
-
-		err = cli.Attach(attachCtx, session, opts)
+		err := cli.AttachCommand(attachCtx, svc, args[0], opts)
 		if errors.Is(err, cli.ErrRemoteEOF) {
 			// --auto-exit preserves today's silent exit on EOF.
 			return nil
 		}
 		return err
 	}
-
-	hooks := cli.StickyHooks{
-		State: stickyStateFor(svc, args[0]),
-		OpenSession: func(ctx context.Context) (cli.AttachSession, error) {
-			return svc.OpenAttachSession(ctx, args[0])
-		},
-		Restart: func(ctx context.Context) error {
-			results, err := svc.Restart(ctx, cmdman.RestartRequest{Targets: []string{args[0]}})
-			if err != nil {
-				return err
-			}
-			for _, r := range results {
-				if r.Err != nil {
-					return r.Err
-				}
-			}
-			return nil
-		},
-	}
-	return cli.AttachSticky(attachCtx, hooks, opts)
+	return cli.AttachCommandSticky(attachCtx, svc, args[0], opts)
 }

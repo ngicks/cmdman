@@ -10,7 +10,8 @@
 cmdman tui
 cmdman tui --popup[=tmux]
 cmdman tui --workdir DIR
-cmdman tui widget switcher|launcher [--workdir DIR] [--no-quit]
+cmdman tui widget switcher [--mux-token TOKEN] [--workdir DIR] [--no-quit]
+cmdman tui widget launcher [--workdir DIR] [--no-quit]
 cmdman tui widget project-manager [--mux-token TOKEN] [-f FILE] [-p NAME]
 ```
 
@@ -80,7 +81,11 @@ it in any terminal or pane. Each widget is its own subcommand.
   `compose down <project>? y/n` on the hint line first, `y` goes ahead and any
   other key takes the question back, and what the teardown did — `stopped N,
   removed M` — is reported there when it ends; a `D` that got through every
-  command takes the project's windows down too, on the same terms as `d`.
+  command takes the project's windows down too, on the same terms as `d`. The
+  widget also stands where the active project stands: each time that mark
+  resolves it moves itself into the project's directory, so the pane's own
+  path — and any multiplexer binding keyed on it — follows the project the
+  window is showing rather than wherever the widget was started from.
 - `launcher`: quick-launch selector. The left pane lists target locations: with
   the input empty, the directories you have brought projects up in, most recent
   first, then the directories that the projects named under cmdman's config
@@ -186,6 +191,20 @@ directory nothing has ever run in is still somewhere to start one.
 - `--no-quit`: unbind the quit keys, so no keypress ends the widget. A widget
   invoked as a frame component always runs with it: a frame pane whose widget
   exited would stand empty until the frame is taken down and put back up.
+
+### widget switcher
+
+On top of the two above:
+
+- `--mux-token TOKEN`: the multiplexer window the widget treats as its own,
+  spelled the way the driver spells it — a tmux window id such as `@7`, which a
+  keybinding passes as `#{window_id}`. It decides which project is marked
+  `active`, so it decides what `M` manages and which directory the widget stands
+  in. This is the highest-priority detection probe; without it the widget asks
+  the multiplexer which window is current, and that answer follows the client,
+  not the pane — which is why a frame pane is handed the token of the window it
+  is docked in without anyone spelling it out. A token naming no cmdman-owned
+  window is not an error, detection simply falls through to the probes under it.
 
 ### widget project-manager
 

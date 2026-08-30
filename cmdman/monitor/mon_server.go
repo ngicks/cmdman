@@ -71,6 +71,19 @@ func (m *Monitor) subscribeOutput(scrollback bool) monitorSubscription {
 				ansi.SetWindowTitle(runtime.Title)...,
 			)
 		}
+		if runtime.CwdSet {
+			// The payload goes back out byte for byte. It was sanitized when it
+			// was latched, and re-encoding it through a URL type would rewrite
+			// what the command actually sent; a payload the terminal cannot
+			// parse is the terminal's to ignore, not ours to repair. The
+			// terminator is ST rather than BEL: the seed makes this sequence
+			// part of every replay, and a viewer that blocks bells must not
+			// receive a stray 0x07 from the monitor itself.
+			sub.TerminalState = append(
+				sub.TerminalState,
+				"\x1b]7;"+runtime.Cwd+"\x1b\\"...,
+			)
+		}
 	}
 	sub.StateChanges, sub.unsubState = m.subscribeStateChange()
 	return sub
@@ -405,6 +418,7 @@ func (s *monitorServer) CaptureScreen(
 func protoRuntimeState(v runtimeView) *pb.RuntimeState {
 	return &pb.RuntimeState{
 		Title:      v.Title,
+		Cwd:        v.Cwd,
 		Status:     protoReportedStatus(v.Status),
 		Detail:     v.Detail,
 		BellUnread: v.BellUnread,

@@ -104,6 +104,21 @@ func TestStreamRuntimeState_SnapshotThenPush(t *testing.T) {
 	})
 }
 
+// A cwd change reaches the stream as the parsed path, and it reaches it at
+// once: unlike a title, a working directory does not animate, so there is
+// nothing to throttle and a `cd` is news a watcher wants now.
+func TestStreamRuntimeState_PushesParsedCwd(t *testing.T) {
+	st := newCommandRuntimeState()
+	st.seedCwd("/tmp/started here")
+
+	stream := startRuntimeStream(t, st, defaultTitleThrottleInterval)
+
+	assert.Equal(t, stream.recv(t), runtimeView{Cwd: "/tmp/started here"})
+
+	st.latchCwd("file://somehost/tmp/moved")
+	assert.Equal(t, stream.recv(t), runtimeView{Cwd: "/tmp/moved"})
+}
+
 func TestStreamRuntimeState_ThrottlesTitleBurst(t *testing.T) {
 	st := newCommandRuntimeState()
 	stream := startRuntimeStream(t, st, 50*time.Millisecond)

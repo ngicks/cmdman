@@ -220,7 +220,7 @@ func carveManaged(t *testing.T, spec frame.Spec) muxctl.PaneSpec {
 	t.Helper()
 	root, err := spec.Carve(
 		muxctl.PaneSpec{Leaf: muxctl.Leaf{Name: frameMainPane}},
-		frameComponentArgv(""),
+		frameComponentArgv("", ""),
 	)
 	if err != nil {
 		t.Fatalf("Carve: %v", err)

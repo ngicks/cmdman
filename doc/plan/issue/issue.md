@@ -120,3 +120,64 @@ Fix direction: reproduce under load (e.g. -count with parallel suite
 pressure), then either capture the real failure (surface the WaitDelay
 abort distinctly from an empty run) or raise/rethink the WaitDelay bound
 for invocations that legitimately run long under contention.
+
+## Relative command Dir fabricates an absolute-looking reported cwd (2026-08-30)
+
+`model.ValidateCreate` checks `CommandConfig.Dir` only for non-emptiness,
+never `filepath.IsAbs`, and `-w/--workdir` reaches it verbatim. A relative
+dir (`rel/sub`) round-trips through the monitor's cwd seed
+(`cmdman/monitor/runtime_state.go`, `cwdURL` → `file://localhost/rel/sub`)
+and comes back out of `cwdPath` as `/rel/sub` — a fabricated absolute path
+that contradicts the proto `RuntimeState.cwd` field's documented "absolute
+path" contract. The same input makes the attach viewer's `chdirWorkDir`
+resolve against the viewer's cwd rather than the monitor's.
+
+Fix direction: validate `Dir` absolute at create, or absolutize it at
+create/seed time.
+
+## Sticky attach's chdir-once guarantee has no behavioral test (2026-08-30)
+
+`cli.AttachSticky` chdirs into `AttachOptions.WorkDir` once, then clears
+the field on its value copy so the re-attach loop never repeats it
+(`cmdman/cli/sticky.go:79-85`). The guarantee is structural only — a
+refactor that stops copying the options by value, or reorders the
+clearing, would regress silently into a chdir (and a failure log for a
+deleted dir) on every restart cycle.
+
+Fix direction: a test driving two loop iterations that asserts a single
+chdir, e.g. via a counting seam like the switcher widget's `chdir` field.
+
+## frameComponentArgv call site untested with a real window id (2026-08-30)
+
+`cmdman/mux/frame.go:212` passes `t.windowID` into `frameComponentArgv`,
+which appends `--mux-token <windowID>` to the switcher frame pane's argv.
+The unit test covers the function in isolation with a literal token, and
+`frame_managed_test.go` hardcodes empty arguments — so passing the wrong
+field at the call site (the whole point of the fix: the pane must get the
+window it is docked in, not the client-relative one) would pass every
+test.
+
+Fix direction: a test through `openFrameTarget`/the frame build path
+asserting the resolved window id lands in the component argv.
+
+## Runtime-stream cwd test does not pin immediate delivery (2026-08-30)
+
+`TestStreamRuntimeState_PushesParsedCwd`
+(`cmdman/monitor/runtime_stream_test.go`) comments that a cwd change
+reaches the watcher at once, but its multi-second receive window cannot
+distinguish immediate delivery from the 150ms title throttle. The behavior
+is in fact immediate (`titleOnlyChange` compares the whole `runtimeView`,
+so a cwd change takes the unthrottled branch); the test just doesn't prove
+it.
+
+Fix direction: mirror `TestStreamRuntimeState_ThrottlesTitleBurst`'s
+timing assertions.
+
+## Window-level start dirs via multiplexer -c plumbing (2026-08-30)
+
+Viewer panes now report per-command cwd, but windows/panes created by the
+mux layer still start in the invoker's directory. `mux.RunOptions` could
+gain a work-dir and the tmux driver pass `split-window -c` / session start
+directories, fixing dashboard window start dirs independently of
+per-command truth. Deliberately left out of the pane-cwd work as
+orthogonal.

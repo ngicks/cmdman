@@ -15,6 +15,11 @@ import (
 // replica: a PTY can only be bound to one terminal. scaleIndex selects the
 // replica (1-based); 0 means "the sole replica" and errors when the command is
 // scaled to more than one.
+//
+// The CLI attach path resolves the id and opens the session in separate steps
+// (it needs the id for its own hooks), so it does not call this; the bundled
+// form is kept for programmatic callers that just want a session for a
+// compose replica.
 func (s *Service) OpenAttachSession(
 	ctx context.Context,
 	selection ProjectSelection,

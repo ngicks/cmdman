@@ -2,6 +2,8 @@ package monitor
 
 import (
 	"bytes"
+	"net/url"
+	"unicode/utf8"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +38,8 @@ type runtimeSnapshot struct {
 	Gen          uint64
 	Title        string
 	TitleSet     bool
+	Cwd          string
+	CwdSet       bool
 	Status       reportedStatus
 	Detail       string
 	BellUnread   bool
@@ -46,7 +50,10 @@ type runtimeSnapshot struct {
 // instead of Gen keeps changes a consumer cannot see (a notification, a repeat)
 // from costing a stream message.
 type runtimeView struct {
-	Title      string
+	Title string
+	// Cwd is the latched OSC 7 payload parsed into a filesystem path - see
+	// cwdPath for why the two forms differ.
+	Cwd        string
 	Status     reportedStatus
 	Detail     string
 	BellUnread bool
@@ -55,6 +62,7 @@ type runtimeView struct {
 func (s runtimeSnapshot) view() runtimeView {
 	return runtimeView{
 		Title:      s.Title,
+		Cwd:        cwdPath(s.Cwd),
 		Status:     s.Status,
 		Detail:     s.Detail,
 		BellUnread: s.BellUnread,
@@ -62,7 +70,8 @@ func (s runtimeSnapshot) view() runtimeView {
 }
 
 // commandRuntimeState holds what a TTY command reports about itself through its
-// own output: window title, unread bell, and the latest desktop notification.
+// own output: window title, working directory, unread bell, and the latest
+// desktop notification.
 // It lives only in memory and only for the current run - Monitor.runOnce resets
 // it, so a restarted command never shows the previous run's title or bell.
 //
@@ -77,6 +86,8 @@ type commandRuntimeState struct {
 	gen        uint64
 	title      string
 	titleSet   bool
+	cwd        string
+	cwdSet     bool
 	status     reportedStatus
 	detail     string
 	bellUnread bool
@@ -109,16 +120,18 @@ func (s *commandRuntimeState) emitHook(ev hookEvent) {
 	s.dispatchHook(ev)
 }
 
-// observe registers the emulator hooks that feed s. Title and BEL arrive as vt
-// callbacks - the emulator exposes no title getter, so callbacks are the only
-// route - while OSC 9 / OSC 777 have no default vt handler and are registered
-// directly. Handlers return true only to keep the emulator from logging them as
-// unhandled; passthrough to attached viewers happens on the byte path, which
-// the emulator does not gate.
+// observe registers the emulator hooks that feed s. Title, BEL and the OSC 7
+// working directory arrive as vt callbacks - the emulator exposes neither a
+// title nor a cwd getter, so callbacks are the only route - while OSC 9 /
+// OSC 777 have no default vt handler and are registered directly. Handlers
+// return true only to keep the emulator from logging them as unhandled;
+// passthrough to attached viewers happens on the byte path, which the emulator
+// does not gate.
 func (s *commandRuntimeState) observe(term *vt.Emulator) {
 	term.SetCallbacks(vt.Callbacks{
-		Bell:  s.latchBell,
-		Title: s.latchTitle,
+		Bell:             s.latchBell,
+		Title:            s.latchTitle,
+		WorkingDirectory: s.latchCwd,
 	})
 	term.RegisterOscHandler(9, func(data []byte) bool {
 		if body, ok := parseOsc9Notification(data); ok {
@@ -143,6 +156,8 @@ func (s *commandRuntimeState) snapshot() runtimeSnapshot {
 		Gen:          s.gen,
 		Title:        s.title,
 		TitleSet:     s.titleSet,
+		Cwd:          s.cwd,
+		CwdSet:       s.cwdSet,
 		Status:       s.status,
 		Detail:       s.detail,
 		BellUnread:   s.bellUnread,
@@ -187,6 +202,79 @@ func (s *commandRuntimeState) latchTitle(title string) {
 	if changed {
 		s.emitHook(hookEvent{Kind: model.HookEventTitle, Title: title})
 	}
+}
+
+// latchCwd records the working directory an OSC 7 reports. Like a title it is a
+// value, not an occurrence - a shell re-emits it on every prompt - so only a
+// real change counts, and cwdSet separates an explicitly empty payload from a
+// command that never reported one.
+//
+// The payload is kept verbatim, host part and all (`file://host/path`): a later
+// re-emit to an attached viewer has to reproduce the bytes the command sent, so
+// there is nothing to gain from parsing it here and a round-trip to lose. The
+// wire view parses its own copy - see cwdPath.
+func (s *commandRuntimeState) latchCwd(payload string) {
+	payload = sanitizeTermString(payload)
+	s.mutate(func() bool {
+		if s.cwdSet && s.cwd == payload {
+			return false
+		}
+		s.cwdSet = true
+		s.cwd = payload
+		return true
+	})
+}
+
+// seedCwd latches the command's configured working directory as the run's
+// baseline, so a command that never emits OSC 7 - a pipe-wired one cannot, it
+// has no emulator - still reports where it was started from. It goes through
+// the same latch as a real report, so the child's first OSC 7 simply replaces
+// it. An empty directory seeds nothing: reporting the bare `file://localhost`
+// a blank path encodes to would be worse than reporting nothing.
+func (s *commandRuntimeState) seedCwd(dir string) {
+	if dir == "" {
+		return
+	}
+	s.latchCwd(cwdURL(dir))
+}
+
+// cwdURL encodes a directory the way an OSC 7 payload carries one,
+// `file://localhost/path`, percent-encoding what the path needs. localhost is
+// the host a path on this machine takes.
+func cwdURL(dir string) string {
+	u := url.URL{Scheme: "file", Host: "localhost", Path: dir}
+	return u.String()
+}
+
+// cwdPath decodes an OSC 7 payload into the filesystem path readers want. The
+// two forms exist because the latch and the wire want different things: an
+// attach replay has to re-emit the payload byte-exactly, so the raw URL stays
+// in the latch, while a reader of inspect or status wants a path it can hand to
+// a file API or print in a column - not `file://localhost/home/me/my%20project`.
+// The view boundary is where that conversion belongs: it happens once per
+// snapshot rather than once per reader, and no reader has to know an OSC 7
+// payload is a URL at all.
+//
+// The host is dropped: OSC 7 uses it to say which machine the path is on, and a
+// monitor only ever reports its own. Anything that is not a file URL - a bare
+// path, some other scheme, a payload that does not parse - yields "" rather
+// than a guess; the replay still re-emits it verbatim, so nothing is lost but
+// the column.
+func cwdPath(payload string) string {
+	u, err := url.Parse(payload)
+	if err != nil || u.Scheme != "file" {
+		return ""
+	}
+	// The latch sanitized the payload, but percent-decoding can mint fresh
+	// invalid UTF-8 out of clean ASCII (`%ff`), and one invalid string fails
+	// proto marshaling of the whole runtime-state response - see the
+	// sanitizeTermString comment above.
+	if !utf8.ValidString(u.Path) {
+		return ""
+	}
+	// A non-opaque file URL's path is already absolute or empty, so there is
+	// nothing further to normalize.
+	return u.Path
 }
 
 // latchBell marks the bell unread. It latches even while a viewer is attached:
@@ -276,12 +364,13 @@ func (s *commandRuntimeState) clearReport() {
 // worse than no status at all.
 func (s *commandRuntimeState) reset() {
 	s.mutate(func() bool {
-		if !s.titleSet && s.status == reportedStatusNone && s.detail == "" &&
+		if !s.titleSet && !s.cwdSet && s.status == reportedStatusNone && s.detail == "" &&
 			!s.bellUnread && s.notif == nil {
 			return false
 		}
 		s.title, s.status, s.detail, s.bellUnread, s.notif = "", reportedStatusNone, "", false, nil
 		s.titleSet = false
+		s.cwd, s.cwdSet = "", false
 		return true
 	})
 }

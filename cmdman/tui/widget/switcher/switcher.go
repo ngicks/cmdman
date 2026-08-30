@@ -15,6 +15,7 @@ import (
 	"image/color"
 	"maps"
 	"math"
+	"os"
 	"slices"
 	"time"
 
@@ -84,6 +85,12 @@ type Model struct {
 	// sitting in (D3), "" when no probe answered — which is when the active mark
 	// falls back to the working directory.
 	activeIdentity string
+
+	// activeDir is the directory this process was last moved into, "" before any
+	// active group resolved; see followActiveDir. chdir is os.Chdir unless a test
+	// replaces it.
+	activeDir string
+	chdir     func(string) error
 
 	// bellRead carries the command ids whose bell was resolved by selecting
 	// their project (D22). The monitor keeps reporting such a bell as unread —
@@ -645,7 +652,40 @@ func (m Model) rebuild() Model {
 			break
 		}
 	}
-	return m.applyBellRead()
+	m = m.applyBellRead()
+	return m.followActiveDir()
+}
+
+// followActiveDir moves this process into the active project's directory. The
+// multiplexer reports the directory of the process running in a pane as the
+// pane's own, so standing in that directory is what makes directory-keyed
+// bindings act on the project the pane is showing rather than on wherever the
+// frame was built from.
+//
+// It runs once per resolved directory and is best effort. A directory the
+// process cannot enter is not something to report: the list is still the list,
+// and the failure is not remembered either, so a directory that only appears
+// later is still entered. A resolve naming no active project leaves the widget
+// where it stands — there is nowhere better to go, and the caller's own starting
+// directory is not it once the pane has moved on from it.
+//
+// The switcher widget is a program of its own (a frame pane runs it as `cmdman
+// tui widget switcher`), so the process this moves is only ever the one drawing
+// this one pane.
+func (m Model) followActiveDir() Model {
+	g, ok := m.activeGroup()
+	if !ok || g.Workdir == "" || g.Workdir == m.activeDir {
+		return m
+	}
+	chdir := os.Chdir
+	if m.chdir != nil {
+		chdir = m.chdir
+	}
+	if chdir(g.Workdir) != nil {
+		return m
+	}
+	m.activeDir = g.Workdir
+	return m
 }
 
 // switcherGroups joins the global project list (the ListProjects merge:

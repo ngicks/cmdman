@@ -183,8 +183,11 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	m.logWriter = logWriter
 	m.terminalState.reset()
 	// The run that ended cleared its own runtime state; this repeats it for the
-	// first run, and is a no-op otherwise.
+	// first run, and is a no-op otherwise. Seeding the configured directory
+	// right after gives every run a cwd before the child produces a byte, and a
+	// restart re-seeds from the config this iteration re-read.
 	m.runtimeState.reset()
+	m.runtimeState.seedCwd(m.cfg.Dir)
 	m.outputMu.Unlock()
 	defer func() {
 		m.outputMu.Lock()
