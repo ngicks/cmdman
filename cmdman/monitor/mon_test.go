@@ -590,6 +590,53 @@ func TestMonitorSubscribeWithScrollbackIncludesTerminalStateReplay(t *testing.T)
 	)
 }
 
+// The payload carries a literal space and an already-percent-encoded octet, so
+// any round-trip through a URL type on the replay path would rewrite it and
+// fail the comparison.
+const testCwdPayload = "file://localhost/tmp/my dir/%20odd"
+
+func TestMonitorSubscribeReplaysLatchedCwdAfterTitle(t *testing.T) {
+	runtimeState := newCommandRuntimeState()
+	m := &Monitor{
+		ring:              newRingBuffer(16),
+		outputBridge:      newBroadcaster[logdriver.LogLine](),
+		stateChangeBridge: newBroadcaster[monitorStateChange](),
+		terminalState:     newTerminalPaneState(),
+		runtimeState:      runtimeState,
+		cfg:               &model.CommandConfig{Tty: true},
+	}
+	m.terminalState.Observe([]byte("\x1b[?1000h"))
+	runtimeState.latchTitle("build")
+	runtimeState.latchCwd(testCwdPayload)
+
+	sub := m.subscribeOutput(true)
+	defer sub.Unsub()
+
+	assert.Equal(
+		t,
+		string(sub.TerminalState),
+		"\x1b[?1000h\x1b]2;build\x07\x1b]7;"+testCwdPayload+"\x07",
+	)
+}
+
+func TestMonitorSubscribeReplaysLatchedCwdWithoutTitle(t *testing.T) {
+	runtimeState := newCommandRuntimeState()
+	runtimeState.latchCwd(testCwdPayload)
+	m := &Monitor{
+		ring:              newRingBuffer(16),
+		outputBridge:      newBroadcaster[logdriver.LogLine](),
+		stateChangeBridge: newBroadcaster[monitorStateChange](),
+		terminalState:     newTerminalPaneState(),
+		runtimeState:      runtimeState,
+		cfg:               &model.CommandConfig{Tty: true},
+	}
+
+	sub := m.subscribeOutput(true)
+	defer sub.Unsub()
+
+	assert.Equal(t, string(sub.TerminalState), "\x1b]7;"+testCwdPayload+"\x07")
+}
+
 func TestMonitorSubscribeReplaysExplicitlyClearedTitle(t *testing.T) {
 	runtimeState := newCommandRuntimeState()
 	runtimeState.latchTitle("")

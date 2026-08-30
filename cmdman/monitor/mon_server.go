@@ -71,6 +71,16 @@ func (m *Monitor) subscribeOutput(scrollback bool) monitorSubscription {
 				ansi.SetWindowTitle(runtime.Title)...,
 			)
 		}
+		if runtime.CwdSet {
+			// The payload goes back out byte for byte. It was sanitized when it
+			// was latched, and re-encoding it through a URL type would rewrite
+			// what the command actually sent; a payload the terminal cannot
+			// parse is the terminal's to ignore, not ours to repair.
+			sub.TerminalState = append(
+				sub.TerminalState,
+				"\x1b]7;"+runtime.Cwd+"\x07"...,
+			)
+		}
 	}
 	sub.StateChanges, sub.unsubState = m.subscribeStateChange()
 	return sub
