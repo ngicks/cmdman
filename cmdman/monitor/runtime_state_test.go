@@ -42,6 +42,32 @@ func TestCommandRuntimeState_LatchesTitle(t *testing.T) {
 	assert.Equal(t, st.snapshot().Title, "second title")
 }
 
+func TestCommandRuntimeState_LatchesCwd(t *testing.T) {
+	st, feed := runtimeStateFeed(t)
+
+	// Nothing reported yet is distinguishable from an explicitly empty payload.
+	assert.Equal(t, st.snapshot().CwdSet, false)
+
+	feed("\x1b]7;file://host/tmp/first\x07")
+	snap := st.snapshot()
+	// The payload is stored verbatim: a replay to a viewer re-emits these bytes.
+	assert.Equal(t, snap.Cwd, "file://host/tmp/first")
+	assert.Equal(t, snap.CwdSet, true)
+
+	feed("\x1b]7;file://host/tmp/second\x1b\\")
+	assert.Equal(t, st.snapshot().Cwd, "file://host/tmp/second")
+
+	// A shell re-emits OSC 7 on every prompt; the same directory is not news.
+	changed, unsub := st.subscribeChange()
+	t.Cleanup(unsub)
+	feed("\x1b]7;file://host/tmp/second\x07")
+	assert.Assert(t, !woke(changed))
+
+	// The latch sanitizes whatever the emulator hands it, as the title does.
+	st.latchCwd("file://host/tmp/\xe2")
+	assert.Equal(t, st.snapshot().Cwd, "file://host/tmp/�")
+}
+
 func TestCommandRuntimeState_SanitizesInvalidUTF8(t *testing.T) {
 	st, feed := runtimeStateFeed(t)
 
@@ -253,7 +279,7 @@ func TestCommandRuntimeState_ResetDropsPreviousRun(t *testing.T) {
 	changed, unsub := st.subscribeChange()
 	t.Cleanup(unsub)
 
-	feed("\x1b]2;title\x07\a\x1b]9;ping\x07")
+	feed("\x1b]2;title\x07\a\x1b]9;ping\x07\x1b]7;file://host/tmp/old\x07")
 	st.setReport(reportedStatusWorking, "still going")
 	for woke(changed) {
 	}
@@ -262,6 +288,8 @@ func TestCommandRuntimeState_ResetDropsPreviousRun(t *testing.T) {
 
 	snap := st.snapshot()
 	assert.Equal(t, snap.Title, "")
+	assert.Equal(t, snap.Cwd, "")
+	assert.Equal(t, snap.CwdSet, false)
 	assert.Equal(t, snap.BellUnread, false)
 	assert.Assert(t, snap.Notification == nil)
 	// D13: the reported status dies with the run it described.

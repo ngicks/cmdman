@@ -36,6 +36,8 @@ type runtimeSnapshot struct {
 	Gen          uint64
 	Title        string
 	TitleSet     bool
+	Cwd          string
+	CwdSet       bool
 	Status       reportedStatus
 	Detail       string
 	BellUnread   bool
@@ -62,7 +64,8 @@ func (s runtimeSnapshot) view() runtimeView {
 }
 
 // commandRuntimeState holds what a TTY command reports about itself through its
-// own output: window title, unread bell, and the latest desktop notification.
+// own output: window title, working directory, unread bell, and the latest
+// desktop notification.
 // It lives only in memory and only for the current run - Monitor.runOnce resets
 // it, so a restarted command never shows the previous run's title or bell.
 //
@@ -77,6 +80,8 @@ type commandRuntimeState struct {
 	gen        uint64
 	title      string
 	titleSet   bool
+	cwd        string
+	cwdSet     bool
 	status     reportedStatus
 	detail     string
 	bellUnread bool
@@ -109,16 +114,18 @@ func (s *commandRuntimeState) emitHook(ev hookEvent) {
 	s.dispatchHook(ev)
 }
 
-// observe registers the emulator hooks that feed s. Title and BEL arrive as vt
-// callbacks - the emulator exposes no title getter, so callbacks are the only
-// route - while OSC 9 / OSC 777 have no default vt handler and are registered
-// directly. Handlers return true only to keep the emulator from logging them as
-// unhandled; passthrough to attached viewers happens on the byte path, which
-// the emulator does not gate.
+// observe registers the emulator hooks that feed s. Title, BEL and the OSC 7
+// working directory arrive as vt callbacks - the emulator exposes neither a
+// title nor a cwd getter, so callbacks are the only route - while OSC 9 /
+// OSC 777 have no default vt handler and are registered directly. Handlers
+// return true only to keep the emulator from logging them as unhandled;
+// passthrough to attached viewers happens on the byte path, which the emulator
+// does not gate.
 func (s *commandRuntimeState) observe(term *vt.Emulator) {
 	term.SetCallbacks(vt.Callbacks{
-		Bell:  s.latchBell,
-		Title: s.latchTitle,
+		Bell:             s.latchBell,
+		Title:            s.latchTitle,
+		WorkingDirectory: s.latchCwd,
 	})
 	term.RegisterOscHandler(9, func(data []byte) bool {
 		if body, ok := parseOsc9Notification(data); ok {
@@ -143,6 +150,8 @@ func (s *commandRuntimeState) snapshot() runtimeSnapshot {
 		Gen:          s.gen,
 		Title:        s.title,
 		TitleSet:     s.titleSet,
+		Cwd:          s.cwd,
+		CwdSet:       s.cwdSet,
 		Status:       s.status,
 		Detail:       s.detail,
 		BellUnread:   s.bellUnread,
@@ -187,6 +196,26 @@ func (s *commandRuntimeState) latchTitle(title string) {
 	if changed {
 		s.emitHook(hookEvent{Kind: model.HookEventTitle, Title: title})
 	}
+}
+
+// latchCwd records the working directory an OSC 7 reports. Like a title it is a
+// value, not an occurrence - a shell re-emits it on every prompt - so only a
+// real change counts, and cwdSet separates an explicitly empty payload from a
+// command that never reported one.
+//
+// The payload is kept verbatim, host part and all (`file://host/path`): a later
+// re-emit to an attached viewer has to reproduce the bytes the command sent, so
+// there is nothing to gain from parsing it here and a round-trip to lose.
+func (s *commandRuntimeState) latchCwd(payload string) {
+	payload = sanitizeTermString(payload)
+	s.mutate(func() bool {
+		if s.cwdSet && s.cwd == payload {
+			return false
+		}
+		s.cwdSet = true
+		s.cwd = payload
+		return true
+	})
 }
 
 // latchBell marks the bell unread. It latches even while a viewer is attached:
@@ -276,12 +305,13 @@ func (s *commandRuntimeState) clearReport() {
 // worse than no status at all.
 func (s *commandRuntimeState) reset() {
 	s.mutate(func() bool {
-		if !s.titleSet && s.status == reportedStatusNone && s.detail == "" &&
+		if !s.titleSet && !s.cwdSet && s.status == reportedStatusNone && s.detail == "" &&
 			!s.bellUnread && s.notif == nil {
 			return false
 		}
 		s.title, s.status, s.detail, s.bellUnread, s.notif = "", reportedStatusNone, "", false, nil
 		s.titleSet = false
+		s.cwd, s.cwdSet = "", false
 		return true
 	})
 }
