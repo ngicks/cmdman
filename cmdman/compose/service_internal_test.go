@@ -145,6 +145,10 @@ func (s testCmdmanSvc) Events(
 	return nil, nil
 }
 
+func (s testCmdmanSvc) OpenAttachSession(context.Context, string) (*cmdman.Session, error) {
+	return nil, nil
+}
+
 func (s testCmdmanSvc) SendKeys(
 	ctx context.Context,
 	idOrName string,

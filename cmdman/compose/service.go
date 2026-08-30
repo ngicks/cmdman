@@ -31,6 +31,7 @@ type cmdmanSvc interface {
 	Logs(ctx context.Context, req cmdman.LogsRequest) (logdriver.Reader, error)
 	Inspect(ctx context.Context, idOrName string) (*cmdman.InspectOutput, error)
 	Events(ctx context.Context, req cmdman.EventsRequest) (*cmdman.EventsSubscription, error)
+	OpenAttachSession(ctx context.Context, idOrName string) (*cmdman.Session, error)
 	SendKeys(ctx context.Context, idOrName string, req cmdman.SendKeysRequest) error
 	CaptureScreen(
 		ctx context.Context,
