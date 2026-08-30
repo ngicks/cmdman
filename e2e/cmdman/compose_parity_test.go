@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -399,7 +398,7 @@ func TestComposeAttachDetach(t *testing.T) {
 	attach := exec.CommandContext(ctx, cmdmanBin,
 		"compose", "--workdir", wd, "-f", composePath, "attach", "alpha")
 	attach.Env = append(
-		os.Environ(),
+		hermeticEnviron(),
 		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
 		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
 	)

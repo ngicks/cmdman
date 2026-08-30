@@ -8,12 +8,22 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ngicks/cmdman/cmdman"
 )
+
+// hermeticEnviron is os.Environ() with every CMDMAN_* variable removed: when
+// the suite itself runs under a cmdman-supervised command, ambient identity
+// (e.g. CMDMAN_CMD_ID) must not reach the child.
+func hermeticEnviron() []string {
+	return slices.DeleteFunc(os.Environ(), func(s string) bool {
+		return strings.HasPrefix(s, "CMDMAN_")
+	})
+}
 
 func must(t *testing.T, err error) {
 	if err != nil {
@@ -127,7 +137,7 @@ func (e *testEnv) execFull(
 	cmd := exec.CommandContext(ctx, cmdmanBin, args...)
 	cmd.Dir = dir
 	cmd.Env = append(
-		os.Environ(),
+		hermeticEnviron(),
 		cmdman.ENV_CMDMAN_DATA_DIR+"="+e.dataHome,
 		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+e.runtimeDir,
 		cmdman.ENV_CMDMAN_CONF+"="+e.confPath,

@@ -156,7 +156,7 @@ func (e *testEnv) muxExecInDir(
 	defer cancel()
 	cmd := exec.CommandContext(ctx, cmdmanBin, args...)
 	cmd.Dir = dir
-	base := slices.DeleteFunc(os.Environ(), func(s string) bool {
+	base := slices.DeleteFunc(hermeticEnviron(), func(s string) bool {
 		return strings.HasPrefix(s, "TMUX=") || strings.HasPrefix(s, "ZELLIJ=")
 	})
 	base = append(base,
@@ -185,7 +185,7 @@ func (e *testEnv) muxExecInDir(
 // the developer's own tmux names a pane on the test's server just as readily —
 // pane ids are small numbers, and both servers start counting at the same place.
 func tmuxTmpdirEnv(tmuxTmpdir string) []string {
-	env := slices.DeleteFunc(os.Environ(), func(s string) bool {
+	env := slices.DeleteFunc(hermeticEnviron(), func(s string) bool {
 		return strings.HasPrefix(s, "TMUX=") ||
 			strings.HasPrefix(s, "TMUX_PANE=") ||
 			strings.HasPrefix(s, "ZELLIJ=") ||

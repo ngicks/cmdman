@@ -162,7 +162,7 @@ func attachedOutput(t *testing.T, ctx context.Context, env *testEnv, name string
 
 	attach := exec.CommandContext(ctx, cmdmanBin, "attach", id)
 	attach.Env = append(
-		os.Environ(),
+		hermeticEnviron(),
 		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
 		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
 		cmdman.ENV_CMDMAN_CONF+"="+env.confPath,

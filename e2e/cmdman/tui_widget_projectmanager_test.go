@@ -1,7 +1,6 @@
 package cmdman_test
 
 import (
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -21,7 +20,7 @@ import (
 // default socket — would point the widget at a different socket path than the
 // dashboard the fixture built on its dedicated one.
 func muxlessEnv() []string {
-	return slices.DeleteFunc(os.Environ(), func(s string) bool {
+	return slices.DeleteFunc(hermeticEnviron(), func(s string) bool {
 		return strings.HasPrefix(s, "TMUX=") ||
 			strings.HasPrefix(s, "TMUX_PANE=") ||
 			strings.HasPrefix(s, "ZELLIJ=")

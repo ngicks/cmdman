@@ -100,7 +100,7 @@ func startMuxOpSession(
 	}
 	cmd := exec.Command("tmux", "-L", socket,
 		"new-session", "-d", "-s", session, "-n", window, "-x", "200", "-y", "50")
-	cmd.Env = os.Environ()
+	cmd.Env = hermeticEnviron()
 	for _, kv := range env {
 		cmd.Env = append(cmd.Env, kv[0]+"="+kv[1])
 	}

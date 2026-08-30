@@ -27,7 +27,7 @@ func TestTUISmoke_RendersAndQuits(t *testing.T) {
 	env.waitForState(ctx, id, "running", defaultTimeout)
 
 	tuiCmd := exec.CommandContext(ctx, cmdmanBin, "tui")
-	tuiCmd.Env = append(os.Environ(),
+	tuiCmd.Env = append(hermeticEnviron(),
 		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
 		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
 		"TERM=xterm-256color")
@@ -147,7 +147,7 @@ func TestTUI_TabFlagStartsOnCompose(t *testing.T) {
 	env := newTestEnv(t)
 
 	tuiCmd := exec.CommandContext(ctx, cmdmanBin, "tui", "--tab=compose")
-	tuiCmd.Env = append(os.Environ(),
+	tuiCmd.Env = append(hermeticEnviron(),
 		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
 		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
 		"TERM=xterm-256color")
@@ -224,7 +224,7 @@ func TestTUI_WorkdirFlagDiscoversComposeProject(t *testing.T) {
 
 	tuiCmd := exec.CommandContext(ctx, cmdmanBin, "tui", "--workdir", wd, "--tab=compose")
 	tuiCmd.Dir = wd
-	tuiCmd.Env = append(os.Environ(),
+	tuiCmd.Env = append(hermeticEnviron(),
 		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
 		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
 		"TERM=xterm-256color")
@@ -304,7 +304,7 @@ func TestTUI_TopBarShowsCwd(t *testing.T) {
 
 	tuiCmd := exec.CommandContext(ctx, cmdmanBin, "tui", "--workdir", wd)
 	tuiCmd.Dir = wd
-	tuiCmd.Env = append(os.Environ(),
+	tuiCmd.Env = append(hermeticEnviron(),
 		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
 		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
 		"TERM=xterm-256color")

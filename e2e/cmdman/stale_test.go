@@ -72,7 +72,7 @@ func TestStale_DetectedOnStop(t *testing.T) {
 	cfg := &model.CommandConfig{
 		Argv:            []string{"/bin/sh", "-c", "sleep 300"},
 		Dir:             env.dataHome,
-		Env:             os.Environ(),
+		Env:             hermeticEnviron(),
 		RestartPolicy:   model.RestartPolicyNo,
 		StopSignal:      model.DefaultStopSignal,
 		ScrollbackBytes: 1024,
@@ -129,7 +129,7 @@ func TestStale_AutoRemoveOnStale(t *testing.T) {
 	cfg := &model.CommandConfig{
 		Argv:            []string{"/bin/sh", "-c", "echo fake"},
 		Dir:             env.dataHome,
-		Env:             os.Environ(),
+		Env:             hermeticEnviron(),
 		RestartPolicy:   model.RestartPolicyNo,
 		ScrollbackBytes: 1024,
 		LogDriver:       model.DefaultLogDriver,

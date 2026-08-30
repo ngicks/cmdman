@@ -3,7 +3,6 @@ package cmdman_test
 import (
 	"bytes"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -25,7 +24,7 @@ func TestAttach_DetachKeysExitWithoutStoppingCommand(t *testing.T) {
 
 	attach := exec.CommandContext(ctx, cmdmanBin, "attach", id)
 	attach.Env = append(
-		os.Environ(),
+		hermeticEnviron(),
 		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
 		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
 	)
@@ -58,7 +57,7 @@ func TestAttach_ExitsWhenCommandStopsFromCtrlC(t *testing.T) {
 	// the restart prompt instead of exiting when ctrl-c stops the command.
 	attach := exec.CommandContext(ctx, cmdmanBin, "attach", "--auto-exit", id)
 	attach.Env = append(
-		os.Environ(),
+		hermeticEnviron(),
 		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
 		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
 	)
@@ -97,7 +96,7 @@ func TestAttach_DetachRestoresShellTtyMode(t *testing.T) {
 
 	sh := exec.CommandContext(ctx, "/bin/sh", "-lc", script)
 	sh.Env = append(
-		os.Environ(),
+		hermeticEnviron(),
 		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
 		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
 	)
@@ -163,7 +162,7 @@ func TestAttach_CtrlCRestoresShellTtyMode(t *testing.T) {
 
 	sh := exec.CommandContext(ctx, "/bin/sh", "-lc", script)
 	sh.Env = append(
-		os.Environ(),
+		hermeticEnviron(),
 		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
 		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
 	)
@@ -238,7 +237,7 @@ sleep 300`
 	time.Sleep(700 * time.Millisecond) // let the update loop finish and the screen settle
 
 	attach := exec.CommandContext(ctx, cmdmanBin, "attach", id)
-	attach.Env = append(os.Environ(),
+	attach.Env = append(hermeticEnviron(),
 		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
 		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir)
 	ptmx, err := pty.Start(attach)
@@ -327,7 +326,7 @@ func TestAttach_RestartReattachStreamsOutput(t *testing.T) {
 
 	attach := exec.CommandContext(ctx, cmdmanBin, "attach", id)
 	attach.Env = append(
-		os.Environ(),
+		hermeticEnviron(),
 		cmdman.ENV_CMDMAN_DATA_DIR+"="+env.dataHome,
 		cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+env.runtimeDir,
 	)

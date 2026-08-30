@@ -228,7 +228,7 @@ func TestTUIWidget_NoQuitSurvivesTheQuitKey(t *testing.T) {
 	wd := composeWorkdir(t)
 	writeComposeFile(t, wd, composeBasicYAML("widgetnq"))
 
-	w := startWidgetEnv(t, ctx, env, wd, wd, "switcher", os.Environ(), "--no-quit")
+	w := startWidgetEnv(t, ctx, env, wd, wd, "switcher", hermeticEnviron(), "--no-quit")
 	w.waitFor(t, filepath.Base(wd), 5*time.Second)
 	if snap := w.snapshot(); strings.Contains(snap, "q quit") {
 		t.Errorf("a --no-quit switcher must not offer a key it does not have; got:\n%q", snap)
@@ -831,7 +831,7 @@ func startWidget(
 	workDir, name string,
 ) *widgetSession {
 	t.Helper()
-	return startWidgetEnv(t, ctx, env, workDir, workDir, name, os.Environ())
+	return startWidgetEnv(t, ctx, env, workDir, workDir, name, hermeticEnviron())
 }
 
 // startWidgetEnv is startWidget over an explicit process directory and base

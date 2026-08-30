@@ -193,7 +193,7 @@ func TestLauncherLanding_StaleEntryForgotten(t *testing.T) {
 
 	// Run the launcher from a directory that is not the project's, so nothing
 	// re-discovers the project by walking into it.
-	w := startWidgetEnv(t, ctx, env, wd, t.TempDir(), "launcher", os.Environ())
+	w := startWidgetEnv(t, ctx, env, wd, t.TempDir(), "launcher", hermeticEnviron())
 	w.waitFor(t, project, 10*time.Second)
 	w.send(t, "\r") // the input hands the keyboard to the locations list
 	w.send(t, "S")  // a stale entry cannot land: the reason surfaces on its row
