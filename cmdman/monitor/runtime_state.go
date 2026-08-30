@@ -3,6 +3,7 @@ package monitor
 import (
 	"bytes"
 	"net/url"
+	"unicode/utf8"
 	"strings"
 	"sync"
 	"time"
@@ -262,6 +263,13 @@ func cwdURL(dir string) string {
 func cwdPath(payload string) string {
 	u, err := url.Parse(payload)
 	if err != nil || u.Scheme != "file" {
+		return ""
+	}
+	// The latch sanitized the payload, but percent-decoding can mint fresh
+	// invalid UTF-8 out of clean ASCII (`%ff`), and one invalid string fails
+	// proto marshaling of the whole runtime-state response - see the
+	// sanitizeTermString comment above.
+	if !utf8.ValidString(u.Path) {
 		return ""
 	}
 	// A non-opaque file URL's path is already absolute or empty, so there is

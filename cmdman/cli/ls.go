@@ -38,7 +38,8 @@ func RuntimeStates(
 // lsRow is the data model for both the built-in ls table and a user --format.
 // It embeds the original entry (so .ID, .Name, … and {{json .}} keep working),
 // the runtime state its monitor holds for the current run (.Title, .Status,
-// .Detail, .BellUnread — all zero for a command with no live monitor), and the
+// .Detail, .BellUnread, .Cwd — all zero for a command with no live monitor),
+// and the
 // table layout via tableMeta (.W, .Win), which is json:"-".
 type lsRow struct {
 	store.CommandEntry

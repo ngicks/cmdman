@@ -117,6 +117,13 @@ func TestCwdPath(t *testing.T) {
 			want:    "",
 		},
 		{
+			// Clean ASCII in, invalid UTF-8 out: the decode itself mints the
+			// bad bytes, after the latch's sanitize pass already ran.
+			name:    "percent-decoded invalid utf-8",
+			payload: "file://localhost/tmp/%ff%fe",
+			want:    "",
+		},
+		{
 			// A payload that never reached the latch reads as unknown, not as
 			// the root directory.
 			name:    "nothing reported",
