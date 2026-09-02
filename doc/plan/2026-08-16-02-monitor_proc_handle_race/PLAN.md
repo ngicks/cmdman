@@ -150,3 +150,15 @@ criterion 3. Final: full suite + golangci-lint.
 
 None — R1 (DECISION.md) records the user-directed skip of the idea
 phase; the fix design is the HANDOFF's own follow-up made concrete.
+
+## Downstream dependency (added 2026-09-03)
+
+`doc/plan/2026-09-02-tty_wedge_stop_exit_status/` sequences its step 7
+behind this plan (its D7) and adds a fourth handle, `runPgid`, under the
+`procMu` this plan introduces. Boundary ledger, mirrored from that plan:
+
+| Deliverable | Owner |
+| --- | --- |
+| `procMu` over `ptmx`/`stdin`/`cmd`; copy-under-lock readers | this plan, step 1 |
+| Regression test: RPCs across a run's end under `-race` | this plan, step 2 |
+| `runPgid` field, publish/clear under `procMu`, `SignalProcess` fallback | tty_wedge plan, step 7 |
