@@ -488,6 +488,50 @@ func TestApplyLayout_ResetsOnReapply(t *testing.T) {
 	}
 }
 
+// TestApplyLayout_SparesFloatingPanes pins that a reapply resets the tiled
+// project region only: a floating pane (tmux's own, pane_floating_flag) is
+// neither part of the layout nor killed by rebuilding it — it may be the very
+// pane the apply is being driven from.
+func TestApplyLayout_SparesFloatingPanes(t *testing.T) {
+	requireTmux(t)
+	sess, socket := newSession(t, "cmdman")
+	ctx := context.Background()
+
+	if _, err := sess.ApplyLayout(ctx, loadLayout(t, "horizontal-three.yaml", ""), 1); err != nil {
+		t.Fatalf("first ApplyLayout: %v", err)
+	}
+	floatID := run(
+		t, socket, "new-pane", "-d", "-t", sess.WindowID(),
+		"-P", "-F", "#{pane_id}\t#{pane_floating_flag}",
+	)
+	id, flag, _ := strings.Cut(floatID, "\t")
+	if flag != "1" {
+		t.Skipf("this tmux has no floating panes (new-pane gave %q)", floatID)
+	}
+
+	panes, err := sess.ApplyLayout(ctx, loadLayout(t, "single-leaf.yaml", ""), 2)
+	if err != nil {
+		t.Fatalf("second ApplyLayout: %v", err)
+	}
+	if len(panes) != 1 {
+		t.Errorf("after reset, want 1 pane in result map, got %d", len(panes))
+	}
+	ids := listPaneIDs(t, socket, sess.WindowID())
+	if !slices.Contains(ids, id) {
+		t.Errorf("floating pane %s was killed by the reapply; panes now %v", id, ids)
+	}
+	if got := len(ids); got != 2 {
+		t.Errorf("after reset, tmux reports %d panes, want the leaf plus the floating one", got)
+	}
+	stat, err := sess.StatWindow(ctx, sess.WindowID())
+	if err != nil {
+		t.Fatalf("StatWindow: %v", err)
+	}
+	if stat.Marker != 2 {
+		t.Errorf("Marker = %d, want 2 (the floating pane must not vote)", stat.Marker)
+	}
+}
+
 func TestClose_KillsOnlyTheOwnedWindow(t *testing.T) {
 	requireTmux(t)
 	sess, socket := newSession(t, "cmdman")

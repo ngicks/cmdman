@@ -45,15 +45,21 @@ const frameDefOption = userOptionPrefix + "frame_def"
 type windowPanes struct {
 	project []string
 	frame   []string
+	// floating holds tmux's floating panes (pane_floating_flag). They hover
+	// over the window rather than tile it, so they belong to neither region:
+	// a rebuild must not kill them and a frame must not carve around them.
+	floating []string
 }
 
-// listPanesByRole reads windowID's panes and splits them by frameOption. A pane
-// with no stamp is a project pane, so a window that was never framed yields
-// every pane in project and nothing in frame.
+// listPanesByRole reads windowID's panes and splits them by role: floating
+// panes first, then by frameOption. A tiled pane with no stamp is a project
+// pane, so a window that was never framed yields every tiled pane in project
+// and nothing in frame. pane_floating_flag expands to "" on a tmux without
+// floating panes, which reads as not floating.
 func listPanesByRole(ctx context.Context, e *executor, windowID string) (windowPanes, error) {
 	out, err := e.run(
 		ctx, "list-panes", "-t", windowID,
-		"-F", "#{pane_id}\t#{"+frameOption+"}",
+		"-F", "#{pane_id}\t#{pane_floating_flag}\t#{"+frameOption+"}",
 	)
 	if err != nil {
 		return windowPanes{}, fmt.Errorf("tmux: list panes for %s: %w", windowID, err)
@@ -65,10 +71,13 @@ func listPanesByRole(ctx context.Context, e *executor, windowID string) (windowP
 	for line := range strings.SplitSeq(out, "\n") {
 		// A line without the trailing field is an unstamped pane: tmux versions
 		// disagree on whether a trailing empty field is emitted or dropped.
-		id, stamp, _ := strings.Cut(line, "\t")
+		id, rest, _ := strings.Cut(line, "\t")
+		floating, stamp, _ := strings.Cut(rest, "\t")
 		switch {
 		case id == "":
 			continue
+		case floating == "1":
+			panes.floating = append(panes.floating, id)
 		case stamp != "":
 			panes.frame = append(panes.frame, id)
 		default:
@@ -456,7 +465,9 @@ func (s *Session) stampFramePane(ctx context.Context, paneID string) error {
 // project pane. It is the one place the driver enforces "a frame pane is never
 // a focus candidate": every operation that can leave the active pane on a frame
 // pane ends here, and an operation that already left it on a project pane pays
-// only the two queries and moves nothing.
+// only the two queries and moves nothing. A floating pane keeps the focus too:
+// it is the user's own, and an operation driven from it must not pull the
+// focus out from under them.
 //
 // The ways focus reaches a frame pane are not the same in each caller —
 // [Session.ShowFrame] can dock around a window whose active pane the user had
@@ -469,8 +480,11 @@ func (s *Session) focusMainRegion(ctx context.Context, anchorID string) error {
 	)
 	if err == nil {
 		panes, listErr := listPanesByRole(ctx, s.exec, s.windowID)
-		if listErr == nil && slices.Contains(panes.project, strings.TrimSpace(active)) {
-			return nil
+		if listErr == nil {
+			active = strings.TrimSpace(active)
+			if slices.Contains(panes.project, active) || slices.Contains(panes.floating, active) {
+				return nil
+			}
 		}
 	}
 	if _, err := s.exec.run(ctx, "select-pane", "-t", anchorID); err != nil {

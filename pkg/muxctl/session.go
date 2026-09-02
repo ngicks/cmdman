@@ -26,6 +26,8 @@ import "context"
 //     itself.
 //   - Focus lands in the project region. A frame pane is never a focus
 //     candidate, whichever operation settles the focus.
+//   - A multiplexer's floating panes belong to neither side: they are never
+//     killed, carved around, or refocused away from.
 //
 // Session reuse, socket choice, dedicated-server isolation, and the choice
 // of window name belong to each driver's constructor (e.g. pkg/muxctl/tmux.New),

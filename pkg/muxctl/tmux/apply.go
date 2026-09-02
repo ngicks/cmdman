@@ -191,8 +191,9 @@ func (st *applyState) recordSkipped(node muxctl.PaneSpec) {
 // resetWindow reduces the window to its first project pane and returns that
 // anchor, plus whether the window carries a frame. Frame panes are spared, so
 // the anchor left over is the project region and the rebuild stays inside it;
-// on an unframed window every pane is a project pane and this is the
-// whole-window reset it has always been.
+// on an unframed window every tiled pane is a project pane and this is the
+// whole-window reset it has always been. Floating panes are spared as well:
+// they are not part of the tiling and may well be what is driving this apply.
 //
 // A framed window with no project pane left — its viewers exited under a frame
 // that kept the window open — is not a dead end: the main region is spawned
