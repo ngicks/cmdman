@@ -3,6 +3,7 @@ package cmdman_test
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -484,4 +485,117 @@ mux:
 	if !strings.Contains(combined, "web") {
 		t.Fatalf("expected 'web' in validation error; got stdout=%q stderr=%q", stdout, stderr)
 	}
+}
+
+// TestComposeMuxCycleScale_SurvivesFloatingPane covers the dashboard window
+// hosting a pane cmdman never stamped: tmux's own floating pane (tmux 3.7,
+// pane_floating_flag), which is what a project-manager summoned from a key
+// binding runs in. The window must still read as its layout, cycle-scale must
+// still find and respawn the leaf, and a layout cycle must rebuild the tiled
+// region without killing the floating pane.
+func TestComposeMuxCycleScale_SurvivesFloatingPane(t *testing.T) {
+	t.Parallel()
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	wd := composeWorkdir(t)
+	project := "cs-float"
+	socket := muxSocket(t)
+	t.Cleanup(func() { killTmuxServer(t, socket) })
+	composePath := writeComposeFile(
+		t, wd, composeMuxTwoLayoutsCycleScaleYAML(project, socket),
+	)
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	if _, stderr, err := env.exec(
+		ctx, "compose", "--workdir", wd, "-f", composePath, "up",
+	); err != nil {
+		t.Fatalf("compose up failed: %v\nstderr:\n%s", err, stderr)
+	}
+	for _, e := range env.lsJSON(ctx,
+		"-l", "cmdman.compose.workdir="+wd,
+		"-l", "cmdman.compose.project="+project,
+	) {
+		env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
+	}
+
+	if _, stderr, err := env.muxExec(
+		ctx, "compose", "--workdir", wd, "-f", composePath, "mux",
+	); err != nil {
+		t.Fatalf("compose mux up (1) failed: %v\nstderr:\n%s", err, stderr)
+	}
+	wid := tmuxWindowID(t, socket, "cmdman-"+project)
+	waitForPaneTitle(t, socket, wid, "web-1", 3*time.Second)
+
+	floatID, flag, _ := strings.Cut(tmuxRun(
+		t, socket, "new-pane", "-d", "-t", wid,
+		"-P", "-F", "#{pane_id}\t#{pane_floating_flag}",
+	), "\t")
+	if flag != "1" {
+		t.Skipf("this tmux has no floating panes (new-pane gave flag %q)", flag)
+	}
+
+	// cycle-scale reads the window's marker first; the unstamped floating pane
+	// must not make the window read as unmarked.
+	stdout, stderr, err := env.muxExec(
+		ctx, "compose", "--workdir", wd, "-f", composePath, "mux", "cycle-scale", "web",
+	)
+	if err != nil {
+		t.Fatalf("cycle-scale web failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "web -> web-2") {
+		t.Fatalf("expected 'web -> web-2' in output; got:\n%s", stdout)
+	}
+	waitForPaneTitle(t, socket, wid, "web-2", 3*time.Second)
+
+	// A layout cycle resets the tiled region; the floating pane is not part of
+	// it and must come through alive.
+	if _, stderr, err := env.muxExec(
+		ctx, "compose", "--workdir", wd, "-f", composePath, "mux",
+	); err != nil {
+		t.Fatalf("compose mux up (2) failed: %v\nstderr:\n%s", err, stderr)
+	}
+	waitForPaneTitle(t, socket, wid, "web-2", 3*time.Second)
+	if got := tiledWindowMarker(t, socket, wid); got != 1 {
+		t.Fatalf("after layout cycle marker = %d, want 1", got)
+	}
+	ids := tmuxPaneField(t, socket, wid, "#{pane_id}")
+	if !slices.Contains(ids, floatID) {
+		t.Fatalf("floating pane %s was killed by the layout cycle; panes now %v", floatID, ids)
+	}
+}
+
+// tiledWindowMarker is windowMarker over the tiled panes only: a floating pane
+// carries no marker and is not part of the layout the marker indexes.
+func tiledWindowMarker(t *testing.T, socket, windowID string) int {
+	t.Helper()
+	marker := -2
+	for _, line := range tmuxPaneField(
+		t, socket, windowID, "#{pane_floating_flag}\t#{@cmdman_marker}",
+	) {
+		floating, v, _ := strings.Cut(line, "\t")
+		if floating == "1" {
+			continue
+		}
+		m := -1
+		if v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				t.Fatalf("non-numeric @cmdman_marker %q", v)
+			}
+			m = n
+		}
+		if marker == -2 {
+			marker = m
+			continue
+		}
+		if m != marker {
+			t.Fatalf("inconsistent layout markers across tiled panes of %s", windowID)
+		}
+	}
+	if marker == -2 {
+		t.Fatalf("window %s has no tiled panes", windowID)
+	}
+	return marker
 }
