@@ -1166,3 +1166,70 @@ func TestStatWindow_FramePanesDoNotVoteOnMarker(t *testing.T) {
 		t.Errorf("Marker = %d, want 3 (a frame pane's marker must not vote)", stat.Marker)
 	}
 }
+
+// TestStatWindow_ForeignPanesDoNotVoteOnMarker pins that a pane cmdman never
+// stamped — a shell the user split off, a floating pane a plugin joined into
+// the dashboard window — neither supplies a marker nor breaks agreement, while
+// a project pane (leaf-stamped) that lost its marker still does.
+func TestStatWindow_ForeignPanesDoNotVoteOnMarker(t *testing.T) {
+	requireTmux(t)
+	sess, socket := newSession(t, "cmdman")
+
+	ctx := context.Background()
+	if _, err := sess.ApplyLayout(ctx, loadLayout(t, "horizontal-two.yaml", ""), 3); err != nil {
+		t.Fatalf("ApplyLayout: %v", err)
+	}
+
+	ids := listPaneIDs(t, socket, sess.WindowID())
+	foreignID := run(
+		t, socket, "split-window", "-v", "-d", "-l", "3",
+		"-t", ids[len(ids)-1], "-P", "-F", "#{pane_id}",
+	)
+
+	stat, err := sess.StatWindow(ctx, sess.WindowID())
+	if err != nil {
+		t.Fatalf("StatWindow: %v", err)
+	}
+	if stat.Marker != 3 {
+		t.Errorf(
+			"Marker = %d, want 3 (an unstamped foreign pane must not break the vote)",
+			stat.Marker,
+		)
+	}
+	if len(stat.PaneNames) != 3 {
+		t.Errorf("PaneNames = %v, want one entry per pane in the window", stat.PaneNames)
+	}
+
+	// A leaf stamp makes the pane a project pane again; its missing marker
+	// now disagrees with the others.
+	run(t, socket, "set-option", "-p", "-t", foreignID, "@cmdman_leaf", "web")
+	stat, err = sess.StatWindow(ctx, sess.WindowID())
+	if err != nil {
+		t.Fatalf("StatWindow after leaf stamp: %v", err)
+	}
+	if stat.Marker != -1 {
+		t.Errorf(
+			"Marker = %d, want -1 (a leaf-stamped pane without a marker breaks the vote)",
+			stat.Marker,
+		)
+	}
+
+	// Order must not matter: the same unmarked project pane listed before
+	// every marked one breaks the vote just the same.
+	run(t, socket, "kill-pane", "-t", foreignID)
+	firstID := run(
+		t, socket, "split-window", "-v", "-d", "-b", "-l", "3",
+		"-t", ids[0], "-P", "-F", "#{pane_id}",
+	)
+	run(t, socket, "set-option", "-p", "-t", firstID, "@cmdman_leaf", "web")
+	stat, err = sess.StatWindow(ctx, sess.WindowID())
+	if err != nil {
+		t.Fatalf("StatWindow with leading unmarked pane: %v", err)
+	}
+	if stat.Marker != -1 {
+		t.Errorf(
+			"Marker = %d, want -1 (an unmarked project pane listed first breaks the vote)",
+			stat.Marker,
+		)
+	}
+}

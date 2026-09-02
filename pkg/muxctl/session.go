@@ -188,7 +188,9 @@ type WindowStat struct {
 	// Only the project region votes: a frame's panes are not part of the
 	// layout the marker indexes, so they neither supply a marker nor break the
 	// agreement of the panes that do. A framed window therefore reports the
-	// layout it is showing, exactly as an unframed one does.
+	// layout it is showing, exactly as an unframed one does. Likewise a pane
+	// the driver never stamped (a shell the user split off, a floating pane
+	// joined into the window) is foreign and stays out of the vote.
 	Marker int
 
 	// PaneNames are the pane names (the tmux driver reads them from the pane

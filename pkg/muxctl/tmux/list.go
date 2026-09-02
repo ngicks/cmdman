@@ -2,9 +2,11 @@ package tmux
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/ngicks/cmdman/pkg/muxctl"
+	"github.com/ngicks/go-common/contextkey"
 )
 
 // ListWindows enumerates tmux windows that carry cmdman state — the
@@ -136,12 +138,19 @@ func (srv *Server) ListWindows(
 
 		// Read the layout marker for this window. We construct a throwaway
 		// Session purely to call StatWindow — it needs no state beyond the
-		// executor (the window id is passed as the argument).
+		// executor (the window id is passed as the argument). A failed read
+		// leaves the row at -1 rather than failing the whole listing, but is
+		// logged so it stays distinguishable from a genuinely marker-less window.
 		tmp := &Session{exec: e}
 		stat, err := tmp.StatWindow(ctx, wid)
 		marker := -1
 		if err == nil {
 			marker = stat.Marker
+		} else {
+			contextkey.ValueSlogLoggerDefault(ctx).WarnContext(
+				ctx, "muxctl/tmux: read layout marker failed; window reported as unmarked",
+				slog.String("window_id", wid), slog.String("err", err.Error()),
+			)
 		}
 
 		rows = append(rows, muxctl.Window{
