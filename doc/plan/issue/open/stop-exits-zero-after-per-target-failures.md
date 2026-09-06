@@ -13,3 +13,13 @@ wedge.
 
 Fix direction: return a non-nil error (or set a non-zero exit status) when
 any result carries an error, matching how `rm` reports refusals.
+
+## Decision
+
+- 2026-09-03: widened to `stop`, `restart`, `rm` and `signal`, which share
+  the same print-and-return-nil shape; `wait` is the precedent (not `rm`,
+  which also exits 0 today). An `--ignore-errors` flag opts a script out of
+  the non-zero exit while keeping the per-target lines. `compose stop`,
+  `compose restart` and the reconcile stop phase, which discard per-target
+  stop results, are fixed alongside. Planned in
+  `doc/plan/2026-09-02-tty_wedge_stop_exit_status/`.

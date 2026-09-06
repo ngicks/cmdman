@@ -9,10 +9,10 @@ batch out of `2026-08-17-01-improve_widget_behavior/HANDOFF.md`
 
 ## `compose up --mux` collides on window index in a shared session (out-of-scope discovery, 2026-08-16)
 
-Bringing a *second* project up with `--mux` into a session that already
+Bringing a _second_ project up with `--mux` into a session that already
 holds one fails: `tmux new-window -d -t <session> …: create window failed:
 index 1 in use` — `-t <session>` resolves to the session's current window's
-*index*, so the insert collides once the current window is not the last
+_index_, so the insert collides once the current window is not the last
 (find-or-create path under `pkg/muxctl/tmux/`). Found while building the
 project-manager plan's step-6 summon e2e (it forced the test's project B to
 be `create`d instead of brought up). **Follow-up**: fix window creation to
@@ -63,7 +63,7 @@ deferred:
   against the same "names and current-window are not identity" principle.
 - `deriveIdentity`'s fallback for standalone (non-compose) specs
   (`cmdman/mux/run.go:134-139`), where the identity defaults to the
-  window/session *name* — the name-as-identity assumption survives there
+  window/session _name_ — the name-as-identity assumption survives there
   in stamped form.
 - A contract-documentation sweep of `pkg/muxctl` (`Config`, `Window`,
   `doc.go`) so every field states whether it is a key or display-only.

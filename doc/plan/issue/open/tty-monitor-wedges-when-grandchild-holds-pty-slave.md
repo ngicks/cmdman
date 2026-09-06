@@ -82,3 +82,16 @@ Two independent defects:
 
 Consider a bounded wait in `waitFn` that logs where the monitor is stuck,
 and add an e2e test around the reproduction above.
+
+## Decision
+
+- 2026-09-03: the "keep the ptmx pollable" direction was dropped during
+  planning. creack/pty already flips the master to blocking mode inside
+  `pty.Open` (its `ioctl` helper calls `Fd()`), and re-wrapping the fd as
+  pollable only works with epoll — the kqueue netpoller on Darwin/BSD does
+  not handle tty devices reliably. The monitor instead detaches from the
+  parked reader (bounded 1 s drain wait, then move on, per the iopipe
+  principle) and sweeps run survivors as a subreaper (reap, SIGTERM, 2 s,
+  SIGKILL, reap), which is what closes the slave and ends the read. The
+  pgid fallback for `SignalProcess` stays. Planned in
+  `doc/plan/2026-09-02-tty_wedge_stop_exit_status/`.
