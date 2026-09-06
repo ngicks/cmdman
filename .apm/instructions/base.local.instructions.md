@@ -36,8 +36,7 @@ A simple shell command daemonizor written in Go which runs blocking commands in 
 │   ├── store           SQLite config / state store
 │   └── tui             bubbletea TUI
 ├── doc
-│   ├── man             man pages written in markdown
-│   └── plan            old plan files. You may not read this
+│   └── man             man pages written in markdown
 ├── e2e
 │   └── cmdman
 ├── internal

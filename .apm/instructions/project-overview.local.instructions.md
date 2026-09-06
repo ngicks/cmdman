@@ -127,8 +127,10 @@ pkg/hrstr/                 human-readable string/signal parsing
 pkg/stdcopy/               demux cmdman's framed log stream into io.Writer (docker-style)
 e2e/cmdman/                black-box tests: TestMain builds the binary, drives it as a subprocess
 doc/man/                   man pages, written as markdown
-doc/plan/                  old plan files — DO NOT read (per base instructions)
 ```
+
+Plans and the issue backlog live in the repository's beads (`bd`) database, shared by every
+worktree; there is no plan directory in the tree.
 
 **`mux` design principle** (`muxctl/doc.go`): the multiplexer is a **disposable viewer** —
 closing/rebuilding a session must never stop a supervised process. Driver autodetect:
