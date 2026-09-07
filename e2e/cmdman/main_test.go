@@ -8,7 +8,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -205,6 +207,17 @@ func (e *testEnv) inspectJSON(ctx context.Context, idOrName string) map[string]a
 	return result
 }
 
+// resolvedID returns the command id behind a name. The verbs that report per
+// target name the id, while `run -n` echoes back the name it was given.
+func (e *testEnv) resolvedID(ctx context.Context, idOrName string) string {
+	e.t.Helper()
+	id, _ := e.inspectJSON(ctx, idOrName)["ID"].(string)
+	if id == "" {
+		e.t.Fatalf("no ID in inspect output for %q", idOrName)
+	}
+	return id
+}
+
 // lsJSON runs "cmdman ls --format '{{json .}}'" and returns the parsed entries.
 // Each line of output is a separate JSON object.
 func (e *testEnv) lsJSON(ctx context.Context, extraArgs ...string) []map[string]any {
@@ -254,5 +267,43 @@ func waitUntil(t *testing.T, timeout time.Duration, fn func() bool, msgAndArgs .
 		t.Fatalf(format, msgAndArgs[1:]...)
 	} else {
 		t.Fatal("waitUntil timed out")
+	}
+}
+
+// readPidFile waits until path carries a pid and returns it. A command that
+// records a pid for the test to observe writes it as its first act, so the
+// wait only covers the gap between the CLI returning and the shell running.
+func readPidFile(t *testing.T, path string) int {
+	t.Helper()
+	var pid int
+	waitUntil(t, defaultTimeout, func() bool {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return false
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(string(b)))
+		if err != nil || n <= 0 {
+			return false
+		}
+		pid = n
+		return true
+	}, "pid file %s never carried a pid", path)
+	return pid
+}
+
+// processExists reports whether /proc still lists pid. A zombie keeps its
+// entry, so this only goes false once the process has also been reaped -
+// which is what a caller checking that a run left nothing behind wants.
+func processExists(pid int) bool {
+	_, err := os.Stat("/proc/" + strconv.Itoa(pid))
+	return err == nil
+}
+
+// killIfAlive sends SIGKILL to pid, ignoring a process that is already gone.
+// SIGKILL rather than SIGTERM: a test survivor is only interesting because it
+// ignores SIGTERM, and an ignored disposition survives exec.
+func killIfAlive(pid int) {
+	if pid > 0 {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}
 }

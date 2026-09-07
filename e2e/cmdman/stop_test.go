@@ -75,13 +75,14 @@ func TestStop_AlreadyExited(t *testing.T) {
 	id := env.run(ctx, "run", "--", "/bin/sh", "-c", "echo done")
 	env.waitForState(ctx, id, "exited", defaultTimeout)
 
-	// Stopping an already-exited command prints an error per-command
-	// but the stop command itself may return 0.
-	// The important thing is the command remains in exited state.
-	stdout, stderr, _ := env.exec(ctx, "stop", id)
-	combined := stdout + " " + stderr
-	if combined == " " {
-		t.Log("stop on exited command produced no output (error was silent)")
+	// A command that already reached a terminal state is not a failed target:
+	// stop is a silent no-op on it and exits 0.
+	res := env.Cmd("stop", id).Exec(ctx)
+	if res.Err != nil {
+		t.Fatalf("stop on an exited command failed: %v\nstderr:\n%s", res.Err, res.Stderr)
+	}
+	if res.Stdout != "" || res.Stderr != "" {
+		t.Errorf("expected no output, got stdout=%q stderr=%q", res.Stdout, res.Stderr)
 	}
 
 	info := env.inspectJSON(ctx, id)

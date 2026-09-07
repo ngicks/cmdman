@@ -1,6 +1,7 @@
 package cmdman_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -46,25 +47,80 @@ func TestRm_RunningCommandFails(t *testing.T) {
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
-	id := env.run(ctx, "run", "-n", "running-rm", "--", "/bin/sh", "-c", "sleep 300")
-	t.Cleanup(func() { env.cleanupCommand(ctx, id) })
+	env.run(ctx, "run", "-n", "running-rm", "--", "/bin/sh", "-c", "sleep 300")
+	// Not ctx: cleanup runs after the test's context is already cancelled.
+	t.Cleanup(func() { env.cleanupCommand(context.Background(), "running-rm") })
 
 	env.waitForState(ctx, "running-rm", "running", defaultTimeout)
 
-	// Removing a running command without --force prints an error per-command
-	// but the rm command itself still returns 0 (it processes each target independently).
-	stdout, stderr, _ := env.exec(ctx, "rm", "running-rm")
-
-	combined := stdout + " " + stderr
-	if !strings.Contains(strings.ToLower(combined), "running") &&
-		!strings.Contains(strings.ToLower(combined), "force") {
-		t.Logf("expected error about running command, got stdout=%q stderr=%q", stdout, stderr)
+	// Removing a running command without --force refuses that one target: the
+	// refusal is printed per command and the process exits non-zero.
+	id := env.resolvedID(ctx, "running-rm")
+	res := env.Cmd("rm", "running-rm").ExpectFail(ctx, t, "rm "+id+":")
+	if !strings.Contains(strings.ToLower(res.Stderr), "force") {
+		t.Errorf("expected the refusal to point at --force, got stderr=%q", res.Stderr)
 	}
 
 	info := env.inspectJSON(ctx, "running-rm")
 	if info["State"] != "running" {
 		t.Errorf("expected command to still be running, got %v", info["State"])
 	}
+}
+
+// TestRm_ExitStatusOnFailure pins the exit status of a multi-target verb whose
+// target failed: the per-target line goes to stderr, the aggregate names the
+// verb, and the process exits non-zero so a "rm … && …" chain stops there.
+func TestRm_ExitStatusOnFailure(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	env.run(ctx, "run", "-n", "rm-exit-status", "--", "/bin/sh", "-c", "sleep 300")
+	// Not ctx: cleanup runs after the test's context is already cancelled.
+	t.Cleanup(func() { env.cleanupCommand(context.Background(), "rm-exit-status") })
+
+	env.waitForState(ctx, "rm-exit-status", "running", defaultTimeout)
+
+	id := env.resolvedID(ctx, "rm-exit-status")
+	env.Cmd("rm", "rm-exit-status").ExpectFail(ctx, t,
+		"rm "+id+": command is running, use --force to remove",
+		"one or more rm operations failed",
+	)
+
+	env.run(ctx, "stop", "rm-exit-status")
+	env.waitForState(ctx, "rm-exit-status", "exited", defaultTimeout)
+	env.run(ctx, "rm", "rm-exit-status")
+}
+
+// TestRm_ExitStatusIgnoreErrors is TestRm_ExitStatusOnFailure with
+// --ignore-errors: the per-target line survives, the aggregate does not, and
+// the process exits 0.
+func TestRm_ExitStatusIgnoreErrors(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	env.run(ctx, "run", "-n", "rm-ignore-errors", "--", "/bin/sh", "-c", "sleep 300")
+	// Not ctx: cleanup runs after the test's context is already cancelled.
+	t.Cleanup(func() { env.cleanupCommand(context.Background(), "rm-ignore-errors") })
+
+	env.waitForState(ctx, "rm-ignore-errors", "running", defaultTimeout)
+
+	id := env.resolvedID(ctx, "rm-ignore-errors")
+	res := env.Cmd("rm", "--ignore-errors", "rm-ignore-errors").Exec(ctx)
+	if res.Err != nil {
+		t.Fatalf("rm --ignore-errors failed: %v\nstderr:\n%s", res.Err, res.Stderr)
+	}
+	if want := "rm " + id + ":"; !strings.Contains(res.Stderr, want) {
+		t.Errorf("expected %q in stderr, got %q", want, res.Stderr)
+	}
+	if strings.Contains(res.Stderr, "one or more rm operations failed") {
+		t.Errorf("--ignore-errors should suppress the aggregate, got stderr=%q", res.Stderr)
+	}
+
+	env.run(ctx, "stop", "rm-ignore-errors")
+	env.waitForState(ctx, "rm-ignore-errors", "exited", defaultTimeout)
+	env.run(ctx, "rm", "rm-ignore-errors")
 }
 
 func TestRm_ForceRunningCommand(t *testing.T) {
