@@ -165,9 +165,9 @@ func TestSweepHelperProcess(t *testing.T) {
 
 // startSurvivor starts a process that outlives this one and writes down the pid
 // it runs under. ownSession puts it in a session of its own, the way a program
-// that deliberately detaches itself does. Its output goes to the null device: a
-// process holding the run's stdout pipe delays cmd.Wait by WaitDelay, which has
-// nothing to do with the sweep.
+// that deliberately detaches itself does. Its output goes to the null device,
+// so what these tests observe is the sweep alone and not the run's drain of the
+// output a leftover holds open.
 func startSurvivor(t *testing.T, pidPath string, ownSession bool) {
 	t.Helper()
 	cmd := exec.Command("sleep", "300")

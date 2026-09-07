@@ -124,7 +124,7 @@ exit 0
 
 	_, _, stateJSON, err := st.GetCommandState(id)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, stateJSON.Warnings, []string{"pty reader still blocked after 1s"})
+	assert.DeepEqual(t, stateJSON.Warnings, []string{"output reader still blocked after 1s"})
 
 	eventPath, err := appCfg.EventLogPath()
 	assert.NilError(t, err)

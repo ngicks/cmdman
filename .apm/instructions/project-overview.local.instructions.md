@@ -59,7 +59,8 @@ Two process roles per command:
   (scrollback) + log-driver file + a broadcaster (live streams).
 - Run end: the monitor is a subreaper (Linux), so when the child exits it sweeps every process
   the run left behind (reap, SIGTERM, 2 s, SIGKILL, reap; classified by session id) before the
-  state flips; the pty reader is detached after a bounded drain wait rather than joined. Both
+  state flips; the output readers (pty or monitor-owned pipes) are detached after a bounded
+  drain wait rather than joined, so `cmd.Wait` returns at reap time on both paths. Both
   anomalies surface as event attrs and `CommandState.Warnings`.
 - Shutdown: SIGTERM → ctx cancel → signal child's process group → `grpcServer.GracefulStop()`
   → `wg.Wait()`.

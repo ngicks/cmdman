@@ -59,8 +59,8 @@ type Monitor struct {
 	//
 	// runPgid is the process group the command led, and it outlives that trio on
 	// purpose: the handles go away the moment the child is reaped, while the
-	// survivor sweep and the pty drain that follow keep the run going for a
-	// while yet. A stop escalating to SIGKILL in that window still has to reach
+	// survivor sweep and the drain of the command's output that follow keep the
+	// run going for a while yet. A stop escalating to SIGKILL in that window still has to reach
 	// whatever the command left behind, so the group id is cleared only once the
 	// run is really over.
 	procMu  sync.Mutex
