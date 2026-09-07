@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```text
-cmdman signal --signal SIGNAL ID|NAME...
+cmdman signal --signal SIGNAL [--ignore-errors] ID|NAME...
 ```
 
 ## Description
@@ -24,6 +24,21 @@ individual targets are written to stderr while remaining targets are attempted.
 
 - `-s, --signal SIGNAL`: required signal to send. Accepts symbolic names with
   or without `SIG` and numeric signal values.
+- `--ignore-errors`: exit 0 even when some targets failed. Failures are still
+  printed.
+
+## Exit Status
+
+- `0`: cmdman delivered the signal to every target.
+- `1`: at least one target failed. cmdman prints one line per failure in the
+  form `signal <id>: <reason>`, then the summary
+  `error: one or more signal operations failed`. `--ignore-errors` turns this
+  exit into `0`. An unknown target and a command without a live monitor are
+  per-target failures. The flag covers them too.
+
+Errors that abort the whole call keep their non-zero exit under
+`--ignore-errors`. An unparsable `--signal` value and a store that cannot be
+opened are such errors.
 
 ## See Also
 

@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```text
-cmdman restart [--signal SIGNAL] [--timeout SECONDS] ID|NAME...
+cmdman restart [--signal SIGNAL] [--timeout SECONDS] [--ignore-errors] ID|NAME...
 ```
 
 ## Description
@@ -26,6 +26,21 @@ failures are reported on stderr.
   each command's stored stop signal is used.
 - `-t, --timeout SECONDS`: seconds to wait before sending `SIGKILL`. Defaults
   to 10.
+- `--ignore-errors`: exit 0 even when some targets failed. Failures are still
+  printed.
+
+## Exit Status
+
+- `0`: cmdman restarted every target. A command that was not running is only
+  started.
+- `1`: at least one target failed. cmdman prints one line per failure in the
+  form `restart <id>: <reason>`, then the summary
+  `error: one or more restart operations failed`. `--ignore-errors` turns this
+  exit into `0`.
+
+Errors that abort the whole call keep their non-zero exit under
+`--ignore-errors`. An unknown target, an unparsable `--signal` value, and a
+store that cannot be opened are such errors.
 
 ## See Also
 

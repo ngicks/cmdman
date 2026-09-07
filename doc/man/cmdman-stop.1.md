@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```text
-cmdman stop [--signal SIGNAL] [--timeout SECONDS] ID|NAME...
+cmdman stop [--signal SIGNAL] [--timeout SECONDS] [--ignore-errors] ID|NAME...
 ```
 
 ## Description
@@ -27,6 +27,8 @@ written to stderr.
   command's stored stop signal is used.
 - `-t, --timeout SECONDS`: seconds to wait before sending `SIGKILL`. Defaults
   to 10.
+- `--ignore-errors`: exit 0 even when some targets failed. Failures are still
+  printed.
 
 ## Examples
 
@@ -34,6 +36,19 @@ written to stderr.
 cmdman stop api worker
 cmdman stop --signal HUP --timeout 30 server
 ```
+
+## Exit Status
+
+- `0`: cmdman handled every target. A command that had already stopped counts
+  as handled.
+- `1`: at least one target failed. cmdman prints one line per failure in the
+  form `stop <id>: <reason>`, then the summary
+  `error: one or more stop operations failed`. `--ignore-errors` turns this
+  exit into `0`.
+
+Errors that abort the whole call keep their non-zero exit under
+`--ignore-errors`. An unknown target, an unparsable `--signal` value, and a
+store that cannot be opened are such errors.
 
 ## See Also
 

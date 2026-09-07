@@ -33,6 +33,13 @@ launch or supervise the process become `failed`.
 Restart policies are enforced by the detached monitor. Explicit `stop` requests
 do not trigger policy-based restart.
 
+When the command's own process exits, the monitor terminates every process the
+command left behind and reaps them before it changes the state. The sweep sends
+`SIGTERM`, allows a 2 second grace period, then sends `SIGKILL`. Nothing a run
+spawned outlives that run, and a restart never stacks survivors of an earlier
+run on top of the new one. On non-Linux hosts the monitor signals only the
+command's process group. The sweep does not affect hooks the monitor runs.
+
 ## Reported Status
 
 Separate from the state model above, a command can report about itself: one of
