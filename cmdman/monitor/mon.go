@@ -51,15 +51,23 @@ type Monitor struct {
 
 	lis net.Listener
 
-	// procMu guards the per-run process handles below - ptmx, stdin and cmd.
-	// runOnce publishes them once the child is wired and clears them once it has
-	// been reaped, so an RPC arriving either side of a run sees the whole trio
-	// change at once instead of a half-torn-down run. It is never held across a
-	// write to the child.
-	procMu sync.Mutex
-	ptmx   *os.File
-	stdin  io.WriteCloser
-	cmd    *exec.Cmd
+	// procMu guards the per-run process state below. runOnce publishes ptmx,
+	// stdin and cmd once the child is wired and clears them once it has been
+	// reaped, so an RPC arriving either side of a run sees the whole trio change
+	// at once instead of a half-torn-down run. It is never held across a write
+	// to the child.
+	//
+	// runPgid is the process group the command led, and it outlives that trio on
+	// purpose: the handles go away the moment the child is reaped, while the
+	// survivor sweep and the pty drain that follow keep the run going for a
+	// while yet. A stop escalating to SIGKILL in that window still has to reach
+	// whatever the command left behind, so the group id is cleared only once the
+	// run is really over.
+	procMu  sync.Mutex
+	ptmx    *os.File
+	stdin   io.WriteCloser
+	cmd     *exec.Cmd
+	runPgid int
 	// stdinWriteMu serializes the stdin writes themselves, so two clients
 	// writing at once never interleave bytes inside a chunk.
 	stdinWriteMu sync.Mutex
@@ -505,22 +513,47 @@ func (m *Monitor) PtySize() (rows, cols uint16, ok bool) {
 	return uint16(r), uint16(c), true
 }
 
+// errNoRunningProcess is what a signal-carrying call gets when the command has
+// nothing left to signal: no live child and no group from a run still winding
+// down.
+var errNoRunningProcess = errors.New("no running process")
+
 // SignalProcess sends a raw signal to the running command and any
 // descendants it has spawned within its process group.
 func (m *Monitor) SignalProcess(sig syscall.Signal) error {
 	m.procMu.Lock()
-	cmd := m.cmd
+	cmd, pgid := m.cmd, m.runPgid
 	m.procMu.Unlock()
-	if cmd == nil || cmd.Process == nil {
-		return fmt.Errorf("no running process")
+	if cmd != nil && cmd.Process != nil {
+		return signalProcessGroup(cmd.Process.Pid, sig)
 	}
-	return signalProcessGroup(cmd.Process.Pid, sig)
+	// The child is reaped but the run is not over: the survivor sweep and the
+	// pty drain still have to finish, and they take long enough for a stop's
+	// escalation to land in the middle of them. The group id outlives the
+	// handles precisely so that escalation reaches what the command left behind
+	// instead of being refused.
+	if pgid != 0 {
+		return signalProcessGroup(pgid, sig)
+	}
+	return errNoRunningProcess
 }
 
 // StopProcess sends a signal to the running command and prevents restart.
+//
+// It reports success even when the signal reached nothing. Stopping is about
+// the command staying down, and the restart suppression is latched before the
+// signal goes out, so a stop landing between one run's end and the next one's
+// start - or on a group whose last member has already exited - has done its
+// job: the loop ends instead of starting another run. SignalProcess keeps
+// returning those errors, because a bare signal that hit nothing is worth
+// reporting.
 func (m *Monitor) StopProcess(sig syscall.Signal) error {
 	m.stopRequested.Store(true)
-	return m.SignalProcess(sig)
+	err := m.SignalProcess(sig)
+	if errors.Is(err, errNoRunningProcess) || errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	return err
 }
 
 // GetState returns the current command state.

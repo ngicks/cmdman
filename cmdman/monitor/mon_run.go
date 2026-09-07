@@ -141,9 +141,21 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 		m.stateChangeBridge.Close()
 	}()
 
-	org := m.stateJSON.RestartCount
-	for ; ; m.stateJSON.RestartCount++ {
-		if m.stateJSON.RestartCount > org {
+	var exitCode int
+	for first := true; ; first = false {
+		if !first {
+			// The policy below says whether the command should run again;
+			// whether it may is decided here, which is as late as the loop can
+			// still decide it. A stop landing after a run has ended has only
+			// this flag to speak through - there is no process left to carry
+			// its signal - and reading the flag alongside the policy instead
+			// would let the restart it raced swallow it. The counter moves
+			// after the check, so a restart a stop cancelled is never counted
+			// as one.
+			if m.stopRequested.Load() {
+				break
+			}
+			m.stateJSON.RestartCount++
 			m.Logger.Info("restarting command", slog.Int("restart_count", m.stateJSON.RestartCount))
 			m.emitEvent(model.Event{
 				Time: time.Now().UTC(),
@@ -171,7 +183,7 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 		}
 		m.cfg = cfg
 
-		exitCode, err := m.runOnce(ctx)
+		exitCode, err = m.runOnce(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				m.outputBridge.Close()
@@ -185,24 +197,24 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 		m.stateJSON.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 		_ = m.store.InsertCommandExitCode(m.ID, exitCode)
 
+		restart := false
 		switch m.cfg.RestartPolicy {
 		case model.RestartPolicyNo:
 		case model.RestartPolicyOnFailure:
-			if exitCode != 0 && !m.stopRequested.Load() && ctx.Err() == nil {
-				if m.cfg.MaxRetries == 0 || m.stateJSON.RestartCount < m.cfg.MaxRetries {
-					continue
-				}
+			if exitCode != 0 && ctx.Err() == nil {
+				restart = m.cfg.MaxRetries == 0 || m.stateJSON.RestartCount < m.cfg.MaxRetries
 			}
 		case model.RestartPolicyAlways:
-			if !m.stopRequested.Load() && ctx.Err() == nil {
-				continue
-			}
+			restart = ctx.Err() == nil
 		}
-
-		m.outputBridge.Close()
-		m.setExited(exitCode)
-		return m.maybeAutoRemove()
+		if !restart {
+			break
+		}
 	}
+
+	m.outputBridge.Close()
+	m.setExited(exitCode)
+	return m.maybeAutoRemove()
 }
 
 func (m *Monitor) wireUpCmd(ctx context.Context) (*exec.Cmd, error) {
@@ -297,16 +309,15 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 		return -1, err
 	}
 
+	// The child leads its own session, so its pid is also the id of the process
+	// group everything it spawns starts out in.
+	pgid := cmd.Process.Pid
+
 	// The handles belong to this run and only exist between these two sections,
 	// which is what the RPC-facing readers hold procMu to observe.
 	m.procMu.Lock()
-	m.ptmx, m.stdin, m.cmd = ptmx, stdin, cmd
+	m.ptmx, m.stdin, m.cmd, m.runPgid = ptmx, stdin, cmd, pgid
 	m.procMu.Unlock()
-
-	// The child leads its own session, so its pid is also the id of the process
-	// group everything it spawns starts out in. It is read here because the
-	// sweep below needs it after the handles have been cleared.
-	childPGID := cmd.Process.Pid
 
 	m.setRunning()
 
@@ -316,9 +327,17 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	m.ptmx, m.stdin, m.cmd = nil, nil, nil
 	m.procMu.Unlock()
 
-	m.sweepSurvivors(ctx, childPGID)
+	m.sweepSurvivors(ctx, pgid)
 
 	waitFn()
+
+	// The group id is given up only here: until the sweep and the drain above
+	// are done the run still has processes a stop can be aimed at, and refusing
+	// a signal in that window is what kept an escalation from ever reaching
+	// them.
+	m.procMu.Lock()
+	m.runPgid = 0
+	m.procMu.Unlock()
 
 	// Runtime state dies with the run (D13). Clearing it here rather than only
 	// when the next run gets this far is what keeps a dead run's title, bell or
