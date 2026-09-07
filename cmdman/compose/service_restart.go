@@ -189,7 +189,10 @@ func stopLayerRestartConcurrent(
 	for _, name := range layer {
 		for _, id := range idsByCommand[name] {
 			eg.Go(func() error {
-				_, stopErr := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{id}})
+				results, stopErr := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{id}})
+				if stopErr == nil {
+					stopErr = firstStopErr(results)
+				}
 				if stopErr != nil {
 					contextkey.ValueSlogLoggerDefault(ctx).Warn("compose restart: stop failed",
 						"project", project,

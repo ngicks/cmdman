@@ -115,7 +115,10 @@ func stopAllConcurrent(
 		id := entry.ID
 		eg.Go(func() error {
 			s.report(name, PhaseStopping, nil, nil)
-			_, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{id}})
+			results, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{id}})
+			if err == nil {
+				err = firstStopErr(results)
+			}
 			outcome := StopOutcome{Command: name}
 			if err != nil {
 				outcome.Err = fmt.Errorf("stop command %q (%s): %w", name, id, err)
@@ -137,4 +140,17 @@ func stopAllConcurrent(
 	}
 	_ = eg.Wait()
 	return outcomes
+}
+
+// firstStopErr returns the first per-target error carried by stop results, nil
+// when every target stopped. cmdman.Service.Stop reports a per-target failure in
+// the result rather than in its own error, so a caller that only checks the
+// returned error would read a failed stop as a success.
+func firstStopErr(results []cmdman.StopResult) error {
+	for _, r := range results {
+		if r.Err != nil {
+			return r.Err
+		}
+	}
+	return nil
 }
