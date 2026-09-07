@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,6 +86,11 @@ exit 0
 	m, err := newMonitor(t.Context(), id, appCfg, logger)
 	assert.NilError(t, err)
 	defer m.Close()
+
+	// What is under test is the run's behaviour while a process still holds the
+	// PTY slave, so nothing may take that process away: the sweep would remove
+	// the helper and the read would end on its own.
+	m.sweepFn = func(_ context.Context, _ *slog.Logger, _ int) int { return 0 }
 
 	// The run's error comes back to the test goroutine: a failed assertion calls
 	// FailNow, which only the test goroutine may do.

@@ -13,9 +13,11 @@ import (
 	"gotest.tools/v3/assert"
 )
 
-// procStat holds the /proc/<pid>/stat fields this test compares.
+// procStat holds the /proc/<pid>/stat fields these tests compare.
 type procStat struct {
 	pid     int
+	state   string
+	ppid    int
 	pgrp    int
 	session int
 }
@@ -36,11 +38,13 @@ func parseProcStat(t *testing.T, s string) procStat {
 	// After comm come: state, ppid, pgrp, session, ...
 	fields := strings.Fields(rest[commEnd+1:])
 	assert.Assert(t, len(fields) >= 4, "too few stat fields: %q", s)
+	ppid, err := strconv.Atoi(fields[1])
+	assert.NilError(t, err)
 	pgrp, err := strconv.Atoi(fields[2])
 	assert.NilError(t, err)
 	session, err := strconv.Atoi(fields[3])
 	assert.NilError(t, err)
-	return procStat{pid: pid, pgrp: pgrp, session: session}
+	return procStat{pid: pid, state: fields[0], ppid: ppid, pgrp: pgrp, session: session}
 }
 
 // runCatStat spawns `cat /proc/self/stat` with prep applied and returns the

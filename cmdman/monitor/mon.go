@@ -103,6 +103,11 @@ type Monitor struct {
 	// lock of its own.
 	runAnomalies []runAnomaly
 
+	// sweepFn terminates the processes a finished run left behind and reports
+	// how many outlived the sweep. It is a field so a test can drive the
+	// giving-up path without a process that genuinely refuses to die.
+	sweepFn func(ctx context.Context, logger *slog.Logger, pgid int) int
+
 	// stopRequested is set by the Signal RPC to prevent restarts.
 	stopRequested atomic.Bool
 }
@@ -163,6 +168,7 @@ func newMonitor(
 		store:             st,
 		cfg:               commandCfg,
 		evtLog:            evtLog,
+		sweepFn:           sweepRunSurvivors,
 		ring:              newRingBuffer(commandCfg.ScrollbackBytes),
 		stateJSON: &model.CommandState{
 			MonitorPID: os.Getpid(),

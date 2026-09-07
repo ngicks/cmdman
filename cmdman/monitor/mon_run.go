@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"strconv"
 	"time"
 
 	"github.com/creack/pty"
@@ -36,15 +37,28 @@ const readerDrainWait = 1 * time.Second
 
 // runAnomaly is something that went wrong as a run ended without keeping the
 // run from ending: attr flags it on the run's terminal event, msg says what
-// happened in the command state.
+// happened in the command state. An anomaly that counts something puts the
+// count in value; one that only says "this happened" leaves value empty and
+// reads as "true" on the event.
 type runAnomaly struct {
-	attr string
-	msg  string
+	attr  string
+	value string
+	msg   string
 }
 
 var anomalyReaderDetached = runAnomaly{
 	attr: "reader_detached",
 	msg:  fmt.Sprintf("pty reader still blocked after %s", readerDrainWait),
+}
+
+// anomalySurvivorsUnreaped reports the processes the command left behind that
+// the sweep could not get rid of within its bound.
+func anomalySurvivorsUnreaped(n int) runAnomaly {
+	return runAnomaly{
+		attr:  "survivors_unreaped",
+		value: strconv.Itoa(n),
+		msg:   fmt.Sprintf("%d survivor(s) still alive after sweep bound", n),
+	}
 }
 
 // noteRunAnomaly records an anomaly of the run being torn down.
@@ -60,7 +74,11 @@ func (m *Monitor) runAnomalyAttrs() map[string]string {
 	}
 	attrs := make(map[string]string, len(m.runAnomalies))
 	for _, a := range m.runAnomalies {
-		attrs[a.attr] = "true"
+		value := a.value
+		if value == "" {
+			value = "true"
+		}
+		attrs[a.attr] = value
 	}
 	return attrs
 }
@@ -86,6 +104,14 @@ func RunMonitor(
 	cfg config.Config,
 	logger *slog.Logger,
 ) error {
+	// Everything the command leaves behind is reparented to the monitor instead
+	// of to init, which is what lets a run enumerate and terminate what it
+	// spawned. Losing this only costs the sweep its reach, so a monitor that
+	// cannot become a subreaper still supervises its command.
+	if err := becomeSubreaper(); err != nil {
+		logger.WarnContext(ctx, "become subreaper", slog.String("error", err.Error()))
+	}
+
 	m, err := newMonitor(ctx, id, cfg, logger)
 	if err != nil {
 		return err
@@ -277,6 +303,11 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	m.ptmx, m.stdin, m.cmd = ptmx, stdin, cmd
 	m.procMu.Unlock()
 
+	// The child leads its own session, so its pid is also the id of the process
+	// group everything it spawns starts out in. It is read here because the
+	// sweep below needs it after the handles have been cleared.
+	childPGID := cmd.Process.Pid
+
 	m.setRunning()
 
 	err = cmd.Wait()
@@ -284,6 +315,8 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	m.procMu.Lock()
 	m.ptmx, m.stdin, m.cmd = nil, nil, nil
 	m.procMu.Unlock()
+
+	m.sweepSurvivors(ctx, childPGID)
 
 	waitFn()
 
@@ -302,6 +335,42 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 		return -1, err
 	}
 	return 0, nil
+}
+
+// sweepSurvivors terminates and reaps whatever the command left behind, so a
+// detached worker, a helper that outlived its parent or anything else that
+// escaped the run stops holding the port, the file or the terminal it was
+// given, instead of stacking up across restarts.
+//
+// It runs before the PTY teardown on purpose: the read parked on the master
+// only ends once the last holder of the slave has let go of it, so removing the
+// holders is what lets the drain that follows finish rather than time out.
+func (m *Monitor) sweepSurvivors(ctx context.Context, pgid int) {
+	sweep := m.sweepFn
+	if sweep == nil {
+		sweep = sweepRunSurvivors
+	}
+	logger := contextkey.ValueSlogLoggerDefault(ctx)
+
+	// The run's own context is already cancelled when the monitor is shutting
+	// down, which is exactly when what the command left behind matters most, so
+	// the sweep gets a context of its own. Its timeout is the sweep's bound: a
+	// process in an uninterruptible wait ignores SIGKILL as well, and the run
+	// has to end regardless.
+	sweepCtx, cancel := context.WithTimeout(context.Background(), sweepBound)
+	defer cancel()
+
+	unreaped := sweep(sweepCtx, logger, pgid)
+	if unreaped == 0 {
+		return
+	}
+	m.noteRunAnomaly(anomalySurvivorsUnreaped(unreaped))
+	logger.WarnContext(
+		sweepCtx,
+		"processes the command left behind are still alive",
+		slog.String("id", m.ID),
+		slog.Int("count", unreaped),
+	)
 }
 
 // writeTty starts cmd on a PTY and hands the run's handles and teardown back to
