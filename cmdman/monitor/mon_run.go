@@ -186,10 +186,10 @@ func (m *Monitor) wireUpCmd(ctx context.Context) (*exec.Cmd, error) {
 	if len(cmd.Env) == 0 {
 		return nil, fmt.Errorf("command config env is empty")
 	}
-	// Place the child in its own process group and route ctx cancellation
-	// through a group-wide signal so grandchildren (e.g. `sleep` under
+	// Place the child in its own session and route ctx cancellation through a
+	// group-wide signal so grandchildren (e.g. `sleep` under
 	// `sh -c "sleep 300"`) are reached too.
-	prepProcessAttrs(cmd, m.cfg.Tty)
+	prepCommandAttrs(cmd)
 	cmd.WaitDelay = 10 * time.Second
 
 	return cmd, nil
