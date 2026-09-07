@@ -8,7 +8,6 @@ import (
 	"maps"
 	"os"
 	"os/exec"
-	"sync"
 	"time"
 
 	"github.com/creack/pty"
@@ -16,6 +15,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"github.com/ngicks/cmdman/cmdman/model"
 	cmdstore "github.com/ngicks/cmdman/cmdman/store"
+	"github.com/ngicks/go-common/contextkey"
 )
 
 // Default PTY window size for a TTY-backed command before any client resizes it,
@@ -24,6 +24,59 @@ const (
 	defaultPtyRows uint16 = 24
 	defaultPtyCols uint16 = 80
 )
+
+// readerDrainWait bounds how long a run waits for its PTY reader once it has
+// closed the master. The reader sits in a blocking read that ends only when
+// every process holding the slave has let go of it, and closing the master
+// does not wake it, so a process the command left behind keeps it parked for
+// as long as it lives. Waiting a moment lets the output a command ended with
+// reach the log before the exit event; giving up after it keeps a command
+// whose own process is gone from being reported as running forever.
+const readerDrainWait = 1 * time.Second
+
+// runAnomaly is something that went wrong as a run ended without keeping the
+// run from ending: attr flags it on the run's terminal event, msg says what
+// happened in the command state.
+type runAnomaly struct {
+	attr string
+	msg  string
+}
+
+var anomalyReaderDetached = runAnomaly{
+	attr: "reader_detached",
+	msg:  fmt.Sprintf("pty reader still blocked after %s", readerDrainWait),
+}
+
+// noteRunAnomaly records an anomaly of the run being torn down.
+func (m *Monitor) noteRunAnomaly(a runAnomaly) {
+	m.runAnomalies = append(m.runAnomalies, a)
+}
+
+// runAnomalyAttrs renders the latest run's anomalies as event attributes, nil
+// when it had none.
+func (m *Monitor) runAnomalyAttrs() map[string]string {
+	if len(m.runAnomalies) == 0 {
+		return nil
+	}
+	attrs := make(map[string]string, len(m.runAnomalies))
+	for _, a := range m.runAnomalies {
+		attrs[a.attr] = "true"
+	}
+	return attrs
+}
+
+// runAnomalyWarnings renders the same anomalies for the persisted state, nil
+// when the run had none.
+func (m *Monitor) runAnomalyWarnings() []string {
+	if len(m.runAnomalies) == 0 {
+		return nil
+	}
+	msgs := make([]string, len(m.runAnomalies))
+	for i, a := range m.runAnomalies {
+		msgs[i] = a.msg
+	}
+	return msgs
+}
 
 // RunMonitor is the main entry point for the monitor process.
 // It reads config, starts the command, and serves gRPC until the command exits.
@@ -183,6 +236,10 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	}()
 	m.outputMu.Lock()
 	m.logWriter = logWriter
+	// Every byte this run produces is tagged with the generation read here, so
+	// output that arrives once the run has given the shared state up is
+	// recognizable as stale.
+	gen := m.runGen
 	m.terminalState.reset()
 	// The run that ended cleared its own runtime state; this repeats it for the
 	// first run, and is a no-op otherwise. Seeding the configured directory
@@ -205,9 +262,9 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 		waitFn func()
 	)
 	if m.cfg.Tty {
-		ptmx, stdin, waitFn, err = m.writeTty(cmd)
+		ptmx, stdin, waitFn, err = m.writeTty(ctx, cmd, gen)
 	} else {
-		stdin, waitFn, err = m.wirePipe(cmd)
+		stdin, waitFn, err = m.wirePipe(cmd, gen)
 	}
 
 	if err != nil {
@@ -248,8 +305,13 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 }
 
 // writeTty starts cmd on a PTY and hands the run's handles and teardown back to
-// runOnce, which is where they are published.
-func (m *Monitor) writeTty(cmd *exec.Cmd) (*os.File, io.WriteCloser, func(), error) {
+// runOnce, which is where they are published. Output it reads is tagged with
+// gen so the shared output state can tell it apart from a later run's.
+func (m *Monitor) writeTty(
+	ctx context.Context,
+	cmd *exec.Cmd,
+	gen uint64,
+) (*os.File, io.WriteCloser, func(), error) {
 	ptmx, err := startTty(cmd)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("pty start: %w", err)
@@ -265,32 +327,58 @@ func (m *Monitor) writeTty(cmd *exec.Cmd) (*os.File, io.WriteCloser, func(), err
 	m.screen = newScreenTracker(int(defaultPtyCols), int(defaultPtyRows), m.runtimeState)
 	m.outputMu.Unlock()
 
-	var wg sync.WaitGroup
-
-	wg.Go(func() {
+	// readerDone is closed by the reader itself because the teardown below
+	// waits on it with a deadline, which neither errgroup nor a WaitGroup
+	// offers.
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := ptmx.Read(buf)
 			if n > 0 {
 				data := make([]byte, n)
 				copy(data, buf[:n])
-				m.logCommandOutput(logdriver.StreamStdout, data)
+				m.logCommandOutput(gen, logdriver.StreamStdout, data)
 			}
 			if err != nil {
 				return
 			}
 		}
-	})
+	}()
 
 	return ptmx, ptmx, func() {
+		// Closing the master is what ends the read for a command that took its
+		// whole process tree with it. It is best-effort: the read only returns
+		// once the last holder of the slave is gone, so a process that escaped
+		// the command keeps this reader parked. The run must not wait on that,
+		// so it waits a moment for the trailing output and then leaves the
+		// reader behind rather than joining it.
 		_ = ptmx.Close()
-		wg.Wait()
+		select {
+		case <-readerDone:
+		case <-time.After(readerDrainWait):
+			m.noteRunAnomaly(anomalyReaderDetached)
+			contextkey.ValueSlogLoggerDefault(ctx).WarnContext(
+				ctx,
+				"pty reader still blocked; leaving it behind",
+				slog.String("id", m.ID),
+				slog.Duration("waited", readerDrainWait),
+			)
+		}
+		// Past this point the reader speaks for a run that is over, and what it
+		// reads is dropped instead of reaching the next run.
+		m.outputMu.Lock()
+		m.runGen++
+		m.outputMu.Unlock()
 	}, nil
 }
 
 // wirePipe starts cmd on pipes and hands the run's stdin and teardown back to
-// runOnce, which is where they are published. There is no PTY on this path.
-func (m *Monitor) wirePipe(cmd *exec.Cmd) (io.WriteCloser, func(), error) {
+// runOnce, which is where they are published. There is no PTY on this path, so
+// no reader can outlive the run; the writers still tag their output with gen so
+// output reaches the shared state through one rule.
+func (m *Monitor) wirePipe(cmd *exec.Cmd, gen uint64) (io.WriteCloser, func(), error) {
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, nil, fmt.Errorf("stdin pipe: %w", err)
@@ -298,10 +386,12 @@ func (m *Monitor) wirePipe(cmd *exec.Cmd) (io.WriteCloser, func(), error) {
 
 	cmd.Stdout = &monitorOutputWriter{
 		monitor: m,
+		gen:     gen,
 		stream:  logdriver.StreamStdout,
 	}
 	cmd.Stderr = &monitorOutputWriter{
 		monitor: m,
+		gen:     gen,
 		stream:  logdriver.StreamStderr,
 	}
 
@@ -312,13 +402,20 @@ func (m *Monitor) wirePipe(cmd *exec.Cmd) (io.WriteCloser, func(), error) {
 	return stdin, func() {}, nil
 }
 
-func (m *Monitor) logCommandOutput(stream logdriver.Stream, data []byte) {
+// logCommandOutput fans one chunk of output out to the scrollback, the log
+// driver, live subscribers and the screen mirror. gen names the run the chunk
+// came from: output of a run that has already given the shared state up is
+// dropped here, which is the single point every producer goes through.
+func (m *Monitor) logCommandOutput(gen uint64, stream logdriver.Stream, data []byte) {
 	if len(data) == 0 {
 		return
 	}
 	lines := logdriver.SplitLogLines(time.Now(), stream, data)
 	m.outputMu.Lock()
 	defer m.outputMu.Unlock()
+	if gen != m.runGen {
+		return
+	}
 	if m.cfg.Tty {
 		m.terminalState.Observe(data)
 	}
@@ -340,12 +437,13 @@ func (m *Monitor) logCommandOutput(stream logdriver.Stream, data []byte) {
 
 type monitorOutputWriter struct {
 	monitor *Monitor
+	gen     uint64
 	stream  logdriver.Stream
 }
 
 func (w *monitorOutputWriter) Write(data []byte) (int, error) {
 	buf := make([]byte, len(data))
 	copy(buf, data)
-	w.monitor.logCommandOutput(w.stream, buf)
+	w.monitor.logCommandOutput(w.gen, w.stream, buf)
 	return len(data), nil
 }

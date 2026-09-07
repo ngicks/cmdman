@@ -70,6 +70,11 @@ type Monitor struct {
 	stateChangeBridge *broadcaster[monitorStateChange]
 	logWriter         logdriver.Writer
 	terminalState     *terminalPaneState
+	// runGen names the run whose output the shared state above still accepts.
+	// A run captures it when it wires its command and the run's teardown bumps
+	// it, so output arriving from a reader that outlived its run is dropped
+	// instead of landing in the next run's scrollback, log or screen.
+	runGen uint64
 	// runtimeState latches what a TTY command reports about itself (title,
 	// bell, notifications). It is per-run state, reset by runOnce, and is read
 	// without outputMu - see commandRuntimeState.
@@ -91,6 +96,12 @@ type Monitor struct {
 	// The supervisor waits on this group between GracefulStop (which is
 	// what unblocks gRPC Recv calls) and resource teardown.
 	wg sync.WaitGroup
+
+	// runAnomalies collects what went wrong as the latest run ended. It is
+	// written and read on the goroutine that drives the run - the one that
+	// tears a run down and the one that publishes its outcome - so it needs no
+	// lock of its own.
+	runAnomalies []runAnomaly
 
 	// stopRequested is set by the Signal RPC to prevent restarts.
 	stopRequested atomic.Bool
@@ -353,6 +364,10 @@ func isMonitorActiveState(state model.EventType) bool {
 
 func (m *Monitor) setRunning() {
 	m.stateJSON.StartedAt = time.Now().UTC().Format(time.RFC3339)
+	// Anomalies describe the run that reported them, so the run starting here
+	// takes over the record from the one before it.
+	m.runAnomalies = nil
+	m.stateJSON.Warnings = nil
 	// Append the event before flipping the DB state so observers polling
 	// state cannot see "running" without the corresponding event on disk.
 	m.emitEvent(model.Event{
@@ -383,7 +398,9 @@ func (m *Monitor) setExited(exitCode int) {
 		ID:       m.ID,
 		State:    model.EventTypeExited,
 		ExitCode: &ec,
+		Attrs:    m.runAnomalyAttrs(),
 	})
+	m.stateJSON.Warnings = m.runAnomalyWarnings()
 	_ = m.store.UpdateCommandState(m.ID, model.EventTypeExited, &exitCode, m.stateJSON)
 	m.publishStateChange(model.EventTypeExited, exitCode)
 	m.stateChangeBridge.Close()
@@ -398,7 +415,9 @@ func (m *Monitor) setFailed(errMsg string) {
 		ID:    m.ID,
 		State: model.EventTypeFailed,
 		Error: errMsg,
+		Attrs: m.runAnomalyAttrs(),
 	})
+	m.stateJSON.Warnings = m.runAnomalyWarnings()
 	_ = m.store.UpdateCommandState(m.ID, model.EventTypeFailed, nil, m.stateJSON)
 	m.publishStateChange(model.EventTypeFailed, 0)
 	m.stateChangeBridge.Close()
