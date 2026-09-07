@@ -46,11 +46,10 @@ func drainClosed(t *testing.T, ch <-chan RuntimeStateRecord) {
 func TestServiceWatchRuntimeState(t *testing.T) {
 	// Every stage waits for a marker file, so the test - not a sleep - decides
 	// when the command changes its state, and the subscription is open before
-	// the first change happens. Marker files rather than the WriteStdin or Stop
-	// RPCs, and no Status polling: Monitor.QueueStdin, SignalProcess and
-	// GetState read m.stdin / m.cmd with no happens-before edge against
-	// runOnce's teardown of those same fields, so driving a run to its end that
-	// way trips -race on a monitor bug this plan does not own.
+	// the first change happens. Marker files are used instead of the WriteStdin
+	// or Stop RPCs because they make each stage deterministic; the RPCs
+	// themselves are safe to combine with a run's end, since the monitor guards
+	// its per-run process handles under a lock.
 	stage := t.TempDir()
 	appCfg, id, _ := startTestMonitor(t, true, "/bin/sh", "-c", fmt.Sprintf(`
 until [ -e "%[1]s/title" ]; do sleep 0.05; done
