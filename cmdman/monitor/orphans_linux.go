@@ -31,8 +31,9 @@ const (
 // becomeSubreaper makes this process the reaper of its whole descendant tree: a
 // process whose own parent is gone is reparented here instead of to init, so
 // its parent id becomes the monitor's own pid. That is what lets a run find
-// what its command spawned and take it down, instead of leaving a detached
-// worker holding the port, the log file or the pty it was given.
+// what its command left in the command's own session and take it down, instead
+// of handing those leftovers to init where they would go on holding the port,
+// the log file or the pty they were given.
 func becomeSubreaper() error {
 	return unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)
 }
@@ -48,10 +49,14 @@ func defaultSweepOptions() sweepOptions {
 	return sweepOptions{grace: orphanGrace, kill: unix.Kill}
 }
 
-// sweepRunSurvivors terminates and reaps every process the finished run left
-// behind and returns how many were still alive when it gave up. pgid is the
-// process group the command itself led. ctx carries the bound: the sweep keeps
-// going until nothing is left or ctx expires.
+// sweepRunSurvivors terminates and reaps the processes the finished run left in
+// the command's own session and returns how many were still alive when it gave
+// up. pgid is the process group the command led, which is also its session id
+// because the command is its own session leader. A process that made a session
+// of its own - a deliberately detached daemon that must outlive the run, or a
+// grandchild that broke away - is left alone, the same as on a non-Linux host.
+// ctx carries the bound: the sweep keeps going until nothing is left or ctx
+// expires.
 func sweepRunSurvivors(ctx context.Context, logger *slog.Logger, pgid int) int {
 	return sweepRunSurvivorsWith(ctx, logger, pgid, defaultSweepOptions())
 }
@@ -62,12 +67,10 @@ func sweepRunSurvivorsWith(
 	pgid int,
 	opts sweepOptions,
 ) int {
-	session, err := unix.Getsid(0)
-	if err != nil {
-		// Without the monitor's own session id there is no way to tell a
-		// leftover of the run from a hook the monitor is running itself, and
-		// killing a hook is worse than leaving a leftover alone.
-		logger.WarnContext(ctx, "sweep: read own session id", slog.String("error", err.Error()))
+	// pgid is the command's session id: the command leads its own session, so
+	// its session id equals its pid, which is the pgid passed in. Without it the
+	// scan below has nothing to match against, so there is nothing to sweep.
+	if pgid <= 0 {
 		return 0
 	}
 	self := os.Getpid()
@@ -75,12 +78,10 @@ func sweepRunSurvivorsWith(
 	// One group-wide signal first: everything the command spawned that stayed
 	// in its process group hears it at once, including processes the scan below
 	// cannot see yet because their own parent is still alive.
-	if pgid > 0 {
-		_ = opts.kill(-pgid, syscall.SIGTERM)
-	}
+	_ = opts.kill(-pgid, syscall.SIGTERM)
 
 	for {
-		found, err := runSurvivors(self, session)
+		found, err := runSurvivors(self, pgid)
 		if err != nil {
 			logger.WarnContext(ctx, "sweep: scan processes", slog.String("error", err.Error()))
 			return 0
@@ -107,17 +108,21 @@ func sweepRunSurvivorsWith(
 	}
 }
 
-// runSurvivors lists the monitor's direct children that are outside the
-// monitor's own session, which is what the finished run left behind. The
-// supervised command leads a session of its own and everything it spawns
-// inherits that session, while a hook deliberately stays in the monitor's
-// session; a process can create a session but never join one, so the session id
-// tells the two apart for good.
+// runSurvivors lists the monitor's direct children that are still in the
+// command's own session, which is what the finished run left behind. The
+// supervised command leads a session of its own - its session id equals its
+// pid, the pgid passed in - and everything it spawns inherits that session. A
+// process can create a session but never join one, so anything that made a
+// session of its own falls outside the match and is left alone: a deliberately
+// detached daemon such as a shared multiplexer server the run must not tear
+// down, or a grandchild that broke away and reverts to the same accepted,
+// unreaped cost as on a non-Linux host. A hook keeps the monitor's session, so
+// it never matches either.
 //
 // /proc is scanned rather than read from /proc/<pid>/task/<tid>/children
 // because that file only exists when the kernel was built with
 // CONFIG_PROC_CHILDREN.
-func runSurvivors(self, session int) ([]int, error) {
+func runSurvivors(self, pgid int) ([]int, error) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return nil, fmt.Errorf("read /proc: %w", err)
@@ -134,7 +139,7 @@ func runSurvivors(self, session int) ([]int, error) {
 			// The process ended between the listing and the read.
 			continue
 		}
-		if ids.ppid != self || ids.session == session {
+		if ids.ppid != self || ids.session != pgid {
 			continue
 		}
 		pids = append(pids, pid)

@@ -33,12 +33,15 @@ launch or supervise the process become `failed`.
 Restart policies are enforced by the detached monitor. Explicit `stop` requests
 do not trigger policy-based restart.
 
-When the command's own process exits, the monitor terminates every process the
-command left behind and reaps them before it changes the state. The sweep sends
-`SIGTERM`, allows a 2 second grace period, then sends `SIGKILL`. Nothing a run
-spawned outlives that run, and a restart never stacks survivors of an earlier
-run on top of the new one. On non-Linux hosts the monitor signals only the
-command's process group. The sweep does not affect hooks the monitor runs.
+When the command's own process exits, the monitor terminates and reaps the
+processes the command left in its own session before it changes the state. The
+sweep sends `SIGTERM`, allows a 2 second grace period, then sends `SIGKILL`, so a
+restart never stacks a run's in-session leftovers on top of the new run. A
+process that made a session of its own is left alone: a program that deliberately
+detached to outlive the run, such as a shared terminal-multiplexer server, is not
+swept, and a restart does not tear it down. On non-Linux hosts the monitor
+signals only the command's process group. The sweep does not affect hooks the
+monitor runs.
 
 ## Reported Status
 

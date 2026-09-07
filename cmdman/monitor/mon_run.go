@@ -365,15 +365,20 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	return 0, nil
 }
 
-// sweepSurvivors terminates and reaps whatever the command left behind, so a
-// detached worker, a helper that outlived its parent or anything else that
-// escaped the run stops holding the port, the file or the terminal it was
-// given, instead of stacking up across restarts.
+// sweepSurvivors terminates and reaps the processes the command left in its own
+// session - a helper that outlived the process that started it, say - so they
+// stop holding the port, the file or the terminal they were given instead of
+// stacking up across restarts. A process that made a session of its own is left
+// alone: a deliberately detached daemon (a shared multiplexer server the run
+// must never tear down is the motivating case), or a grandchild that broke away
+// and reverts to the same accepted, unreaped cost as on a non-Linux host.
 //
 // It runs before the output teardown on purpose: a read parked on the pty
 // master or on a pipe only ends once the last holder of the other end has let
-// go of it, so removing the holders is what lets the drain that follows finish
-// rather than time out.
+// go of it, so clearing the in-session holders is what lets the drain that
+// follows finish rather than time out. An escapee that kept a handle open is
+// left to that drain, which detaches the reader after a bounded wait instead of
+// waiting on the handle for good.
 func (m *Monitor) sweepSurvivors(ctx context.Context, pgid int) {
 	sweep := m.sweepFn
 	if sweep == nil {

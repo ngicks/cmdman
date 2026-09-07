@@ -28,11 +28,15 @@ const (
 	sweepHelperOrphanEnv   = "CMDMAN_TEST_SWEEP_ORPHAN_PID"
 )
 
-// A command can leave processes behind: one that broke away into a session of
-// its own, and one that simply outlived the process that started it. The
-// monitor is the reaper of both, so the run terminates them before it finishes
-// instead of handing them to init, where they would go on holding whatever they
-// hold and stack up across restarts.
+// A command can leave processes behind. One stays in the command's own session
+// - a helper that simply outlived the process that started it - and the sweep
+// reaps it before the run finishes, instead of handing it to init where it
+// would go on holding whatever it holds and stack up across restarts. Another
+// breaks away into a session of its own - the way a deliberately detached daemon
+// such as a shared multiplexer server that must outlive the run does - and the
+// sweep leaves it alone. Both are children of the monitor once their parent
+// exits; the session id is what tells the leftover to reap from the daemon to
+// spare.
 func TestMonitorRunSweepsWhatTheCommandLeftBehind(t *testing.T) {
 	// The sweep only reaches what is reparented to this process. In the monitor
 	// RunMonitor arranges that; here the test process is the monitor.
@@ -70,17 +74,26 @@ func TestMonitorRunSweepsWhatTheCommandLeftBehind(t *testing.T) {
 	orphan, ok := readPidFile(t, orphanPidPath)
 	assert.Assert(t, ok, "the helper in the command's session never reported a pid")
 
-	// The one that broke away is out of reach of any group-wide signal, so only
-	// a scan for what the monitor has been made the parent of finds it.
-	assert.Assert(
-		t,
-		survivorGone(t, detached),
-		"the process that broke away into its own session outlived the run",
-	)
+	// The one that stayed in the command's session is reaped: it is a child of
+	// the monitor once its parent exits, and its session id still matches the
+	// run's, so the scan finds it. It also sat in the run's process group, so the
+	// group-wide signal reaches it even before the scan.
 	assert.Assert(
 		t,
 		survivorGone(t, orphan),
-		"the process the command left behind outlived the run",
+		"the process the command left in its own session outlived the run",
+	)
+	// The one that broke away into a session of its own is spared, the way a
+	// shared multiplexer server that must outlive the run is spared. Its session
+	// id no longer matches the run's, so the scan passes it by even though it is
+	// a child of the monitor too, and its own session put it out of reach of the
+	// group-wide signal. This is the guarantee that keeps the sweep from tearing
+	// down a deliberately detached daemon.
+	detachedStat, detachedFound := procStatOf(t, detached)
+	assert.Assert(
+		t,
+		detachedFound && detachedStat.state != "Z",
+		"the sweep took down a process that had broken away into its own session",
 	)
 
 	hookStat, hookFound := procStatOf(t, hook.Process.Pid)
@@ -130,7 +143,7 @@ func TestMonitorRunReportsSurvivorsTheSweepCouldNotReap(t *testing.T) {
 	assert.NilError(t, err)
 	exited := lastEventOfType(t, eventPath, model.EventTypeExited)
 	// The count is whatever the sweep found, not only this test's helper:
-	// anything else outside the monitor's session is a leftover of the run too.
+	// anything else still in the command's session is a leftover of the run too.
 	unreaped, err := strconv.Atoi(exited.Attrs["survivors_unreaped"])
 	assert.NilError(t, err, "the exited event carries no survivor count: %v", exited.Attrs)
 	assert.Assert(t, unreaped >= 1, "the sweep reported %d survivors", unreaped)
