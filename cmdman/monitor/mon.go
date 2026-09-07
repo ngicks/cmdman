@@ -51,11 +51,19 @@ type Monitor struct {
 
 	lis net.Listener
 
-	ptmx    *os.File
-	stdin   io.WriteCloser
-	stdinMu sync.Mutex
-	cmd     *exec.Cmd
-	ring    *ringBuffer
+	// procMu guards the per-run process handles below - ptmx, stdin and cmd.
+	// runOnce publishes them once the child is wired and clears them once it has
+	// been reaped, so an RPC arriving either side of a run sees the whole trio
+	// change at once instead of a half-torn-down run. It is never held across a
+	// write to the child.
+	procMu sync.Mutex
+	ptmx   *os.File
+	stdin  io.WriteCloser
+	cmd    *exec.Cmd
+	// stdinWriteMu serializes the stdin writes themselves, so two clients
+	// writing at once never interleave bytes inside a chunk.
+	stdinWriteMu sync.Mutex
+	ring         *ringBuffer
 
 	outputMu          sync.Mutex
 	outputBridge      *broadcaster[logdriver.LogLine]
@@ -417,24 +425,35 @@ func (m *Monitor) QueueStdin(ctx context.Context, data []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if m.stdin == nil {
+	// The handle lock is released before the write. A PTY write blocks for as
+	// long as the child stops draining its input, and holding procMu across it
+	// would freeze Resize, Status, Signal and Stop - Stop being the way out of
+	// that state. Serialization moves to stdinWriteMu, which nothing else waits
+	// on.
+	m.procMu.Lock()
+	stdin := m.stdin
+	m.procMu.Unlock()
+	if stdin == nil {
 		return fmt.Errorf("no stdin")
 	}
-	m.stdinMu.Lock()
-	defer m.stdinMu.Unlock()
-	if m.stdin == nil {
-		return fmt.Errorf("no stdin")
-	}
-	_, err := m.stdin.Write(data)
+	m.stdinWriteMu.Lock()
+	defer m.stdinWriteMu.Unlock()
+	_, err := stdin.Write(data)
 	return err
 }
 
 // Resize changes the PTY window size.
 func (m *Monitor) Resize(rows, cols uint16) error {
-	if m.ptmx == nil {
+	// Act on a copy: the run can end at any point during the call, and a handle
+	// read out under the lock stays usable - a syscall on the closed file fails
+	// with an error rather than reading a field mid-teardown.
+	m.procMu.Lock()
+	ptmx := m.ptmx
+	m.procMu.Unlock()
+	if ptmx == nil {
 		return fmt.Errorf("no pty")
 	}
-	if err := pty.Setsize(m.ptmx, &pty.Winsize{Rows: rows, Cols: cols}); err != nil {
+	if err := pty.Setsize(ptmx, &pty.Winsize{Rows: rows, Cols: cols}); err != nil {
 		return err
 	}
 	// Keep the server-side screen mirror at the command's real size so its
@@ -448,10 +467,13 @@ func (m *Monitor) Resize(rows, cols uint16) error {
 // PtySize returns the command's current PTY window size. ok is false for a
 // non-TTY command (no PTY) so callers can skip reporting a size.
 func (m *Monitor) PtySize() (rows, cols uint16, ok bool) {
-	if m.ptmx == nil {
+	m.procMu.Lock()
+	ptmx := m.ptmx
+	m.procMu.Unlock()
+	if ptmx == nil {
 		return 0, 0, false
 	}
-	r, c, err := pty.Getsize(m.ptmx)
+	r, c, err := pty.Getsize(ptmx)
 	if err != nil {
 		return 0, 0, false
 	}
@@ -461,10 +483,13 @@ func (m *Monitor) PtySize() (rows, cols uint16, ok bool) {
 // SignalProcess sends a raw signal to the running command and any
 // descendants it has spawned within its process group.
 func (m *Monitor) SignalProcess(sig syscall.Signal) error {
-	if m.cmd == nil || m.cmd.Process == nil {
+	m.procMu.Lock()
+	cmd := m.cmd
+	m.procMu.Unlock()
+	if cmd == nil || cmd.Process == nil {
 		return fmt.Errorf("no running process")
 	}
-	return signalProcessGroup(m.cmd.Process.Pid, sig)
+	return signalProcessGroup(cmd.Process.Pid, sig)
 }
 
 // StopProcess sends a signal to the running command and prevents restart.
@@ -480,9 +505,12 @@ func (m *Monitor) GetState() (model.EventType, int, int) {
 	if ec != nil {
 		exitCode = *ec
 	}
+	m.procMu.Lock()
+	cmd := m.cmd
+	m.procMu.Unlock()
 	pid := 0
-	if m.cmd != nil && m.cmd.Process != nil {
-		pid = m.cmd.Process.Pid
+	if cmd != nil && cmd.Process != nil {
+		pid = cmd.Process.Pid
 	}
 	return state, exitCode, pid
 }

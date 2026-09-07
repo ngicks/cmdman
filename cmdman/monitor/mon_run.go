@@ -3,8 +3,10 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -197,25 +199,34 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 		m.outputMu.Unlock()
 	}()
 
-	var waitFn func()
+	var (
+		ptmx   *os.File
+		stdin  io.WriteCloser
+		waitFn func()
+	)
 	if m.cfg.Tty {
-		waitFn, err = m.writeTty(cmd)
+		ptmx, stdin, waitFn, err = m.writeTty(cmd)
 	} else {
-		waitFn, err = m.wirePipe(cmd)
+		stdin, waitFn, err = m.wirePipe(cmd)
 	}
 
 	if err != nil {
 		return -1, err
 	}
 
-	m.cmd = cmd
+	// The handles belong to this run and only exist between these two sections,
+	// which is what the RPC-facing readers hold procMu to observe.
+	m.procMu.Lock()
+	m.ptmx, m.stdin, m.cmd = ptmx, stdin, cmd
+	m.procMu.Unlock()
 
 	m.setRunning()
 
 	err = cmd.Wait()
-	m.ptmx = nil
-	m.stdin = nil
-	m.cmd = nil
+
+	m.procMu.Lock()
+	m.ptmx, m.stdin, m.cmd = nil, nil, nil
+	m.procMu.Unlock()
 
 	waitFn()
 
@@ -236,13 +247,13 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	return 0, nil
 }
 
-func (m *Monitor) writeTty(cmd *exec.Cmd) (func(), error) {
+// writeTty starts cmd on a PTY and hands the run's handles and teardown back to
+// runOnce, which is where they are published.
+func (m *Monitor) writeTty(cmd *exec.Cmd) (*os.File, io.WriteCloser, func(), error) {
 	ptmx, err := startTty(cmd)
 	if err != nil {
-		return nil, fmt.Errorf("pty start: %w", err)
+		return nil, nil, nil, fmt.Errorf("pty start: %w", err)
 	}
-	m.ptmx = ptmx
-	m.stdin = ptmx
 	// Give the PTY a conventional default size so a full-screen program renders
 	// sanely even when no interactive client ever attaches to resize it.
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: defaultPtyRows, Cols: defaultPtyCols})
@@ -271,18 +282,19 @@ func (m *Monitor) writeTty(cmd *exec.Cmd) (func(), error) {
 		}
 	})
 
-	return func() {
+	return ptmx, ptmx, func() {
 		_ = ptmx.Close()
 		wg.Wait()
 	}, nil
 }
 
-func (m *Monitor) wirePipe(cmd *exec.Cmd) (func(), error) {
+// wirePipe starts cmd on pipes and hands the run's stdin and teardown back to
+// runOnce, which is where they are published. There is no PTY on this path.
+func (m *Monitor) wirePipe(cmd *exec.Cmd) (io.WriteCloser, func(), error) {
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, fmt.Errorf("stdin pipe: %w", err)
+		return nil, nil, fmt.Errorf("stdin pipe: %w", err)
 	}
-	m.stdin = stdin
 
 	cmd.Stdout = &monitorOutputWriter{
 		monitor: m,
@@ -294,13 +306,10 @@ func (m *Monitor) wirePipe(cmd *exec.Cmd) (func(), error) {
 	}
 
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start command: %w", err)
+		return nil, nil, fmt.Errorf("start command: %w", err)
 	}
 
-	m.stdin = stdin
-	m.cmd = cmd
-
-	return func() {}, nil
+	return stdin, func() {}, nil
 }
 
 func (m *Monitor) logCommandOutput(stream logdriver.Stream, data []byte) {
