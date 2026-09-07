@@ -362,9 +362,15 @@ func (m *Monitor) subscribeStateChange() (<-chan monitorStateChange, func()) {
 }
 
 func (m *Monitor) publishStateChange(state model.EventType, exitCode int) {
+	// Read the handle under procMu like the other readers of the trio, so the
+	// mutex owns every read of m.cmd even though these callers run on the run
+	// goroutine and never race a teardown in practice.
+	m.procMu.Lock()
+	cmd := m.cmd
+	m.procMu.Unlock()
 	pid := 0
-	if m.cmd != nil && m.cmd.Process != nil {
-		pid = m.cmd.Process.Pid
+	if cmd != nil && cmd.Process != nil {
+		pid = cmd.Process.Pid
 	}
 	m.stateChangeBridge.Send(monitorStateChange{
 		State:    state,
@@ -379,10 +385,8 @@ func isMonitorActiveState(state model.EventType) bool {
 
 func (m *Monitor) setRunning() {
 	m.stateJSON.StartedAt = time.Now().UTC().Format(time.RFC3339)
-	// Anomalies describe the run that reported them, so the run starting here
-	// takes over the record from the one before it.
-	m.runAnomalies = nil
-	m.stateJSON.Warnings = nil
+	// runOnce already cleared the previous run's anomalies and warnings at its
+	// top, ahead of any setup that could fail, so nothing to reset here.
 	// Append the event before flipping the DB state so observers polling
 	// state cannot see "running" without the corresponding event on disk.
 	m.emitEvent(model.Event{
@@ -529,8 +533,8 @@ func (m *Monitor) SignalProcess(sig syscall.Signal) error {
 		return signalProcessGroup(cmd.Process.Pid, sig)
 	}
 	// The child is reaped but the run is not over: the survivor sweep and the
-	// pty drain still have to finish, and they take long enough for a stop's
-	// escalation to land in the middle of them. The group id outlives the
+	// output-reader drain still have to finish, and they take long enough for a
+	// stop's escalation to land in the middle of them. The group id outlives the
 	// handles precisely so that escalation reaches what the command left behind
 	// instead of being refused.
 	if pgid != 0 {

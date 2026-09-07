@@ -14,11 +14,11 @@ import (
 	"gotest.tools/v3/assert"
 )
 
-// A run is not over when its child is reaped: the survivor sweep and the pty
-// drain still have to finish, and a stop escalating to SIGKILL routinely lands
-// in that window. The run keeps the command's process group id for exactly that
-// long, so the escalation reaches what the command left behind instead of being
-// refused for want of a live child.
+// A run is not over when its child is reaped: the survivor sweep and the
+// output-reader drain still have to finish, and a stop escalating to SIGKILL
+// routinely lands in that window. The run keeps the command's process group id
+// for exactly that long, so the escalation reaches what the command left behind
+// instead of being refused for want of a live child.
 func TestMonitorSignalReachesGroupDuringSweep(t *testing.T) {
 	// Only what is reparented here can be waited on below, which is how the
 	// signal's effect is told apart from a pid that simply went away.

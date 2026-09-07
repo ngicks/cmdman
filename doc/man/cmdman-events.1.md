@@ -37,9 +37,9 @@ same warning, and [`cmdman inspect`](./cmdman-inspect.1.md) lists it under the
 command's `warnings`.
 
 - `reader_detached`: the literal `true`. The monitor's output reader was still
-  blocked one second after the child exited. A leftover process that kept the
-  terminal or the output pipe open is the usual cause. Trailing output may be
-  missing from the log.
+  blocked one second after the survivor sweep finished. A leftover process that
+  kept the terminal or the output pipe open is the usual cause. Trailing output
+  may be missing from the log.
 - `survivors_unreaped`: a decimal count. It reports the processes still alive
   when the survivor sweep gave up after its 10 second bound.
 

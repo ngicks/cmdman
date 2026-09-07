@@ -27,12 +27,12 @@ const (
 )
 
 // readerDrainWait bounds how long a run waits for the readers of its output
-// once the command itself is gone. A reader sits in a blocking read that ends
-// only when every process holding the other end has let go of it, so a process
-// the command left behind keeps it parked for as long as it lives. Waiting a
-// moment lets the output a command ended with reach the log before the exit
-// event; giving up after it keeps a command whose own process is gone from
-// being reported as running forever.
+// once the command is reaped and the survivor sweep has finished. A reader sits
+// in a blocking read that ends only when every process holding the other end
+// has let go of it, so a process the command left behind keeps it parked for as
+// long as it lives. Waiting a moment lets the output a command ended with reach
+// the log before the exit event; giving up after it keeps a command whose own
+// process is gone from being reported as running forever.
 const readerDrainWait = 1 * time.Second
 
 // runAnomaly is something that went wrong as a run ended without keeping the
@@ -257,6 +257,14 @@ func (m *Monitor) openLogWriter(ctx context.Context) (logdriver.Writer, error) {
 }
 
 func (m *Monitor) runOnce(ctx context.Context) (int, error) {
+	// Anomalies and warnings describe the run they were recorded for, so the run
+	// starting here takes the record over from the one before it before anything
+	// can fail. Setup that fails ahead of setRunning (empty env, log writer, the
+	// output pipes) then reports on its own failed event instead of replaying the
+	// previous run's anomalies.
+	m.runAnomalies = nil
+	m.stateJSON.Warnings = nil
+
 	cmd, err := m.wireUpCmd(ctx)
 	if err != nil {
 		return -1, err
@@ -388,10 +396,11 @@ func (m *Monitor) sweepSurvivors(ctx context.Context, pgid int) {
 
 	// The run's own context is already cancelled when the monitor is shutting
 	// down, which is exactly when what the command left behind matters most, so
-	// the sweep gets a context of its own. Its timeout is the sweep's bound: a
-	// process in an uninterruptible wait ignores SIGKILL as well, and the run
-	// has to end regardless.
-	sweepCtx, cancel := context.WithTimeout(context.Background(), sweepBound)
+	// the sweep drops that cancellation while keeping the context's values (the
+	// logger among them). Its timeout is the sweep's bound: a process in an
+	// uninterruptible wait ignores SIGKILL as well, and the run has to end
+	// regardless.
+	sweepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sweepBound)
 	defer cancel()
 
 	unreaped := sweep(sweepCtx, logger, pgid)
@@ -458,11 +467,10 @@ func (m *Monitor) wirePipe(
 	cmd *exec.Cmd,
 	gen uint64,
 ) (io.WriteCloser, func(), error) {
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, nil, fmt.Errorf("stdin pipe: %w", err)
-	}
-
+	// The two output pipes are made before the stdin pipe so nothing that can
+	// fail sits between StdinPipe and Start: StdinPipe opens a descriptor that
+	// only Start (or Wait) closes, so a later os.Pipe failure would return with
+	// that stdin pipe leaked.
 	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
 		return nil, nil, fmt.Errorf("stdout pipe: %w", err)
@@ -472,6 +480,15 @@ func (m *Monitor) wirePipe(
 		_ = stdoutR.Close()
 		_ = stdoutW.Close()
 		return nil, nil, fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
+		_ = stderrR.Close()
+		_ = stderrW.Close()
+		return nil, nil, fmt.Errorf("stdin pipe: %w", err)
 	}
 	cmd.Stdout = stdoutW
 	cmd.Stderr = stderrW
@@ -540,8 +557,10 @@ func (m *Monitor) readOutput(
 func (m *Monitor) awaitReaders(ctx context.Context, readers ...<-chan struct{}) {
 	// The run's own context is already cancelled when the monitor is shutting
 	// down, so a bound derived from it would expire at once and drop the output
-	// the command ended with.
-	drainCtx, cancel := context.WithTimeout(context.Background(), readerDrainWait)
+	// the command ended with. Dropping the cancellation while keeping the
+	// context's values gives the drain its own clock and still carries the
+	// logger the warning below reads.
+	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), readerDrainWait)
 	defer cancel()
 
 	detached := false
