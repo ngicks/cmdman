@@ -3,10 +3,10 @@ package monitor
 import (
 	"bytes"
 	"net/url"
-	"unicode/utf8"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ngicks/cmdman/cmdman/model"
 	vt "github.com/ngicks/cmdman/internal/third_party/charmbracelet-x-vt"
