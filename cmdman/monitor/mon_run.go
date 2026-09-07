@@ -3,10 +3,12 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
+	"os"
 	"os/exec"
-	"sync"
+	"strconv"
 	"time"
 
 	"github.com/creack/pty"
@@ -14,6 +16,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"github.com/ngicks/cmdman/cmdman/model"
 	cmdstore "github.com/ngicks/cmdman/cmdman/store"
+	"github.com/ngicks/go-common/contextkey"
 )
 
 // Default PTY window size for a TTY-backed command before any client resizes it,
@@ -23,6 +26,80 @@ const (
 	defaultPtyCols uint16 = 80
 )
 
+// readerDrainWait bounds how long a run waits for the readers of its output
+// once the command is reaped and the survivor sweep has finished. A reader sits
+// in a blocking read that ends only when every process holding the other end
+// has let go of it, so a process the command left behind keeps it parked for as
+// long as it lives. Waiting a moment lets the output a command ended with reach
+// the log before the exit event; giving up after it keeps a command whose own
+// process is gone from being reported as running forever.
+const readerDrainWait = 1 * time.Second
+
+// runAnomaly is something that went wrong as a run ended without keeping the
+// run from ending: attr flags it on the run's terminal event, msg says what
+// happened in the command state. An anomaly that counts something puts the
+// count in value; one that only says "this happened" leaves value empty and
+// reads as "true" on the event.
+type runAnomaly struct {
+	attr  string
+	value string
+	msg   string
+}
+
+// anomalyReaderDetached reports output the run gave up on: a reader still
+// parked when the drain bound expired, which both the PTY and the pipe path
+// report the same way because both mean the same thing to a user - trailing
+// output may be missing.
+var anomalyReaderDetached = runAnomaly{
+	attr: "reader_detached",
+	msg:  fmt.Sprintf("output reader still blocked after %s", readerDrainWait),
+}
+
+// anomalySurvivorsUnreaped reports the processes the command left behind that
+// the sweep could not get rid of within its bound.
+func anomalySurvivorsUnreaped(n int) runAnomaly {
+	return runAnomaly{
+		attr:  "survivors_unreaped",
+		value: strconv.Itoa(n),
+		msg:   fmt.Sprintf("%d survivor(s) still alive after sweep bound", n),
+	}
+}
+
+// noteRunAnomaly records an anomaly of the run being torn down.
+func (m *Monitor) noteRunAnomaly(a runAnomaly) {
+	m.runAnomalies = append(m.runAnomalies, a)
+}
+
+// runAnomalyAttrs renders the latest run's anomalies as event attributes, nil
+// when it had none.
+func (m *Monitor) runAnomalyAttrs() map[string]string {
+	if len(m.runAnomalies) == 0 {
+		return nil
+	}
+	attrs := make(map[string]string, len(m.runAnomalies))
+	for _, a := range m.runAnomalies {
+		value := a.value
+		if value == "" {
+			value = "true"
+		}
+		attrs[a.attr] = value
+	}
+	return attrs
+}
+
+// runAnomalyWarnings renders the same anomalies for the persisted state, nil
+// when the run had none.
+func (m *Monitor) runAnomalyWarnings() []string {
+	if len(m.runAnomalies) == 0 {
+		return nil
+	}
+	msgs := make([]string, len(m.runAnomalies))
+	for i, a := range m.runAnomalies {
+		msgs[i] = a.msg
+	}
+	return msgs
+}
+
 // RunMonitor is the main entry point for the monitor process.
 // It reads config, starts the command, and serves gRPC until the command exits.
 func RunMonitor(
@@ -31,6 +108,14 @@ func RunMonitor(
 	cfg config.Config,
 	logger *slog.Logger,
 ) error {
+	// Everything the command leaves behind is reparented to the monitor instead
+	// of to init, which is what lets a run enumerate and terminate what it
+	// spawned. Losing this only costs the sweep its reach, so a monitor that
+	// cannot become a subreaper still supervises its command.
+	if err := becomeSubreaper(); err != nil {
+		logger.WarnContext(ctx, "become subreaper", slog.String("error", err.Error()))
+	}
+
 	m, err := newMonitor(ctx, id, cfg, logger)
 	if err != nil {
 		return err
@@ -60,9 +145,21 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 		m.stateChangeBridge.Close()
 	}()
 
-	org := m.stateJSON.RestartCount
-	for ; ; m.stateJSON.RestartCount++ {
-		if m.stateJSON.RestartCount > org {
+	var exitCode int
+	for first := true; ; first = false {
+		if !first {
+			// The policy below says whether the command should run again;
+			// whether it may is decided here, which is as late as the loop can
+			// still decide it. A stop landing after a run has ended has only
+			// this flag to speak through - there is no process left to carry
+			// its signal - and reading the flag alongside the policy instead
+			// would let the restart it raced swallow it. The counter moves
+			// after the check, so a restart a stop cancelled is never counted
+			// as one.
+			if m.stopRequested.Load() {
+				break
+			}
+			m.stateJSON.RestartCount++
 			m.Logger.Info("restarting command", slog.Int("restart_count", m.stateJSON.RestartCount))
 			m.emitEvent(model.Event{
 				Time: time.Now().UTC(),
@@ -90,7 +187,7 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 		}
 		m.cfg = cfg
 
-		exitCode, err := m.runOnce(ctx)
+		exitCode, err = m.runOnce(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				m.outputBridge.Close()
@@ -104,24 +201,24 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 		m.stateJSON.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 		_ = m.store.InsertCommandExitCode(m.ID, exitCode)
 
+		restart := false
 		switch m.cfg.RestartPolicy {
 		case model.RestartPolicyNo:
 		case model.RestartPolicyOnFailure:
-			if exitCode != 0 && !m.stopRequested.Load() && ctx.Err() == nil {
-				if m.cfg.MaxRetries == 0 || m.stateJSON.RestartCount < m.cfg.MaxRetries {
-					continue
-				}
+			if exitCode != 0 && ctx.Err() == nil {
+				restart = m.cfg.MaxRetries == 0 || m.stateJSON.RestartCount < m.cfg.MaxRetries
 			}
 		case model.RestartPolicyAlways:
-			if !m.stopRequested.Load() && ctx.Err() == nil {
-				continue
-			}
+			restart = ctx.Err() == nil
 		}
-
-		m.outputBridge.Close()
-		m.setExited(exitCode)
-		return m.maybeAutoRemove()
+		if !restart {
+			break
+		}
 	}
+
+	m.outputBridge.Close()
+	m.setExited(exitCode)
+	return m.maybeAutoRemove()
 }
 
 func (m *Monitor) wireUpCmd(ctx context.Context) (*exec.Cmd, error) {
@@ -131,10 +228,15 @@ func (m *Monitor) wireUpCmd(ctx context.Context) (*exec.Cmd, error) {
 	if len(cmd.Env) == 0 {
 		return nil, fmt.Errorf("command config env is empty")
 	}
-	// Place the child in its own process group and route ctx cancellation
-	// through a group-wide signal so grandchildren (e.g. `sleep` under
+	// Place the child in its own session and route ctx cancellation through a
+	// group-wide signal so grandchildren (e.g. `sleep` under
 	// `sh -c "sleep 300"`) are reached too.
-	prepProcessAttrs(cmd, m.cfg.Tty)
+	prepCommandAttrs(cmd)
+	// WaitDelay bounds the cancellation wired just above: exec signals the
+	// group and, when the command is still there once this expires, kills it,
+	// so a command that ignores the signal cannot hold the monitor's shutdown
+	// open. It no longer bounds output - the monitor reads the command's output
+	// itself on both paths, so exec has no copying of its own left to wait for.
 	cmd.WaitDelay = 10 * time.Second
 
 	return cmd, nil
@@ -155,6 +257,14 @@ func (m *Monitor) openLogWriter(ctx context.Context) (logdriver.Writer, error) {
 }
 
 func (m *Monitor) runOnce(ctx context.Context) (int, error) {
+	// Anomalies and warnings describe the run they were recorded for, so the run
+	// starting here takes the record over from the one before it before anything
+	// can fail. Setup that fails ahead of setRunning (empty env, log writer, the
+	// output pipes) then reports on its own failed event instead of replaying the
+	// previous run's anomalies.
+	m.runAnomalies = nil
+	m.stateJSON.Warnings = nil
+
 	cmd, err := m.wireUpCmd(ctx)
 	if err != nil {
 		return -1, err
@@ -181,6 +291,10 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	}()
 	m.outputMu.Lock()
 	m.logWriter = logWriter
+	// Every byte this run produces is tagged with the generation read here, so
+	// output that arrives once the run has given the shared state up is
+	// recognizable as stale.
+	gen := m.runGen
 	m.terminalState.reset()
 	// The run that ended cleared its own runtime state; this repeats it for the
 	// first run, and is a no-op otherwise. Seeding the configured directory
@@ -197,27 +311,50 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 		m.outputMu.Unlock()
 	}()
 
-	var waitFn func()
+	var (
+		ptmx   *os.File
+		stdin  io.WriteCloser
+		waitFn func()
+	)
 	if m.cfg.Tty {
-		waitFn, err = m.writeTty(cmd)
+		ptmx, stdin, waitFn, err = m.writeTty(ctx, cmd, gen)
 	} else {
-		waitFn, err = m.wirePipe(cmd)
+		stdin, waitFn, err = m.wirePipe(ctx, cmd, gen)
 	}
 
 	if err != nil {
 		return -1, err
 	}
 
-	m.cmd = cmd
+	// The child leads its own session, so its pid is also the id of the process
+	// group everything it spawns starts out in.
+	pgid := cmd.Process.Pid
+
+	// The handles belong to this run and only exist between these two sections,
+	// which is what the RPC-facing readers hold procMu to observe.
+	m.procMu.Lock()
+	m.ptmx, m.stdin, m.cmd, m.runPgid = ptmx, stdin, cmd, pgid
+	m.procMu.Unlock()
 
 	m.setRunning()
 
 	err = cmd.Wait()
-	m.ptmx = nil
-	m.stdin = nil
-	m.cmd = nil
+
+	m.procMu.Lock()
+	m.ptmx, m.stdin, m.cmd = nil, nil, nil
+	m.procMu.Unlock()
+
+	m.sweepSurvivors(ctx, pgid)
 
 	waitFn()
+
+	// The group id is given up only here: until the sweep and the drain above
+	// are done the run still has processes a stop can be aimed at, and refusing
+	// a signal in that window is what kept an escalation from ever reaching
+	// them.
+	m.procMu.Lock()
+	m.runPgid = 0
+	m.procMu.Unlock()
 
 	// Runtime state dies with the run (D13). Clearing it here rather than only
 	// when the next run gets this far is what keeps a dead run's title, bell or
@@ -236,13 +373,61 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	return 0, nil
 }
 
-func (m *Monitor) writeTty(cmd *exec.Cmd) (func(), error) {
+// sweepSurvivors terminates and reaps the processes the command left in its own
+// session - a helper that outlived the process that started it, say - so they
+// stop holding the port, the file or the terminal they were given instead of
+// stacking up across restarts. A process that made a session of its own is left
+// alone: a deliberately detached daemon (a shared multiplexer server the run
+// must never tear down is the motivating case), or a grandchild that broke away
+// and reverts to the same accepted, unreaped cost as on a non-Linux host.
+//
+// It runs before the output teardown on purpose: a read parked on the pty
+// master or on a pipe only ends once the last holder of the other end has let
+// go of it, so clearing the in-session holders is what lets the drain that
+// follows finish rather than time out. An escapee that kept a handle open is
+// left to that drain, which detaches the reader after a bounded wait instead of
+// waiting on the handle for good.
+func (m *Monitor) sweepSurvivors(ctx context.Context, pgid int) {
+	sweep := m.sweepFn
+	if sweep == nil {
+		sweep = sweepRunSurvivors
+	}
+	logger := contextkey.ValueSlogLoggerDefault(ctx)
+
+	// The run's own context is already cancelled when the monitor is shutting
+	// down, which is exactly when what the command left behind matters most, so
+	// the sweep drops that cancellation while keeping the context's values (the
+	// logger among them). Its timeout is the sweep's bound: a process in an
+	// uninterruptible wait ignores SIGKILL as well, and the run has to end
+	// regardless.
+	sweepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sweepBound)
+	defer cancel()
+
+	unreaped := sweep(sweepCtx, logger, pgid)
+	if unreaped == 0 {
+		return
+	}
+	m.noteRunAnomaly(anomalySurvivorsUnreaped(unreaped))
+	logger.WarnContext(
+		sweepCtx,
+		"processes the command left behind are still alive",
+		slog.String("id", m.ID),
+		slog.Int("count", unreaped),
+	)
+}
+
+// writeTty starts cmd on a PTY and hands the run's handles and teardown back to
+// runOnce, which is where they are published. Output it reads is tagged with
+// gen so the shared output state can tell it apart from a later run's.
+func (m *Monitor) writeTty(
+	ctx context.Context,
+	cmd *exec.Cmd,
+	gen uint64,
+) (*os.File, io.WriteCloser, func(), error) {
 	ptmx, err := startTty(cmd)
 	if err != nil {
-		return nil, fmt.Errorf("pty start: %w", err)
+		return nil, nil, nil, fmt.Errorf("pty start: %w", err)
 	}
-	m.ptmx = ptmx
-	m.stdin = ptmx
 	// Give the PTY a conventional default size so a full-screen program renders
 	// sanely even when no interactive client ever attaches to resize it.
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: defaultPtyRows, Cols: defaultPtyCols})
@@ -254,62 +439,168 @@ func (m *Monitor) writeTty(cmd *exec.Cmd) (func(), error) {
 	m.screen = newScreenTracker(int(defaultPtyCols), int(defaultPtyRows), m.runtimeState)
 	m.outputMu.Unlock()
 
-	var wg sync.WaitGroup
+	readerDone := m.readOutput(gen, ptmx, logdriver.StreamStdout)
 
-	wg.Go(func() {
+	return ptmx, ptmx, func() {
+		// Closing the master is what ends the read for a command that took its
+		// whole process tree with it. It is best-effort: the read only returns
+		// once the last holder of the slave is gone, so a process that escaped
+		// the command keeps this reader parked, and nothing this side can wake
+		// it.
+		_ = ptmx.Close()
+		m.awaitReaders(ctx, readerDone)
+	}, nil
+}
+
+// wirePipe starts cmd on pipes the monitor reads itself and hands the run's
+// stdin and teardown back to runOnce, which is where they are published.
+//
+// The pipes are made here rather than left to os/exec: exec hands an *os.File
+// to the child as it is and starts no copying goroutine for it, so cmd.Wait
+// returns as soon as the command is reaped. Letting exec make them instead
+// would make Wait join those goroutines, and a process the command left behind
+// that inherited its stdout keeps them going, which held every run with a
+// leftover open until exec's own delay expired and then failed it. Output is
+// tagged with gen so it reaches the shared state through one rule.
+func (m *Monitor) wirePipe(
+	ctx context.Context,
+	cmd *exec.Cmd,
+	gen uint64,
+) (io.WriteCloser, func(), error) {
+	// The two output pipes are made before the stdin pipe so nothing that can
+	// fail sits between StdinPipe and Start: StdinPipe opens a descriptor that
+	// only Start (or Wait) closes, so a later os.Pipe failure would return with
+	// that stdin pipe leaked.
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
+		return nil, nil, fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
+		_ = stderrR.Close()
+		_ = stderrW.Close()
+		return nil, nil, fmt.Errorf("stdin pipe: %w", err)
+	}
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
+
+	startErr := cmd.Start()
+	// The child has descriptors of its own now and exec leaves these two to
+	// whoever made them, so the monitor's copies of the write ends go here: a
+	// read ends only once nobody holds the write end at all, this process
+	// included.
+	_ = stdoutW.Close()
+	_ = stderrW.Close()
+	if startErr != nil {
+		_ = stdoutR.Close()
+		_ = stderrR.Close()
+		return nil, nil, fmt.Errorf("start command: %w", startErr)
+	}
+
+	stdoutDone := m.readOutput(gen, stdoutR, logdriver.StreamStdout)
+	stderrDone := m.readOutput(gen, stderrR, logdriver.StreamStderr)
+
+	return stdin, func() {
+		m.awaitReaders(ctx, stdoutDone, stderrDone)
+		// A pipe wakes the read parked on it when its read end closes, which a
+		// pty master cannot do, so a process that outlived the command never
+		// pins these readers for the rest of the monitor's life. It happens
+		// here and not in the readers themselves because this is the side that
+		// knows the run is over and has already given up on the output.
+		_ = stdoutR.Close()
+		_ = stderrR.Close()
+	}, nil
+}
+
+// readOutput reads f to its end on a goroutine of its own and hands every chunk
+// to the run's output tagged with gen. The channel it returns is closed once
+// the read is over; it is a channel and not an errgroup or a WaitGroup because
+// the teardown waits on it with a bound instead of joining it.
+func (m *Monitor) readOutput(
+	gen uint64,
+	f *os.File,
+	stream logdriver.Stream,
+) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
 		buf := make([]byte, 32*1024)
 		for {
-			n, err := ptmx.Read(buf)
+			n, err := f.Read(buf)
 			if n > 0 {
 				data := make([]byte, n)
 				copy(data, buf[:n])
-				m.logCommandOutput(logdriver.StreamStdout, data)
+				m.logCommandOutput(gen, stream, data)
 			}
 			if err != nil {
 				return
 			}
 		}
-	})
-
-	return func() {
-		_ = ptmx.Close()
-		wg.Wait()
-	}, nil
+	}()
+	return done
 }
 
-func (m *Monitor) wirePipe(cmd *exec.Cmd) (func(), error) {
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdin pipe: %w", err)
-	}
-	m.stdin = stdin
+// awaitReaders gives the readers of a finished run a moment to deliver the
+// output the command ended with, then closes the run's output for good. A
+// reader that has not finished by then is left behind rather than joined:
+// waiting on one a leftover process keeps blocked would report a command whose
+// own process is long gone as running forever.
+func (m *Monitor) awaitReaders(ctx context.Context, readers ...<-chan struct{}) {
+	// The run's own context is already cancelled when the monitor is shutting
+	// down, so a bound derived from it would expire at once and drop the output
+	// the command ended with. Dropping the cancellation while keeping the
+	// context's values gives the drain its own clock and still carries the
+	// logger the warning below reads.
+	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), readerDrainWait)
+	defer cancel()
 
-	cmd.Stdout = &monitorOutputWriter{
-		monitor: m,
-		stream:  logdriver.StreamStdout,
+	detached := false
+	for _, done := range readers {
+		select {
+		case <-done:
+		case <-drainCtx.Done():
+			detached = true
+		}
 	}
-	cmd.Stderr = &monitorOutputWriter{
-		monitor: m,
-		stream:  logdriver.StreamStderr,
+	if detached {
+		m.noteRunAnomaly(anomalyReaderDetached)
+		contextkey.ValueSlogLoggerDefault(ctx).WarnContext(
+			ctx,
+			"output reader still blocked; leaving it behind",
+			slog.String("id", m.ID),
+			slog.Duration("waited", readerDrainWait),
+		)
 	}
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start command: %w", err)
-	}
-
-	m.stdin = stdin
-	m.cmd = cmd
-
-	return func() {}, nil
+	// Past this point a reader still going speaks for a run that is over, and
+	// what it reads is dropped instead of reaching the next run.
+	m.outputMu.Lock()
+	m.runGen++
+	m.outputMu.Unlock()
 }
 
-func (m *Monitor) logCommandOutput(stream logdriver.Stream, data []byte) {
+// logCommandOutput fans one chunk of output out to the scrollback, the log
+// driver, live subscribers and the screen mirror. gen names the run the chunk
+// came from: output of a run that has already given the shared state up is
+// dropped here, which is the single point every producer goes through.
+func (m *Monitor) logCommandOutput(gen uint64, stream logdriver.Stream, data []byte) {
 	if len(data) == 0 {
 		return
 	}
 	lines := logdriver.SplitLogLines(time.Now(), stream, data)
 	m.outputMu.Lock()
 	defer m.outputMu.Unlock()
+	if gen != m.runGen {
+		return
+	}
 	if m.cfg.Tty {
 		m.terminalState.Observe(data)
 	}
@@ -327,16 +618,4 @@ func (m *Monitor) logCommandOutput(stream logdriver.Stream, data []byte) {
 	if m.cfg.Tty {
 		m.screen.feed(data)
 	}
-}
-
-type monitorOutputWriter struct {
-	monitor *Monitor
-	stream  logdriver.Stream
-}
-
-func (w *monitorOutputWriter) Write(data []byte) (int, error) {
-	buf := make([]byte, len(data))
-	copy(buf, data)
-	w.monitor.logCommandOutput(w.stream, buf)
-	return len(data), nil
 }

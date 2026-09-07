@@ -51,17 +51,38 @@ type Monitor struct {
 
 	lis net.Listener
 
+	// procMu guards the per-run process state below. runOnce publishes ptmx,
+	// stdin and cmd once the child is wired and clears them once it has been
+	// reaped, so an RPC arriving either side of a run sees the whole trio change
+	// at once instead of a half-torn-down run. It is never held across a write
+	// to the child.
+	//
+	// runPgid is the process group the command led, and it outlives that trio on
+	// purpose: the handles go away the moment the child is reaped, while the
+	// survivor sweep and the drain of the command's output that follow keep the
+	// run going for a while yet. A stop escalating to SIGKILL in that window still has to reach
+	// whatever the command left behind, so the group id is cleared only once the
+	// run is really over.
+	procMu  sync.Mutex
 	ptmx    *os.File
 	stdin   io.WriteCloser
-	stdinMu sync.Mutex
 	cmd     *exec.Cmd
-	ring    *ringBuffer
+	runPgid int
+	// stdinWriteMu serializes the stdin writes themselves, so two clients
+	// writing at once never interleave bytes inside a chunk.
+	stdinWriteMu sync.Mutex
+	ring         *ringBuffer
 
 	outputMu          sync.Mutex
 	outputBridge      *broadcaster[logdriver.LogLine]
 	stateChangeBridge *broadcaster[monitorStateChange]
 	logWriter         logdriver.Writer
 	terminalState     *terminalPaneState
+	// runGen names the run whose output the shared state above still accepts.
+	// A run captures it when it wires its command and the run's teardown bumps
+	// it, so output arriving from a reader that outlived its run is dropped
+	// instead of landing in the next run's scrollback, log or screen.
+	runGen uint64
 	// runtimeState latches what a TTY command reports about itself (title,
 	// bell, notifications). It is per-run state, reset by runOnce, and is read
 	// without outputMu - see commandRuntimeState.
@@ -83,6 +104,18 @@ type Monitor struct {
 	// The supervisor waits on this group between GracefulStop (which is
 	// what unblocks gRPC Recv calls) and resource teardown.
 	wg sync.WaitGroup
+
+	// runAnomalies collects what went wrong as the latest run ended. It is
+	// written and read on the goroutine that drives the run - the one that
+	// tears a run down and the one that publishes its outcome - so it needs no
+	// lock of its own.
+	runAnomalies []runAnomaly
+
+	// sweepFn terminates the processes a finished run left in the command's own
+	// session and reports how many outlived the sweep. It is a field so a test
+	// can drive the giving-up path without a process that genuinely refuses to
+	// die.
+	sweepFn func(ctx context.Context, logger *slog.Logger, pgid int) int
 
 	// stopRequested is set by the Signal RPC to prevent restarts.
 	stopRequested atomic.Bool
@@ -144,6 +177,7 @@ func newMonitor(
 		store:             st,
 		cfg:               commandCfg,
 		evtLog:            evtLog,
+		sweepFn:           sweepRunSurvivors,
 		ring:              newRingBuffer(commandCfg.ScrollbackBytes),
 		stateJSON: &model.CommandState{
 			MonitorPID: os.Getpid(),
@@ -328,9 +362,15 @@ func (m *Monitor) subscribeStateChange() (<-chan monitorStateChange, func()) {
 }
 
 func (m *Monitor) publishStateChange(state model.EventType, exitCode int) {
+	// Read the handle under procMu like the other readers of the trio, so the
+	// mutex owns every read of m.cmd even though these callers run on the run
+	// goroutine and never race a teardown in practice.
+	m.procMu.Lock()
+	cmd := m.cmd
+	m.procMu.Unlock()
 	pid := 0
-	if m.cmd != nil && m.cmd.Process != nil {
-		pid = m.cmd.Process.Pid
+	if cmd != nil && cmd.Process != nil {
+		pid = cmd.Process.Pid
 	}
 	m.stateChangeBridge.Send(monitorStateChange{
 		State:    state,
@@ -345,6 +385,8 @@ func isMonitorActiveState(state model.EventType) bool {
 
 func (m *Monitor) setRunning() {
 	m.stateJSON.StartedAt = time.Now().UTC().Format(time.RFC3339)
+	// runOnce already cleared the previous run's anomalies and warnings at its
+	// top, ahead of any setup that could fail, so nothing to reset here.
 	// Append the event before flipping the DB state so observers polling
 	// state cannot see "running" without the corresponding event on disk.
 	m.emitEvent(model.Event{
@@ -375,7 +417,9 @@ func (m *Monitor) setExited(exitCode int) {
 		ID:       m.ID,
 		State:    model.EventTypeExited,
 		ExitCode: &ec,
+		Attrs:    m.runAnomalyAttrs(),
 	})
+	m.stateJSON.Warnings = m.runAnomalyWarnings()
 	_ = m.store.UpdateCommandState(m.ID, model.EventTypeExited, &exitCode, m.stateJSON)
 	m.publishStateChange(model.EventTypeExited, exitCode)
 	m.stateChangeBridge.Close()
@@ -390,7 +434,9 @@ func (m *Monitor) setFailed(errMsg string) {
 		ID:    m.ID,
 		State: model.EventTypeFailed,
 		Error: errMsg,
+		Attrs: m.runAnomalyAttrs(),
 	})
+	m.stateJSON.Warnings = m.runAnomalyWarnings()
 	_ = m.store.UpdateCommandState(m.ID, model.EventTypeFailed, nil, m.stateJSON)
 	m.publishStateChange(model.EventTypeFailed, 0)
 	m.stateChangeBridge.Close()
@@ -417,24 +463,35 @@ func (m *Monitor) QueueStdin(ctx context.Context, data []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if m.stdin == nil {
+	// The handle lock is released before the write. A PTY write blocks for as
+	// long as the child stops draining its input, and holding procMu across it
+	// would freeze Resize, Status, Signal and Stop - Stop being the way out of
+	// that state. Serialization moves to stdinWriteMu, which nothing else waits
+	// on.
+	m.procMu.Lock()
+	stdin := m.stdin
+	m.procMu.Unlock()
+	if stdin == nil {
 		return fmt.Errorf("no stdin")
 	}
-	m.stdinMu.Lock()
-	defer m.stdinMu.Unlock()
-	if m.stdin == nil {
-		return fmt.Errorf("no stdin")
-	}
-	_, err := m.stdin.Write(data)
+	m.stdinWriteMu.Lock()
+	defer m.stdinWriteMu.Unlock()
+	_, err := stdin.Write(data)
 	return err
 }
 
 // Resize changes the PTY window size.
 func (m *Monitor) Resize(rows, cols uint16) error {
-	if m.ptmx == nil {
+	// Act on a copy: the run can end at any point during the call, and a handle
+	// read out under the lock stays usable - a syscall on the closed file fails
+	// with an error rather than reading a field mid-teardown.
+	m.procMu.Lock()
+	ptmx := m.ptmx
+	m.procMu.Unlock()
+	if ptmx == nil {
 		return fmt.Errorf("no pty")
 	}
-	if err := pty.Setsize(m.ptmx, &pty.Winsize{Rows: rows, Cols: cols}); err != nil {
+	if err := pty.Setsize(ptmx, &pty.Winsize{Rows: rows, Cols: cols}); err != nil {
 		return err
 	}
 	// Keep the server-side screen mirror at the command's real size so its
@@ -448,29 +505,60 @@ func (m *Monitor) Resize(rows, cols uint16) error {
 // PtySize returns the command's current PTY window size. ok is false for a
 // non-TTY command (no PTY) so callers can skip reporting a size.
 func (m *Monitor) PtySize() (rows, cols uint16, ok bool) {
-	if m.ptmx == nil {
+	m.procMu.Lock()
+	ptmx := m.ptmx
+	m.procMu.Unlock()
+	if ptmx == nil {
 		return 0, 0, false
 	}
-	r, c, err := pty.Getsize(m.ptmx)
+	r, c, err := pty.Getsize(ptmx)
 	if err != nil {
 		return 0, 0, false
 	}
 	return uint16(r), uint16(c), true
 }
 
+// errNoRunningProcess is what a signal-carrying call gets when the command has
+// nothing left to signal: no live child and no group from a run still winding
+// down.
+var errNoRunningProcess = errors.New("no running process")
+
 // SignalProcess sends a raw signal to the running command and any
 // descendants it has spawned within its process group.
 func (m *Monitor) SignalProcess(sig syscall.Signal) error {
-	if m.cmd == nil || m.cmd.Process == nil {
-		return fmt.Errorf("no running process")
+	m.procMu.Lock()
+	cmd, pgid := m.cmd, m.runPgid
+	m.procMu.Unlock()
+	if cmd != nil && cmd.Process != nil {
+		return signalProcessGroup(cmd.Process.Pid, sig)
 	}
-	return signalProcessGroup(m.cmd.Process.Pid, sig)
+	// The child is reaped but the run is not over: the survivor sweep and the
+	// output-reader drain still have to finish, and they take long enough for a
+	// stop's escalation to land in the middle of them. The group id outlives the
+	// handles precisely so that escalation reaches what the command left behind
+	// instead of being refused.
+	if pgid != 0 {
+		return signalProcessGroup(pgid, sig)
+	}
+	return errNoRunningProcess
 }
 
 // StopProcess sends a signal to the running command and prevents restart.
+//
+// It reports success even when the signal reached nothing. Stopping is about
+// the command staying down, and the restart suppression is latched before the
+// signal goes out, so a stop landing between one run's end and the next one's
+// start - or on a group whose last member has already exited - has done its
+// job: the loop ends instead of starting another run. SignalProcess keeps
+// returning those errors, because a bare signal that hit nothing is worth
+// reporting.
 func (m *Monitor) StopProcess(sig syscall.Signal) error {
 	m.stopRequested.Store(true)
-	return m.SignalProcess(sig)
+	err := m.SignalProcess(sig)
+	if errors.Is(err, errNoRunningProcess) || errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	return err
 }
 
 // GetState returns the current command state.
@@ -480,9 +568,12 @@ func (m *Monitor) GetState() (model.EventType, int, int) {
 	if ec != nil {
 		exitCode = *ec
 	}
+	m.procMu.Lock()
+	cmd := m.cmd
+	m.procMu.Unlock()
 	pid := 0
-	if m.cmd != nil && m.cmd.Process != nil {
-		pid = m.cmd.Process.Pid
+	if cmd != nil && cmd.Process != nil {
+		pid = cmd.Process.Pid
 	}
 	return state, exitCode, pid
 }

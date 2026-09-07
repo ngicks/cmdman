@@ -200,12 +200,13 @@ func (d *hookDispatcher) runHook(ctx context.Context, inv hookInvocation) {
 
 // execHook runs a hook argv with its output discarded. The hook gets its own
 // process group and the same cancellation contract as a supervised command, so
-// a hook that spawned children takes them down with it on shutdown.
+// a hook that spawned children takes them down with it on shutdown. It stays
+// in the monitor's session, unlike the supervised command.
 func execHook(ctx context.Context, argv []string, dir string, env []string) error {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
 	cmd.Env = env
-	prepProcessAttrs(cmd, false)
+	prepHookAttrs(cmd)
 	cmd.WaitDelay = hookWaitDelay
 	return cmd.Run()
 }

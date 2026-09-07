@@ -23,6 +23,14 @@ itself, from its latest OSC 7 report or from the configured directory the run
 was seeded with. It answers where the command stands now rather than where its
 definition says it starts, and is empty when nothing reported parsed as a path.
 
+The state also carries `warnings`, a list of messages about anomalies at the
+end of the latest run. `output reader still blocked after 1s` reports a reader
+of the command's output that had not finished one second after the survivor
+sweep finished.
+`<n> survivor(s) still alive after sweep bound` reports processes the monitor
+could not reap. The list is absent until an anomaly occurs, and the next start
+resets it.
+
 Inspection does not require the command to be running.
 
 ## Options

@@ -15,20 +15,40 @@ func startTty(cmd *exec.Cmd) (*os.File, error) {
 	return pty.Start(cmd)
 }
 
-// prepProcessAttrs configures platform-specific exec attributes for a
-// monitored command: process-group placement so signals reach grandchildren,
-// and a Cancel hook that signals the whole group on ctx cancellation.
+// prepCommandAttrs configures platform-specific exec attributes for a
+// supervised command: a fresh session (hence its own process group) so signals
+// reach grandchildren, and a Cancel hook that signals the whole group on ctx
+// cancellation.
 //
-// For tty=true, pty.Start sets Setsid=true on its own, which already places
-// the child in a new session and (implicitly) a new process group. Setting
-// Setpgid in addition would fail with EPERM during exec (setpgid is rejected
-// on a session leader). So only set Setpgid for the non-TTY path; signals can
-// be sent to the whole group via -pid either way.
-func prepProcessAttrs(cmd *exec.Cmd, tty bool) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{}
-	if !tty {
-		cmd.SysProcAttr.Setpgid = true
+// Both the TTY and the pipe path get a session of their own so that leftovers
+// from a run can be told apart from the monitor's other children by session
+// id: a process can create a new session but can never join an existing one,
+// so every descendant of the command stays outside the monitor's session
+// unless it deliberately breaks away. Process group id gives no such
+// guarantee.
+//
+// Setpgid must not be set alongside Setsid: exec runs setsid() first, and the
+// following setpgid() is then rejected with EPERM on a fresh session leader.
+// Nothing is lost, because a session leader is also the leader of its own
+// process group, so signalling -pid still reaches the group. On the TTY path
+// pty.Start sets Setsid (and Setctty) on the attrs it is handed, so setting it
+// here only makes the intent explicit.
+func prepCommandAttrs(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.Cancel = func() error {
+		return signalProcessGroup(cmd.Process.Pid, syscall.SIGTERM)
 	}
+}
+
+// prepHookAttrs configures exec attributes for a hook process: its own process
+// group, and the same group-wide cancellation contract as a supervised
+// command.
+//
+// A hook deliberately stays in the monitor's session. A sweep that classifies
+// run leftovers by session id therefore never mistakes a running hook for a
+// process left behind by the command.
+func prepHookAttrs(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		return signalProcessGroup(cmd.Process.Pid, syscall.SIGTERM)
 	}

@@ -305,12 +305,7 @@ func (s *Service) stopForRecreate(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	for _, r := range results {
-		if r.Err != nil {
-			return r.Err
-		}
-	}
-	return nil
+	return firstStopErr(results)
 }
 
 // buildCreateRequest constructs a cmdman.CreateRequest for one replica of a

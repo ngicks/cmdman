@@ -2,6 +2,7 @@ package cmdman_test
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -73,6 +74,43 @@ func TestRun_NonZeroExitCode(t *testing.T) {
 	if exitCode != 42 {
 		t.Errorf("expected exit_code=42, got %v", exitCode)
 	}
+}
+
+// TestRun_ExitWithSurvivors pins the end of a run whose command leaves a
+// process behind on the output pipes. The run ends when the command is reaped
+// and the survivor is swept, so the state reaches exited with the command's own
+// status instead of waiting out a drain the survivor keeps open and failing.
+func TestRun_ExitWithSurvivors(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	pidFile := filepath.Join(t.TempDir(), "survivor.pid")
+	env.run(ctx, "run", "-n", "orphaner", "--", "/bin/sh", "-c",
+		fmt.Sprintf("echo hello; sleep 300 & echo $! > %s; exit 0", pidFile))
+	// Not ctx: cleanup runs after the test's context is already cancelled.
+	t.Cleanup(func() { env.cleanupCommand(context.Background(), "orphaner") })
+
+	survivor := readPidFile(t, pidFile)
+	t.Cleanup(func() { killIfAlive(survivor) })
+
+	start := time.Now()
+	env.waitForState(ctx, "orphaner", "exited", defaultTimeout)
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("the run took %s to end; the survivor held the output pipes", elapsed)
+	}
+
+	info := env.inspectJSON(ctx, "orphaner")
+	if exitCode, _ := info["ExitCode"].(float64); exitCode != 0 {
+		t.Errorf("expected exit_code=0, got %v", exitCode)
+	}
+
+	if out := env.run(ctx, "logs", "orphaner"); !strings.Contains(out, "hello") {
+		t.Errorf("expected the command's output in the logs, got %q", out)
+	}
+
+	waitUntil(t, 5*time.Second, func() bool { return !processExists(survivor) },
+		"survivor pid %d is still in /proc; the run did not sweep it", survivor)
 }
 
 func TestRun_WithWorkingDirectory(t *testing.T) {

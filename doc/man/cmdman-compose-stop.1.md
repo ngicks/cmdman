@@ -22,6 +22,10 @@ stopped. Orphans are not part of the declared graph and are not stopped by this
 operation. When no compose file is loaded, dependency order is reconstructed
 from stored compose labels.
 
+Failures are aggregated rather than cancelling the remaining stops. cmdman
+reports a command it could not stop as an error and exits non-zero with the
+summary `error: <n> compose stop operation(s) failed`.
+
 ## Selection Flags
 
 Uses the compose selection flags documented in

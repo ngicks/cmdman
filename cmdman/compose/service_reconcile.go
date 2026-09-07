@@ -238,7 +238,11 @@ func (s *Service) stopAction(
 		ids[i] = in.ID
 		s.report(instanceDisplayName(*cmd, in.ScaleIndex), PhaseStopping, nil, nil)
 	}
-	if _, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: ids}); err != nil {
+	results, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: ids})
+	if err == nil {
+		err = firstStopErr(results)
+	}
+	if err != nil {
 		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: stop failed",
 			"project", project,
 			"command", cmd.Name,

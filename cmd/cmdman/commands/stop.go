@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -12,8 +11,9 @@ import (
 
 func stopCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
-		flagSignal  string
-		flagTimeout int
+		flagSignal       string
+		flagTimeout      int
+		flagIgnoreErrors bool
 	)
 
 	cmd := &cobra.Command{
@@ -22,13 +22,15 @@ func stopCmd(parent *cobra.Command, rf *rootFlags) {
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeCommandNames(rf, runningStates...),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStop(cmd, args, rf, flagSignal, flagTimeout)
+			return runStop(cmd, args, rf, flagSignal, flagTimeout, flagIgnoreErrors)
 		},
 	}
 
 	cmd.Flags().
 		StringVarP(&flagSignal, "signal", "s", "", "Signal to send before waiting for shutdown")
 	cmd.Flags().IntVarP(&flagTimeout, "timeout", "t", 10, "Seconds to wait before sending SIGKILL")
+	cmd.Flags().BoolVar(&flagIgnoreErrors, "ignore-errors", false,
+		"Exit 0 even when some targets failed; failures are still printed")
 	_ = cmd.RegisterFlagCompletionFunc("signal", signalCompletions)
 
 	parent.AddCommand(cmd)
@@ -40,6 +42,7 @@ func runStop(
 	rf *rootFlags,
 	sigName string,
 	timeoutSeconds int,
+	ignoreErrors bool,
 ) error {
 	if sigName != "" {
 		if _, _, err := hrstr.ParseSignal(sigName); err != nil {
@@ -61,10 +64,12 @@ func runStop(
 	if err != nil {
 		return err
 	}
-	for _, result := range results {
-		if result.Err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "stop %s: %v\n", result.ID, result.Err)
-		}
-	}
-	return nil
+	return reportTargetErrors(cmd.ErrOrStderr(), "stop", ignoreErrors,
+		func(yield func(string, error) bool) {
+			for _, result := range results {
+				if !yield(result.ID, result.Err) {
+					return
+				}
+			}
+		})
 }

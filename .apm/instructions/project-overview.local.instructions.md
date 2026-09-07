@@ -53,9 +53,16 @@ Two process roles per command:
   writes its PID + socket path into the state JSON, listens on a Unix socket, serves gRPC.
 - `runLoop` re-reads config from disk each iteration (live edits apply on restart) and honors
   `RestartPolicy` (`no` / `on-failure[:N]` / `always`).
-- `runOnce` wires the child: PTY (`creack/pty`) when `Tty`, else pipes; sets `Setpgid` and a
-  `cmd.Cancel` hook that signals the whole **process group**. Output fans out to: ring buffer
+- `runOnce` wires the child: PTY (`creack/pty`) when `Tty`, else pipes; sets `Setsid` (its own
+  session on both paths) and a `cmd.Cancel` hook that signals the whole **process group**. Hooks
+  keep `Setpgid` and stay in the monitor's session. Output fans out to: ring buffer
   (scrollback) + log-driver file + a broadcaster (live streams).
+- Run end: the monitor is a subreaper (Linux), so when the child exits it sweeps the processes the
+  run left in the command's session (reap, SIGTERM, 2 s, SIGKILL, reap; a process that made a
+  session of its own — a detached daemon such as a shared multiplexer server — is left alone)
+  before the state flips; the output readers (pty or monitor-owned pipes) are detached after a bounded
+  drain wait rather than joined, so `cmd.Wait` returns at reap time on both paths. Both
+  anomalies surface as event attrs and `CommandState.Warnings`.
 - Shutdown: SIGTERM → ctx cancel → signal child's process group → `grpcServer.GracefulStop()`
   → `wg.Wait()`.
 

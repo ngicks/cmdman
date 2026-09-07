@@ -116,4 +116,7 @@ type CommandState struct {
 	FinishedAt   string `json:"finished_at,omitzero"`
 	RestartCount int    `json:"restart_count"`
 	Error        string `json:"error,omitzero"`
+	// Warnings lists run-end anomalies of the latest run that did not stop
+	// the run from ending. Reset on each start.
+	Warnings []string `json:"warnings,omitzero"`
 }
