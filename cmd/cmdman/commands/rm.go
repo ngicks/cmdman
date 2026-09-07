@@ -10,8 +10,9 @@ import (
 
 func rmCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
-		flagLabel []string
-		flagForce bool
+		flagLabel        []string
+		flagForce        bool
+		flagIgnoreErrors bool
 	)
 
 	cmd := &cobra.Command{
@@ -19,13 +20,15 @@ func rmCmd(parent *cobra.Command, rf *rootFlags) {
 		Short:             "Remove a stopped command",
 		ValidArgsFunction: completeCommandNames(rf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRm(cmd, args, rf, flagLabel, flagForce)
+			return runRm(cmd, args, rf, flagLabel, flagForce, flagIgnoreErrors)
 		},
 	}
 
 	cmd.Flags().StringArrayVarP(&flagLabel, "label", "l", nil, "Target commands matching labels")
 	cmd.Flags().
 		BoolVarP(&flagForce, "force", "f", false, "Force remove running commands (sends SIGKILL)")
+	cmd.Flags().BoolVar(&flagIgnoreErrors, "ignore-errors", false,
+		"Exit 0 even when some targets failed; failures are still printed")
 
 	parent.AddCommand(cmd)
 }
@@ -36,6 +39,7 @@ func runRm(
 	rf *rootFlags,
 	labelSlice []string,
 	force bool,
+	ignoreErrors bool,
 ) error {
 	labels, err := parseLabels(labelSlice)
 	if err != nil {
@@ -57,11 +61,16 @@ func runRm(
 		return err
 	}
 	for _, result := range results {
-		if result.Err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "rm %s: %v\n", result.ID, result.Err)
-			continue
+		if result.Err == nil {
+			fmt.Fprintln(cmd.OutOrStdout(), result.ID)
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), result.ID)
 	}
-	return nil
+	return reportTargetErrors(cmd.ErrOrStderr(), "rm", ignoreErrors,
+		func(yield func(string, error) bool) {
+			for _, result := range results {
+				if !yield(result.ID, result.Err) {
+					return
+				}
+			}
+		})
 }
