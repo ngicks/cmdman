@@ -1,11 +1,11 @@
 lockfile_version: '1'
-generated_at: '2026-09-13T14:29:22.665737+00:00'
-apm_version: 0.30.0
+generated_at: '2026-09-19T18:35:13.485175+00:00'
+apm_version: 0.29.0
 dependencies:
 - repo_url: ngicks/agents-package
   name: cc-workers
   host: github.com
-  resolved_commit: 48df58afd6bdbf72ac8338fe2c7ad92871611e51
+  resolved_commit: 368adef4bed2c0f7c527a55805a44d0b67009f91
   version: 0.0.1
   virtual_path: apm-package/cc-workers
   is_virtual: true
@@ -93,7 +93,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: agents-simple-automation
   host: github.com
-  resolved_commit: 48df58afd6bdbf72ac8338fe2c7ad92871611e51
+  resolved_commit: 368adef4bed2c0f7c527a55805a44d0b67009f91
   version: 1.0.0
   virtual_path: hooks/agents-simple-automation
   is_virtual: true
@@ -102,7 +102,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: go-golangci-lint
   host: github.com
-  resolved_commit: 48df58afd6bdbf72ac8338fe2c7ad92871611e51
+  resolved_commit: 368adef4bed2c0f7c527a55805a44d0b67009f91
   version: 1.0.0
   virtual_path: hooks/go-golangci-lint
   is_virtual: true
@@ -111,7 +111,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: go-vet-ngcheckers
   host: github.com
-  resolved_commit: 48df58afd6bdbf72ac8338fe2c7ad92871611e51
+  resolved_commit: 368adef4bed2c0f7c527a55805a44d0b67009f91
   version: 1.0.0
   virtual_path: hooks/go-vet-ngcheckers
   is_virtual: true
@@ -120,7 +120,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: markdown-mermaid-lint
   host: github.com
-  resolved_commit: 48df58afd6bdbf72ac8338fe2c7ad92871611e51
+  resolved_commit: 368adef4bed2c0f7c527a55805a44d0b67009f91
   version: 1.0.0
   virtual_path: hooks/markdown-mermaid-lint
   is_virtual: true
@@ -129,7 +129,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: agents-package-ngicks.base.env
   host: github.com
-  resolved_commit: 48df58afd6bdbf72ac8338fe2c7ad92871611e51
+  resolved_commit: 368adef4bed2c0f7c527a55805a44d0b67009f91
   version: 1.0.0
   virtual_path: instructions/ngicks.base.env.instructions.md
   is_virtual: true
@@ -141,7 +141,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: agents-package-ngicks.base.preference
   host: github.com
-  resolved_commit: 48df58afd6bdbf72ac8338fe2c7ad92871611e51
+  resolved_commit: 368adef4bed2c0f7c527a55805a44d0b67009f91
   version: 1.0.0
   virtual_path: instructions/ngicks.base.preference.instructions.md
   is_virtual: true
@@ -153,7 +153,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: agents-package-ngicks.go.basics
   host: github.com
-  resolved_commit: 48df58afd6bdbf72ac8338fe2c7ad92871611e51
+  resolved_commit: 368adef4bed2c0f7c527a55805a44d0b67009f91
   version: 1.0.0
   virtual_path: instructions/ngicks.go.basics.instructions.md
   is_virtual: true
@@ -165,7 +165,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: agents-package-ngicks.go.design-preference
   host: github.com
-  resolved_commit: 48df58afd6bdbf72ac8338fe2c7ad92871611e51
+  resolved_commit: 368adef4bed2c0f7c527a55805a44d0b67009f91
   version: 1.0.0
   virtual_path: instructions/ngicks.go.design-preference.instructions.md
   is_virtual: true
@@ -177,7 +177,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: agents-package-ngicks.web.base-preference
   host: github.com
-  resolved_commit: 48df58afd6bdbf72ac8338fe2c7ad92871611e51
+  resolved_commit: 368adef4bed2c0f7c527a55805a44d0b67009f91
   version: 1.0.0
   virtual_path: instructions/ngicks.web.base-preference.instructions.md
   is_virtual: true
@@ -189,7 +189,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: agents-package-ngicks.web.preact-preference
   host: github.com
-  resolved_commit: 48df58afd6bdbf72ac8338fe2c7ad92871611e51
+  resolved_commit: 368adef4bed2c0f7c527a55805a44d0b67009f91
   version: 1.0.0
   virtual_path: instructions/ngicks.web.preact-preference.instructions.md
   is_virtual: true
@@ -201,7 +201,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: go-check-outdated-patterns
   host: github.com
-  resolved_commit: 48df58afd6bdbf72ac8338fe2c7ad92871611e51
+  resolved_commit: 368adef4bed2c0f7c527a55805a44d0b67009f91
   version: unknown
   virtual_path: skills/go-check-outdated-patterns
   is_virtual: true
@@ -218,7 +218,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: go-edit-cobra
   host: github.com
-  resolved_commit: 48df58afd6bdbf72ac8338fe2c7ad92871611e51
+  resolved_commit: 368adef4bed2c0f7c527a55805a44d0b67009f91
   version: unknown
   virtual_path: skills/go-edit-cobra
   is_virtual: true
@@ -311,7 +311,7 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: go-review-checklist
   host: github.com
-  resolved_commit: 48df58afd6bdbf72ac8338fe2c7ad92871611e51
+  resolved_commit: 368adef4bed2c0f7c527a55805a44d0b67009f91
   version: unknown
   virtual_path: skills/go-review-checklist
   is_virtual: true
@@ -328,24 +328,28 @@ dependencies:
 - repo_url: ngicks/agents-package
   name: ngcommit
   host: github.com
-  resolved_commit: 48df58afd6bdbf72ac8338fe2c7ad92871611e51
+  resolved_commit: 368adef4bed2c0f7c527a55805a44d0b67009f91
   version: unknown
   virtual_path: skills/ngcommit
   is_virtual: true
   package_type: claude_skill
   deployed_files:
   - .agents/skills/ngcommit
+  - .agents/skills/ngcommit/COMMIT_CONVENTION.md
   - .agents/skills/ngcommit/SKILL.md
   - .claude/skills/ngcommit
+  - .claude/skills/ngcommit/COMMIT_CONVENTION.md
   - .claude/skills/ngcommit/SKILL.md
   deployed_file_hashes:
-    .agents/skills/ngcommit/SKILL.md: sha256:66eaf3c7b183568eb842b8b6c7be1e384b090e9b75d15a4e0c4be7925fb562be
-    .claude/skills/ngcommit/SKILL.md: sha256:66eaf3c7b183568eb842b8b6c7be1e384b090e9b75d15a4e0c4be7925fb562be
-  content_hash: sha256:f9e7c06e1b96efb4639b4df627abb4b3074c0be899601b7a445d8348bf24a206
+    .agents/skills/ngcommit/COMMIT_CONVENTION.md: sha256:c820043a7670ed0c4950f95905d12bf573e05dbfaee107f07c4115c37f084340
+    .agents/skills/ngcommit/SKILL.md: sha256:c1ad88c665c0b7d5757273ff27591c61f08f2c88e3a1cd7422dc611494f55402
+    .claude/skills/ngcommit/COMMIT_CONVENTION.md: sha256:c820043a7670ed0c4950f95905d12bf573e05dbfaee107f07c4115c37f084340
+    .claude/skills/ngcommit/SKILL.md: sha256:c1ad88c665c0b7d5757273ff27591c61f08f2c88e3a1cd7422dc611494f55402
+  content_hash: sha256:9dc029572c266b1af10b17171305a07e17248d8858acbc76e63c7aa3449eae57
 - repo_url: ngicks/agents-package
   name: ngplan
   host: github.com
-  resolved_commit: 48df58afd6bdbf72ac8338fe2c7ad92871611e51
+  resolved_commit: 368adef4bed2c0f7c527a55805a44d0b67009f91
   version: unknown
   virtual_path: skills/ngplan
   is_virtual: true
@@ -359,6 +363,7 @@ dependencies:
   - .agents/skills/ngplan/reference/sub-plans.md
   - .agents/skills/ngplan/reference/visuals.md
   - .agents/skills/ngplan/scripts/bd-init.sh
+  - .agents/skills/ngplan/scripts/hk-init.sh
   - .claude/skills/ngplan
   - .claude/skills/ngplan/SKILL.md
   - .claude/skills/ngplan/reference/beads.hk.pkl
@@ -367,26 +372,29 @@ dependencies:
   - .claude/skills/ngplan/reference/sub-plans.md
   - .claude/skills/ngplan/reference/visuals.md
   - .claude/skills/ngplan/scripts/bd-init.sh
+  - .claude/skills/ngplan/scripts/hk-init.sh
   deployed_file_hashes:
-    .agents/skills/ngplan/SKILL.md: sha256:00aedb2c501ee0aa0c8eb9b93abc2af28445f9598d5b5ca09778568f77fc1d4c
-    .agents/skills/ngplan/reference/beads.hk.pkl: sha256:5b55b88ab7634ed29e078d824b820d670780f30aa528e875371d206ee163109b
-    .agents/skills/ngplan/reference/beads.md: sha256:d5e357bad3c4eccce10728c204fea9e251ce5513b8faf91441938b4929eccded
+    .agents/skills/ngplan/SKILL.md: sha256:4f65b2c418c103e759b90ce258b7bf794c2f4acff2b83c0d10cdfeaab0a36b91
+    .agents/skills/ngplan/reference/beads.hk.pkl: sha256:2ed64cd32b9452e62a9c96a3ed4c7fc26a814f3273c38dd18459ba4b98ed427a
+    .agents/skills/ngplan/reference/beads.md: sha256:5eab7ee529045383f52a312477720edacd6428bf16835d919ef7f5cc74b22092
     .agents/skills/ngplan/reference/contracts.md: sha256:0eb923211d975d30ef153fa23c302aae8c240377175a093825610f57ddf20ac7
     .agents/skills/ngplan/reference/sub-plans.md: sha256:da3abfa227c0c2d290679160132a89baa04aeb62ed58bd6d27b437cc75d78e30
     .agents/skills/ngplan/reference/visuals.md: sha256:732f0ef3a670055812431401c16de98aa2cae47ebe3aa0361c8bd3cd0af6f255
-    .agents/skills/ngplan/scripts/bd-init.sh: sha256:bf839e40170b90b4f35c886db10f974dc94ce5af20e31716d18cd3810ece2637
-    .claude/skills/ngplan/SKILL.md: sha256:00aedb2c501ee0aa0c8eb9b93abc2af28445f9598d5b5ca09778568f77fc1d4c
-    .claude/skills/ngplan/reference/beads.hk.pkl: sha256:5b55b88ab7634ed29e078d824b820d670780f30aa528e875371d206ee163109b
-    .claude/skills/ngplan/reference/beads.md: sha256:d5e357bad3c4eccce10728c204fea9e251ce5513b8faf91441938b4929eccded
+    .agents/skills/ngplan/scripts/bd-init.sh: sha256:25c7f3812d949fa45428dd3658d82e6d1fa70d1dc925a386ffb3a0b0ca7654ae
+    .agents/skills/ngplan/scripts/hk-init.sh: sha256:f0bc4126a8d4104d41e53d046b5afca3e810f12ccd566f62f8415d322a0d4801
+    .claude/skills/ngplan/SKILL.md: sha256:4f65b2c418c103e759b90ce258b7bf794c2f4acff2b83c0d10cdfeaab0a36b91
+    .claude/skills/ngplan/reference/beads.hk.pkl: sha256:2ed64cd32b9452e62a9c96a3ed4c7fc26a814f3273c38dd18459ba4b98ed427a
+    .claude/skills/ngplan/reference/beads.md: sha256:5eab7ee529045383f52a312477720edacd6428bf16835d919ef7f5cc74b22092
     .claude/skills/ngplan/reference/contracts.md: sha256:0eb923211d975d30ef153fa23c302aae8c240377175a093825610f57ddf20ac7
     .claude/skills/ngplan/reference/sub-plans.md: sha256:da3abfa227c0c2d290679160132a89baa04aeb62ed58bd6d27b437cc75d78e30
     .claude/skills/ngplan/reference/visuals.md: sha256:732f0ef3a670055812431401c16de98aa2cae47ebe3aa0361c8bd3cd0af6f255
-    .claude/skills/ngplan/scripts/bd-init.sh: sha256:bf839e40170b90b4f35c886db10f974dc94ce5af20e31716d18cd3810ece2637
-  content_hash: sha256:dab6e54d7d113c6ec731b55103048ed69ad8b73fb1cef5dd51bc3217a3693a36
+    .claude/skills/ngplan/scripts/bd-init.sh: sha256:25c7f3812d949fa45428dd3658d82e6d1fa70d1dc925a386ffb3a0b0ca7654ae
+    .claude/skills/ngplan/scripts/hk-init.sh: sha256:f0bc4126a8d4104d41e53d046b5afca3e810f12ccd566f62f8415d322a0d4801
+  content_hash: sha256:fc52f7367418af06b418942350a254b02f4b29472e6d33fc545f9e0b708c0acc
 - repo_url: ngicks/crabswarm
   name: issues-mermaid-lint
   host: github.com
-  resolved_commit: 6cfbb894db9e153d755dadb8eccafd17aca1a944
+  resolved_commit: 2ed1ad187f2c09b59a555d03917f1f1c1873d536
   version: 0.2.0
   virtual_path: apm-package/crabswarm-issues-lint
   is_virtual: true
@@ -409,6 +417,24 @@ dependencies:
     .claude/skills/crabswarm-issues-lint/hooks/hooks.json: sha256:391d8935389c68f7bc6b911ec6dc0ba73d93294a4a89d22e16abc7b7216a9284
   content_hash: sha256:9d9bdf5fddb7ff3c9e22a1aa02bbe4f9bc394e1504e6cc8e452e9269a674e300
 deployments:
+- kind: project-relative
+  target: agents
+  value: .agents/skills/go-cmdman-review-checklist
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: agents
+  value: .agents/skills/go-cmdman-review-checklist/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:035f1202633125f463a4471523a06b351432d317bb9c632f1529851fcc3d247e
 - kind: project-relative
   target: claude
   value: .claude/agents/ng-command-invoker.md
@@ -969,13 +995,22 @@ deployments:
   content_hash: null
 - kind: project-relative
   target: claude
+  value: .claude/skills/ngcommit/COMMIT_CONVENTION.md
+  runtime: null
+  scope: project
+  owners:
+  - ngicks/agents-package/skills/ngcommit
+  active_owner: ngicks/agents-package/skills/ngcommit
+  content_hash: sha256:c820043a7670ed0c4950f95905d12bf573e05dbfaee107f07c4115c37f084340
+- kind: project-relative
+  target: claude
   value: .claude/skills/ngcommit/SKILL.md
   runtime: null
   scope: project
   owners:
   - ngicks/agents-package/skills/ngcommit
   active_owner: ngicks/agents-package/skills/ngcommit
-  content_hash: sha256:66eaf3c7b183568eb842b8b6c7be1e384b090e9b75d15a4e0c4be7925fb562be
+  content_hash: sha256:c1ad88c665c0b7d5757273ff27591c61f08f2c88e3a1cd7422dc611494f55402
 - kind: project-relative
   target: claude
   value: .claude/skills/ngplan
@@ -993,7 +1028,7 @@ deployments:
   owners:
   - ngicks/agents-package/skills/ngplan
   active_owner: ngicks/agents-package/skills/ngplan
-  content_hash: sha256:00aedb2c501ee0aa0c8eb9b93abc2af28445f9598d5b5ca09778568f77fc1d4c
+  content_hash: sha256:4f65b2c418c103e759b90ce258b7bf794c2f4acff2b83c0d10cdfeaab0a36b91
 - kind: project-relative
   target: claude
   value: .claude/skills/ngplan/reference/beads.hk.pkl
@@ -1002,7 +1037,7 @@ deployments:
   owners:
   - ngicks/agents-package/skills/ngplan
   active_owner: ngicks/agents-package/skills/ngplan
-  content_hash: sha256:5b55b88ab7634ed29e078d824b820d670780f30aa528e875371d206ee163109b
+  content_hash: sha256:2ed64cd32b9452e62a9c96a3ed4c7fc26a814f3273c38dd18459ba4b98ed427a
 - kind: project-relative
   target: claude
   value: .claude/skills/ngplan/reference/beads.md
@@ -1011,7 +1046,7 @@ deployments:
   owners:
   - ngicks/agents-package/skills/ngplan
   active_owner: ngicks/agents-package/skills/ngplan
-  content_hash: sha256:d5e357bad3c4eccce10728c204fea9e251ce5513b8faf91441938b4929eccded
+  content_hash: sha256:5eab7ee529045383f52a312477720edacd6428bf16835d919ef7f5cc74b22092
 - kind: project-relative
   target: claude
   value: .claude/skills/ngplan/reference/contracts.md
@@ -1047,7 +1082,16 @@ deployments:
   owners:
   - ngicks/agents-package/skills/ngplan
   active_owner: ngicks/agents-package/skills/ngplan
-  content_hash: sha256:bf839e40170b90b4f35c886db10f974dc94ce5af20e31716d18cd3810ece2637
+  content_hash: sha256:25c7f3812d949fa45428dd3658d82e6d1fa70d1dc925a386ffb3a0b0ca7654ae
+- kind: project-relative
+  target: claude
+  value: .claude/skills/ngplan/scripts/hk-init.sh
+  runtime: null
+  scope: project
+  owners:
+  - ngicks/agents-package/skills/ngplan
+  active_owner: ngicks/agents-package/skills/ngplan
+  content_hash: sha256:f0bc4126a8d4104d41e53d046b5afca3e810f12ccd566f62f8415d322a0d4801
 - kind: project-relative
   target: codex
   value: .agents/skills/crabswarm-issues-lint
@@ -1428,13 +1472,22 @@ deployments:
   content_hash: null
 - kind: project-relative
   target: codex
+  value: .agents/skills/ngcommit/COMMIT_CONVENTION.md
+  runtime: null
+  scope: project
+  owners:
+  - ngicks/agents-package/skills/ngcommit
+  active_owner: ngicks/agents-package/skills/ngcommit
+  content_hash: sha256:c820043a7670ed0c4950f95905d12bf573e05dbfaee107f07c4115c37f084340
+- kind: project-relative
+  target: codex
   value: .agents/skills/ngcommit/SKILL.md
   runtime: null
   scope: project
   owners:
   - ngicks/agents-package/skills/ngcommit
   active_owner: ngicks/agents-package/skills/ngcommit
-  content_hash: sha256:66eaf3c7b183568eb842b8b6c7be1e384b090e9b75d15a4e0c4be7925fb562be
+  content_hash: sha256:c1ad88c665c0b7d5757273ff27591c61f08f2c88e3a1cd7422dc611494f55402
 - kind: project-relative
   target: codex
   value: .agents/skills/ngplan
@@ -1452,7 +1505,7 @@ deployments:
   owners:
   - ngicks/agents-package/skills/ngplan
   active_owner: ngicks/agents-package/skills/ngplan
-  content_hash: sha256:00aedb2c501ee0aa0c8eb9b93abc2af28445f9598d5b5ca09778568f77fc1d4c
+  content_hash: sha256:4f65b2c418c103e759b90ce258b7bf794c2f4acff2b83c0d10cdfeaab0a36b91
 - kind: project-relative
   target: codex
   value: .agents/skills/ngplan/reference/beads.hk.pkl
@@ -1461,7 +1514,7 @@ deployments:
   owners:
   - ngicks/agents-package/skills/ngplan
   active_owner: ngicks/agents-package/skills/ngplan
-  content_hash: sha256:5b55b88ab7634ed29e078d824b820d670780f30aa528e875371d206ee163109b
+  content_hash: sha256:2ed64cd32b9452e62a9c96a3ed4c7fc26a814f3273c38dd18459ba4b98ed427a
 - kind: project-relative
   target: codex
   value: .agents/skills/ngplan/reference/beads.md
@@ -1470,7 +1523,7 @@ deployments:
   owners:
   - ngicks/agents-package/skills/ngplan
   active_owner: ngicks/agents-package/skills/ngplan
-  content_hash: sha256:d5e357bad3c4eccce10728c204fea9e251ce5513b8faf91441938b4929eccded
+  content_hash: sha256:5eab7ee529045383f52a312477720edacd6428bf16835d919ef7f5cc74b22092
 - kind: project-relative
   target: codex
   value: .agents/skills/ngplan/reference/contracts.md
@@ -1506,7 +1559,16 @@ deployments:
   owners:
   - ngicks/agents-package/skills/ngplan
   active_owner: ngicks/agents-package/skills/ngplan
-  content_hash: sha256:bf839e40170b90b4f35c886db10f974dc94ce5af20e31716d18cd3810ece2637
+  content_hash: sha256:25c7f3812d949fa45428dd3658d82e6d1fa70d1dc925a386ffb3a0b0ca7654ae
+- kind: project-relative
+  target: codex
+  value: .agents/skills/ngplan/scripts/hk-init.sh
+  runtime: null
+  scope: project
+  owners:
+  - ngicks/agents-package/skills/ngplan
+  active_owner: ngicks/agents-package/skills/ngplan
+  content_hash: sha256:f0bc4126a8d4104d41e53d046b5afca3e810f12ccd566f62f8415d322a0d4801
 - kind: project-relative
   target: codex
   value: .codex/agents/ng-command-invoker.toml
@@ -1597,24 +1659,6 @@ deployments:
   - ngicks/agents-package/apm-package/cc-workers
   active_owner: ngicks/agents-package/apm-package/cc-workers
   content_hash: sha256:e121ea80d32dfd1c23fb4b17bbeb70a6a1b458d4a840db915a9e6300527ba3c2
-- kind: project-relative
-  target: legacy
-  value: .agents/skills/go-cmdman-review-checklist
-  runtime: null
-  scope: project
-  owners:
-  - .
-  active_owner: .
-  content_hash: null
-- kind: project-relative
-  target: legacy
-  value: .agents/skills/go-cmdman-review-checklist/SKILL.md
-  runtime: null
-  scope: project
-  owners:
-  - .
-  active_owner: .
-  content_hash: sha256:035f1202633125f463a4471523a06b351432d317bb9c632f1529851fcc3d247e
 local_deployed_files:
 - .agents/skills/go-cmdman-review-checklist
 - .agents/skills/go-cmdman-review-checklist/SKILL.md
