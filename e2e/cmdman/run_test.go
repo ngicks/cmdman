@@ -299,6 +299,73 @@ test -f "$CMDMAN_CMD_DATA_DIR/config.json"
 	}
 }
 
+// TestRun_InjectEnvDisabled covers --inject-env=false: the CMDMAN_* context the
+// command was given is neither stripped nor replaced, so a cmdman that runs
+// inside a command another cmdman supervises keeps addressing the outer one.
+func TestRun_InjectEnvDisabled(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	const (
+		outerData    = "/outer-data"
+		outerRuntime = "/outer-run"
+		outerCmdData = "/outer-data/commands/outer-id"
+		outerID      = "outer-id"
+	)
+
+	id := env.run(ctx,
+		"run",
+		"--inject-env=false",
+		"-E", cmdman.ENV_CMDMAN_DATA_DIR+"="+outerData,
+		"-E", cmdman.ENV_CMDMAN_RUNTIME_DIR+"="+outerRuntime,
+		"-E", cmdman.ENV_CMDMAN_CMD_DATA_DIR+"="+outerCmdData,
+		"-E", cmdman.ENV_CMDMAN_CMD_ID+"="+outerID,
+		"-E", "EXPECT_DATA="+outerData,
+		"-E", "EXPECT_RUNTIME="+outerRuntime,
+		"-E", "EXPECT_CMD_DATA="+outerCmdData,
+		"-E", "EXPECT_CMD_ID="+outerID,
+		"--",
+		"/bin/sh", "-c", `
+test "$CMDMAN_DATA_DIR" = "$EXPECT_DATA" &&
+test "$CMDMAN_RUNTIME_DIR" = "$EXPECT_RUNTIME" &&
+test "$CMDMAN_CMD_DATA_DIR" = "$EXPECT_CMD_DATA" &&
+test "$CMDMAN_CMD_ID" = "$EXPECT_CMD_ID"
+`,
+	)
+	env.waitForState(ctx, id, "exited", defaultTimeout)
+
+	info := env.inspectJSON(ctx, id)
+	exitCode, _ := info["ExitCode"].(float64)
+	if exitCode != 0 {
+		t.Fatalf("expected the inherited cmdman context to reach the command, exit_code=%v",
+			exitCode)
+	}
+
+	cfg, _ := info["Config"].(map[string]any)
+	if injectEnv, ok := cfg["inject_env"].(bool); !ok || injectEnv {
+		t.Errorf("expected inject_env=false in the stored config, got %v", cfg["inject_env"])
+	}
+
+	// Injection strips every entry naming one of the four keys before appending
+	// its own, so a sentinel that is still there exactly once proves neither the
+	// create path nor the monitor rewrote it.
+	counts := map[string]int{}
+	for _, entry := range env.configEnv(ctx, id) {
+		counts[entry]++
+	}
+	for _, want := range []string{
+		cmdman.ENV_CMDMAN_DATA_DIR + "=" + outerData,
+		cmdman.ENV_CMDMAN_RUNTIME_DIR + "=" + outerRuntime,
+		cmdman.ENV_CMDMAN_CMD_DATA_DIR + "=" + outerCmdData,
+		cmdman.ENV_CMDMAN_CMD_ID + "=" + outerID,
+	} {
+		if counts[want] != 1 {
+			t.Errorf("expected exactly one %q entry, got %d", want, counts[want])
+		}
+	}
+}
+
 func TestRun_AutoRemove(t *testing.T) {
 	t.Parallel()
 	ctx := testContext(t)
