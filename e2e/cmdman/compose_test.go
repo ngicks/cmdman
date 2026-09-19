@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ngicks/cmdman/cmdman"
 )
 
 // progressEvent mirrors one JSONL object emitted by compose up/start/stop/down
@@ -1817,5 +1819,101 @@ func TestComposeUpIndependentCommandsStartConcurrently(t *testing.T) {
 	for _, name := range []string{"alpha", "beta"} {
 		id := composeCommandID(ctx, env, wd, project, name)
 		env.waitForState(ctx, id, "running", 10*time.Second)
+	}
+}
+
+// composeInjectEnvYAML gives both commands the same outer CMDMAN_CMD_ID, so the
+// only thing separating them is that one opts out of injection.
+func composeInjectEnvYAML(name, outerID string) string {
+	return fmt.Sprintf(`name: %s
+commands:
+  keeps-outer:
+    args: [/bin/sh, -c, "exit 0"]
+    inject_env: false
+    env:
+      - %s=%s
+  gets-own:
+    args: [/bin/sh, -c, "exit 0"]
+    env:
+      - %s=%s
+`, name, cmdman.ENV_CMDMAN_CMD_ID, outerID, cmdman.ENV_CMDMAN_CMD_ID, outerID)
+}
+
+// countEnvEntry counts exact KEY=VALUE matches in a stored config env. Injection
+// rewrites rather than appends, so an exact count tells a surviving entry apart
+// from one that was replaced.
+func countEnvEntry(env []string, entry string) int {
+	n := 0
+	for _, e := range env {
+		if e == entry {
+			n++
+		}
+	}
+	return n
+}
+
+// cmdmanEnvEntries narrows a stored config env to its CMDMAN_ entries. A failure
+// message must not dump the whole env: import_host_env defaults to true, so the
+// stored env carries the host environment, secrets included.
+func cmdmanEnvEntries(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		if strings.HasPrefix(e, "CMDMAN_") {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// TestComposeUpInjectEnv verifies that the compose file's inject_env key reaches
+// the command compose up creates: the opted-out command keeps the CMDMAN_CMD_ID
+// the file gave it, while the default command has it replaced by its own id.
+func TestComposeUpInjectEnv(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-inject-env"
+	const outerID = "outer-id"
+	writeComposeFile(t, wd, composeInjectEnvYAML(project, outerID))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	composePath := filepath.Join(wd, "cmd-compose.yaml")
+	if _, stderr, err := env.exec(ctx, "compose",
+		"--workdir", wd, "-f", composePath, "up"); err != nil {
+		t.Fatalf("compose up failed: %v\nstderr:\n%s", err, stderr)
+	}
+
+	keepsID := composeCommandID(ctx, env, wd, project, "keeps-outer")
+	getsOwnID := composeCommandID(ctx, env, wd, project, "gets-own")
+	if keepsID == "" || getsOwnID == "" {
+		t.Fatalf("compose up did not create both commands: keeps-outer=%q gets-own=%q",
+			keepsID, getsOwnID)
+	}
+
+	keepsCfg, _ := env.inspectJSON(ctx, keepsID)["Config"].(map[string]any)
+	if injectEnv, ok := keepsCfg["inject_env"].(bool); !ok || injectEnv {
+		t.Errorf("expected inject_env=false for keeps-outer, got %v", keepsCfg["inject_env"])
+	}
+	getsOwnCfg, _ := env.inspectJSON(ctx, getsOwnID)["Config"].(map[string]any)
+	if injectEnv, ok := getsOwnCfg["inject_env"].(bool); !ok || !injectEnv {
+		t.Errorf("expected inject_env=true for gets-own, got %v", getsOwnCfg["inject_env"])
+	}
+
+	outerEntry := cmdman.ENV_CMDMAN_CMD_ID + "=" + outerID
+	keepsEnv := env.configEnv(ctx, keepsID)
+	if got := countEnvEntry(keepsEnv, outerEntry); got != 1 {
+		t.Errorf("expected exactly one %q in keeps-outer's env, got %d in %v",
+			outerEntry, got, cmdmanEnvEntries(keepsEnv))
+	}
+
+	getsOwnEnv := env.configEnv(ctx, getsOwnID)
+	if got := countEnvEntry(getsOwnEnv, outerEntry); got != 0 {
+		t.Errorf("injection should have dropped %q from gets-own's env, got %d in %v",
+			outerEntry, got, cmdmanEnvEntries(getsOwnEnv))
+	}
+	ownEntry := cmdman.ENV_CMDMAN_CMD_ID + "=" + getsOwnID
+	if got := countEnvEntry(getsOwnEnv, ownEntry); got != 1 {
+		t.Errorf("expected exactly one %q in gets-own's env, got %d in %v",
+			ownEntry, got, cmdmanEnvEntries(getsOwnEnv))
 	}
 }
