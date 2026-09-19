@@ -66,3 +66,47 @@ func TestMonitorInjectEnvDisabledExemptsHooks(t *testing.T) {
 	assert.Assert(t, slices.Contains(hookEnv, own))
 	assert.Assert(t, !slices.Contains(hookEnv, outer))
 }
+
+// With injection on, the monitor replaces an inherited CMDMAN_CMD_ID with its
+// own before the command starts.
+func TestMonitorInjectEnvReplacesInheritedContext(t *testing.T) {
+	dir := t.TempDir()
+	appCfg := testConfig(t, dir)
+	dbPath, err := appCfg.DBPath()
+	assert.NilError(t, err)
+
+	st, err := store.OpenStore(t.Context(), dbPath, true)
+	assert.NilError(t, err)
+	defer st.Close()
+
+	id := "test-monitor-inject-env-on"
+	commandDir, err := appCfg.CommandDir(id)
+	assert.NilError(t, err)
+	outer := config.ENV_CMDMAN_CMD_ID + "=outer-id"
+	own := config.ENV_CMDMAN_CMD_ID + "=" + id
+	cfg := &model.CommandConfig{
+		Argv:            []string{"/bin/sh", "-c", "exit 0"},
+		Dir:             dir,
+		Env:             append(testEnv(), outer),
+		InjectEnv:       true,
+		RestartPolicy:   model.RestartPolicyNo,
+		ScrollbackBytes: 4096,
+		LogDriver:       model.DefaultLogDriver,
+		CommandDir:      commandDir,
+	}
+
+	assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
+	assert.NilError(t, store.WriteCommandConfig(cfg.CommandDir, cfg))
+	assert.NilError(t, st.InsertCommandState(id, model.EventTypeCreated, &model.CommandState{}))
+
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	m, err := newMonitor(t.Context(), id, appCfg, logger)
+	assert.NilError(t, err)
+	defer m.Close()
+
+	cmd, err := m.wireUpCmd(t.Context())
+	assert.NilError(t, err)
+	assert.Assert(t, slices.Contains(cmd.Env, own))
+	assert.Assert(t, !slices.Contains(cmd.Env, outer))
+	assert.Assert(t, slices.Contains(cmd.Env, config.ENV_CMDMAN_CMD_DATA_DIR+"="+commandDir))
+}
