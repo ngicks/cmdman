@@ -307,6 +307,7 @@ func TestHashGoldenDigest(t *testing.T) {
 		Args:            []string{"go", "run", "./cmd/api"},
 		Env:             []string{"B=2", "A=1"},
 		ImportHostEnv:   true,
+		InjectEnv:       true,
 		Labels:          map[string]string{"team": "core"},
 		RestartPolicy:   model.RestartPolicyOnFailure,
 		MaxRetries:      3,
@@ -324,7 +325,7 @@ func TestHashGoldenDigest(t *testing.T) {
 	assert.Equal(
 		t,
 		h,
-		"sha256:36a784e638f94f3d8e21707f7193fe0bbd7810a38d3003ba62fa314eaefd9559",
+		"sha256:d504574af28888499b3a4ec7b36fd373e361d79bb254b2b1e4148808cf07cf27",
 	)
 }
 
@@ -361,6 +362,23 @@ func TestHashChangesOnImportHostEnv(t *testing.T) {
 	assert.Assert(t, h1 != h2, "hash must change when import_host_env changes")
 }
 
+func TestHashChangesOnInjectEnv(t *testing.T) {
+	cmd := compose.Command{
+		Name:      "api",
+		Args:      []string{"go", "run", "./cmd/api"},
+		Dir:       "/work",
+		InjectEnv: true,
+	}
+	h1, err := compose.Hash(cmd)
+	assert.NilError(t, err)
+
+	cmd.InjectEnv = false
+	h2, err := compose.Hash(cmd)
+	assert.NilError(t, err)
+
+	assert.Assert(t, h1 != h2, "hash must change when inject_env changes")
+}
+
 func TestImportHostEnvDefaultsTrue(t *testing.T) {
 	dir := t.TempDir()
 	yamlContent := `
@@ -390,6 +408,37 @@ commands:
 	assert.Equal(t, byName["default-on"].ImportHostEnv, true)
 	assert.Equal(t, byName["explicit-off"].ImportHostEnv, false)
 	assert.Equal(t, byName["explicit-on"].ImportHostEnv, true)
+}
+
+func TestInjectEnvDefaultsTrue(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := `
+name: inject-env-test
+commands:
+  default-on:
+    args: [echo, a]
+  explicit-off:
+    args: [echo, b]
+    inject_env: false
+  explicit-on:
+    args: [echo, c]
+    inject_env: true
+`
+	yamlPath := filepath.Join(dir, "cmd-compose.yaml")
+	assert.NilError(t, os.WriteFile(yamlPath, []byte(yamlContent), 0644))
+
+	raw, err := compose.DecodeFile(yamlPath)
+	assert.NilError(t, err)
+	spec, err := compose.Normalize(context.Background(), yamlPath, raw, compose.NormalizeOpts{})
+	assert.NilError(t, err)
+
+	byName := make(map[string]compose.Command, len(spec.Commands))
+	for _, c := range spec.Commands {
+		byName[c.Name] = c
+	}
+	assert.Equal(t, byName["default-on"].InjectEnv, true)
+	assert.Equal(t, byName["explicit-off"].InjectEnv, false)
+	assert.Equal(t, byName["explicit-on"].InjectEnv, true)
 }
 
 // ---- reserved label rejection -----------------------------------------------

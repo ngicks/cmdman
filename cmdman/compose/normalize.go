@@ -230,6 +230,11 @@ func Normalize(
 			importHostEnv = *cmd.ImportHostEnv
 		}
 
+		injectEnv := true
+		if cmd.InjectEnv != nil {
+			injectEnv = *cmd.InjectEnv
+		}
+
 		var (
 			restartPolicy model.RestartPolicy
 			maxRetries    int
@@ -247,6 +252,7 @@ func Normalize(
 			Args:            interpolatedArgs,
 			Env:             envSlice,
 			ImportHostEnv:   importHostEnv,
+			InjectEnv:       injectEnv,
 			Labels:          cmd.Labels,
 			RestartPolicy:   restartPolicy,
 			MaxRetries:      maxRetries,

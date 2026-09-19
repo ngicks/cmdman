@@ -37,7 +37,11 @@ type CanonicalCommand struct {
 	// ImportHostEnv is rendered only when it deviates from the default (true): a
 	// pointer set to false emits "import_host_env: false", while the default
 	// (nil) is omitted so the canonical document round-trips back to true.
-	ImportHostEnv   *bool                     `yaml:"import_host_env,omitempty" json:"import_host_env,omitzero"` //nolint:lll // dual yaml+json snake_case tags exceed the line limit
+	ImportHostEnv *bool `yaml:"import_host_env,omitempty" json:"import_host_env,omitzero"` //nolint:lll // dual yaml+json snake_case tags exceed the line limit
+	// InjectEnv is rendered only when it deviates from the default (true): a
+	// pointer set to false emits "inject_env: false", while the default (nil) is
+	// omitted so the canonical document round-trips back to true.
+	InjectEnv       *bool                     `yaml:"inject_env,omitempty" json:"inject_env,omitzero"` //nolint:lll // dual yaml+json snake_case tags exceed the line limit
 	Labels          map[string]string         `yaml:"labels,omitempty" json:"labels,omitzero"`
 	RestartPolicy   string                    `yaml:"restart_policy,omitempty" json:"restart_policy,omitzero"` //nolint:lll // dual yaml+json snake_case tags exceed the line limit
 	StopSignal      string                    `yaml:"stop_signal,omitempty" json:"stop_signal,omitzero"`       //nolint:lll // dual yaml+json snake_case tags exceed the line limit
@@ -85,11 +89,19 @@ func canonicalCommand(c Command) CanonicalCommand {
 		disabled := false
 		importHostEnv = &disabled
 	}
+	var injectEnv *bool
+	if !c.InjectEnv {
+		// Default is true, so only an explicit false is rendered; true is omitted
+		// and round-trips back to the default.
+		disabled := false
+		injectEnv = &disabled
+	}
 	return CanonicalCommand{
 		Dir:             c.Dir,
 		Args:            c.Args,
 		Env:             c.Env,
 		ImportHostEnv:   importHostEnv,
+		InjectEnv:       injectEnv,
 		Labels:          c.Labels,
 		RestartPolicy:   canonicalRestartPolicy(c.RestartPolicy, c.MaxRetries),
 		StopSignal:      c.StopSignal,
