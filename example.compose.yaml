@@ -16,6 +16,8 @@ commands:
   # The host environment is imported by default (env: entries are layered on top
   # as overrides), so commands keep PATH and friends. Set `import_host_env: false`
   # on a command to start it from an empty environment plus its own env:/env_file.
+  # cmdman also injects CMDMAN_DATA_DIR, CMDMAN_RUNTIME_DIR, CMDMAN_CMD_DATA_DIR
+  # and CMDMAN_CMD_ID. Set `inject_env: false` to keep an outer cmdman's values.
   yay2:
     env:
       - SLEEP_SECS=${INPUT_SLEEP:-3}

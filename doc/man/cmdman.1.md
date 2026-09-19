@@ -51,7 +51,9 @@ command's own word, not cmdman's observation of it.
 
 cmdman puts `CMDMAN_CMD_ID` into the environment of every command it supervises,
 so a supervised command addresses itself by passing no argument at all; from
-outside, name the command by ID or name. Reads and writes reach the command's
+outside, name the command by ID or name. Creating a command with
+`--inject-env=false` suppresses that injection, so the command keeps the
+`CMDMAN_CMD_ID` value of an outer cmdman. Reads and writes reach the command's
 monitor over its per-command Unix socket, so the status is per-run state: it is
 cleared when the command restarts and gone once it exits. Writing requires a
 running monitor and fails without one; reading a command that has none reports
