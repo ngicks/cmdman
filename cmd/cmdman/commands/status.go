@@ -14,8 +14,9 @@ The status is one of working, waiting or done, plus an optional detail. It is
 held by the monitor of the current run: it is cleared when the command restarts
 and is gone once the command exits.
 
-Every command cmdman supervises gets CMDMAN_CMD_ID in its environment, so a
-command reports about itself with no argument at all:
+A command cmdman supervises gets CMDMAN_CMD_ID in its environment unless it was
+created with --inject-env=false, so a command reports about itself with no
+argument at all:
 
   cmdman status set waiting --detail "needs input"
 

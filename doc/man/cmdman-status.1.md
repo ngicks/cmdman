@@ -25,9 +25,11 @@ command's per-command Unix socket. It is therefore per-run state: restarting the
 command clears it, and it is gone once the command exits.
 
 `ID|NAME` is optional because cmdman puts `CMDMAN_CMD_ID` into the environment
-of every command it supervises, so a supervised command reports about itself
-with no argument at all. Outside such a command, and with `CMDMAN_CMD_ID` unset,
-the argument is required.
+of a command it supervises, so a supervised command reports about itself with no
+argument at all. A command created with `--inject-env=false` keeps the
+`CMDMAN_CMD_ID` of an outer cmdman, so the argument-less form addresses that
+outer command. Outside such a command, and with `CMDMAN_CMD_ID` unset, the
+argument is required.
 
 The project-wide read is [`cmdman compose status`](./cmdman-compose-status.1.md);
 the `STATUS`, `BELL`, `DETAIL`, and `TITLE` columns of

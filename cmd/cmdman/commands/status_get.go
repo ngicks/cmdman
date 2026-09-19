@@ -20,8 +20,9 @@ func statusGetCmd(parent *cobra.Command, rf *rootFlags) {
 		Long: `Print the status a command reports about itself.
 
 Without ID|NAME the command is taken from CMDMAN_CMD_ID, which cmdman sets in
-every command it supervises. A command that reported nothing - and one that is
-not running, which can hold no status - prints nothing.`,
+a command it supervises unless --inject-env=false was given. A command that
+reported nothing - and one that is not running, which can hold no status -
+prints nothing.`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeCommandNames(rf),
 		RunE: func(cmd *cobra.Command, args []string) error {
