@@ -101,7 +101,9 @@ compose file, especially when `work_dir` points somewhere else.
 
 Environment values are layered per command:
 
-- Host environment is the base interpolation context, but is not stored.
+- Host environment is the base interpolation context. Compose keeps it out of
+  the merged `env_file` and `env` values. The service imports it into the
+  created command at create time unless `import_host_env` is `false`.
 - `env_file` entries are read in list order. Each file sees the host
   environment and earlier `env_file` values.
 - `env` entries are applied in list order and override `env_file` values.
