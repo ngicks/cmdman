@@ -71,6 +71,10 @@ Absolute paths are cleaned and used as-is.
 - `args`: argv array to execute. Required and not interpreted as shell source.
 - `env_file`: ordered list of dotenv files.
 - `env`: ordered list of `KEY=VALUE` assignments or bare `KEY` entries.
+- `import_host_env`: whether the host environment is imported as the command's
+  base environment. Defaults to `true`.
+- `inject_env`: whether cmdman injects `CMDMAN_DATA_DIR`, `CMDMAN_RUNTIME_DIR`,
+  `CMDMAN_CMD_DATA_DIR`, and `CMDMAN_CMD_ID`. Defaults to `true`.
 - `labels`: user metadata. Keys starting with `cmdman.compose.` are reserved.
 - `restart_policy`: `no`, `always`, `on-failure`, or `on-failure:N`.
 - `stop_signal`: signal used by `cmdman stop` when no signal override is given.
@@ -97,7 +101,9 @@ compose file, especially when `work_dir` points somewhere else.
 
 Environment values are layered per command:
 
-- Host environment is the base interpolation context, but is not stored.
+- Host environment is the base interpolation context. Compose keeps it out of
+  the merged `env_file` and `env` values. The service imports it into the
+  created command at create time unless `import_host_env` is `false`.
 - `env_file` entries are read in list order. Each file sees the host
   environment and earlier `env_file` values.
 - `env` entries are applied in list order and override `env_file` values.

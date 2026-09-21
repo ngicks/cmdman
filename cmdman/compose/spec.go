@@ -82,7 +82,12 @@ type RawCommand struct {
 	// base for this command (env_file + env: are layered on top as overrides).
 	// A pointer so absence (nil → default true) is distinguishable from an
 	// explicit false.
-	ImportHostEnv   *bool                `yaml:"import_host_env" json:"import_host_env"` //nolint:lll // pointer detects absence; defaults to true
+	ImportHostEnv *bool `yaml:"import_host_env" json:"import_host_env"` //nolint:lll // pointer detects absence; defaults to true
+	// InjectEnv controls whether the command's environment gets CMDMAN_DATA_DIR,
+	// CMDMAN_RUNTIME_DIR, CMDMAN_CMD_DATA_DIR and CMDMAN_CMD_ID pointing at this
+	// command. A pointer so absence (nil → default true) is distinguishable from
+	// an explicit false.
+	InjectEnv       *bool                `yaml:"inject_env" json:"inject_env"`
 	Labels          map[string]string    `yaml:"labels" json:"labels"`
 	RestartPolicy   string               `yaml:"restart_policy" json:"restart_policy"`
 	StopSignal      string               `yaml:"stop_signal" json:"stop_signal"`
@@ -157,6 +162,11 @@ type Command struct {
 	// base for this command, with Env layered on top as overrides. Resolved from
 	// RawCommand.ImportHostEnv during normalization; defaults to true.
 	ImportHostEnv bool
+	// InjectEnv controls whether the command's environment gets CMDMAN_DATA_DIR,
+	// CMDMAN_RUNTIME_DIR, CMDMAN_CMD_DATA_DIR and CMDMAN_CMD_ID pointing at this
+	// command. Resolved from RawCommand.InjectEnv during normalization; defaults
+	// to true.
+	InjectEnv bool
 	// Labels are user-supplied labels. Reserved cmdman.compose.* labels are absent here;
 	// they are added by Plan when building CreateRequest inputs.
 	Labels        map[string]string

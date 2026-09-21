@@ -87,8 +87,8 @@ func newHookDispatcher(logger *slog.Logger) *hookDispatcher {
 }
 
 // configure installs the hook configuration for the run that is about to start.
-// env is the environment the supervised command itself gets, so a hook sees the
-// same context (including the CMDMAN_CMD_ID family).
+// env is the supervised command's environment with this command's own
+// CMDMAN_CMD_ID family in place, whether or not the command itself receives it.
 func (d *hookDispatcher) configure(layers model.HookLayers, dir string, env []string) {
 	if d == nil {
 		return

@@ -105,3 +105,24 @@ func TestCanonicalizeImportHostEnv(t *testing.T) {
 	assert.Assert(t, drop != nil, "explicit false must be rendered")
 	assert.Equal(t, *drop, false)
 }
+
+func TestCanonicalizeInjectEnv(t *testing.T) {
+	// inject_env defaults to true, so canonical output omits it when true
+	// (round-trips back to the default) and renders it only when explicitly false.
+	spec := compose.ComposeSpec{
+		Project: "p",
+		WorkDir: "/w",
+		Commands: []compose.Command{
+			{Name: "keep", Dir: "/w", Args: []string{"true"}, InjectEnv: true},
+			{Name: "drop", Dir: "/w", Args: []string{"true"}, InjectEnv: false},
+		},
+	}
+	got := compose.Canonicalize(spec)
+
+	assert.Assert(t, got.Commands["keep"].InjectEnv == nil,
+		"default (true) must be omitted from canonical output")
+
+	drop := got.Commands["drop"].InjectEnv
+	assert.Assert(t, drop != nil, "explicit false must be rendered")
+	assert.Equal(t, *drop, false)
+}

@@ -328,12 +328,14 @@ func buildCreateRequest(
 		ENV_CMDMAN_COMPOSE_SCALE + "=" + strconv.Itoa(max(nc.Scale, 1)),
 	}
 	importHostEnv := nc.ImportHostEnv
+	injectEnv := nc.InjectEnv
 	return cmdman.CreateRequest{
 		Name:            instanceName,
 		Dir:             nc.Dir,
 		Argv:            nc.Args,
 		Env:             nc.Env,
 		ImportHostEnv:   &importHostEnv,
+		InjectEnv:       &injectEnv,
 		AppendEnv:       appendEnv,
 		RestartPolicy:   nc.RestartPolicy,
 		MaxRetries:      nc.MaxRetries,

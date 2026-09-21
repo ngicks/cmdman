@@ -16,8 +16,8 @@ func statusDeleteCmd(parent *cobra.Command, rf *rootFlags) {
 		Long: `Clear the status a command reports about itself.
 
 Without ID|NAME the command is taken from CMDMAN_CMD_ID, which cmdman sets in
-every command it supervises. The command must be running: the status lives in
-the monitor of the current run.`,
+a command it supervises unless --inject-env=false was given. The command must
+be running: the status lives in the monitor of the current run.`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeCommandNames(rf, runningStates...),
 		RunE: func(cmd *cobra.Command, args []string) error {

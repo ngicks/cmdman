@@ -13,8 +13,9 @@ import (
 
 // ResolveStatusTarget picks the command the status verbs address: the explicit
 // argument when there is one, otherwise envID - the CMDMAN_CMD_ID cmdman injects
-// into every command it supervises, which is how a command addresses itself
-// without knowing its own id.
+// into a command it supervises unless that command was created with
+// --inject-env=false, which is how a command addresses itself without knowing
+// its own id.
 func ResolveStatusTarget(args []string, envID string) (string, error) {
 	if len(args) > 0 && args[0] != "" {
 		return args[0], nil

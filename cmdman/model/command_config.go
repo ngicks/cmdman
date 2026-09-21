@@ -10,9 +10,16 @@ import (
 
 // CommandConfig is the canonical command configuration stored in CommandConfig.JSON.
 type CommandConfig struct {
-	Argv          []string      `json:"argv"`
-	Dir           string        `json:"dir,omitzero"`
-	Env           []string      `json:"env,omitzero"`
+	Argv []string `json:"argv"`
+	Dir  string   `json:"dir,omitzero"`
+	Env  []string `json:"env,omitzero"`
+	// InjectEnv controls whether CMDMAN_DATA_DIR, CMDMAN_RUNTIME_DIR,
+	// CMDMAN_CMD_DATA_DIR and CMDMAN_CMD_ID are stripped from the command's
+	// environment and re-added for this command. False leaves whatever the
+	// environment already carries untouched, so a command supervised by an
+	// outer cmdman keeps addressing the outer command. Hooks are exempt: a
+	// hook always receives this command's own context.
+	InjectEnv     bool          `json:"inject_env"`
 	RestartPolicy RestartPolicy `json:"restart_policy"`
 	// MaxRetries caps the number of automatic restarts under the "on-failure"
 	// policy. Zero means unlimited. It is only valid with "on-failure".

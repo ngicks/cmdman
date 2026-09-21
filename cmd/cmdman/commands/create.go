@@ -16,6 +16,7 @@ type createFlags struct {
 	Dir             string
 	Env             []string
 	ImportHostEnv   bool
+	InjectEnv       bool
 	Label           []string
 	Restart         string
 	StopSignal      string
@@ -37,6 +38,14 @@ func bindCreateFlags(cmd *cobra.Command, f *createFlags) {
 		true,
 		"Import the host environment as the base; --env entries override it. "+
 			"Set to false to start from an empty environment plus --env",
+	)
+	flags.BoolVar(
+		&f.InjectEnv,
+		"inject-env",
+		true,
+		"Set CMDMAN_DATA_DIR, CMDMAN_RUNTIME_DIR, CMDMAN_CMD_DATA_DIR and "+
+			"CMDMAN_CMD_ID for this command. Set to false to keep the values "+
+			"inherited from an outer cmdman",
 	)
 	flags.StringArrayVarP(&f.Label, "label", "l", nil, "Metadata label KEY=VALUE (repeatable)")
 	flags.StringVar(
@@ -148,6 +157,7 @@ func doCreate(
 		Dir:             flags.Dir,
 		Env:             flags.Env,
 		ImportHostEnv:   &flags.ImportHostEnv,
+		InjectEnv:       &flags.InjectEnv,
 		Labels:          labels,
 		RestartPolicy:   restartPolicy,
 		MaxRetries:      maxRetries,

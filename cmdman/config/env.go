@@ -28,9 +28,10 @@ type HookEventEnv struct {
 }
 
 // WithHookEventEnv strips any caller-supplied CMDMAN_HOOK_* variables from env
-// and appends the ones describing the event that triggered the hook. env is
-// expected to be the supervised command's own environment, so a hook already
-// carries the ENV_CMDMAN_* command context added by [WithCommandContextEnv].
+// and appends the ones describing the event that triggered the hook. The caller
+// passes an env that already went through [WithCommandContextEnv], so a hook
+// carries the ENV_CMDMAN_* command context even when the command itself keeps
+// an outer cmdman's values.
 func WithHookEventEnv(env []string, ev HookEventEnv) []string {
 	prefixes := []string{
 		ENV_CMDMAN_HOOK_EVENT + "=",

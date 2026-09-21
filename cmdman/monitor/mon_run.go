@@ -224,7 +224,10 @@ func (m *Monitor) runLoop(ctx context.Context) (err error) {
 func (m *Monitor) wireUpCmd(ctx context.Context) (*exec.Cmd, error) {
 	cmd := exec.CommandContext(ctx, m.cfg.Argv[0], m.cfg.Argv[1:]...)
 	cmd.Dir = m.cfg.Dir
-	cmd.Env = config.WithCommandContextEnv(m.cfg.Env, m.Config, m.ID, m.cfg.CommandDir)
+	cmd.Env = m.cfg.Env
+	if m.cfg.InjectEnv {
+		cmd.Env = config.WithCommandContextEnv(m.cfg.Env, m.Config, m.ID, m.cfg.CommandDir)
+	}
 	if len(cmd.Env) == 0 {
 		return nil, fmt.Errorf("command config env is empty")
 	}
@@ -271,12 +274,13 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	}
 
 	// Hook config is re-resolved per run, like the command config it comes
-	// from. Hooks get the command's own environment, so they inherit the
-	// CMDMAN_CMD_ID family without a second construction of it.
+	// from. Hooks always get this monitor's context, even when the command
+	// itself opted out of it: a hook reports on the command it is attached to,
+	// not on whatever supervises the monitor.
 	m.hooks.configure(
 		model.HookLayers{Command: m.cfg.Hooks, Global: m.Config.DefaultHooks},
 		m.cfg.Dir,
-		cmd.Env,
+		config.WithCommandContextEnv(m.cfg.Env, m.Config, m.ID, m.cfg.CommandDir),
 	)
 
 	logWriter, err := m.openLogWriter(ctx)

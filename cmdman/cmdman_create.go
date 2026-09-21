@@ -26,6 +26,12 @@ type CreateRequest struct {
 	// to true, so a programmatic caller that leaves it unset inherits the host
 	// environment (and keeps PATH) rather than starting bare.
 	ImportHostEnv *bool
+	// InjectEnv controls whether the command's environment gets CMDMAN_DATA_DIR,
+	// CMDMAN_RUNTIME_DIR, CMDMAN_CMD_DATA_DIR and CMDMAN_CMD_ID pointing at this
+	// command. When false, entries with those names are left exactly as the
+	// environment already carries them, which keeps a command that runs under an
+	// outer cmdman addressing the outer command. A nil pointer defaults to true.
+	InjectEnv *bool
 	// AppendEnv holds environment entries appended after the base environment is
 	// resolved (host env import + Env overrides). Use it for context the command
 	// should always see (e.g. compose scale index) without it counting toward
@@ -65,7 +71,9 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 		return nil, err
 	}
 	cfg.CommandDir = commandDir
-	cfg.Env = config.WithCommandContextEnv(cfg.Env, s.cfg, id, commandDir)
+	if cfg.InjectEnv {
+		cfg.Env = config.WithCommandContextEnv(cfg.Env, s.cfg, id, commandDir)
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -120,6 +128,7 @@ func (s *Service) buildCommandConfig(req CreateRequest) *model.CommandConfig {
 	// the last occurrence), so a later Env entry overrides the inherited host
 	// value. A nil ImportHostEnv defaults to true.
 	importHostEnv := req.ImportHostEnv == nil || *req.ImportHostEnv
+	injectEnv := req.InjectEnv == nil || *req.InjectEnv
 	var env []string
 	if importHostEnv {
 		env = append(env, s.cfg.DefaultEnvironment...)
@@ -148,6 +157,7 @@ func (s *Service) buildCommandConfig(req CreateRequest) *model.CommandConfig {
 		Argv:            append([]string(nil), req.Argv...),
 		Dir:             dir,
 		Env:             env,
+		InjectEnv:       injectEnv,
 		RestartPolicy:   restartPolicy,
 		MaxRetries:      req.MaxRetries,
 		StopSignal:      stopSignal,

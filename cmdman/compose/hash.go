@@ -91,6 +91,7 @@ type hashCanonical struct {
 	Dir             string            `json:"dir"`
 	Env             []string          `json:"env"` // sorted KEY=VALUE; env_file + env: merged
 	ImportHostEnv   bool              `json:"import_host_env"`
+	InjectEnv       bool              `json:"inject_env"`
 	RestartPolicy   string            `json:"restart_policy"`
 	MaxRetries      int               `json:"max_retries,omitzero"`
 	StopSignal      string            `json:"stop_signal"`
@@ -143,6 +144,7 @@ func Hash(cmd Command) (string, error) {
 		Dir:             cmd.Dir,
 		Env:             envCopy,
 		ImportHostEnv:   cmd.ImportHostEnv,
+		InjectEnv:       cmd.InjectEnv,
 		RestartPolicy:   string(cmd.RestartPolicy),
 		StopSignal:      cmd.StopSignal,
 		Tty:             cmd.Tty,
