@@ -90,7 +90,7 @@ exit 0
 	// What is under test is the run's behaviour while a process still holds the
 	// PTY slave, so nothing may take that process away: the sweep would remove
 	// the helper and the read would end on its own.
-	m.sweepFn = func(_ context.Context, _ *slog.Logger, _ int) int { return 0 }
+	m.sweepFn = func(context.Context, *slog.Logger, int, func() bool) int { return 0 }
 
 	// The run's error comes back to the test goroutine: a failed assertion calls
 	// FailNow, which only the test goroutine may do.

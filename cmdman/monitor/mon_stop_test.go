@@ -99,7 +99,7 @@ func TestMonitorStopDuringRunEndEndsRestartLoop(t *testing.T) {
 	// land for this to be about anything.
 	stopErr := errors.New("the sweep never ran, so no stop was ever attempted")
 	stopped := false
-	m.sweepFn = func(context.Context, *slog.Logger, int) int {
+	m.sweepFn = func(context.Context, *slog.Logger, int, func() bool) int {
 		if !stopped {
 			stopped = true
 			stopErr = m.StopProcess(syscall.SIGTERM, 0)

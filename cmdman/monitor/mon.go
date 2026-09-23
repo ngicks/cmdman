@@ -117,13 +117,22 @@ type Monitor struct {
 	runAnomalies []runAnomaly
 
 	// sweepFn terminates the processes a finished run left in the command's own
-	// session and reports how many outlived the sweep. It is a field so a test
-	// can drive the giving-up path without a process that genuinely refuses to
-	// die.
-	sweepFn func(ctx context.Context, logger *slog.Logger, pgid int) int
+	// session and reports how many outlived the sweep, or sweepHandedOver once
+	// stopRequested reports a stop. awaitFn waits those processes out while a
+	// stop is in progress and reports how many it left alive. They are fields
+	// so a test can drive the giving-up paths without a process that genuinely
+	// refuses to die, and see what either sends. nil runs the default.
+	sweepFn func(ctx context.Context, logger *slog.Logger, pgid int, stopRequested func() bool) int
+	awaitFn func(ctx context.Context, logger *slog.Logger, pgid int, killed func() bool) int
 
-	// stopRequested is set by the Signal RPC to prevent restarts.
+	// stopRequested is set by a stop to prevent restarts. Nothing clears it: the
+	// loop ends on the first run end that sees it, and the monitor exits with it.
 	stopRequested atomic.Bool
+	// stopKilled is set once a stop's own SIGKILL is on its way, whether the
+	// client sent it or the deadline the monitor armed for the stop did. It is
+	// what lets the run end finish that SIGKILL for what the process group could
+	// not reach. Like stopRequested it is never cleared.
+	stopKilled atomic.Bool
 }
 
 func newMonitor(
@@ -183,6 +192,7 @@ func newMonitor(
 		cfg:               commandCfg,
 		evtLog:            evtLog,
 		sweepFn:           sweepRunSurvivors,
+		awaitFn:           awaitRunSurvivors,
 		ring:              newRingBuffer(commandCfg.ScrollbackBytes),
 		stateJSON: &model.CommandState{
 			MonitorPID: os.Getpid(),
@@ -567,6 +577,11 @@ func (m *Monitor) SignalProcess(sig syscall.Signal) error {
 // finish its run ahead of the arming and leave the deadline to outlive it.
 func (m *Monitor) StopProcess(sig syscall.Signal, timeout time.Duration) error {
 	m.stopRequested.Store(true)
+	// Latched ahead of the signal for the same reason as the deadline below: a
+	// command that dies of it at once must find the run end already knowing.
+	if sig == syscall.SIGKILL {
+		m.stopKilled.Store(true)
+	}
 
 	m.procMu.Lock()
 	if m.stopDeadline != nil {
@@ -589,6 +604,7 @@ func (m *Monitor) StopProcess(sig syscall.Signal, timeout time.Duration) error {
 // still has, live child or leftovers alike. Nothing left to signal means the
 // stop already worked.
 func (m *Monitor) escalateStop() {
+	m.stopKilled.Store(true)
 	err := m.SignalProcess(syscall.SIGKILL)
 	if err == nil || errors.Is(err, errNoRunningProcess) || errors.Is(err, syscall.ESRCH) {
 		return

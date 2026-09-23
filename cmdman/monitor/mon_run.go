@@ -56,7 +56,8 @@ var anomalyReaderDetached = runAnomaly{
 }
 
 // anomalySurvivorsUnreaped reports the processes the command left behind that
-// the sweep could not get rid of within its bound.
+// were still alive once the run gave up on them: the sweep ran out its bound,
+// or a stop's SIGKILL had not taken them down within the same bound.
 func anomalySurvivorsUnreaped(n int) runAnomaly {
 	return runAnomaly{
 		attr:  "survivors_unreaped",
@@ -381,13 +382,30 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	return 0, nil
 }
 
-// sweepSurvivors terminates and reaps the processes the command left in its own
-// session - a helper that outlived the process that started it, say - so they
-// stop holding the port, the file or the terminal they were given instead of
+// sweepHandedOver is what the terminating sweep returns in place of a count when
+// a stop landed while it ran: it has sent nothing since, and what is left is
+// the stop's to finish.
+const sweepHandedOver = -1
+
+// sweepSurvivors deals with the processes the command left in its own session -
+// a helper that outlived the process that started it, say - so they stop
+// holding the port, the file or the terminal they were given instead of
 // stacking up across restarts. A process that made a session of its own is left
 // alone: a deliberately detached daemon (a shared multiplexer server the run
 // must never tear down is the motivating case), or a grandchild that broke away
 // and reverts to the same accepted, unreaped cost as on a non-Linux host.
+//
+// How it deals with them depends on why the run ended. A run that ended on its
+// own gets the terminating sweep: SIGTERM, a grace, SIGKILL, reap. A run that
+// ended on a stop gets the await instead, which reaps and waits and sends
+// nothing of its own. The stop already delivered its signal to the whole
+// process group, and a survivor is most likely the process carrying the stop
+// out; signalling it again, or killing it after the sweep's short grace, would
+// break that and override the timeout the user gave the stop. The only SIGKILL
+// in that mode is the stop's own - the client's, or the deadline the monitor
+// armed for it - and the await finishes it for survivors the group signal
+// cannot reach. A stop landing while the terminating sweep runs switches it to
+// the await.
 //
 // It runs before the output teardown on purpose: a read parked on the pty
 // master or on a pipe only ends once the last holder of the other end has let
@@ -400,6 +418,10 @@ func (m *Monitor) sweepSurvivors(ctx context.Context, pgid int) {
 	if sweep == nil {
 		sweep = sweepRunSurvivors
 	}
+	await := m.awaitFn
+	if await == nil {
+		await = awaitRunSurvivors
+	}
 	logger := contextkey.ValueSlogLoggerDefault(ctx)
 
 	// The run's own context is already cancelled when the monitor is shutting
@@ -408,16 +430,40 @@ func (m *Monitor) sweepSurvivors(ctx context.Context, pgid int) {
 	// logger among them). Its timeout is the sweep's bound: a process in an
 	// uninterruptible wait ignores SIGKILL as well, and the run has to end
 	// regardless.
-	sweepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sweepBound)
-	defer cancel()
+	terminate := func(stopRequested func() bool) int {
+		sweepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sweepBound)
+		defer cancel()
+		return sweep(sweepCtx, logger, pgid, stopRequested)
+	}
 
-	unreaped := sweep(sweepCtx, logger, pgid)
+	// A stop already in progress takes the survivors over before the sweep sends
+	// anything, the same as one landing while it runs.
+	unreaped := sweepHandedOver
+	if !m.stopRequested.Load() {
+		unreaped = terminate(m.stopRequested.Load)
+	}
+	if unreaped == sweepHandedOver {
+		// The await runs on the run's own context and has no bound of its own:
+		// how long the stop may take is the stop's call, and the stop's SIGKILL -
+		// its deadline's or the client's - is what ends the wait.
+		unreaped = await(ctx, logger, pgid, m.stopKilled.Load)
+		if ctx.Err() != nil {
+			// The monitor is shutting down, so nothing is left to see the stop
+			// through, and what the command left behind would outlive its
+			// supervisor. The terminating sweep takes it down instead, told that
+			// no stop is in progress so it does not hand the survivors straight
+			// back. It finds nothing when the await already saw the session
+			// empty. The count the await reported is not a precondition: the
+			// build without /proc cannot count at all.
+			unreaped = terminate(func() bool { return false })
+		}
+	}
 	if unreaped == 0 {
 		return
 	}
 	m.noteRunAnomaly(anomalySurvivorsUnreaped(unreaped))
 	logger.WarnContext(
-		sweepCtx,
+		ctx,
 		"processes the command left behind are still alive",
 		slog.String("id", m.ID),
 		slog.Int("count", unreaped),

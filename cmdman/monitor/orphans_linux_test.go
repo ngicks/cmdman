@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -28,6 +29,7 @@ import (
 const (
 	sweepHelperDetachedEnv = "CMDMAN_TEST_SWEEP_DETACHED_PID"
 	sweepHelperOrphanEnv   = "CMDMAN_TEST_SWEEP_ORPHAN_PID"
+	sweepHelperOwnGroupEnv = "CMDMAN_TEST_SWEEP_OWN_GROUP_PID"
 )
 
 // A command can leave processes behind. One stays in the command's own session
@@ -128,8 +130,14 @@ func TestMonitorRunSweepNeverSignalsTheProcessGroup(t *testing.T) {
 	// only once runOnceWithin has received the run's outcome, which orders it
 	// after every append.
 	var signalled []int
-	m.sweepFn = func(ctx context.Context, logger *slog.Logger, pgid int) int {
+	m.sweepFn = func(
+		ctx context.Context,
+		logger *slog.Logger,
+		pgid int,
+		stopRequested func() bool,
+	) int {
 		opts := defaultSweepOptions()
+		opts.stopRequested = stopRequested
 		opts.kill = func(pid int, sig syscall.Signal) error {
 			signalled = append(signalled, pid)
 			return unix.Kill(pid, sig)
@@ -177,12 +185,18 @@ func TestMonitorRunReportsSurvivorsTheSweepCouldNotReap(t *testing.T) {
 	// Signals that deliver nothing stand in for a process that will not die, so
 	// the sweep runs its whole course and gives up on something still alive.
 	// The bound here is the test's; the monitor's is ten seconds.
-	m.sweepFn = func(ctx context.Context, logger *slog.Logger, pgid int) int {
+	m.sweepFn = func(
+		ctx context.Context,
+		logger *slog.Logger,
+		pgid int,
+		stopRequested func() bool,
+	) int {
 		ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 		defer cancel()
 		return sweepRunSurvivorsWith(ctx, logger, pgid, sweepOptions{
-			grace: 50 * time.Millisecond,
-			kill:  func(int, syscall.Signal) error { return nil },
+			grace:         50 * time.Millisecond,
+			kill:          func(int, syscall.Signal) error { return nil },
+			stopRequested: stopRequested,
 		})
 	}
 
@@ -208,6 +222,58 @@ func TestMonitorRunReportsSurvivorsTheSweepCouldNotReap(t *testing.T) {
 	})
 }
 
+// The fields the sweep reads sit after comm, which is parenthesized and may
+// hold spaces and parentheses of its own.
+func TestParseProcIDs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		stat string
+		want procIDs
+		err  bool
+	}{
+		{
+			name: "plain comm",
+			stat: "4242 (sleep) S 100 4200 4100 0 -1 4194560 104 0 0 0\n",
+			want: procIDs{ppid: 100, pgrp: 4200, session: 4100},
+		},
+		{
+			name: "comm with spaces and parentheses",
+			stat: "4242 (a (b) c) d)) S 100 4200 4100 0 -1 4194560 104 0 0 0\n",
+			want: procIDs{ppid: 100, pgrp: 4200, session: 4100},
+		},
+		{
+			name: "comm that looks like the fields",
+			stat: "4242 (x) S 1 2 3) R 100 4200 4100 0 -1\n",
+			want: procIDs{ppid: 100, pgrp: 4200, session: 4100},
+		},
+		{
+			name: "no end of comm",
+			stat: "4242 (sleep S 100 4200 4100 0\n",
+			err:  true,
+		},
+		{
+			name: "too few fields",
+			stat: "4242 (sleep) S 100 4200\n",
+			err:  true,
+		},
+		{
+			name: "pgrp not a number",
+			stat: "4242 (sleep) S 100 x 4100 0\n",
+			err:  true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseProcIDs(tc.stat)
+			if tc.err {
+				assert.Assert(t, err != nil, "parsed %q as %+v", tc.stat, got)
+				return
+			}
+			assert.NilError(t, err)
+			assert.Equal(t, got, tc.want)
+		})
+	}
+}
+
 // TestSweepHelperProcess is not a test of its own: it is the command the sweep
 // tests supervise. It starts the processes the environment asks for, reports
 // their pids and exits without waiting for either, which is what leaves them
@@ -217,28 +283,56 @@ func TestSweepHelperProcess(t *testing.T) {
 	var (
 		detachedPidPath = os.Getenv(sweepHelperDetachedEnv)
 		orphanPidPath   = os.Getenv(sweepHelperOrphanEnv)
+		ownGroupPidPath = os.Getenv(sweepHelperOwnGroupEnv)
 	)
-	if detachedPidPath == "" && orphanPidPath == "" {
+	if detachedPidPath == "" && orphanPidPath == "" && ownGroupPidPath == "" {
 		t.Skip("helper process: runs only as the command of a sweep test")
 	}
 	if detachedPidPath != "" {
-		startSurvivor(t, detachedPidPath, true)
+		startSurvivor(t, detachedPidPath, survivorOwnSession)
 	}
 	if orphanPidPath != "" {
-		startSurvivor(t, orphanPidPath, false)
+		startSurvivor(t, orphanPidPath, survivorInGroup)
+	}
+	if ownGroupPidPath != "" {
+		startSurvivor(t, ownGroupPidPath, survivorOwnGroup)
 	}
 }
 
+// survivorMode says where in the command's process tree a survivor sits.
+type survivorMode int
+
+const (
+	// survivorInGroup stays in the command's session and process group, the way
+	// a helper that simply outlived the process that started it does.
+	survivorInGroup survivorMode = iota
+	// survivorOwnSession breaks away into a session of its own, the way a
+	// program that deliberately detaches itself does.
+	survivorOwnSession
+	// survivorOwnGroup stays in the command's session but leads a process group
+	// of its own, the way a shell with job control places a background job, so
+	// a signal to the command's group never reaches it. It ignores SIGTERM, so
+	// only SIGKILL by its own pid ends it.
+	survivorOwnGroup
+)
+
 // startSurvivor starts a process that outlives this one and writes down the pid
-// it runs under. ownSession puts it in a session of its own, the way a program
-// that deliberately detaches itself does. Its output goes to the null device,
-// so what these tests observe is the sweep alone and not the run's drain of the
-// output a leftover holds open.
-func startSurvivor(t *testing.T, pidPath string, ownSession bool) {
+// it runs under. Its output goes to the null device, so what these tests
+// observe is the sweep alone and not the run's drain of the output a leftover
+// holds open.
+func startSurvivor(t *testing.T, pidPath string, mode survivorMode) {
 	t.Helper()
 	cmd := exec.Command("sleep", "300")
-	if ownSession {
+	switch mode {
+	case survivorInGroup:
+	case survivorOwnSession:
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	case survivorOwnGroup:
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		// An ignored disposition is inherited across the exec, while one this
+		// process handles is reset to the default there.
+		signal.Ignore(syscall.SIGTERM)
+		defer signal.Reset(syscall.SIGTERM)
 	}
 	assert.NilError(t, cmd.Start())
 	assert.NilError(t, os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600))
