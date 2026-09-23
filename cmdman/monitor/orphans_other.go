@@ -31,13 +31,17 @@ func becomeSubreaper() error {
 	return nil
 }
 
-// sweepRunSurvivors signals the process group the command led, which is as far
-// as the monitor can reach without being the reaper of its descendants: a
-// process that broke away into a session of its own survives unseen. It reaps
-// nothing, so it always reports zero left behind rather than a count it cannot
-// establish.
+// sweepRunSurvivors signals the process group the command led. The group is the
+// only handle this build has on what the run left behind: the monitor is not a
+// subreaper here and there is no /proc to scan, so it cannot enumerate the
+// leftovers and signal each one by pid the way the Linux build does. The cost
+// is the one the Linux build avoids: a helper that a process still handling a
+// stop signal forked into the group is signalled too. A process that broke
+// away into a session of its own survives unseen. It reaps nothing, so it
+// always reports zero left behind rather than a count it cannot establish.
 //
-// It returns as soon as the group is empty rather than always waiting out the
+// It sends SIGTERM only once a probe shows the group still has a member, and it
+// returns as soon as the group is empty rather than always waiting out the
 // grace, so a run whose leftovers exit promptly on SIGTERM does not pay the
 // full delay at every run end. Only a group that is still alive when the grace
 // (or the sweep bound carried on ctx) runs out is escalated to SIGKILL.
@@ -45,22 +49,23 @@ func sweepRunSurvivors(ctx context.Context, logger *slog.Logger, pgid int) int {
 	if pgid <= 0 {
 		return 0
 	}
+	// Signal 0 delivers nothing; it only reports whether the group still has a
+	// member the monitor may signal.
+	if err := signalProcessGroup(pgid, 0); errors.Is(err, syscall.ESRCH) {
+		// Nothing outlived the run, so there is nothing to signal, wait on or
+		// kill.
+		return 0
+	}
 	logger.DebugContext(ctx, "signalling the process group the run leaves behind",
 		slog.Int("pgid", pgid),
 	)
-	if err := signalProcessGroup(pgid, syscall.SIGTERM); errors.Is(err, syscall.ESRCH) {
-		// The group has no members: nothing outlived the run, so there is
-		// nothing to wait on or kill.
-		return 0
-	}
+	_ = signalProcessGroup(pgid, syscall.SIGTERM)
 
 	deadline := time.NewTimer(orphanGrace)
 	defer deadline.Stop()
 	tick := time.NewTicker(sweepPoll)
 	defer tick.Stop()
 	for {
-		// Signal 0 delivers nothing; it only reports whether the group still has
-		// a member the monitor may signal.
 		if err := signalProcessGroup(pgid, 0); errors.Is(err, syscall.ESRCH) {
 			return 0
 		}

@@ -75,11 +75,14 @@ func sweepRunSurvivorsWith(
 	}
 	self := os.Getpid()
 
-	// One group-wide signal first: everything the command spawned that stayed
-	// in its process group hears it at once, including processes the scan below
-	// cannot see yet because their own parent is still alive.
-	_ = opts.kill(-pgid, syscall.SIGTERM)
-
+	// The sweep never signals the command's process group. A run that ends on a
+	// stop has already had that signal delivered to the group, and a process
+	// still handling it may have forked a helper into the same group to do the
+	// work: podman runs `crun kill` that way, and when that helper is killed
+	// mid-way podman exits without cleaning up its container. The scan below
+	// only finds processes already reparented to the monitor, so a helper whose
+	// parent is still alive is left alone until that parent is gone, and the
+	// rescan then reaches it by pid like any other survivor.
 	for {
 		found, err := runSurvivors(self, pgid)
 		if err != nil {

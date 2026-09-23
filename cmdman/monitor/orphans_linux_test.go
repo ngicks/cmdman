@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -18,6 +19,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/config"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/store"
+	"golang.org/x/sys/unix"
 	"gotest.tools/v3/assert"
 )
 
@@ -76,8 +78,7 @@ func TestMonitorRunSweepsWhatTheCommandLeftBehind(t *testing.T) {
 
 	// The one that stayed in the command's session is reaped: it is a child of
 	// the monitor once its parent exits, and its session id still matches the
-	// run's, so the scan finds it. It also sat in the run's process group, so the
-	// group-wide signal reaches it even before the scan.
+	// run's, so the scan finds it.
 	assert.Assert(
 		t,
 		survivorGone(t, orphan),
@@ -86,9 +87,8 @@ func TestMonitorRunSweepsWhatTheCommandLeftBehind(t *testing.T) {
 	// The one that broke away into a session of its own is spared, the way a
 	// shared multiplexer server that must outlive the run is spared. Its session
 	// id no longer matches the run's, so the scan passes it by even though it is
-	// a child of the monitor too, and its own session put it out of reach of the
-	// group-wide signal. This is the guarantee that keeps the sweep from tearing
-	// down a deliberately detached daemon.
+	// a child of the monitor too. This is the guarantee that keeps the sweep from
+	// tearing down a deliberately detached daemon.
 	detachedStat, detachedFound := procStatOf(t, detached)
 	assert.Assert(
 		t,
@@ -103,6 +103,59 @@ func TestMonitorRunSweepsWhatTheCommandLeftBehind(t *testing.T) {
 		"the sweep took the running hook down with the command's leftovers",
 	)
 
+	assert.Assert(t, len(m.runAnomalies) == 0, "the run reported %v", m.runAnomalies)
+}
+
+// The sweep signals what the command left behind one pid at a time and never
+// the command's process group. When a stop ends the run, a process still
+// handling that stop may have forked a helper into the group, and a group-wide
+// signal from the sweep would kill that helper before it is done. kill takes a
+// negative pid, or zero, as a process group, so every pid the sweep hands it
+// must be positive.
+func TestMonitorRunSweepNeverSignalsTheProcessGroup(t *testing.T) {
+	assert.NilError(t, becomeSubreaper())
+
+	dir := t.TempDir()
+	orphanPidPath := filepath.Join(dir, "orphan.pid")
+	t.Cleanup(func() { killSurvivor(t, orphanPidPath) })
+
+	m, _, _ := newSurvivorMonitor(t, dir, "test-monitor-sweep-no-group-signal", []string{
+		sweepHelperOrphanEnv + "=" + orphanPidPath,
+	})
+
+	// The stub still delivers every signal, so the leftover is taken down and
+	// the run ends the way it would without the recording. The slice is read
+	// only once runOnceWithin has received the run's outcome, which orders it
+	// after every append.
+	var signalled []int
+	m.sweepFn = func(ctx context.Context, logger *slog.Logger, pgid int) int {
+		opts := defaultSweepOptions()
+		opts.kill = func(pid int, sig syscall.Signal) error {
+			signalled = append(signalled, pid)
+			return unix.Kill(pid, sig)
+		}
+		return sweepRunSurvivorsWith(ctx, logger, pgid, opts)
+	}
+
+	assert.Equal(t, runOnceWithin(t, m, 30*time.Second), 0)
+
+	for _, pid := range signalled {
+		assert.Assert(t, pid > 0, "the sweep signalled a process group: kill(%d)", pid)
+	}
+	orphan, ok := readPidFile(t, orphanPidPath)
+	assert.Assert(t, ok, "the helper in the command's session never reported a pid")
+	// A sweep that signalled nothing at all would pass the check above, so the
+	// leftover must have been signalled by its own pid.
+	assert.Assert(
+		t,
+		slices.Contains(signalled, orphan),
+		"the sweep never signalled the leftover %d; it signalled %v", orphan, signalled,
+	)
+	assert.Assert(
+		t,
+		survivorGone(t, orphan),
+		"the process the command left in its own session outlived the run",
+	)
 	assert.Assert(t, len(m.runAnomalies) == 0, "the run reported %v", m.runAnomalies)
 }
 
