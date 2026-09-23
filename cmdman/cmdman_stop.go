@@ -112,12 +112,56 @@ func (s *Service) stop(
 	// keeps the wait below and its error reporting on the client's own clock.
 	killSig, _, _ := hrstr.ParseSignal("SIGKILL")
 	if err := s.sendStop(ctx, st, id, killSig, 0); err != nil {
-		return fmt.Errorf("timeout waiting for stop, and SIGKILL failed: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			// A command that removes itself is gone from the store once the
+			// monitor's own SIGKILL ended its run, which is the stop having
+			// succeeded.
+			return nil
+		}
+		killErr := fmt.Errorf("timeout waiting for stop, and SIGKILL failed: %w", err)
+		if isMonitorUnavailable(err) {
+			return s.settleUnreachableKill(ctx, st, id, cfg, killErr)
+		}
+		return killErr
 	}
 	if err := waitForStopped(ctx, st, id, timeout); err != nil {
 		return fmt.Errorf("timeout waiting for stop after SIGKILL: %w", err)
 	}
 	return nil
+}
+
+// settleUnreachableKill decides what a monitor that could not be reached with
+// the stop's SIGKILL means. The monitor escalates at the same deadline as the
+// client, and the run that SIGKILL ends takes the monitor down with it, so the
+// monitor is often gone by the time the client's own SIGKILL connects. The
+// monitor records the terminal state before it closes its socket, so a
+// terminal state here is a stop that succeeded.
+//
+// Anything else is a monitor that died on the way. Its death is recorded, but
+// the stop still reports killErr: the client's SIGKILL never went out, and a
+// monitor that died short of recording the end of the run may never have sent
+// its own, so whatever ignored the stop's signal may still be running.
+func (s *Service) settleUnreachableKill(
+	ctx context.Context,
+	st *store.Store,
+	id string,
+	cfg *model.CommandConfig,
+	killErr error,
+) error {
+	state, _, stateJSON, err := st.GetCommandState(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return errors.Join(killErr, fmt.Errorf("get command state: %w", err))
+	}
+	if state == model.EventTypeExited || state == model.EventTypeFailed {
+		return nil
+	}
+	if err := monitor.MarkMonitorDied(ctx, st, s.cfg, id, stateJSON, cfg); err != nil {
+		return errors.Join(killErr, err)
+	}
+	return killErr
 }
 
 func (s *Service) sendStop(
