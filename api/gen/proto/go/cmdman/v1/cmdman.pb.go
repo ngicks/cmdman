@@ -9,6 +9,7 @@ package cmdmanv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
@@ -713,8 +714,12 @@ func (*SignalResponse) Descriptor() ([]byte, []int) {
 }
 
 type StopRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Signal        int32                  `protobuf:"varint,1,opt,name=signal,proto3" json:"signal,omitempty"` // e.g. 15 for SIGTERM
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Signal int32                  `protobuf:"varint,1,opt,name=signal,proto3" json:"signal,omitempty"` // e.g. 15 for SIGTERM
+	// timeout is how long the monitor waits after delivering signal before it
+	// escalates to SIGKILL on its own. Unset or zero means the monitor never
+	// escalates and the client is the only escalation.
+	Timeout       *durationpb.Duration `protobuf:"bytes,2,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -754,6 +759,13 @@ func (x *StopRequest) GetSignal() int32 {
 		return x.Signal
 	}
 	return 0
+}
+
+func (x *StopRequest) GetTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.Timeout
+	}
+	return nil
 }
 
 type StopResponse struct {
@@ -1474,7 +1486,7 @@ var File_cmdman_v1_cmdman_proto protoreflect.FileDescriptor
 
 const file_cmdman_v1_cmdman_proto_rawDesc = "" +
 	"\n" +
-	"\x16cmdman/v1/cmdman.proto\x12\tcmdman.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"b\n" +
+	"\x16cmdman/v1/cmdman.proto\x12\tcmdman.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"b\n" +
 	"\rAttachRequest\x12\x16\n" +
 	"\x05stdin\x18\x01 \x01(\fH\x00R\x05stdin\x120\n" +
 	"\x06resize\x18\x02 \x01(\v2\x16.cmdman.v1.ResizeEventH\x00R\x06resizeB\a\n" +
@@ -1503,9 +1515,10 @@ const file_cmdman_v1_cmdman_proto_rawDesc = "" +
 	"\x12WriteStdinResponse\"'\n" +
 	"\rSignalRequest\x12\x16\n" +
 	"\x06signal\x18\x01 \x01(\x05R\x06signal\"\x10\n" +
-	"\x0eSignalResponse\"%\n" +
+	"\x0eSignalResponse\"Z\n" +
 	"\vStopRequest\x12\x16\n" +
-	"\x06signal\x18\x01 \x01(\x05R\x06signal\"\x0e\n" +
+	"\x06signal\x18\x01 \x01(\x05R\x06signal\x123\n" +
+	"\atimeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"\x0e\n" +
 	"\fStopResponse\"\x0f\n" +
 	"\rStatusRequest\"\x93\x01\n" +
 	"\x0eStatusResponse\x12\x14\n" +
@@ -1619,6 +1632,7 @@ var file_cmdman_v1_cmdman_proto_goTypes = []any{
 	(*CaptureScreenRequest)(nil),         // 26: cmdman.v1.CaptureScreenRequest
 	(*CaptureScreenResponse)(nil),        // 27: cmdman.v1.CaptureScreenResponse
 	(*timestamppb.Timestamp)(nil),        // 28: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),          // 29: google.protobuf.Duration
 }
 var file_cmdman_v1_cmdman_proto_depIdxs = []int32{
 	4,  // 0: cmdman.v1.AttachRequest.resize:type_name -> cmdman.v1.ResizeEvent
@@ -1627,38 +1641,39 @@ var file_cmdman_v1_cmdman_proto_depIdxs = []int32{
 	0,  // 3: cmdman.v1.LogLine.stream:type_name -> cmdman.v1.LogStream
 	8,  // 4: cmdman.v1.SubscribeResponse.offset:type_name -> cmdman.v1.SubscribeOffset
 	5,  // 5: cmdman.v1.SubscribeResponse.line:type_name -> cmdman.v1.LogLine
-	17, // 6: cmdman.v1.StatusResponse.runtime_state:type_name -> cmdman.v1.RuntimeState
-	1,  // 7: cmdman.v1.RuntimeState.status:type_name -> cmdman.v1.ReportedStatus
-	17, // 8: cmdman.v1.WatchRuntimeStateResponse.state:type_name -> cmdman.v1.RuntimeState
-	1,  // 9: cmdman.v1.SetReportedStatusRequest.status:type_name -> cmdman.v1.ReportedStatus
-	1,  // 10: cmdman.v1.GetReportedStatusResponse.status:type_name -> cmdman.v1.ReportedStatus
-	2,  // 11: cmdman.v1.CommandMonitorService.Attach:input_type -> cmdman.v1.AttachRequest
-	6,  // 12: cmdman.v1.CommandMonitorService.Subscribe:input_type -> cmdman.v1.SubscribeRequest
-	9,  // 13: cmdman.v1.CommandMonitorService.WriteStdin:input_type -> cmdman.v1.WriteStdinRequest
-	11, // 14: cmdman.v1.CommandMonitorService.Signal:input_type -> cmdman.v1.SignalRequest
-	13, // 15: cmdman.v1.CommandMonitorService.Stop:input_type -> cmdman.v1.StopRequest
-	15, // 16: cmdman.v1.CommandMonitorService.Status:input_type -> cmdman.v1.StatusRequest
-	18, // 17: cmdman.v1.CommandMonitorService.WatchRuntimeState:input_type -> cmdman.v1.WatchRuntimeStateRequest
-	20, // 18: cmdman.v1.CommandMonitorService.SetReportedStatus:input_type -> cmdman.v1.SetReportedStatusRequest
-	22, // 19: cmdman.v1.CommandMonitorService.GetReportedStatus:input_type -> cmdman.v1.GetReportedStatusRequest
-	24, // 20: cmdman.v1.CommandMonitorService.DeleteReportedStatus:input_type -> cmdman.v1.DeleteReportedStatusRequest
-	26, // 21: cmdman.v1.CommandMonitorService.CaptureScreen:input_type -> cmdman.v1.CaptureScreenRequest
-	3,  // 22: cmdman.v1.CommandMonitorService.Attach:output_type -> cmdman.v1.AttachResponse
-	7,  // 23: cmdman.v1.CommandMonitorService.Subscribe:output_type -> cmdman.v1.SubscribeResponse
-	10, // 24: cmdman.v1.CommandMonitorService.WriteStdin:output_type -> cmdman.v1.WriteStdinResponse
-	12, // 25: cmdman.v1.CommandMonitorService.Signal:output_type -> cmdman.v1.SignalResponse
-	14, // 26: cmdman.v1.CommandMonitorService.Stop:output_type -> cmdman.v1.StopResponse
-	16, // 27: cmdman.v1.CommandMonitorService.Status:output_type -> cmdman.v1.StatusResponse
-	19, // 28: cmdman.v1.CommandMonitorService.WatchRuntimeState:output_type -> cmdman.v1.WatchRuntimeStateResponse
-	21, // 29: cmdman.v1.CommandMonitorService.SetReportedStatus:output_type -> cmdman.v1.SetReportedStatusResponse
-	23, // 30: cmdman.v1.CommandMonitorService.GetReportedStatus:output_type -> cmdman.v1.GetReportedStatusResponse
-	25, // 31: cmdman.v1.CommandMonitorService.DeleteReportedStatus:output_type -> cmdman.v1.DeleteReportedStatusResponse
-	27, // 32: cmdman.v1.CommandMonitorService.CaptureScreen:output_type -> cmdman.v1.CaptureScreenResponse
-	22, // [22:33] is the sub-list for method output_type
-	11, // [11:22] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	29, // 6: cmdman.v1.StopRequest.timeout:type_name -> google.protobuf.Duration
+	17, // 7: cmdman.v1.StatusResponse.runtime_state:type_name -> cmdman.v1.RuntimeState
+	1,  // 8: cmdman.v1.RuntimeState.status:type_name -> cmdman.v1.ReportedStatus
+	17, // 9: cmdman.v1.WatchRuntimeStateResponse.state:type_name -> cmdman.v1.RuntimeState
+	1,  // 10: cmdman.v1.SetReportedStatusRequest.status:type_name -> cmdman.v1.ReportedStatus
+	1,  // 11: cmdman.v1.GetReportedStatusResponse.status:type_name -> cmdman.v1.ReportedStatus
+	2,  // 12: cmdman.v1.CommandMonitorService.Attach:input_type -> cmdman.v1.AttachRequest
+	6,  // 13: cmdman.v1.CommandMonitorService.Subscribe:input_type -> cmdman.v1.SubscribeRequest
+	9,  // 14: cmdman.v1.CommandMonitorService.WriteStdin:input_type -> cmdman.v1.WriteStdinRequest
+	11, // 15: cmdman.v1.CommandMonitorService.Signal:input_type -> cmdman.v1.SignalRequest
+	13, // 16: cmdman.v1.CommandMonitorService.Stop:input_type -> cmdman.v1.StopRequest
+	15, // 17: cmdman.v1.CommandMonitorService.Status:input_type -> cmdman.v1.StatusRequest
+	18, // 18: cmdman.v1.CommandMonitorService.WatchRuntimeState:input_type -> cmdman.v1.WatchRuntimeStateRequest
+	20, // 19: cmdman.v1.CommandMonitorService.SetReportedStatus:input_type -> cmdman.v1.SetReportedStatusRequest
+	22, // 20: cmdman.v1.CommandMonitorService.GetReportedStatus:input_type -> cmdman.v1.GetReportedStatusRequest
+	24, // 21: cmdman.v1.CommandMonitorService.DeleteReportedStatus:input_type -> cmdman.v1.DeleteReportedStatusRequest
+	26, // 22: cmdman.v1.CommandMonitorService.CaptureScreen:input_type -> cmdman.v1.CaptureScreenRequest
+	3,  // 23: cmdman.v1.CommandMonitorService.Attach:output_type -> cmdman.v1.AttachResponse
+	7,  // 24: cmdman.v1.CommandMonitorService.Subscribe:output_type -> cmdman.v1.SubscribeResponse
+	10, // 25: cmdman.v1.CommandMonitorService.WriteStdin:output_type -> cmdman.v1.WriteStdinResponse
+	12, // 26: cmdman.v1.CommandMonitorService.Signal:output_type -> cmdman.v1.SignalResponse
+	14, // 27: cmdman.v1.CommandMonitorService.Stop:output_type -> cmdman.v1.StopResponse
+	16, // 28: cmdman.v1.CommandMonitorService.Status:output_type -> cmdman.v1.StatusResponse
+	19, // 29: cmdman.v1.CommandMonitorService.WatchRuntimeState:output_type -> cmdman.v1.WatchRuntimeStateResponse
+	21, // 30: cmdman.v1.CommandMonitorService.SetReportedStatus:output_type -> cmdman.v1.SetReportedStatusResponse
+	23, // 31: cmdman.v1.CommandMonitorService.GetReportedStatus:output_type -> cmdman.v1.GetReportedStatusResponse
+	25, // 32: cmdman.v1.CommandMonitorService.DeleteReportedStatus:output_type -> cmdman.v1.DeleteReportedStatusResponse
+	27, // 33: cmdman.v1.CommandMonitorService.CaptureScreen:output_type -> cmdman.v1.CaptureScreenResponse
+	23, // [23:34] is the sub-list for method output_type
+	12, // [12:23] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_cmdman_v1_cmdman_proto_init() }

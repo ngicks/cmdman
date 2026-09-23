@@ -21,10 +21,41 @@ import (
 func TestMonitorStopWithoutProcessSucceeds(t *testing.T) {
 	var m Monitor
 
-	assert.NilError(t, m.StopProcess(syscall.SIGTERM))
+	assert.NilError(t, m.StopProcess(syscall.SIGTERM, 0))
 	assert.Assert(t, m.stopRequested.Load(), "the stop did not suppress restarts")
 
 	assert.ErrorIs(t, m.SignalProcess(syscall.SIGTERM), errNoRunningProcess)
+}
+
+// Each stop replaces the deadline an earlier one armed, so there is never more
+// than one SIGKILL pending. SIGKILL has nothing left to escalate to and arms
+// none.
+func TestMonitorStopReplacesDeadline(t *testing.T) {
+	var m Monitor
+	deadline := func() *time.Timer {
+		m.procMu.Lock()
+		defer m.procMu.Unlock()
+		return m.stopDeadline
+	}
+
+	assert.NilError(t, m.StopProcess(syscall.SIGTERM, time.Minute))
+	first := deadline()
+	assert.Assert(t, first != nil, "the stop armed no deadline")
+
+	assert.NilError(t, m.StopProcess(syscall.SIGTERM, time.Minute))
+	second := deadline()
+	assert.Assert(
+		t,
+		second != nil && second != first,
+		"the second stop armed no deadline of its own",
+	)
+	// Stop reports whether it was the one to stop the timer, so false means the
+	// second stop already had.
+	assert.Assert(t, !first.Stop(), "the earlier deadline is still pending")
+
+	assert.NilError(t, m.StopProcess(syscall.SIGKILL, time.Minute))
+	assert.Assert(t, deadline() == nil, "SIGKILL armed a deadline")
+	assert.Assert(t, !second.Stop(), "the deadline SIGKILL superseded is still pending")
 }
 
 // A command that exits at once leaves an empty process group behind, so a stop
@@ -71,7 +102,7 @@ func TestMonitorStopDuringRunEndEndsRestartLoop(t *testing.T) {
 	m.sweepFn = func(context.Context, *slog.Logger, int) int {
 		if !stopped {
 			stopped = true
-			stopErr = m.StopProcess(syscall.SIGTERM)
+			stopErr = m.StopProcess(syscall.SIGTERM, 0)
 		}
 		return 0
 	}

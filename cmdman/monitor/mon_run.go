@@ -358,6 +358,10 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	// them.
 	m.procMu.Lock()
 	m.runPgid = 0
+	if m.stopDeadline != nil {
+		m.stopDeadline.Stop()
+		m.stopDeadline = nil
+	}
 	m.procMu.Unlock()
 
 	// Runtime state dies with the run (D13). Clearing it here rather than only

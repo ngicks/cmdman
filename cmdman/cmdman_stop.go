@@ -12,6 +12,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/monitor"
 	"github.com/ngicks/cmdman/cmdman/store"
 	"github.com/ngicks/cmdman/pkg/hrstr"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // StopRequest defines a stop operation across explicit targets and/or labels.
@@ -94,7 +95,7 @@ func (s *Service) stop(
 		},
 	})
 
-	if err := s.sendStop(ctx, st, id, sig); err != nil {
+	if err := s.sendStop(ctx, st, id, sig, timeout); err != nil {
 		if isMonitorUnavailable(err) {
 			return monitor.MarkMonitorDied(ctx, st, s.cfg, id, stateJSON, cfg)
 		}
@@ -106,8 +107,11 @@ func (s *Service) stop(
 		return err
 	}
 
+	// The monitor escalates to SIGKILL on its own at the same deadline. This
+	// SIGKILL stays anyway: a duplicate SIGKILL is harmless, and sending it here
+	// keeps the wait below and its error reporting on the client's own clock.
 	killSig, _, _ := hrstr.ParseSignal("SIGKILL")
-	if err := s.sendStop(ctx, st, id, killSig); err != nil {
+	if err := s.sendStop(ctx, st, id, killSig, 0); err != nil {
 		return fmt.Errorf("timeout waiting for stop, and SIGKILL failed: %w", err)
 	}
 	if err := waitForStopped(ctx, st, id, timeout); err != nil {
@@ -116,7 +120,13 @@ func (s *Service) stop(
 	return nil
 }
 
-func (s *Service) sendStop(ctx context.Context, st *store.Store, id string, sig int32) error {
+func (s *Service) sendStop(
+	ctx context.Context,
+	st *store.Store,
+	id string,
+	sig int32,
+	timeout time.Duration,
+) error {
 	_, _, stateJSON, err := st.GetCommandState(id)
 	if err != nil {
 		return err
@@ -129,7 +139,11 @@ func (s *Service) sendStop(ctx context.Context, st *store.Store, id string, sig 
 	defer conn.Close()
 
 	client := cmdmanv1pb.NewCommandMonitorServiceClient(conn)
-	_, err = client.Stop(ctx, &cmdmanv1pb.StopRequest{Signal: sig})
+	req := &cmdmanv1pb.StopRequest{Signal: sig}
+	if timeout > 0 {
+		req.Timeout = durationpb.New(timeout)
+	}
+	_, err = client.Stop(ctx, req)
 	return err
 }
 
