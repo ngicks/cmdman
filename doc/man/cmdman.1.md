@@ -33,15 +33,45 @@ launch or supervise the process become `failed`.
 Restart policies are enforced by the detached monitor. Explicit `stop` requests
 do not trigger policy-based restart.
 
-When the command's own process exits, the monitor terminates and reaps the
-processes the command left in its own session before it changes the state. The
-sweep sends `SIGTERM`, allows a 2 second grace period, then sends `SIGKILL`, so a
-restart never stacks a run's in-session leftovers on top of the new run. A
-process that made a session of its own is left alone: a program that deliberately
-detached to outlive the run, such as a shared terminal-multiplexer server, is not
-swept, and a restart does not tear it down. On non-Linux hosts the monitor
-signals only the command's process group. The sweep does not affect hooks the
-monitor runs.
+When the command's own process exits, the monitor deals with the processes the
+command left in its own session before it changes the state. The monitor treats
+them differently after a natural exit and after a stop. In both cases it leaves
+alone a process that made a session of its own. A program that deliberately
+detached to outlive the run, such as a shared terminal-multiplexer server, is
+never swept, and a restart does not tear it down. The sweep does not affect
+hooks the monitor runs.
+
+After a crash or a normal exit, the monitor runs a full sweep. On Linux the
+monitor reaps the leftovers, sends `SIGTERM` to each one by PID, waits
+2 seconds, sends `SIGKILL`, reaps again, and rescans until the session is empty.
+The sweep gives up after 10 seconds. It signals individual PIDs only and never
+signals the process group. Other platforms offer the monitor no subreaper and no
+`/proc`. The monitor cannot enumerate the leftovers there. On those platforms
+the sweep probes the command's process group, sends it `SIGTERM` once when the
+probe finds a member, and sends it `SIGKILL` after the 2 second grace period. A
+restart therefore never stacks a run's in-session leftovers on top of the new
+run.
+
+After a stop, the sweep sends no signal of its own on any platform. A stop comes
+from `cmdman stop`, `cmdman compose stop`, `cmdman compose down`, or the TUI.
+The stop already delivered the configured stop signal to the whole process
+group once. A leftover of a wrapper shell that exited first is usually the
+process that carries out the stop. Podman waiting for its container is one
+example. The monitor only reaps the leftovers and waits for them. `SIGKILL`
+comes from the stop's `--timeout` alone. The client sends `SIGKILL` when the
+timeout expires, and the monitor escalates at the same deadline on its own. An
+interrupted `cmdman stop` therefore still ends the command. A signal to the
+process group cannot reach a survivor that runs in a process group of its own
+inside the command's session. After the `SIGKILL` went out, the monitor sends
+`SIGKILL` to each such survivor. The monitor reports the processes still alive
+10 seconds after that `SIGKILL` as `survivors_unreaped` on the `exited` event
+and as a warning in the command state. A stop that arrives while a natural-exit
+sweep is in progress ends that sweep's own signalling at once.
+
+The stop's `--timeout` is the single setting for how long a stop waits before
+`SIGKILL`. It also covers the survivors of a wrapper that exited early. A stop
+adds no grace period of its own. A wrapper script does not need `exec` to stop
+correctly. Using `exec` in a wrapper script remains good hygiene.
 
 ## Reported Status
 
