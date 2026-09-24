@@ -447,14 +447,19 @@ func (m *Monitor) sweepSurvivors(ctx context.Context, pgid int) {
 		// how long the stop may take is the stop's call, and the stop's SIGKILL -
 		// its deadline's or the client's - is what ends the wait.
 		unreaped = await(ctx, logger, pgid, m.stopKilled.Load)
-		if ctx.Err() != nil {
-			// The monitor is shutting down, so nothing is left to see the stop
-			// through, and what the command left behind would outlive its
-			// supervisor. The terminating sweep takes it down instead, told that
-			// no stop is in progress so it does not hand the survivors straight
-			// back. It finds nothing when the await already saw the session
-			// empty. The count the await reported is not a precondition: the
-			// build without /proc cannot count at all.
+		if ctx.Err() != nil && !m.stopKilled.Load() {
+			// The monitor is shutting down before the stop's SIGKILL went out, so
+			// nothing is left to see the stop through, and what the command left
+			// behind would outlive its supervisor. The terminating sweep takes it
+			// down instead, told that no stop is in progress so it does not hand
+			// the survivors straight back. It finds nothing when the await already
+			// saw the session empty. The count the await reported is not a
+			// precondition: the build without /proc cannot count at all.
+			//
+			// Once the stop's SIGKILL is out, the await has run its kill phase on
+			// a bound of its own that ignores the shutdown, and a second pass would
+			// only spend another bound on what that SIGKILL could not take down
+			// and replace the count the kill phase reported.
 			unreaped = terminate(func() bool { return false })
 		}
 	}

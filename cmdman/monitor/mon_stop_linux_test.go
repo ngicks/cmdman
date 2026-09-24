@@ -375,6 +375,40 @@ func TestMonitorShutdownDuringStopFallsBackToSweep(t *testing.T) {
 	assert.Assert(t, len(m.runAnomalies) == 0, "the run reported %v", m.runAnomalies)
 }
 
+// Once the stop's SIGKILL is out, the await runs its kill phase on a bound of
+// its own, and a monitor shutting down meanwhile adds no terminating sweep on
+// top. The run reports what the kill phase left alive.
+func TestMonitorShutdownAfterStopKillKeepsAwaitCount(t *testing.T) {
+	var m Monitor
+	assert.NilError(t, m.StopProcess(syscall.SIGKILL, 0))
+
+	swept := 0
+	m.sweepFn = func(context.Context, *slog.Logger, int, func() bool) int {
+		swept++
+		return 0
+	}
+	const unreaped = 3
+	var sawKill bool
+	m.awaitFn = func(_ context.Context, _ *slog.Logger, _ int, killed func() bool) int {
+		sawKill = killed()
+		return unreaped
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	// The stubs never look at the group, so any positive pgid does.
+	m.sweepSurvivors(ctx, 1)
+
+	assert.Assert(t, sawKill, "the await was not told the stop's SIGKILL is out")
+	assert.Equal(t, swept, 0, "the terminating sweep ran %d times after the kill phase", swept)
+	assert.Assert(
+		t,
+		slices.Equal(m.runAnomalies, []runAnomaly{anomalySurvivorsUnreaped(unreaped)}),
+		"the run reported %v",
+		m.runAnomalies,
+	)
+}
+
 // A stop can land while the terminating sweep is going. From then on what is
 // left belongs to the stop: the sweep sends nothing further, does not sit out
 // the rest of its grace, and the await takes over until the stop's own SIGKILL.
