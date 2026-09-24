@@ -58,7 +58,7 @@ func (s *Service) stop(
 	signalOverride string,
 	timeout time.Duration,
 ) error {
-	state, _, stateJSON, err := st.GetCommandState(id)
+	state, _, _, err := st.GetCommandState(id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -97,7 +97,9 @@ func (s *Service) stop(
 
 	if err := s.sendStop(ctx, st, id, sig, timeout); err != nil {
 		if isMonitorUnavailable(err) {
-			return monitor.MarkMonitorDied(ctx, st, s.cfg, id, stateJSON, cfg)
+			// From the user's point of view, a monitor gone before the stop
+			// reached it is a done stop.
+			return s.settleUnreachableMonitor(ctx, st, id, cfg, nil)
 		}
 		return err
 	}
@@ -120,7 +122,10 @@ func (s *Service) stop(
 		}
 		killErr := fmt.Errorf("timeout waiting for stop, and SIGKILL failed: %w", err)
 		if isMonitorUnavailable(err) {
-			return s.settleUnreachableKill(ctx, st, id, cfg, killErr)
+			// The client's SIGKILL never went out, and a monitor that died short
+			// of recording the end of the run may never have sent its own, so
+			// whatever ignored the stop's signal may still be running.
+			return s.settleUnreachableMonitor(ctx, st, id, cfg, killErr)
 		}
 		return killErr
 	}
@@ -130,38 +135,40 @@ func (s *Service) stop(
 	return nil
 }
 
-// settleUnreachableKill decides what a monitor that could not be reached with
-// the stop's SIGKILL means. The monitor escalates at the same deadline as the
-// client, and the run that SIGKILL ends takes the monitor down with it, so the
-// monitor is often gone by the time the client's own SIGKILL connects. The
-// monitor records the terminal state before it closes its socket, so a
-// terminal state here is a stop that succeeded.
+// settleUnreachableMonitor decides what a monitor the stop could not reach
+// means. The state read before the connect can be stale by then: the command
+// may have exited on its own in between, and the monitor escalates a stop at
+// the same deadline as the client, so the run its SIGKILL ends often takes the
+// monitor down before the client's own SIGKILL connects. The monitor records
+// the terminal state before it closes its socket, so the state is read again
+// here, and a terminal state or a removed command is a stop that succeeded.
+// Marking that command failed would turn a clean end into a dead monitor.
 //
-// Anything else is a monitor that died on the way. Its death is recorded, but
-// the stop still reports killErr: the client's SIGKILL never went out, and a
-// monitor that died short of recording the end of the run may never have sent
-// its own, so whatever ignored the stop's signal may still be running.
-func (s *Service) settleUnreachableKill(
+// Anything else is a monitor that died on the way. Its death is recorded on top
+// of the state just read, not the stale one, so nothing the monitor wrote since
+// is lost. The caller passes what the stop reports in that case as retErr. A
+// nil retErr means the monitor's death alone settles the stop.
+func (s *Service) settleUnreachableMonitor(
 	ctx context.Context,
 	st *store.Store,
 	id string,
 	cfg *model.CommandConfig,
-	killErr error,
+	retErr error,
 ) error {
 	state, _, stateJSON, err := st.GetCommandState(id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
-		return errors.Join(killErr, fmt.Errorf("get command state: %w", err))
+		return errors.Join(retErr, fmt.Errorf("get command state: %w", err))
 	}
 	if state == model.EventTypeExited || state == model.EventTypeFailed {
 		return nil
 	}
 	if err := monitor.MarkMonitorDied(ctx, st, s.cfg, id, stateJSON, cfg); err != nil {
-		return errors.Join(killErr, err)
+		return errors.Join(retErr, err)
 	}
-	return killErr
+	return retErr
 }
 
 func (s *Service) sendStop(
