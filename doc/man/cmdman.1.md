@@ -65,8 +65,10 @@ process group cannot reach a survivor that runs in a process group of its own
 inside the command's session. After the `SIGKILL` went out, the monitor sends
 `SIGKILL` to each such survivor. The monitor reports the processes still alive
 10 seconds after that `SIGKILL` as `survivors_unreaped` on the `exited` event
-and as a warning in the command state. A stop that arrives while a natural-exit
-sweep is in progress ends that sweep's own signalling at once.
+and as a warning in the command state. On platforms other than Linux the monitor
+cannot enumerate the survivors, sends nothing after the stop's `SIGKILL`, and
+reports no count. A stop that arrives while a natural-exit sweep is in progress
+ends that sweep's own signalling at once.
 
 The stop's `--timeout` is the single setting for how long a stop waits before
 `SIGKILL`. It also covers the survivors of a wrapper that exited early. A stop

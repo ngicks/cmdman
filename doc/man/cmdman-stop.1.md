@@ -23,8 +23,11 @@ command. A signal to the process group cannot reach a survivor that runs in a
 process group of its own inside the command's session. After the `SIGKILL` went
 out, the monitor sends `SIGKILL` to each such survivor. The monitor reports the
 processes still alive 10 seconds after that `SIGKILL` as `survivors_unreaped` on
-the `exited` event and as a warning in the command state.
-[cmdman-events(1)](./cmdman-events.1.md) describes that attribute.
+the `exited` event and as a warning in the command state. On platforms other
+than Linux the monitor cannot enumerate the survivors, sends nothing after the
+stop's `SIGKILL`, and reports no count.
+[cmdman-events(1)](./cmdman-events.1.md) describes the `survivors_unreaped`
+attribute.
 
 The whole process group is targeted, so child processes launched by a shell are
 normally stopped with their parent. A stop request suppresses monitor restart

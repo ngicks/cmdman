@@ -70,9 +70,10 @@ Two process roles per command:
     waits. SIGKILL comes from `--timeout` alone: the client sends it at the timeout, and the
     monitor escalates at the same deadline itself. An interrupted stop therefore still ends the
     command. After that SIGKILL the monitor kills each survivor in its own pgid inside the
-    session; whatever is alive 10 s later becomes `survivors_unreaped`. A stop during a
-    natural-exit sweep ends that sweep's signalling at once. `--timeout` is the single stop knob;
-    wrappers do not need `exec`.
+    session; whatever is alive 10 s later becomes `survivors_unreaped`. On platforms other than
+    Linux the monitor cannot enumerate survivors, sends nothing after that SIGKILL, and reports no
+    count. A stop during a natural-exit sweep ends that sweep's signalling at once. `--timeout`
+    is the single stop knob; wrappers do not need `exec`.
   - The output readers (pty or monitor-owned pipes) are detached after a bounded drain wait rather
     than joined, so `cmd.Wait` returns at reap time on both paths. Both anomalies surface as event
     attrs and `CommandState.Warnings`.

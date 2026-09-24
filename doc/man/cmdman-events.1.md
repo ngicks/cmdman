@@ -41,7 +41,8 @@ command's `warnings`.
   kept the terminal or the output pipe open is the usual cause. Trailing output
   may be missing from the log.
 - `survivors_unreaped`: a decimal count. It reports the processes still alive
-  when the survivor sweep gave up after its 10 second bound.
+  when the survivor sweep gave up after its 10 second bound. After a stop's
+  `SIGKILL`, it reports the processes still alive 10 seconds later.
 
 ## Options
 
