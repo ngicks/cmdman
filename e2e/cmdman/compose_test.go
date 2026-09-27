@@ -1917,3 +1917,59 @@ func TestComposeUpInjectEnv(t *testing.T) {
 			ownEntry, got, cmdmanEnvEntries(getsOwnEnv))
 	}
 }
+
+// composeIdentityEnvYAML writes the runtime identity variables, followed by the
+// hash interpolated into args, one per line into identity.txt under the work
+// directory. $$ keeps the runtime references away from compose interpolation.
+func composeIdentityEnvYAML(name string) string {
+	return "name: " + name + `
+commands:
+  app:
+    args:
+      - /bin/sh
+      - -c
+      - >-
+        printf '%s\n' "$$CMDMAN_COMPOSE_WORK_DIR" "$$CMDMAN_COMPOSE_WORK_DIR_HASH"
+        "$$CMDMAN_COMPOSE_PROJECT" "$$1" > identity.txt
+      - sh
+      - ${CMDMAN_COMPOSE_WORK_DIR_HASH}
+`
+}
+
+// TestComposeUpIdentityEnv verifies that a compose command sees the project
+// identity both through interpolation and in its runtime environment, and that
+// the hash matches the prefix of the generated command name.
+func TestComposeUpIdentityEnv(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-identity-env"
+	writeComposeFile(t, wd, composeIdentityEnvYAML(project))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	composePath := filepath.Join(wd, "cmd-compose.yaml")
+	if _, stderr, err := env.exec(ctx, "compose",
+		"--workdir", wd, "-f", composePath, "up"); err != nil {
+		t.Fatalf("compose up failed: %v\nstderr:\n%s", err, stderr)
+	}
+
+	id := composeCommandID(ctx, env, wd, project, "app")
+	if id == "" {
+		t.Fatal("compose up did not create app")
+	}
+	name, _ := env.inspectJSON(ctx, id)["Name"].(string)
+	wdHash, _, _ := strings.Cut(name, "-")
+
+	outPath := filepath.Join(wd, "identity.txt")
+	var out []byte
+	waitUntil(t, 10*time.Second, func() bool {
+		var err error
+		out, err = os.ReadFile(outPath)
+		return err == nil && strings.Count(string(out), "\n") == 4
+	}, "app writes identity.txt")
+
+	want := strings.Join([]string{wd, wdHash, project, wdHash}, "\n") + "\n"
+	if string(out) != want {
+		t.Errorf("identity.txt = %q, want %q (command name %q)", out, want, name)
+	}
+}

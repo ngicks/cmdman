@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -60,6 +61,40 @@ commands:
 	// env: entries can reference the variable too.
 	assert.Equal(t, envMap["SELF"], yamlPath)
 	assert.Equal(t, envMap["SELF_DIR"], projDir)
+}
+
+func TestComposeIdentityInterpolation(t *testing.T) {
+	root := t.TempDir()
+	projDir := filepath.Join(root, "proj")
+	workDir := filepath.Join(root, "work")
+	yamlPath := filepath.Join(projDir, "compose.yaml")
+	writeFile(t, yamlPath, `
+name: interp-id
+work_dir: ${CMDMAN_COMPOSE_DIR}/../work
+commands:
+  app:
+    args:
+      - echo
+      - ${CMDMAN_COMPOSE_WORK_DIR}
+      - net-${CMDMAN_COMPOSE_WORK_DIR_HASH}-${CMDMAN_COMPOSE_PROJECT}
+    env:
+      - NET=net-${CMDMAN_COMPOSE_WORK_DIR_HASH}-${CMDMAN_COMPOSE_PROJECT}
+`)
+
+	raw, err := compose.DecodeFile(yamlPath)
+	assert.NilError(t, err)
+	spec, err := compose.Normalize(
+		context.Background(), yamlPath, raw, compose.NormalizeOpts{},
+	)
+	assert.NilError(t, err)
+
+	cmd := spec.Commands[0]
+	wdHash, _, _ := strings.Cut(cmd.GeneratedName, "-")
+	wantNet := "net-" + wdHash + "-interp-id"
+
+	assert.Equal(t, cmd.Args[1], workDir)
+	assert.Equal(t, cmd.Args[2], wantNet)
+	assert.Equal(t, envSliceToMap(cmd.Env)["NET"], wantNet)
 }
 
 // work_dir may be expressed relative to the compose dir, which makes a named
