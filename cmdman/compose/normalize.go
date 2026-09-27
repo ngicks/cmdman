@@ -28,6 +28,22 @@ const ENV_CMDMAN_COMPOSE_SCALE_INDEX = "CMDMAN_COMPOSE_SCALE_INDEX"
 // command's total replica count.
 const ENV_CMDMAN_COMPOSE_SCALE = "CMDMAN_COMPOSE_SCALE"
 
+// ENV_CMDMAN_COMPOSE_WORK_DIR exposes the project's effective work directory.
+// It is available to interpolation and injected into each replica's
+// environment.
+const ENV_CMDMAN_COMPOSE_WORK_DIR = "CMDMAN_COMPOSE_WORK_DIR"
+
+// ENV_CMDMAN_COMPOSE_WORK_DIR_HASH exposes the work directory hash that
+// prefixes every generated command name of the project. Together with
+// ENV_CMDMAN_COMPOSE_PROJECT it names resources (e.g. a podman network) unique
+// to one project in one work directory. It is available to interpolation and
+// injected into each replica's environment.
+const ENV_CMDMAN_COMPOSE_WORK_DIR_HASH = "CMDMAN_COMPOSE_WORK_DIR_HASH"
+
+// ENV_CMDMAN_COMPOSE_PROJECT exposes the resolved project name. It is
+// available to interpolation and injected into each replica's environment.
+const ENV_CMDMAN_COMPOSE_PROJECT = "CMDMAN_COMPOSE_PROJECT"
+
 // NormalizeOpts holds caller-supplied overrides for Normalize.
 type NormalizeOpts struct {
 	// File is an explicit compose file path. When empty, discovery is used.
@@ -93,9 +109,9 @@ func Normalize(
 
 	// baseEnv is the OS environment plus compose path variables, used as the
 	// base for every interpolation in this spec (work_dir, dirs, env files,
-	// env:, args, log opts). The compose path variables are interpolation-only:
-	// they never land in a command's stored Env unless an author copies them
-	// through env:.
+	// env:, args, log opts). The compose variables never land in a command's
+	// stored Env unless an author copies them through env:; the project identity
+	// variables reach the runtime environment through buildCreateRequest instead.
 	baseEnv := osEnvMap()
 	baseEnv[ENV_CMDMAN_COMPOSE_FILE] = composeFilePath
 	baseEnv[ENV_CMDMAN_COMPOSE_DIR] = filepath.Dir(composeFilePath)
@@ -145,6 +161,13 @@ func Normalize(
 	)
 
 	wdHash := workdirHash(effectiveWorkDir)
+
+	// The project identity variables join the interpolation base only now,
+	// because work_dir and the project name define them: work_dir: cannot
+	// reference them. baseLookup reads baseEnv by reference, so it sees them.
+	baseEnv[ENV_CMDMAN_COMPOSE_WORK_DIR] = effectiveWorkDir
+	baseEnv[ENV_CMDMAN_COMPOSE_WORK_DIR_HASH] = wdHash
+	baseEnv[ENV_CMDMAN_COMPOSE_PROJECT] = project
 
 	cmdNames := make([]string, 0, len(raw.Commands))
 	for n := range raw.Commands {

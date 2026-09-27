@@ -322,10 +322,15 @@ func buildCreateRequest(
 	// Inject the replica's identity as environment variables via AppendEnv (not
 	// nc.Env) so they stay out of the config hash: the index is a property of the
 	// replica, not the command config, so identical replicas must not look like
-	// drift. Host-env inheritance is governed explicitly by ImportHostEnv below.
+	// drift. The project identity is already part of the generated name, so
+	// hashing it again would add nothing. Host-env inheritance is governed
+	// explicitly by ImportHostEnv below.
 	appendEnv := []string{
 		ENV_CMDMAN_COMPOSE_SCALE_INDEX + "=" + strconv.Itoa(scaleIndex),
 		ENV_CMDMAN_COMPOSE_SCALE + "=" + strconv.Itoa(max(nc.Scale, 1)),
+		ENV_CMDMAN_COMPOSE_WORK_DIR + "=" + spec.WorkDir,
+		ENV_CMDMAN_COMPOSE_WORK_DIR_HASH + "=" + workdirHash(spec.WorkDir),
+		ENV_CMDMAN_COMPOSE_PROJECT + "=" + spec.Project,
 	}
 	importHostEnv := nc.ImportHostEnv
 	injectEnv := nc.InjectEnv

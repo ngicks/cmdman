@@ -99,6 +99,36 @@ These variables are interpolation-only unless explicitly copied into `env`.
 `CMDMAN_COMPOSE_DIR` is the preferred way to reference files stored beside the
 compose file, especially when `work_dir` points somewhere else.
 
+Compose also exposes the project identity. These variables are available to
+interpolation, except in `work_dir`, and cmdman injects them into the
+environment of every command it creates:
+
+- `CMDMAN_COMPOSE_WORK_DIR`: absolute effective `work_dir`.
+- `CMDMAN_COMPOSE_WORK_DIR_HASH`: hash of the effective `work_dir`. Every
+  command name generated for the project starts with this hash.
+- `CMDMAN_COMPOSE_PROJECT`: project name.
+
+The hash and the project name together identify one project in one work
+directory. Use them to name resources that must not collide with another copy
+of the project, such as a podman network:
+
+```yaml
+commands:
+  network:
+    args:
+      - podman
+      - network
+      - create
+      - --ignore
+      - net-${CMDMAN_COMPOSE_WORK_DIR_HASH}-${CMDMAN_COMPOSE_PROJECT}
+```
+
+Each replica of a command also receives `CMDMAN_COMPOSE_SCALE_INDEX`, its
+1-based replica index, and `CMDMAN_COMPOSE_SCALE`, the command's replica count.
+
+Injected variables are applied after `env`, so they override an `env` entry of
+the same name. They are injected even when `inject_env` is `false`.
+
 Environment values are layered per command:
 
 - Host environment is the base interpolation context. Compose keeps it out of
