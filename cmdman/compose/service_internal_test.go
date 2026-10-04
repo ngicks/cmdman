@@ -1107,6 +1107,9 @@ func TestListProjectsGroupsComposeCommands(t *testing.T) {
 			if !req.AllStates {
 				t.Fatal("expected all states")
 			}
+			if req.Labels[LabelIntermediate] != "" {
+				return nil, nil
+			}
 			if req.Labels[LabelVersion] != LabelVersionValue {
 				t.Fatalf("expected compose label filter, got %#v", req.Labels)
 			}

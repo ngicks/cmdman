@@ -148,11 +148,86 @@ func TestOutputSnippetCutsLongLines(t *testing.T) {
 	}
 }
 
+func TestTTYReporterHookIgnoredSettlesTheLine(t *testing.T) {
+	var buf bytes.Buffer
+	r := newTTYReporter(&buf)
+
+	ignored := hookEvent(compose.PhaseHookIgnored)
+	ignored.Err = errors.New("hook command exited with code 3")
+	r.Report(hookEvent(compose.PhaseHookRunning))
+	r.Report(ignored)
+
+	r.mu.Lock()
+	inProgress := r.hasInProgress()
+	r.mu.Unlock()
+	if inProgress {
+		t.Fatal("an ignored hook run should leave no line in progress")
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	final := lastFrame(buf.String())
+	if !strings.Contains(final, "Hook-ignored") || !strings.Contains(final, "exited with code 3") {
+		t.Fatalf("expected the ignored phase and its detail:\n%q", final)
+	}
+	if strings.Contains(final, "✘") {
+		t.Fatalf("an ignored hook run should not wear the failure glyph:\n%q", final)
+	}
+	if got := len(splitNonEmptyLines(final)); got != 1 {
+		t.Errorf("expected the hook run on 1 line, got %d:\n%q", got, final)
+	}
+}
+
+func TestTTYReporterKeepsHookStepsOnTheHookLine(t *testing.T) {
+	var buf bytes.Buffer
+	r := newTTYReporter(&buf)
+
+	r.Report(compose.Event{Command: "web-2", Phase: compose.PhaseCreated})
+	r.Report(hookEvent(compose.PhaseHookRunning))
+	r.Report(hookEvent(compose.PhaseHookSucceeded))
+	// A second run of the same hook event opens a new step on the hook's line.
+	r.Report(hookEvent(compose.PhaseHookRunning))
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	replica := r.lines["web-2"]
+	if len(replica) != 1 || replica[0].phase != compose.PhaseCreated {
+		t.Fatalf("hook steps must not land on the replica line: %+v", replica)
+	}
+	hook := r.lines["web-2 hook scratch.create_pre"]
+	if len(hook) != 2 || hook[1].phase != compose.PhaseHookRunning {
+		t.Fatalf("want the settled run and the new one on the hook line: %+v", hook)
+	}
+}
+
+func TestJSONReporterEmitsHookIgnored(t *testing.T) {
+	var buf bytes.Buffer
+	r := newJSONReporter(&buf, "down")
+
+	ignored := hookEvent(compose.PhaseHookIgnored)
+	ignored.Err = errors.New("hook command exited with code 3")
+	exit := 3
+	ignored.ExitCode = &exit
+	r.Report(ignored)
+
+	var got progressLine
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON line %q: %v", buf.String(), err)
+	}
+	if got.Phase != "hook-ignored" || !got.Terminal || got.Hook != "scratch" ||
+		got.ExitCode == nil || *got.ExitCode != 3 ||
+		!strings.Contains(got.Error, "exited with code 3") {
+		t.Fatalf("ignored line wrong: %+v", got)
+	}
+}
+
 func TestProgressMarkerHookPhases(t *testing.T) {
 	cases := map[compose.Phase]string{
 		compose.PhaseHookSucceeded: "✔",
 		compose.PhaseHookFailed:    "✘",
 		compose.PhaseHookWarning:   "!",
+		compose.PhaseHookIgnored:   "-",
 		compose.PhaseHookRunning:   spinnerFrames[0],
 	}
 	for phase, want := range cases {

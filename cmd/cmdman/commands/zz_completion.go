@@ -163,6 +163,10 @@ func composeCommandNames(
 	}
 	names := make([]string, 0, len(statuses))
 	for _, s := range statuses {
+		// An intermediate's command may have no replica left to act on.
+		if s.Intermediate != "" {
+			continue
+		}
 		names = append(names, s.Command)
 	}
 	return names

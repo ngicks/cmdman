@@ -48,14 +48,16 @@ const (
 
 	// Hook phases belong to one run of one lifecycle hook event rather than to
 	// the replica itself; their events set [Event.Hook]. PhaseHookRunning is
-	// transient. PhaseHookSucceeded, PhaseHookFailed and PhaseHookWarning end the
-	// run; PhaseHookWarning is a failure that on_error: continue let pass.
+	// transient. PhaseHookSucceeded, PhaseHookFailed, PhaseHookWarning and
+	// PhaseHookIgnored end the run; PhaseHookWarning is a failure that on_error:
+	// continue let pass, and PhaseHookIgnored one that on_error: ignore let pass.
 	// PhaseHookOutput is no state at all: it carries one line of output while
 	// the hook runs.
 	PhaseHookRunning   Phase = "hook-running"
 	PhaseHookSucceeded Phase = "hook-succeeded"
 	PhaseHookFailed    Phase = "hook-failed"
 	PhaseHookWarning   Phase = "hook-warning"
+	PhaseHookIgnored   Phase = "hook-ignored"
 	PhaseHookOutput    Phase = "hook-output"
 )
 

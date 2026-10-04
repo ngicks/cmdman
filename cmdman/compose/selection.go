@@ -396,3 +396,13 @@ func projectLabels(workDir, project string) map[string]string {
 	}
 	return labels
 }
+
+// hooksProjectLabels is [projectLabels] for the intermediates of the
+// selection, which name their project by the hooks labels instead.
+func hooksProjectLabels(workDir, project string) map[string]string {
+	labels := map[string]string{LabelHooksWorkdir: workDir}
+	if project != "" {
+		labels[LabelHooksProject] = project
+	}
+	return labels
+}

@@ -94,7 +94,7 @@ func (r *ttyReporter) Report(ev compose.Event) {
 	case steps[len(steps)-1].phase.Terminal():
 		// The previous step reached a terminal milestone; this event opens a new
 		// step on its own line, leaving the milestone visible above it.
-		r.lines[ev.Command] = append(steps, entry)
+		r.lines[name] = append(steps, entry)
 	default:
 		// The current step is still in flight; refine it in place (transient →
 		// transient, or transient → terminal collapses onto the same line).
@@ -223,7 +223,12 @@ func renderProgressLine(name string, e progressEntry, frame int) string {
 		fmt.Fprintf(&b, " (exit %d)", *e.exit)
 	}
 	if e.err != "" {
-		b.WriteString(styleErr.Render("  " + firstLine(e.err)))
+		// An ignored failure is shown for what it was, without alarming color.
+		style := styleErr
+		if e.phase == compose.PhaseHookIgnored {
+			style = styleDim
+		}
+		b.WriteString(style.Render("  " + firstLine(e.err)))
 	}
 	if e.output != "" && !e.phase.Terminal() {
 		b.WriteString(styleDim.Render("  " + outputSnippet(e.output)))
@@ -255,6 +260,7 @@ func outputSnippet(s string) string {
 //	completed    ✔  green                exited/stopped/removed
 //	skipped      ⊘  yellow               skipped
 //	warning      !  yellow               hook-warning
+//	ignored      -  dim                  hook-ignored
 //	failed       ✘  red                  error/failed/hook-failed
 func progressMarker(p compose.Phase, frame int) string {
 	switch {
@@ -266,6 +272,8 @@ func progressMarker(p compose.Phase, frame int) string {
 		return styleWarn.Render("⊘")
 	case p == compose.PhaseHookWarning:
 		return styleWarn.Render("!")
+	case p == compose.PhaseHookIgnored:
+		return styleDim.Render("-")
 	case isPendingPhase(p):
 		return stylePending.Render("◌")
 	case p == compose.PhaseRunning:

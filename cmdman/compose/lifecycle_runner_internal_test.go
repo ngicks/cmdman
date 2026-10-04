@@ -331,10 +331,18 @@ func TestRunLifecycleEventOnErrorIgnore(t *testing.T) {
 	assert.Equal(t, len(warnings), 0)
 	_, held := holderValue(t, f, r, "scratch")
 	assert.Assert(t, !held, "a failed release under ignore still drops the holder")
-	for _, p := range hookPhases(rec, "scratch") {
-		assert.Assert(t, p != PhaseHookFailed && p != PhaseHookWarning,
-			"ignore reports no failure, got %s", p)
-	}
+	assert.DeepEqual(t, hookPhases(rec, "scratch"),
+		[]Phase{PhaseHookRunning, PhaseHookIgnored})
+	rec.mu.Lock()
+	ignored := rec.events[len(rec.events)-1]
+	rec.mu.Unlock()
+	assert.ErrorContains(t, ignored.Err, "exited with code 1")
+	assert.Assert(t, ignored.ExitCode != nil && *ignored.ExitCode == 1)
+}
+
+func TestPhaseHookIgnoredEndsTheRunWithoutFailing(t *testing.T) {
+	assert.Assert(t, PhaseHookIgnored.Terminal())
+	assert.Assert(t, !PhaseHookIgnored.Failed())
 }
 
 func TestRunLifecycleEventFailStopsTheWalk(t *testing.T) {

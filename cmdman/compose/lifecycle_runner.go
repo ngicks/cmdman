@@ -31,8 +31,9 @@ const (
 //
 // A hook whose on_error is fail stops the walk: the error is returned and is
 // the replica's failure. One whose on_error is continue is reported as a
-// warning event and returned among warnings. One whose on_error is ignore
-// passes silently. A cancelled ctx stops the walk whatever on_error says.
+// warning event and returned among warnings. One whose on_error is ignore is
+// reported as an ignored event and adds no warning. A cancelled ctx stops the
+// walk whatever on_error says.
 func (s *Service) runLifecycleEvent(
 	ctx context.Context,
 	r hookReplica,
@@ -121,6 +122,9 @@ func (s *Service) runHook(
 		s.reportHook(run, PhaseHookWarning, err, exit)
 		return err, nil
 	case OnErrorIgnore:
+		// The run still needs a terminal event, or a progress view keeps it in
+		// flight forever.
+		s.reportHook(run, PhaseHookIgnored, err, exit)
 		logger := contextkey.ValueSlogLoggerDefault(ctx)
 		logger.InfoContext(ctx, "compose: ignoring failed hook", "error", err)
 		if h.Resource != "" && !ev.acquires() {

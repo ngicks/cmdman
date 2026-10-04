@@ -74,22 +74,30 @@ func TestComposeResourceSingleReplica(t *testing.T) {
 	holderName := holders[0]["Name"].(string)
 	holderID := holders[0]["ID"].(string)
 
-	t.Run("holder is listed by ls but left out of compose verbs", func(t *testing.T) {
-		ls := env.Cmd("ls", "--format", "{{.Name}} {{.State}}").Run(ctx, t)
-		if !strings.Contains(ls, holderName+" created") {
-			t.Fatalf("ls should list the holder %s as created:\n%s", holderName, ls)
-		}
-		if ps := compose("ps", "--format", "{{.ID}}").Run(ctx, t); ps != replicaID {
-			t.Fatalf("compose ps should list the replica %s only, got:\n%s", replicaID, ps)
-		}
-		compose("stop").Run(ctx, t)
-		if st := composeReplicaState(ctx, env, wd, project, "web", 1); !isStopped(st) {
-			t.Fatalf("compose stop should stop the replica, got %q", st)
-		}
-		if st := env.inspectJSON(ctx, holderID)["State"]; st != "created" {
-			t.Fatalf("compose stop should leave the holder alone, got state %v", st)
-		}
-	})
+	t.Run(
+		"holder is listed by ls and compose ps but left out of compose verbs",
+		func(t *testing.T) {
+			ls := env.Cmd("ls", "--format", "{{.Name}} {{.State}}").Run(ctx, t)
+			if !strings.Contains(ls, holderName+" created") {
+				t.Fatalf("ls should list the holder %s as created:\n%s", holderName, ls)
+			}
+			want := replicaID + ":\n" + holderID + ":holder"
+			if ps := compose(
+				"ps",
+				"--format",
+				"{{.ID}}:{{.Intermediate}}",
+			).Run(ctx, t); ps != want {
+				t.Fatalf("compose ps should list the replica, then the holder, got:\n%s", ps)
+			}
+			compose("stop").Run(ctx, t)
+			if st := composeReplicaState(ctx, env, wd, project, "web", 1); !isStopped(st) {
+				t.Fatalf("compose stop should stop the replica, got %q", st)
+			}
+			if st := env.inspectJSON(ctx, holderID)["State"]; st != "created" {
+				t.Fatalf("compose stop should leave the holder alone, got state %v", st)
+			}
+		},
+	)
 
 	t.Run("holder outlives its replica", func(t *testing.T) {
 		env.Cmd("rm", "-f", replicaID).Run(ctx, t)
