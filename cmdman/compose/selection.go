@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/ngicks/cmdman/cmdman/store"
@@ -187,6 +188,62 @@ func LoadOrProject(opts NormalizeOpts) (ProjectSelection, error) {
 	// selection; when empty it matches every command in this workdir (cwd), which
 	// is how down/stop/... work from the project directory without -f.
 	return workdirSelection(cwd, opts), nil
+}
+
+// ResolveContextSelection resolves the project for an operation that a replica
+// or a hook of a compose project may run on itself, such as `compose resource`.
+//
+// Resolution order:
+//  1. Any of opts.File, opts.ProjectName or opts.WorkDir set: [LoadOrProject].
+//  2. [ENV_CMDMAN_COMPOSE_WORK_DIR] and [ENV_CMDMAN_COMPOSE_PROJECT] both set
+//     and non-empty, as compose sets them for every replica and hook: the
+//     project they name, with no spec loaded.
+//  3. Otherwise [LoadOrProject], which discovers a compose file in the current
+//     directory.
+//
+// lookupEnv reads the environment, normally [os.LookupEnv].
+func ResolveContextSelection(
+	opts NormalizeOpts,
+	lookupEnv func(string) (string, bool),
+) (ProjectSelection, error) {
+	if opts.File != "" || opts.ProjectName != "" || opts.WorkDir != "" {
+		return LoadOrProject(opts)
+	}
+	workDir, _ := lookupEnv(ENV_CMDMAN_COMPOSE_WORK_DIR)
+	project, _ := lookupEnv(ENV_CMDMAN_COMPOSE_PROJECT)
+	if workDir != "" && project != "" {
+		return ProjectSelection{WorkDir: filepath.Clean(workDir), Project: project}, nil
+	}
+	return LoadOrProject(opts)
+}
+
+// ContextScaleIndex returns the scale index the environment names when it is
+// the environment of a replica or hook of command in the project of
+// selection, and 0 otherwise. Compose sets [ENV_CMDMAN_COMPOSE_COMMAND],
+// [ENV_CMDMAN_COMPOSE_PROJECT], [ENV_CMDMAN_COMPOSE_WORK_DIR] and
+// [ENV_CMDMAN_COMPOSE_SCALE_INDEX] there, so a process acting on its own
+// replica need not name it.
+//
+// lookupEnv reads the environment, normally [os.LookupEnv].
+func ContextScaleIndex(
+	selection ProjectSelection,
+	command string,
+	lookupEnv func(string) (string, bool),
+) int {
+	envCommand, _ := lookupEnv(ENV_CMDMAN_COMPOSE_COMMAND)
+	envProject, _ := lookupEnv(ENV_CMDMAN_COMPOSE_PROJECT)
+	envWorkDir, _ := lookupEnv(ENV_CMDMAN_COMPOSE_WORK_DIR)
+	if envCommand == "" || envCommand != command ||
+		envProject != selection.Project ||
+		envWorkDir == "" || filepath.Clean(envWorkDir) != filepath.Clean(selection.WorkDir) {
+		return 0
+	}
+	raw, _ := lookupEnv(ENV_CMDMAN_COMPOSE_SCALE_INDEX)
+	index, err := strconv.Atoi(raw)
+	if err != nil || index < 1 {
+		return 0
+	}
+	return index
 }
 
 // LoadOrWorkdir resolves the project selection for read-only listing operations

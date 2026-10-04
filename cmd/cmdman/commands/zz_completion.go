@@ -114,6 +114,22 @@ func completeComposeCommands(
 	}
 }
 
+// completeFirstComposeCommand is completeComposeCommands for a verb whose
+// first argument alone is a compose command name.
+func completeFirstComposeCommand(rf *rootFlags, cf *composeFlags) cobra.CompletionFunc {
+	complete := completeComposeCommands(rf, cf)
+	return func(
+		cmd *cobra.Command,
+		args []string,
+		toComplete string,
+	) ([]cobra.Completion, cobra.ShellCompDirective) {
+		if len(args) > 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return complete(cmd, args, toComplete)
+	}
+}
+
 // composeCommandNames resolves the candidate compose service names for the
 // current selection, returning nil on any error so completion degrades to no
 // suggestions rather than failing.

@@ -101,14 +101,21 @@ func (quietReporter) Close() error         { return nil }
 
 // progressLine is the JSONL wire shape emitted by jsonReporter. One object per
 // line, reporting a command's state transition and, on a terminal phase, its
-// result (exit code / error).
+// result (exit code / error). A hook event also names the hook run it belongs
+// to, and a hook-output event carries one line of the hook's output.
 type progressLine struct {
-	Op       string `json:"op"`
-	Command  string `json:"command"`
-	Phase    string `json:"phase"`
-	Terminal bool   `json:"terminal"`
-	ExitCode *int   `json:"exitCode,omitzero"`
-	Error    string `json:"error,omitzero"`
+	Op         string `json:"op"`
+	Command    string `json:"command"`
+	Phase      string `json:"phase"`
+	Terminal   bool   `json:"terminal"`
+	ExitCode   *int   `json:"exitCode,omitzero"`
+	Error      string `json:"error,omitzero"`
+	ScaleIndex int    `json:"scaleIndex,omitzero"`
+	Hook       string `json:"hook,omitzero"`
+	Lifecycle  string `json:"lifecycle,omitzero"`
+	Exec       string `json:"exec,omitzero"`
+	Stream     string `json:"stream,omitzero"`
+	Line       string `json:"line,omitzero"`
 }
 
 // jsonReporter writes one JSON object per event, newline-delimited (JSONL).
@@ -124,11 +131,17 @@ func newJSONReporter(out io.Writer, op string) *jsonReporter {
 
 func (r *jsonReporter) Report(ev compose.Event) {
 	line := progressLine{
-		Op:       r.op,
-		Command:  ev.Command,
-		Phase:    string(ev.Phase),
-		Terminal: ev.Phase.Terminal(),
-		ExitCode: ev.ExitCode,
+		Op:         r.op,
+		Command:    ev.Command,
+		Phase:      string(ev.Phase),
+		Terminal:   ev.Phase.Terminal(),
+		ExitCode:   ev.ExitCode,
+		ScaleIndex: ev.ScaleIndex,
+		Hook:       ev.Hook,
+		Lifecycle:  string(ev.Lifecycle),
+		Exec:       ev.Exec,
+		Stream:     string(ev.Stream),
+		Line:       ev.Line,
 	}
 	if ev.Err != nil {
 		line.Error = ev.Err.Error()

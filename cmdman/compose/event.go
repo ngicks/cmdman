@@ -1,5 +1,7 @@
 package compose
 
+import "github.com/ngicks/cmdman/cmdman/logdriver"
+
 // Phase is a single lifecycle state in a compose up/start/stop/down state
 // trace. The set is shared by every lifecycle operation; which phases actually
 // appear depends on the operation (e.g. only stop/down emit stopping/stopped).
@@ -43,6 +45,18 @@ const (
 	PhaseSkipped Phase = "skipped"
 	PhaseFailed  Phase = "failed"
 	PhaseError   Phase = "error"
+
+	// Hook phases belong to one run of one lifecycle hook event rather than to
+	// the replica itself; their events set [Event.Hook]. PhaseHookRunning is
+	// transient. PhaseHookSucceeded, PhaseHookFailed and PhaseHookWarning end the
+	// run; PhaseHookWarning is a failure that on_error: continue let pass.
+	// PhaseHookOutput is no state at all: it carries one line of output while
+	// the hook runs.
+	PhaseHookRunning   Phase = "hook-running"
+	PhaseHookSucceeded Phase = "hook-succeeded"
+	PhaseHookFailed    Phase = "hook-failed"
+	PhaseHookWarning   Phase = "hook-warning"
+	PhaseHookOutput    Phase = "hook-output"
 )
 
 // Terminal reports whether p is a terminal phase (a result rather than work in
@@ -50,7 +64,7 @@ const (
 func (p Phase) Terminal() bool {
 	switch p {
 	case PhaseCreating, PhaseRecreating, PhaseStarting, PhaseWaiting,
-		PhaseStopping, PhaseRemoving:
+		PhaseStopping, PhaseRemoving, PhaseHookRunning, PhaseHookOutput:
 		return false
 	default:
 		return true
@@ -59,7 +73,7 @@ func (p Phase) Terminal() bool {
 
 // Failed reports whether p is a terminal phase that represents a failure.
 func (p Phase) Failed() bool {
-	return p == PhaseFailed || p == PhaseError
+	return p == PhaseFailed || p == PhaseError || p == PhaseHookFailed
 }
 
 // Event is one lifecycle state-transition emitted while an operation runs. The
@@ -72,8 +86,22 @@ type Event struct {
 	Phase Phase
 	// Err is non-nil for a failure phase and carries the detail.
 	Err error
-	// ExitCode is the observed exit code when known (set on PhaseExited).
+	// ExitCode is the observed exit code when known (set on PhaseExited and on
+	// the phases that end a hook run).
 	ExitCode *int
+
+	// ScaleIndex is the 1-based scale index of the replica, set on hook events.
+	ScaleIndex int
+	// Hook is the name of the hook item a hook event belongs to. It is empty
+	// for every other event.
+	Hook string
+	// Lifecycle is the event the hook runs for.
+	Lifecycle LifecycleEvent
+	// Exec is the cmdman command name of the exec command running the hook.
+	Exec string
+	// Stream and Line carry one line of the hook's output on PhaseHookOutput.
+	Stream logdriver.Stream
+	Line   string
 }
 
 // Reporter receives lifecycle progress events for a single compose operation.

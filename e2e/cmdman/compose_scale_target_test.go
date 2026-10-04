@@ -35,9 +35,6 @@ commands:
 // composeScaleDependencyYAML defines two scaled commands where every replica of
 // app waits for setup to complete successfully. Each run of a replica appends a
 // line to <wd>/<command>-<index>.txt.
-//
-// setup sleeps before it exits because a start whose command exits before the
-// running state is observed keeps polling for several seconds.
 func composeScaleDependencyYAML(name, wd string) string {
 	setup := shellQuote(filepath.Join(wd, "setup-"))
 	app := shellQuote(filepath.Join(wd, "app-"))

@@ -347,14 +347,7 @@ func buildCreateRequest(
 	// drift. The project identity is already part of the generated name, so
 	// hashing it again would add nothing. Host-env inheritance is governed
 	// explicitly by ImportHostEnv below.
-	appendEnv := []string{
-		ENV_CMDMAN_COMPOSE_SCALE_INDEX + "=" + strconv.Itoa(scaleIndex),
-		ENV_CMDMAN_COMPOSE_SCALE + "=" + strconv.Itoa(max(nc.Scale, 1)),
-		ENV_CMDMAN_COMPOSE_WORK_DIR + "=" + spec.WorkDir,
-		ENV_CMDMAN_COMPOSE_WORK_DIR_HASH + "=" + workdirHash(spec.WorkDir),
-		ENV_CMDMAN_COMPOSE_PROJECT + "=" + spec.Project,
-		ENV_CMDMAN_COMPOSE_COMMAND + "=" + nc.Name,
-	}
+	appendEnv := composeContextEnv(spec.Project, spec.WorkDir, nc.Name, scaleIndex, nc.Scale)
 	importHostEnv := nc.ImportHostEnv
 	injectEnv := nc.InjectEnv
 	return cmdman.CreateRequest{
@@ -374,5 +367,18 @@ func buildCreateRequest(
 		LogOpts:         nc.LogOpts,
 		AutoRemove:      false, // compose owns lifecycle
 		Labels:          BuildLabels(spec, nc, configHash, scaleIndex),
+	}
+}
+
+// composeContextEnv returns the environment entries that tell a process which
+// replica of which compose project it runs for.
+func composeContextEnv(project, workDir, command string, scaleIndex, scale int) []string {
+	return []string{
+		ENV_CMDMAN_COMPOSE_SCALE_INDEX + "=" + strconv.Itoa(scaleIndex),
+		ENV_CMDMAN_COMPOSE_SCALE + "=" + strconv.Itoa(max(scale, 1)),
+		ENV_CMDMAN_COMPOSE_WORK_DIR + "=" + workDir,
+		ENV_CMDMAN_COMPOSE_WORK_DIR_HASH + "=" + workdirHash(workDir),
+		ENV_CMDMAN_COMPOSE_PROJECT + "=" + project,
+		ENV_CMDMAN_COMPOSE_COMMAND + "=" + command,
 	}
 }
