@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -43,10 +44,10 @@ type storedHook struct {
 }
 
 // composeLifecycleHooksYAML declares one hooked command (app) and one plain
-// command (plain). Both exit right away; hooks only need to be stored.
-// notifyArg is the argument of app's start_post hook, so a test can edit a hook
-// without touching anything else.
-func composeLifecycleHooksYAML(name, notifyArg string) string {
+// command (plain). Both exit right away. notifyArg is the argument of app's
+// start_post hook, so a test can edit a hook without touching anything else.
+// The scratch resource is a directory made under wd.
+func composeLifecycleHooksYAML(name, wd, notifyArg string) string {
 	return fmt.Sprintf(`name: %s
 commands:
   app:
@@ -59,18 +60,19 @@ commands:
           on_error: ignore
       - name: scratch
         resource: scratch
-        create_pre: ["mktemp", "-d", "/tmp/app.XXXX"]
+        create_pre: ["mktemp", "-d", %q]
         remove_post: ["sh", "-c", "rm -rf \"$$CMDMAN_COMPOSE_RESOURCE_VALUE\""]
   plain:
     args: [sh, -c, "echo plain"]
-`, name, notifyArg)
+`, name, notifyArg, filepath.Join(wd, "app.XXXX"))
 }
 
 func TestComposeLifecycleHooksConfig(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnv(t)
 	wd := composeWorkdir(t)
-	composePath := writeComposeFile(t, wd, composeLifecycleHooksYAML("tc-hooks-config", "app up"))
+	composePath := writeComposeFile(t, wd,
+		composeLifecycleHooksYAML("tc-hooks-config", wd, "app up"))
 
 	stdout := env.Cmd("compose", "--workdir", wd, "-f", composePath, "config").Run(ctx, t)
 
@@ -101,7 +103,7 @@ func TestComposeLifecycleHooksConfig(t *testing.T) {
 			scratch.Name, scratch.Resource)
 	}
 	assertHookExec(t, "scratch.create_pre", scratch.CreatePre,
-		[]string{"mktemp", "-d", "/tmp/app.XXXX"}, "fail")
+		[]string{"mktemp", "-d", filepath.Join(wd, "app.XXXX")}, "fail")
 	// $$ escapes compose interpolation and renders as a single $.
 	assertHookExec(t, "scratch.remove_post", scratch.RemovePost,
 		[]string{"sh", "-c", `rm -rf "$CMDMAN_COMPOSE_RESOURCE_VALUE"`}, "fail")
@@ -186,7 +188,7 @@ func TestComposeLifecycleHooksLabelAndEnv(t *testing.T) {
 	env := newTestEnv(t)
 	wd := composeWorkdir(t)
 	project := "tc-hooks-label"
-	composePath := writeComposeFile(t, wd, composeLifecycleHooksYAML(project, "app up"))
+	composePath := writeComposeFile(t, wd, composeLifecycleHooksYAML(project, wd, "app up"))
 	t.Cleanup(func() { cleanupProject(context.Background(), env, wd, project) })
 
 	env.Cmd("compose", "--workdir", wd, "-f", composePath, "create").Run(ctx, t)
@@ -244,7 +246,7 @@ func TestComposeLifecycleHooksEditRecreates(t *testing.T) {
 	env := newTestEnv(t)
 	wd := composeWorkdir(t)
 	project := "tc-hooks-recreate"
-	composePath := writeComposeFile(t, wd, composeLifecycleHooksYAML(project, "app up"))
+	composePath := writeComposeFile(t, wd, composeLifecycleHooksYAML(project, wd, "app up"))
 	t.Cleanup(func() { cleanupProject(context.Background(), env, wd, project) })
 
 	env.Cmd("compose", "--workdir", wd, "-f", composePath, "up").Run(ctx, t)
@@ -260,7 +262,7 @@ func TestComposeLifecycleHooksEditRecreates(t *testing.T) {
 		idsBefore[name] = id
 	}
 
-	writeComposeFile(t, wd, composeLifecycleHooksYAML(project, "app is up"))
+	writeComposeFile(t, wd, composeLifecycleHooksYAML(project, wd, "app is up"))
 
 	stdout := env.Cmd("compose", "--workdir", wd, "-f", composePath, "up").Run(ctx, t)
 	events := parseProgress(t, stdout)

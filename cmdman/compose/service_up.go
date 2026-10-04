@@ -41,7 +41,7 @@ func (s *Service) Up(
 		return nil, err
 	}
 
-	starts, err := s.reconcileStart(ctx, spec, targets)
+	starts, err := s.reconcileStart(ctx, spec, targets, hooksFromSpec)
 	if err != nil {
 		return nil, err
 	}

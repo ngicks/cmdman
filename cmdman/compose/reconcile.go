@@ -40,6 +40,9 @@ type instanceSnapshot struct {
 	State model.EventType
 	// ExitCode is the last recorded exit code (nil when never exited).
 	ExitCode *int
+	// Entry is the stored replica. Its own label holds the hooks it runs when
+	// no compose file is loaded.
+	Entry cmdmanEntry
 }
 
 // only narrows the snapshot to the replicas with the given scale indices and

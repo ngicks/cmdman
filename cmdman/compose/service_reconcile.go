@@ -22,10 +22,15 @@ const reconcileWalkLimit = 8
 // always evaluated against the run this reconciliation is responsible for, not
 // against stale terminal state from a previous run. A pulled-in dependency
 // covers every replica; a targeted command covers the replicas targets selects.
+//
+// src tells where the start hooks of each replica come from: spec when it was
+// loaded from a compose file, the replica's stored label when spec was rebuilt
+// from stored labels.
 func (s *Service) reconcileStart(
 	ctx context.Context,
 	spec ComposeSpec,
 	targets targetSet,
+	src hookSource,
 ) ([]StartOutcome, error) {
 	if err := ValidateDAG(spec.Commands); err != nil {
 		return nil, err
@@ -40,7 +45,14 @@ func (s *Service) reconcileStart(
 	g := buildReconcileGraph(spec, snaps, closure, targets)
 
 	limit := min(len(closure), reconcileWalkLimit)
-	g.walk(ctx, walkFromBegin, limit, s.upStartAction)
+	g.walk(
+		ctx,
+		walkFromBegin,
+		limit,
+		func(ctx context.Context, g *reconcileGraph, v *graphVertex) actionResult {
+			return s.upStartAction(ctx, g, v, spec, src)
+		},
+	)
 
 	s.reportBlocked(g)
 	return g.startOutcomes(spec), nil
@@ -82,18 +94,23 @@ func (s *Service) reportBlocked(g *reconcileGraph) {
 // upStartAction starts (or confirms running) every replica the vertex covers
 // and, when a dependent needs its completion, waits for those replicas to stop
 // so completion edges can progress from the current run's terminal state.
+//
+// Each replica it starts runs its start hooks around the start, taken from
+// spec or from the replica's stored label as src says. A failing hook fails
+// the action like a failed start does, which blocks the dependents.
 func (s *Service) upStartAction(
 	ctx context.Context,
 	g *reconcileGraph,
 	v *graphVertex,
+	spec ComposeSpec,
+	src hookSource,
 ) actionResult {
 	cmd := v.Command
 	replicas := v.replicaIndices()
 
-	active := make(map[string]bool, len(v.Snapshot.Instances))
+	stored := make(map[string]instanceSnapshot, len(v.Snapshot.Instances))
 	for _, in := range v.Snapshot.Instances {
-		active[in.GenName] = in.State == model.EventTypeRunning ||
-			in.State == model.EventTypeStarting
+		stored[in.GenName] = in
 	}
 
 	// Start every covered replica that is not already active, reporting each by
@@ -106,12 +123,21 @@ func (s *Service) upStartAction(
 		// Idempotency: starting/running replicas are already active. Everything
 		// else (created/exited/failed/absent) gets a Start, matching low-level
 		// cmdman start and project-only compose start.
-		if active[genName] {
+		in, exists := stored[genName]
+		if exists &&
+			(in.State == model.EventTypeRunning || in.State == model.EventTypeStarting) {
 			continue
 		}
 		disp := instanceDisplayName(*cmd, idx)
 		s.report(disp, PhaseStarting, nil, nil)
-		if err := s.svc.Start(ctx, genName); err != nil {
+		var err error
+		if exists {
+			err = s.startReplica(ctx, spec, src, *cmd, in.Entry)
+		} else {
+			// A missing replica has no hooks to run, and starting it fails.
+			err = s.svc.Start(ctx, genName)
+		}
+		if err != nil {
 			contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: start failed",
 				"command", cmd.Name,
 				"generated_name", genName,
@@ -303,6 +329,7 @@ func (s *Service) snapshotCommands(
 			ScaleIndex: scaleIndexOf(e),
 			State:      e.State,
 			ExitCode:   e.ExitCode,
+			Entry:      e,
 		})
 	}
 	out := make(map[string]commandSnapshot, len(byName))

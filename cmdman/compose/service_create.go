@@ -147,7 +147,8 @@ func (s *Service) executeAction(
 	case ActionCreate:
 		s.report(disp, PhaseCreating, nil, nil)
 		req := buildCreateRequest(spec, nc, action.DesiredHash, instName, action.ScaleIndex)
-		_, err := s.svc.Create(ctx, req)
+		err := s.createWithHooks(
+			ctx, s.specHookReplica(spec, nc, action.ScaleIndex), nc.Hooks, req)
 		if err != nil {
 			werr := fmt.Errorf("create command %q (%s): %w", disp, instName, err)
 			s.report(disp, PhaseError, werr, nil)
@@ -162,6 +163,14 @@ func (s *Service) executeAction(
 			werr := fmt.Errorf("recreate command %q: missing existing entry", disp)
 			s.report(disp, PhaseSkipped, werr, nil)
 			return ActionOutcome{Command: disp, Action: "skipped", Err: werr}, nil
+		}
+		// The replica going away runs the hooks stored on it. The spec may
+		// declare other hooks by now.
+		old, oldHooks, err := storedHookReplica(*existing)
+		if err != nil {
+			werr := fmt.Errorf("recreate command %q: %w", disp, err)
+			s.report(disp, PhaseError, werr, nil)
+			return ActionOutcome{Command: disp, Action: "recreate", Err: werr}, nil
 		}
 
 		// A running/starting command is stopped before it can be removed and
@@ -178,7 +187,7 @@ func (s *Service) executeAction(
 				"state", existing.State,
 			)
 			s.report(disp, PhaseStopping, nil, nil)
-			if err := s.stopForRecreate(ctx, existing.ID); err != nil {
+			if err := s.stopWithHooks(ctx, old, oldHooks, existing.ID); err != nil {
 				werr := fmt.Errorf(
 					"stop command %q (%s) for recreate: %w",
 					disp,
@@ -192,7 +201,7 @@ func (s *Service) executeAction(
 		}
 
 		s.report(disp, PhaseRecreating, nil, nil)
-		results, err := s.svc.Remove(ctx, cmdman.RemoveRequest{
+		err = s.removeWithHooks(ctx, old, oldHooks, cmdman.RemoveRequest{
 			Targets: []string{existing.ID},
 		})
 		if err != nil {
@@ -200,16 +209,10 @@ func (s *Service) executeAction(
 			s.report(disp, PhaseError, werr, nil)
 			return ActionOutcome{Command: disp, Action: "recreate", Err: werr}, nil
 		}
-		for _, r := range results {
-			if r.Err != nil {
-				werr := fmt.Errorf("remove command %q for recreate: %w", disp, r.Err)
-				s.report(disp, PhaseError, werr, nil)
-				return ActionOutcome{Command: disp, Action: "recreate", Err: werr}, nil
-			}
-		}
 
 		req := buildCreateRequest(spec, nc, action.DesiredHash, instName, action.ScaleIndex)
-		_, err = s.svc.Create(ctx, req)
+		err = s.createWithHooks(
+			ctx, s.specHookReplica(spec, nc, action.ScaleIndex), nc.Hooks, req)
 		if err != nil {
 			werr := fmt.Errorf("create command %q after remove: %w", disp, err)
 			s.report(disp, PhaseError, werr, nil)
@@ -251,9 +254,10 @@ func entryDisplayName(e store.CommandEntry) string {
 }
 
 // handleExcessReplicas stops (when live) and removes surplus replicas left by a
-// scale-down. Only replicas whose command is in the target set are touched, so a
-// subset operation never tears down a replica it was not asked about. Each
-// removal is reported as its own removing → removed/error step.
+// scale-down, each inside the stop and remove hooks stored on it. Only replicas
+// whose command is in the target set are touched, so a subset operation never
+// tears down a replica it was not asked about. Each removal is reported as its
+// own removing → removed/error step.
 func (s *Service) handleExcessReplicas(
 	ctx context.Context,
 	spec ComposeSpec,
@@ -272,9 +276,19 @@ func (s *Service) handleExcessReplicas(
 		disp := fmt.Sprintf("%s-%d", cmdName, scaleIndexOf(e))
 		s.report(disp, PhaseRemoving, nil, nil)
 
+		r, hooks, err := storedHookReplica(e)
+		if err != nil {
+			werr := fmt.Errorf("remove excess replica %q (%s): %w", disp, e.ID, err)
+			s.report(disp, PhaseError, werr, nil)
+			outcomes = append(outcomes, ActionOutcome{
+				Command: disp, Action: "remove-excess", Err: werr,
+			})
+			continue
+		}
+
 		// Stop a live replica before removal so its monitor is not yanked.
 		if e.State == model.EventTypeRunning || e.State == model.EventTypeStarting {
-			if err := s.stopForRecreate(ctx, e.ID); err != nil {
+			if err := s.stopWithHooks(ctx, r, hooks, e.ID); err != nil {
 				werr := fmt.Errorf("stop excess replica %q (%s): %w", disp, e.ID, err)
 				s.report(disp, PhaseError, werr, nil)
 				outcomes = append(outcomes, ActionOutcome{
@@ -284,18 +298,10 @@ func (s *Service) handleExcessReplicas(
 			}
 		}
 
-		results, err := s.svc.Remove(ctx, cmdman.RemoveRequest{
+		err = s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
 			Targets: []string{e.ID},
 			Force:   true,
 		})
-		if err == nil {
-			for _, r := range results {
-				if r.Err != nil {
-					err = r.Err
-					break
-				}
-			}
-		}
 		if err != nil {
 			werr := fmt.Errorf("remove excess replica %q (%s): %w", disp, e.ID, err)
 			contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: remove excess replica failed",

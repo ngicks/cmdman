@@ -62,7 +62,7 @@ func (s *Service) startWithSpec(
 	spec ComposeSpec,
 	targets targetSet,
 ) (*StartResult, error) {
-	starts, err := s.reconcileStart(ctx, spec, targets)
+	starts, err := s.reconcileStart(ctx, spec, targets, hooksFromSpec)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func (s *Service) startWithoutSpec(
 			"compose start: stored dependency graph is ambiguous; pass -f or --project-name",
 		)
 	}
-	starts, err := s.reconcileStart(ctx, spec, targets)
+	starts, err := s.reconcileStart(ctx, spec, targets, hooksFromStored)
 	if err != nil {
 		return nil, err
 	}
