@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] down [--progress MODE] [COMMAND...]
+cmdman compose [selection flags] down [--progress MODE] [--force] [COMMAND...]
 ```
 
 ## Description
@@ -27,6 +27,39 @@ Failures are aggregated and do not prevent other targets from being attempted.
 Down removes every replica of a command. To remove replicas, scale the command
 down with `cmdman compose scale COMMAND=N`.
 
+Each replica runs the hooks stored on it. A running replica runs `stop_pre`,
+stops, then runs `stop_post`. Every replica then runs `remove_pre`, is removed,
+then runs `remove_post`. `remove_post` still reads the values of the replica's
+resources. Once a replica is removed, down also removes the hook commands its
+failed hooks left for inspection.
+
+A hook that fails under `on_error: fail` keeps its replica:
+
+- A failed `stop_pre` or `stop_post` keeps the replica from being removed. It
+  stays running after a failed `stop_pre`, and stopped after a failed
+  `stop_post`.
+- A failed `remove_pre` keeps the replica from being removed.
+- A failed `remove_post` comes after the removal. A resource it was to release
+  keeps its value, which the error names.
+
+A replica whose stop fails for any other reason is removed by force. Down exits
+non-zero when it keeps a replica.
+
+With no command names, down then retries the resources a removed replica left
+behind. For every resource of the project whose replica was gone before down
+began, down runs the release event stored with its value, in the directory and
+environment stored with it, with `CMDMAN_COMPOSE_RESOURCE_KEY` and
+`CMDMAN_COMPOSE_RESOURCE_VALUE` set. The `on_error` of the release applies:
+
+- `fail`: a failed release keeps the value, and down exits non-zero.
+- `continue`: a failed release keeps the value with a warning.
+- `ignore`: the value is dropped whether the release worked or not.
+
+A release that worked drops the value. A value that has no release event, such
+as one stored by `compose resource set` alone, stays. The retry needs no
+compose file, so `cmdman compose -p NAME down` retries the releases of a project
+whose file is gone.
+
 ## Selection Flags
 
 Uses the compose selection flags documented in
@@ -37,7 +70,12 @@ Uses the compose selection flags documented in
 
 - `--progress auto|tty|json|quiet`: progress output mode. `auto` chooses TTY
   output on terminals and JSON otherwise.
+- `--force`: treat every hook that fails under `on_error: fail` as
+  `on_error: continue`. Down reports the failure as a warning and stops and
+  removes the replica anyway. A retried release that fails keeps its value
+  with a warning. `--force` has no `-f` short form: `-f` is `--file`.
 
 ## See Also
 
-[cmdman-compose-stop(1)](./cmdman-compose-stop.1.md), [cmdman-compose-create(1)](./cmdman-compose-create.1.md)
+[cmdman-compose-stop(1)](./cmdman-compose-stop.1.md), [cmdman-compose-create(1)](./cmdman-compose-create.1.md),
+[cmdman-compose-resource(1)](./cmdman-compose-resource.1.md)

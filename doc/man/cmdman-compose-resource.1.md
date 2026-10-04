@@ -72,4 +72,5 @@ cmdman compose resource set --scale 2 web scratch /tmp/web-2
 
 ## See Also
 
-[cmdman-compose(1)](./cmdman-compose.1.md), [cmdman-compose(5)](./cmdman-compose.5.md)
+[cmdman-compose(1)](./cmdman-compose.1.md), [cmdman-compose(5)](./cmdman-compose.5.md),
+[cmdman-compose-down(1)](./cmdman-compose-down.1.md)
