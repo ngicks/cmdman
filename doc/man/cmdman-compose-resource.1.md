@@ -21,8 +21,9 @@ the resource for that replica. The release event finds the value in
 `CMDMAN_COMPOSE_RESOURCE_VALUE` and drops it once it exits with code 0.
 
 Each value is kept by a cmdman command of its own, named
-`<replica>.res.<key>`, which is never started. `cmdman ls` lists it; the compose
-verbs that act on a project's commands leave it alone. The value stays readable
+`<replica>.res.<key>`, which is never started. `cmdman ls` lists it, and
+`cmdman compose ps` lists it as a `holder` of its project; the compose verbs that
+act on a project's commands leave it alone. The value stays readable
 after its replica is removed, until the release event or `unset` drops it.
 
 - `get` prints the value followed by a newline. It fails when no value is
