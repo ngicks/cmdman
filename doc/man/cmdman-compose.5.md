@@ -277,4 +277,5 @@ are handled by the existing resolver, which errors on a missing live replica.
 ## See Also
 
 [cmdman-compose(1)](./cmdman-compose.1.md), [cmdman-mux(5)](./cmdman-mux.5.md),
-[cmdman-compose-mux(1)](./cmdman-compose-mux.1.md)
+[cmdman-compose-mux(1)](./cmdman-compose-mux.1.md),
+[cmdman-compose-resource(1)](./cmdman-compose-resource.1.md)

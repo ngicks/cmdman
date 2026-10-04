@@ -150,7 +150,8 @@ signal start status stop tui version wait compose` (+ hidden `__monitor`, and `t
 Root carries the persistent flags `--config`, `--data-dir`, `--runtime-dir`.
 `config` prints the resolved configuration (indented JSON, or `--format` template).
 `status` has `get` / `set` / `delete` subcommands.
-`compose` subcommands mirror the verbs plus `up down config ps scale mux`. Most listing/inspect
+`compose` subcommands mirror the verbs plus `up down config ps scale mux resource`; `resource`
+has `get` / `set` / `unset` subcommands. Most listing/inspect
 commands support `--format` Go templates: the generic helpers live in `internal/templateutil`
 (`FuncMap`), and `cli/template.go` copies that map and adds its own entries on top.
 

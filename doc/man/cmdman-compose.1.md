@@ -97,7 +97,8 @@ Independent work runs concurrently and failures are aggregated where possible.
 [send-keys](./cmdman-compose-send-keys.1.md),
 [capture-screen](./cmdman-compose-capture-screen.1.md),
 [signal](./cmdman-compose-signal.1.md), [wait](./cmdman-compose-wait.1.md),
-[mux](./cmdman-compose-mux.1.md) (subcommands: `up`, `down`, `ls`, `cycle-scale`).
+[mux](./cmdman-compose-mux.1.md) (subcommands: `up`, `down`, `ls`, `cycle-scale`),
+[resource](./cmdman-compose-resource.1.md) (subcommands: `get`, `set`, `unset`).
 
 ## See Also
 
