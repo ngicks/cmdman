@@ -58,16 +58,20 @@ func (s *Service) Create(
 	if err != nil {
 		return nil, err
 	}
-	return s.create(ctx, spec, opts.RemoveOrphan, targets)
+	res, _, err := s.create(ctx, spec, opts.RemoveOrphan, targets)
+	return res, err
 }
 
-// create is [Service.Create] for already resolved targets.
+// create is [Service.Create] for already resolved targets. aborted maps the
+// cmdman command name of every replica whose recreate failed to that failure:
+// such a replica is either the old one or gone, and no start should take it
+// for the replica the spec describes.
 func (s *Service) create(
 	ctx context.Context,
 	spec ComposeSpec,
 	removeOrphan bool,
 	targets targetSet,
-) (*CreateResult, error) {
+) (_ *CreateResult, aborted map[string]error, _ error) {
 	existing, err := s.svc.List(ctx, cmdman.ListRequest{
 		AllStates: true,
 		Labels: map[string]string{
@@ -76,12 +80,12 @@ func (s *Service) create(
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("list existing commands: %w", err)
+		return nil, nil, fmt.Errorf("list existing commands: %w", err)
 	}
 
 	plan, err := ComputePlan(spec, existing)
 	if err != nil {
-		return nil, fmt.Errorf(
+		return nil, nil, fmt.Errorf(
 			"compute plan for project %q in %q: %w",
 			spec.Project,
 			spec.WorkDir,
@@ -115,7 +119,14 @@ func (s *Service) create(
 		}
 		outcome, err := s.executeAction(ctx, spec, action)
 		if err != nil {
-			return nil, err // internal/unexpected error; individual cmd errors are in Err field
+			// internal/unexpected error; individual cmd errors are in Err field
+			return nil, nil, err
+		}
+		if action.Kind == ActionRecreate && outcome.Err != nil {
+			if aborted == nil {
+				aborted = make(map[string]error)
+			}
+			aborted[action.InstanceName] = outcome.Err
 		}
 		actions = append(actions, outcome)
 	}
@@ -124,7 +135,7 @@ func (s *Service) create(
 	// Create unconditionally), so this one site owns history-row creation.
 	s.recordProject(ctx, spec)
 
-	return &CreateResult{Actions: actions}, nil
+	return &CreateResult{Actions: actions}, aborted, nil
 }
 
 // executeAction carries out a single plan action (one replica) and returns its
@@ -187,7 +198,7 @@ func (s *Service) executeAction(
 				"state", existing.State,
 			)
 			s.report(disp, PhaseStopping, nil, nil)
-			if err := s.stopWithHooks(ctx, old, oldHooks, existing.ID); err != nil {
+			if _, err := s.stopWithHooks(ctx, old, oldHooks, existing.ID); err != nil {
 				werr := fmt.Errorf(
 					"stop command %q (%s) for recreate: %w",
 					disp,
@@ -201,7 +212,7 @@ func (s *Service) executeAction(
 		}
 
 		s.report(disp, PhaseRecreating, nil, nil)
-		err = s.removeWithHooks(ctx, old, oldHooks, cmdman.RemoveRequest{
+		_, err = s.removeWithHooks(ctx, old, oldHooks, cmdman.RemoveRequest{
 			Targets: []string{existing.ID},
 		})
 		if err != nil {
@@ -288,7 +299,7 @@ func (s *Service) handleExcessReplicas(
 
 		// Stop a live replica before removal so its monitor is not yanked.
 		if e.State == model.EventTypeRunning || e.State == model.EventTypeStarting {
-			if err := s.stopWithHooks(ctx, r, hooks, e.ID); err != nil {
+			if _, err := s.stopWithHooks(ctx, r, hooks, e.ID); err != nil {
 				werr := fmt.Errorf("stop excess replica %q (%s): %w", disp, e.ID, err)
 				s.report(disp, PhaseError, werr, nil)
 				outcomes = append(outcomes, ActionOutcome{
@@ -298,7 +309,7 @@ func (s *Service) handleExcessReplicas(
 			}
 		}
 
-		err = s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
+		_, err = s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
 			Targets: []string{e.ID},
 			Force:   true,
 		})

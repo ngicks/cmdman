@@ -10,6 +10,7 @@ import (
 func composeDownCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagProgress string
+		flagForce    bool
 	)
 
 	cmd := &cobra.Command{
@@ -24,12 +25,15 @@ of a command; to remove replicas, scale the command down with
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeDown(cmd, rf, cf, args, flagProgress)
+			return runComposeDown(cmd, rf, cf, args, flagProgress, flagForce)
 		},
 	}
 
 	cmd.Flags().StringVar(&flagProgress, "progress", "auto", cli.ProgressFlagUsage)
 	_ = cmd.RegisterFlagCompletionFunc("progress", progressCompletions)
+	// No -f shorthand: the compose group's persistent --file owns -f.
+	cmd.Flags().BoolVar(&flagForce, "force", false,
+		"Treat every failing hook as on_error continue, so every replica is torn down")
 
 	parent.AddCommand(cmd)
 }
@@ -40,6 +44,7 @@ func runComposeDown(
 	cf *composeFlags,
 	commandNames []string,
 	progress string,
+	force bool,
 ) error {
 	selection, err := compose.LoadOrProject(cf.normalizeOpts())
 	if err != nil {
@@ -61,6 +66,7 @@ func runComposeDown(
 	result, err := compose.NewService(svc, compose.WithReporter(prog)).Down(
 		cmd.Context(), selection, compose.DownOption{
 			Targets: compose.TargetsOf(commandNames...),
+			Force:   force,
 		})
 	if err != nil {
 		return err

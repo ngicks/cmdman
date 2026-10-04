@@ -212,7 +212,8 @@ func StopResultErr(stops []compose.StopOutcome) error {
 	return aggregateErrors("compose stop operation", errs)
 }
 
-// DownResultErr returns a combined error when any stop or remove failed.
+// DownResultErr returns a combined error when any stop, remove or release
+// failed.
 func DownResultErr(result *compose.DownResult) error {
 	var errs []error
 	for _, s := range result.Stops {
@@ -221,6 +222,11 @@ func DownResultErr(result *compose.DownResult) error {
 		}
 	}
 	for _, r := range result.Removes {
+		if r.Err != nil {
+			errs = append(errs, r.Err)
+		}
+	}
+	for _, r := range result.Releases {
 		if r.Err != nil {
 			errs = append(errs, r.Err)
 		}

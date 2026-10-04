@@ -332,6 +332,12 @@ func TestResultErrHelpers(t *testing.T) {
 	if err := DownResultErr(down); err == nil {
 		t.Errorf("down with a failed remove should return an error")
 	}
+	released := &compose.DownResult{
+		Releases: []compose.ReleaseOutcome{{Holder: "web.res.scratch", Err: boom}},
+	}
+	if err := DownResultErr(released); err == nil {
+		t.Errorf("down with a failed release should return an error")
+	}
 }
 
 func splitNonEmptyLines(s string) []string {

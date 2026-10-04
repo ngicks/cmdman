@@ -47,6 +47,9 @@ type fakeCmdman struct {
 	run func(name string, req cmdman.CreateRequest) fakeRun
 	// createErr fails a Create when it returns non-nil.
 	createErr func(req cmdman.CreateRequest) error
+	// stopErr fails the stop of the named command, leaving it as it is, when
+	// it returns non-nil.
+	stopErr func(name string) error
 	// started is called after a command has started.
 	started func(name string)
 }
@@ -291,6 +294,12 @@ func (f *fakeCmdman) stop(_ context.Context, req cmdman.StopRequest) ([]cmdman.S
 			continue
 		}
 		f.calls = append(f.calls, "stop "+c.entry.Name)
+		if f.stopErr != nil {
+			if err := f.stopErr(c.entry.Name); err != nil {
+				out = append(out, cmdman.StopResult{ID: c.entry.ID, Err: err})
+				continue
+			}
+		}
 		if c.entry.State == model.EventTypeRunning {
 			finishFake(c, new(143))
 		}

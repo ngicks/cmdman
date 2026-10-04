@@ -18,12 +18,20 @@ type DownOption struct {
 	// Empty targets the whole project. A target selecting a single replica is
 	// rejected: see [Service.Down].
 	Targets []Target
+	// Force lets every hook that fails under on_error fail pass as on_error
+	// continue: the failure is reported as a warning, and the replica is
+	// stopped and removed all the same. The stored releases a whole-project
+	// down retries are forced the same way.
+	Force bool
 }
 
 // DownResult is the aggregated result of a compose down operation.
 type DownResult struct {
 	Stops   []StopOutcome
 	Removes []RemoveOutcome
+	// Releases are the stored releases a whole-project down ran for the
+	// resources whose replica was already gone.
+	Releases []ReleaseOutcome
 }
 
 // RemoveOutcome records the result of removing a single compose command.
@@ -32,10 +40,27 @@ type RemoveOutcome struct {
 	Err     error
 }
 
+// ReleaseOutcome records the result of running the stored release of one
+// resource whose replica is gone.
+type ReleaseOutcome struct {
+	// Holder is the cmdman command name of the resource holder.
+	Holder string
+	Err    error
+}
+
 // Down stops and then removes project-labeled commands.
 //
-// Stop phase: same ordering as Stop (reverse-dependency up walk). Remove
-// phase: fully concurrent after all stops complete.
+// Stop phase: same ordering as Stop (reverse-dependency up walk). Every live
+// replica stops inside the stop hooks stored on it. Remove phase: fully
+// concurrent after all stops complete. Every replica is removed inside the
+// remove hooks stored on it, and the exec commands its failed hooks left for
+// inspection are removed with it.
+//
+// A replica whose stop_pre or stop_post failed under on_error fail is kept: it
+// is not removed, and its RemoveOutcome carries the failure. A replica whose
+// stop failed for any other reason is removed by force. A remove_pre that
+// fails under on_error fail keeps its replica too. opts.Force lets every
+// failing hook pass as on_error continue instead.
 //
 // With no targets and a loaded Spec, Down is the destructive whole-project
 // teardown: because selection is by the (workdir, project) label pair, it also
@@ -48,6 +73,12 @@ type RemoveOutcome struct {
 // the start waits assume replicas are numbered 1..N without gaps. A target with
 // a non-zero ScaleIndex is therefore an error; scaling the command down
 // ([Service.Scale]) is how replicas are removed.
+//
+// A whole-project down then retries the resources of the project left behind
+// by a replica that no longer existed when Down began: the release stored with
+// each runs as the release hook would have, under the on_error stored with it,
+// and the holder goes once the release succeeds. A holder that stores no
+// release stays. This needs no compose file.
 //
 // Per resolved-decision 21, failures are aggregated; every command is attempted.
 func (s *Service) Down(
@@ -94,47 +125,110 @@ func (s *Service) Down(
 		}
 	}
 
+	result := &DownResult{}
+	td := &teardown{force: opts.Force}
 	selected := targets.filter(allEntries)
-	if len(selected) == 0 {
+	if len(selected) > 0 {
+		var removeTargets []cmdmanEntry
+		if spec != nil {
+			// Stop the declared closure (named + recursive dependents) in
+			// reverse-dependency order via the reconcile graph.
+			result.Stops, err = s.reconcileStop(ctx, *spec, targets, td)
+			if err != nil {
+				return nil, err
+			}
+			if len(targets) == 0 {
+				// Whole-project teardown: also stop running orphans, remove everything.
+				result.Stops = append(result.Stops,
+					s.stopOrphans(ctx, allEntries, *spec, selection.Project, td)...)
+				removeTargets = allEntries
+			} else {
+				// Scoped teardown: remove exactly the stopped closure.
+				closure := resolveStopTargetCommands(*spec, targets.names())
+				removeTargets = filterEntriesInClosure(allEntries, closure)
+			}
+		} else {
+			// No reconstructable graph: stop running entries concurrently, remove
+			// the selected set.
+			result.Stops = stopAllConcurrent(
+				ctx, s, runningEntries(selected), selection.Project, td)
+			removeTargets = selected
+		}
+		result.Removes = removeAllConcurrent(ctx, s, removeTargets, selection.Project, td)
+	}
+
+	if len(targets) == 0 {
+		result.Releases, err = s.releaseStranded(ctx, selection, allEntries, opts.Force)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if len(selected) == 0 && len(result.Releases) == 0 {
 		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose down: no commands found for project",
 			"project", selection.Project,
 			"workdir", selection.WorkDir,
 			"operation", "down",
 		)
-		return &DownResult{}, nil
+	}
+	return result, nil
+}
+
+// releaseStranded runs the stored release of every resource of selection whose
+// replica is not among replicas, the project's replicas as Down found them
+// before tearing any down. A replica Down removes has had its release run by
+// its own hooks; one that fails is retried by the next down. A holder that
+// stores no release is left alone, and so is one that cannot be read.
+func (s *Service) releaseStranded(
+	ctx context.Context,
+	selection ProjectSelection,
+	replicas []cmdmanEntry,
+	force bool,
+) ([]ReleaseOutcome, error) {
+	labels := hooksProjectLabels(selection.WorkDir, selection.Project)
+	labels[LabelIntermediate] = IntermediateHolder
+	entries, err := s.svc.List(ctx, cmdman.ListRequest{AllStates: true, Labels: labels})
+	if err != nil {
+		return nil, fmt.Errorf("compose down: list resource holders: %w", err)
 	}
 
-	var (
-		stops         []StopOutcome
-		removeTargets []cmdmanEntry
-	)
-	if spec != nil {
-		// Stop the declared closure (named + recursive dependents) in
-		// reverse-dependency order via the reconcile graph.
-		stops, err = s.reconcileStop(ctx, *spec, targets)
+	logger := contextkey.ValueSlogLoggerDefault(ctx)
+	live := make(map[string]struct{}, len(replicas))
+	for _, e := range replicas {
+		live[e.Name] = struct{}{}
+	}
+	var stranded []resourceHolder
+	for _, e := range entries {
+		h, err := decodeHolder(e)
 		if err != nil {
-			return nil, err
+			logger.WarnContext(ctx, "compose down: skip unreadable resource holder",
+				"holder", e.Name, "error", err)
+			continue
 		}
-		if len(targets) == 0 {
-			// Whole-project teardown: also stop running orphans, remove everything.
-			stops = append(
-				stops, s.stopOrphans(ctx, allEntries, *spec, selection.Project)...)
-			removeTargets = allEntries
-		} else {
-			// Scoped teardown: remove exactly the stopped closure.
-			closure := resolveStopTargetCommands(*spec, targets.names())
-			removeTargets = filterEntriesInClosure(allEntries, closure)
+		if _, ok := live[h.Owner]; ok || h.Release == nil {
+			continue
 		}
-	} else {
-		// No reconstructable graph: stop running entries concurrently, remove
-		// the selected set.
-		stops = stopAllConcurrent(ctx, s, runningEntries(selected), selection.Project)
-		removeTargets = selected
+		stranded = append(stranded, h)
 	}
 
-	removes := removeAllConcurrent(ctx, s, removeTargets, selection.Project)
-
-	return &DownResult{Stops: stops, Removes: removes}, nil
+	outcomes := make([]ReleaseOutcome, len(stranded))
+	var eg errgroup.Group
+	for i, h := range stranded {
+		eg.Go(func() error {
+			_, err := s.runRelease(ctx, h, force)
+			if err != nil {
+				logger.WarnContext(ctx, "compose down: release failed",
+					"project", h.Ref.Project,
+					"holder", h.name(),
+					"error", err,
+				)
+			}
+			outcomes[i] = ReleaseOutcome{Holder: h.name(), Err: err}
+			return nil
+		})
+	}
+	_ = eg.Wait()
+	return outcomes, nil
 }
 
 // spansMultipleProjects reports whether entries carry more than one distinct
@@ -188,6 +282,7 @@ func (s *Service) stopOrphans(
 	entries []cmdmanEntry,
 	spec ComposeSpec,
 	project string,
+	td *teardown,
 ) []StopOutcome {
 	declared := make(map[string]struct{}, len(spec.Commands))
 	for _, nc := range spec.Commands {
@@ -205,7 +300,7 @@ func (s *Service) stopOrphans(
 	if len(orphans) == 0 {
 		return nil
 	}
-	return stopAllConcurrent(ctx, s, orphans, project)
+	return stopAllConcurrent(ctx, s, orphans, project, td)
 }
 
 // filterEntriesInClosure returns the entries whose compose command name is a
@@ -223,12 +318,15 @@ func filterEntriesInClosure(entries []cmdmanEntry, closure map[string]struct{}) 
 	return out
 }
 
-// removeAllConcurrent removes all entries concurrently and returns outcomes.
+// removeAllConcurrent removes all entries concurrently, each inside the remove
+// hooks stored on it as td says, and returns outcomes. An entry td keeps is not
+// removed; its outcome carries the stop hook failure that keeps it.
 func removeAllConcurrent(
 	ctx context.Context,
 	s *Service,
 	entries []cmdmanEntry,
 	project string,
+	td *teardown,
 ) []RemoveOutcome {
 	var (
 		mu       sync.Mutex
@@ -242,38 +340,26 @@ func removeAllConcurrent(
 		name := entryDisplayName(entry)
 		id := entry.ID
 		eg.Go(func() error {
-			s.report(name, PhaseRemoving, nil, nil)
-			results, err := s.svc.Remove(ctx, cmdman.RemoveRequest{
-				Targets: []string{id},
-				Force:   true,
-			})
 			outcome := RemoveOutcome{Command: name}
-			if err != nil {
-				outcome.Err = fmt.Errorf("remove command %q (%s): %w", name, id, err)
-				contextkey.ValueSlogLoggerDefault(ctx).Warn("compose down: remove failed",
-					"project", project,
-					"command", name,
-					"id", id,
-					"error", err,
-				)
+			if kept := td.keptBy(id); kept != nil {
+				outcome.Err = fmt.Errorf(
+					"remove command %q (%s): kept after a failed stop hook: %w", name, id, kept)
+				s.report(name, PhaseSkipped, outcome.Err, nil)
 			} else {
-				for _, r := range results {
-					if r.Err != nil {
-						outcome.Err = fmt.Errorf("remove command %q (%s): %w", name, id, r.Err)
-						contextkey.ValueSlogLoggerDefault(ctx).Warn("compose down: remove failed",
-							"project", project,
-							"command", name,
-							"id", id,
-							"error", r.Err,
-						)
-						break
-					}
+				s.report(name, PhaseRemoving, nil, nil)
+				if err := s.teardownRemove(ctx, td, entry); err != nil {
+					outcome.Err = fmt.Errorf("remove command %q (%s): %w", name, id, err)
+					contextkey.ValueSlogLoggerDefault(ctx).WarnContext(ctx,
+						"compose down: remove failed",
+						"project", project,
+						"command", name,
+						"id", id,
+						"error", err,
+					)
+					s.report(name, PhaseError, outcome.Err, nil)
+				} else {
+					s.report(name, PhaseRemoved, nil, nil)
 				}
-			}
-			if outcome.Err != nil {
-				s.report(name, PhaseError, outcome.Err, nil)
-			} else {
-				s.report(name, PhaseRemoved, nil, nil)
 			}
 			mu.Lock()
 			outcomes = append(outcomes, outcome)

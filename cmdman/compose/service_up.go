@@ -25,6 +25,10 @@ type UpResult struct {
 // Up performs idempotent convergence: runs Create then starts the targeted
 // commands honoring after.Condition via the DAG-aware concurrent starter.
 //
+// A replica whose recreate failed part way is not started: it is the old
+// replica or no replica at all. Its command's start fails, which blocks the
+// commands that depend on it.
+//
 // Per resolved-decision 21, failures are aggregated; remaining commands continue.
 func (s *Service) Up(
 	ctx context.Context,
@@ -36,12 +40,12 @@ func (s *Service) Up(
 		return nil, err
 	}
 
-	createResult, err := s.create(ctx, spec, opts.RemoveOrphan, targets)
+	createResult, aborted, err := s.create(ctx, spec, opts.RemoveOrphan, targets)
 	if err != nil {
 		return nil, err
 	}
 
-	starts, err := s.reconcileStart(ctx, spec, targets, hooksFromSpec)
+	starts, err := s.reconcileStart(ctx, spec, targets, hooksFromSpec, aborted)
 	if err != nil {
 		return nil, err
 	}

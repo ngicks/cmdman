@@ -62,6 +62,8 @@ type hookRun struct {
 	hook    string
 	event   LifecycleEvent
 	exec    string
+	// env is the environment of the exec command, less the resource value.
+	env []string
 }
 
 func (s *Service) reportHook(run hookRun, phase Phase, err error, exit *int) {
@@ -106,7 +108,59 @@ func (s *Service) runHook(
 	ev LifecycleEvent,
 	exec LifecycleExec,
 ) (warning, err error) {
-	run := hookRun{replica: r, hook: h.Name, event: ev, exec: ExecCommandName(r.Name, h.Name, ev)}
+	return s.runHookAs(ctx, hookRun{
+		replica: r,
+		hook:    h.Name,
+		event:   ev,
+		exec:    ExecCommandName(r.Name, h.Name, ev),
+		env:     slices.Concat(r.Env, s.hookEnv(r, h, ev)),
+	}, h, exec)
+}
+
+// runRelease runs the release stored in holder h, whose replica is gone, as
+// the release hook would have run: in the directory and environment h keeps
+// for it, with the resource key and value added. A failure is handled as
+// [Service.runHook] handles it under the on_error h stores, except that force
+// turns on_error fail into continue.
+func (s *Service) runRelease(
+	ctx context.Context,
+	h resourceHolder,
+	force bool,
+) (warning, err error) {
+	rel := h.Release
+	if rel == nil {
+		return nil, fmt.Errorf("resource holder %s stores no release", h.name())
+	}
+	hooks := []LifecycleHook{{
+		Name:     h.hookName(),
+		Resource: h.Ref.Key,
+		Events: map[LifecycleEvent]LifecycleExec{
+			rel.Event: {Args: rel.Args, OnError: rel.OnError},
+		},
+	}}
+	if force {
+		hooks = forcedHooks(hooks)
+	}
+	hook := hooks[0]
+	r := h.replica()
+	return s.runHookAs(ctx, hookRun{
+		replica: r,
+		hook:    hook.Name,
+		event:   rel.Event,
+		exec:    ExecCommandName(r.Name, hook.Name, rel.Event),
+		env:     append(slices.Clone(h.Env), ENV_CMDMAN_COMPOSE_RESOURCE_KEY+"="+h.Ref.Key),
+	}, hook, hook.Events[rel.Event])
+}
+
+// runHookAs is [Service.runHook] for the run described by run.
+func (s *Service) runHookAs(
+	ctx context.Context,
+	run hookRun,
+	h LifecycleHook,
+	exec LifecycleExec,
+) (warning, err error) {
+	r := run.replica
+	ev := run.event
 	exit, err := s.execHook(ctx, run, h, exec)
 	if err == nil {
 		s.reportHook(run, PhaseHookSucceeded, nil, exit)
@@ -146,6 +200,8 @@ func (s *Service) runHook(
 // execHook runs ev of h as the exec command run.exec and records what it
 // acquired or released. The exec command is removed when everything worked and
 // kept otherwise, so a failure can be read back with cmdman logs and inspect.
+// The failure of a release names the value it was to release, which the
+// holder keeps unless on_error is ignore.
 func (s *Service) execHook(
 	ctx context.Context,
 	run hookRun,
@@ -163,13 +219,29 @@ func (s *Service) execHook(
 			value = holder.ConfigJSON.Labels[LabelResourceValue]
 		}
 	}
+	exit, err := s.execHookValue(ctx, run, h, exec, value)
+	if err != nil && h.Resource != "" && !run.event.acquires() {
+		err = fmt.Errorf("release resource %q (value %q): %w", h.Resource, value, err)
+	}
+	return exit, err
+}
 
+// execHookValue is [Service.execHook] once value, the stored value of the
+// resource h declares, has been read.
+func (s *Service) execHookValue(
+	ctx context.Context,
+	run hookRun,
+	h LifecycleHook,
+	exec LifecycleExec,
+	value string,
+) (*int, error) {
+	r := run.replica
 	labels := execLabels(r, h.Name, run.event)
 	if err := s.clearStaleExecs(ctx, labels); err != nil {
 		return nil, err
 	}
 
-	env := slices.Concat(r.Env, s.hookEnv(r, h, run.event))
+	env := slices.Clone(run.env)
 	if h.Resource != "" {
 		env = append(env, ENV_CMDMAN_COMPOSE_RESOURCE_VALUE+"="+value)
 	}

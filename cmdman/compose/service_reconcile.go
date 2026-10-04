@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/go-common/contextkey"
@@ -26,11 +28,16 @@ const reconcileWalkLimit = 8
 // src tells where the start hooks of each replica come from: spec when it was
 // loaded from a compose file, the replica's stored label when spec was rebuilt
 // from stored labels.
+//
+// held maps the cmdman command name of every replica that must not be started
+// to the reason. Such a replica is reported skipped and fails the start of its
+// command.
 func (s *Service) reconcileStart(
 	ctx context.Context,
 	spec ComposeSpec,
 	targets targetSet,
 	src hookSource,
+	held map[string]error,
 ) ([]StartOutcome, error) {
 	if err := ValidateDAG(spec.Commands); err != nil {
 		return nil, err
@@ -50,7 +57,7 @@ func (s *Service) reconcileStart(
 		walkFromBegin,
 		limit,
 		func(ctx context.Context, g *reconcileGraph, v *graphVertex) actionResult {
-			return s.upStartAction(ctx, g, v, spec, src)
+			return s.upStartAction(ctx, g, v, spec, src, held)
 		},
 	)
 
@@ -98,12 +105,16 @@ func (s *Service) reportBlocked(g *reconcileGraph) {
 // Each replica it starts runs its start hooks around the start, taken from
 // spec or from the replica's stored label as src says. A failing hook fails
 // the action like a failed start does, which blocks the dependents.
+//
+// A replica named in held is skipped. The other replicas are started all the
+// same, and then the action fails.
 func (s *Service) upStartAction(
 	ctx context.Context,
 	g *reconcileGraph,
 	v *graphVertex,
 	spec ComposeSpec,
 	src hookSource,
+	held map[string]error,
 ) actionResult {
 	cmd := v.Command
 	replicas := v.replicaIndices()
@@ -117,9 +128,22 @@ func (s *Service) upStartAction(
 	// its scale index (instances[i] is replica replicas[i]) so the trace lists
 	// all replicas rather than collapsing them onto one command line.
 	instances := make([]string, len(replicas))
+	var (
+		heldErr error
+		started []int
+	)
 	for i, idx := range replicas {
 		genName := InstanceName(cmd.GeneratedName, idx)
 		instances[i] = genName
+		if reason, ok := held[genName]; ok {
+			werr := fmt.Errorf("start command %q (%s): not started: %w", cmd.Name, genName, reason)
+			s.report(instanceDisplayName(*cmd, idx), PhaseSkipped, werr, nil)
+			if heldErr == nil {
+				heldErr = werr
+			}
+			continue
+		}
+		started = append(started, idx)
 		// Idempotency: starting/running replicas are already active. Everything
 		// else (created/exited/failed/absent) gets a Start, matching low-level
 		// cmdman start and project-only compose start.
@@ -147,6 +171,10 @@ func (s *Service) upStartAction(
 			s.report(disp, PhaseError, werr, nil)
 			return actionResult{State: v.Snapshot.State, Err: werr}
 		}
+	}
+	if heldErr != nil {
+		s.reportReplicas(*cmd, started, PhaseRunning, nil, nil)
+		return actionResult{State: v.Snapshot.State, Err: heldErr}
 	}
 
 	// No dependent waits on our termination: record running and let dependents
@@ -217,10 +245,14 @@ func (s *Service) upStartAction(
 // so a dependency is never stopped while a command that depends on it is still
 // running. A pulled-in dependent covers every replica; a targeted command
 // covers the replicas targets selects.
+//
+// Each live replica stops inside the stop hooks stored on it, as td says, and
+// td records the replicas a failed stop hook keeps.
 func (s *Service) reconcileStop(
 	ctx context.Context,
 	spec ComposeSpec,
 	targets targetSet,
+	td *teardown,
 ) ([]StopOutcome, error) {
 	if err := ValidateDAG(spec.Commands); err != nil {
 		return nil, err
@@ -240,7 +272,7 @@ func (s *Service) reconcileStop(
 		walkFromEnd,
 		limit,
 		func(ctx context.Context, _ *reconcileGraph, v *graphVertex) actionResult {
-			return s.stopAction(ctx, v, spec.Project)
+			return s.stopAction(ctx, v, spec.Project, td)
 		},
 	)
 
@@ -248,14 +280,16 @@ func (s *Service) reconcileStop(
 	return g.stopOutcomes(spec), nil
 }
 
-// stopAction stops the replicas a vertex covers. Only a replica with a live
-// monitor (starting/running) is stopped; created/exited/failed are already
-// terminal and a stop on them would only return monitor-connect errors, so they
-// are no-ops.
+// stopAction stops the replicas a vertex covers, each inside its own stop
+// hooks and all at once. Only a replica with a live monitor (starting/running)
+// is stopped; created/exited/failed are already terminal and a stop on them
+// would only return monitor-connect errors, so they are no-ops. The action
+// fails with the first failure among the replicas.
 func (s *Service) stopAction(
 	ctx context.Context,
 	v *graphVertex,
 	project string,
+	td *teardown,
 ) actionResult {
 	cmd := v.Command
 	// The graph narrowed the snapshot to the covered replicas.
@@ -271,30 +305,32 @@ func (s *Service) stopAction(
 
 	// Report and stop each live replica by its scale index so the trace lists
 	// every replica being stopped rather than one command line.
-	ids := make([]string, len(live))
+	errs := make([]error, len(live))
+	var eg errgroup.Group
 	for i, in := range live {
-		ids[i] = in.ID
-		s.report(instanceDisplayName(*cmd, in.ScaleIndex), PhaseStopping, nil, nil)
+		disp := instanceDisplayName(*cmd, in.ScaleIndex)
+		s.report(disp, PhaseStopping, nil, nil)
+		eg.Go(func() error {
+			if err := s.teardownStop(ctx, td, in.Entry); err != nil {
+				contextkey.ValueSlogLoggerDefault(ctx).WarnContext(ctx, "compose: stop failed",
+					"project", project,
+					"command", cmd.Name,
+					"id", in.ID,
+					"error", err,
+				)
+				errs[i] = fmt.Errorf("stop command %q (%s): %w", disp, in.ID, err)
+				s.report(disp, PhaseError, errs[i], nil)
+				return nil
+			}
+			s.report(disp, PhaseStopped, nil, snap.ExitCode)
+			return nil
+		})
 	}
-	results, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: ids})
-	if err == nil {
-		err = firstStopErr(results)
-	}
-	if err != nil {
-		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: stop failed",
-			"project", project,
-			"command", cmd.Name,
-			"ids", ids,
-			"error", err,
-		)
-		werr := fmt.Errorf("stop command %q (%v): %w", cmd.Name, ids, err)
-		for _, in := range live {
-			s.report(instanceDisplayName(*cmd, in.ScaleIndex), PhaseError, werr, nil)
+	_ = eg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return actionResult{State: snap.State, Err: err}
 		}
-		return actionResult{State: snap.State, Err: werr}
-	}
-	for _, in := range live {
-		s.report(instanceDisplayName(*cmd, in.ScaleIndex), PhaseStopped, nil, snap.ExitCode)
 	}
 	return actionResult{State: model.EventTypeExited, ExitCode: snap.ExitCode}
 }

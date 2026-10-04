@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/logdriver"
@@ -118,6 +120,52 @@ type resourceHolder struct {
 
 func (h resourceHolder) name() string {
 	return HolderName(h.Owner, h.Ref.Key)
+}
+
+// envValue returns the value Env sets for key, the last one when it sets more.
+func (h resourceHolder) envValue(key string) (string, bool) {
+	for _, kv := range slices.Backward(h.Env) {
+		if k, v, ok := strings.Cut(kv, "="); ok && k == key {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// hookName returns the name of the hook item that acquired the resource. The
+// environment kept for the release hook names it; the resource key stands in
+// for a holder whose environment does not.
+func (h resourceHolder) hookName() string {
+	if name, ok := h.envValue(ENV_CMDMAN_COMPOSE_HOOK_NAME); ok && name != "" {
+		return name
+	}
+	return h.Ref.Key
+}
+
+// replica describes the replica h is held for, as its release hook sees it,
+// from what h records. The replica itself may be gone.
+func (h resourceHolder) replica() hookReplica {
+	scale := 1
+	if raw, ok := h.envValue(ENV_CMDMAN_COMPOSE_SCALE); ok {
+		if n, err := strconv.Atoi(raw); err == nil && n > 1 {
+			scale = n
+		}
+	}
+	display := h.Ref.Command
+	if scale > 1 {
+		display = fmt.Sprintf("%s-%d", h.Ref.Command, h.Ref.ScaleIndex)
+	}
+	return hookReplica{
+		Project:    h.Ref.Project,
+		WorkDir:    h.Ref.WorkDir,
+		Command:    h.Ref.Command,
+		ScaleIndex: h.Ref.ScaleIndex,
+		Scale:      scale,
+		Name:       h.Owner,
+		Display:    display,
+		Dir:        h.Dir,
+		Env:        slices.Clone(h.Env),
+	}
 }
 
 func (h resourceHolder) labels() (map[string]string, error) {

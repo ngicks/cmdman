@@ -101,7 +101,7 @@ func TestStopAllConcurrentReportsPerTargetResultError(t *testing.T) {
 	entries := []store.CommandEntry{storedGraphEntry("api", model.EventTypeRunning)}
 	svc := &Service{svc: stopResultErrSvc(entries, want)}
 
-	outcomes := stopAllConcurrent(context.Background(), svc, entries, "proj")
+	outcomes := stopAllConcurrent(context.Background(), svc, entries, "proj", &teardown{})
 	o, ok := stopOutcomeByCommand(outcomes, "api")
 	if !ok {
 		t.Fatalf("expected an api outcome, got %#v", outcomes)

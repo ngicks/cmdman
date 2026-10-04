@@ -240,20 +240,8 @@ func (s *Service) restartStop(ctx context.Context, e cmdmanEntry) (startable boo
 	if e.State != model.EventTypeRunning && e.State != model.EventTypeStarting {
 		return true, s.stopForRecreate(ctx, e.ID)
 	}
-	r, hooks, err := storedHookReplica(e)
-	if err != nil {
-		return false, err
-	}
-	if _, err := s.runLifecycleEvent(ctx, r, hooks, LifecycleStopPre); err != nil {
-		return false, err
-	}
-	if err := s.stopForRecreate(ctx, e.ID); err != nil {
-		return true, err
-	}
-	if _, err := s.runLifecycleEvent(ctx, r, hooks, LifecycleStopPost); err != nil {
-		return false, err
-	}
-	return true, nil
+	hookFailed, err := s.stopReplica(ctx, e, false)
+	return !hookFailed, err
 }
 
 // startLayerRestartConcurrent starts a layer for the restart operation,

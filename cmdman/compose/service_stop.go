@@ -43,6 +43,10 @@ type StopOutcome struct {
 // When no Spec is loaded, the dependency graph is reconstructed from stored
 // compose labels.
 //
+// Each live replica stops inside the stop hooks stored on it: stop_pre, the
+// stop, then stop_post. A stop_pre that fails under on_error fail leaves its
+// replica running, and either failing hook fails the command's outcome.
+//
 // An empty resolved target set is not an error: the caller should emit a
 // structured-log event and return nil.
 //
@@ -76,7 +80,7 @@ func (s *Service) Stop(
 
 	var stops []StopOutcome
 	if selection.Spec != nil {
-		stops, err = s.reconcileStop(ctx, *selection.Spec, targets)
+		stops, err = s.reconcileStop(ctx, *selection.Spec, targets, &teardown{})
 		if err != nil {
 			return nil, err
 		}
@@ -90,7 +94,7 @@ func (s *Service) Stop(
 				"compose stop: stored dependency graph is ambiguous; pass -f or --project-name",
 			)
 		}
-		stops, err = s.reconcileStop(ctx, spec, targets)
+		stops, err = s.reconcileStop(ctx, spec, targets, &teardown{})
 		if err != nil {
 			return nil, err
 		}
@@ -99,12 +103,14 @@ func (s *Service) Stop(
 	return &StopResult{Stops: stops}, nil
 }
 
-// stopAllConcurrent stops all entries concurrently and returns outcomes.
+// stopAllConcurrent stops all entries concurrently, each inside the stop hooks
+// stored on it as td says, and returns outcomes.
 func stopAllConcurrent(
 	ctx context.Context,
 	s *Service,
 	entries []cmdmanEntry,
 	project string,
+	td *teardown,
 ) []StopOutcome {
 	var (
 		mu       sync.Mutex
@@ -119,10 +125,7 @@ func stopAllConcurrent(
 		id := entry.ID
 		eg.Go(func() error {
 			s.report(name, PhaseStopping, nil, nil)
-			results, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{id}})
-			if err == nil {
-				err = firstStopErr(results)
-			}
+			err := s.teardownStop(ctx, td, entry)
 			outcome := StopOutcome{Command: name}
 			if err != nil {
 				outcome.Err = fmt.Errorf("stop command %q (%s): %w", name, id, err)
