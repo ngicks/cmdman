@@ -52,37 +52,52 @@ func newMonitorCmd(cfg config.Config, id string, extraEnv []string) (*exec.Cmd, 
 	return cmd, nil
 }
 
+// StateMark is a command's state record as read right before a monitor is
+// spawned for it. [WaitForState] tells the spawned run apart from it.
+type StateMark struct {
+	State model.EventType
+	// MonitorPID is the PID of the monitor that last wrote the record, or 0.
+	MonitorPID int
+}
+
 // WaitForState polls the store until the command reaches the desired state
 // or the timeout is reached. Returns the final state observed.
 //
-// When the initial observation is EventTypeFailed (e.g. when restarting a
-// previously failed command), the leftover state is not treated as a new
-// failure; only a transition into EventTypeFailed after the state has progressed
-// is reported as such.
+// since is the record before the spawn. The state has progressed once it
+// differs from since, or once a monitor other than since's has written it,
+// which a new monitor does with its first write. A leftover EventTypeFailed or
+// EventTypeExited (e.g. when restarting a previously stopped command) is
+// therefore not treated as the end of a new run. Once the state has
+// progressed, a transition into EventTypeFailed is reported as an error and a
+// transition into EventTypeExited returns that state with no error: a run that
+// has already ended can no longer reach the desired state, and polling on
+// would only wait out the timeout.
 func WaitForState(
 	st *store.Store,
 	id string,
 	desiredState model.EventType,
+	since StateMark,
 	maxAttempts int,
 ) (model.EventType, error) {
-	var initial model.EventType
 	progressed := false
-	for i := range maxAttempts {
-		state, _, _, err := st.GetCommandState(id)
+	for range maxAttempts {
+		state, _, stateJSON, err := st.GetCommandState(id)
 		if err != nil {
 			return "", err
 		}
-		if i == 0 {
-			initial = state
-		}
-		if state != initial {
+		if state != since.State || stateJSON.MonitorPID != since.MonitorPID {
 			progressed = true
 		}
 		if state == desiredState {
 			return state, nil
 		}
-		if state == model.EventTypeFailed && progressed {
-			return state, fmt.Errorf("monitor entered failed state")
+		if progressed {
+			switch state {
+			case model.EventTypeFailed:
+				return state, fmt.Errorf("monitor entered failed state")
+			case model.EventTypeExited:
+				return state, nil
+			}
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
