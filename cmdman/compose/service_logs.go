@@ -22,8 +22,10 @@ const logsChannelBuffer = 64
 
 // LogsOption configures a Logs operation.
 type LogsOption struct {
-	// CommandNames optionally narrows the target set to specific compose command names.
-	CommandNames []string
+	// Targets optionally narrows the target set to specific compose commands or
+	// replicas. Empty targets the whole project. A replica index must name a
+	// stored replica.
+	Targets []Target
 	// Follow tails live output when true; otherwise reads stored logs and exits.
 	Follow bool
 	// Since excludes log records before this time (zero = no lower bound).
@@ -86,13 +88,12 @@ func (s *Service) Logs(
 			return
 		}
 
-		if err := validateCommandNames(opts.CommandNames, selection.Spec, entries); err != nil {
+		targets, err := resolveTargets(opts.Targets, storedReplicas(selection.Spec, entries))
+		if err != nil {
 			errc <- err
 			return
 		}
-		if len(opts.CommandNames) > 0 {
-			entries = filterByCommandNames(entries, opts.CommandNames)
-		}
+		entries = targets.filter(entries)
 
 		if len(entries) == 0 {
 			contextkey.ValueSlogLoggerDefault(ctx).Warn(

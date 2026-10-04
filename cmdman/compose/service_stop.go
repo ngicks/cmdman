@@ -13,8 +13,11 @@ import (
 
 // StopOption configures a Stop operation.
 type StopOption struct {
-	// CommandNames optionally narrows the target set to specific compose command names.
-	CommandNames []string
+	// Targets optionally narrows the stop to specific compose commands or
+	// replicas. Empty targets the whole project. Dependents of a targeted command
+	// are stopped too, every replica of them. A replica index must name a stored
+	// replica.
+	Targets []Target
 }
 
 // StopResult is the aggregated result of a compose stop operation.
@@ -33,9 +36,9 @@ type StopOutcome struct {
 // When selection carries a Spec (compose file loaded), commands are stopped by
 // an up walk of the reconcile graph: dependents are stopped before the
 // dependencies they rely on, and independent branches stop concurrently. When
-// command names are given, their recursive dependents are pulled in so a
-// dependency is never stopped while a command that depends on it is still
-// running.
+// targets are given, the targeted commands' recursive dependents are pulled in
+// so a dependency is never stopped while a command that depends on it is still
+// running. A targeted command stops only the replicas its targets select.
 //
 // When no Spec is loaded, the dependency graph is reconstructed from stored
 // compose labels.
@@ -57,7 +60,8 @@ func (s *Service) Stop(
 		return nil, fmt.Errorf("list project commands: %w", err)
 	}
 
-	if err := validateCommandNames(opts.CommandNames, selection.Spec, entries); err != nil {
+	targets, err := resolveTargets(opts.Targets, storedReplicas(selection.Spec, entries))
+	if err != nil {
 		return nil, err
 	}
 
@@ -72,7 +76,7 @@ func (s *Service) Stop(
 
 	var stops []StopOutcome
 	if selection.Spec != nil {
-		stops, err = s.reconcileStop(ctx, *selection.Spec, opts.CommandNames)
+		stops, err = s.reconcileStop(ctx, *selection.Spec, targets)
 		if err != nil {
 			return nil, err
 		}
@@ -86,7 +90,7 @@ func (s *Service) Stop(
 				"compose stop: stored dependency graph is ambiguous; pass -f or --project-name",
 			)
 		}
-		stops, err = s.reconcileStop(ctx, spec, opts.CommandNames)
+		stops, err = s.reconcileStop(ctx, spec, targets)
 		if err != nil {
 			return nil, err
 		}

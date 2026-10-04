@@ -20,11 +20,12 @@ const reconcileWalkLimit = 8
 //
 // Dependencies are pulled into the closure transitively, so after.Condition is
 // always evaluated against the run this reconciliation is responsible for, not
-// against stale terminal state from a previous run.
+// against stale terminal state from a previous run. A pulled-in dependency
+// covers every replica; a targeted command covers the replicas targets selects.
 func (s *Service) reconcileStart(
 	ctx context.Context,
 	spec ComposeSpec,
-	names []string,
+	targets targetSet,
 ) ([]StartOutcome, error) {
 	if err := ValidateDAG(spec.Commands); err != nil {
 		return nil, err
@@ -35,8 +36,8 @@ func (s *Service) reconcileStart(
 		return nil, err
 	}
 
-	closure := resolveTargetCommands(spec, names)
-	g := buildReconcileGraph(spec, snaps, closure)
+	closure := resolveTargetCommands(spec, targets.names())
+	g := buildReconcileGraph(spec, snaps, closure, targets)
 
 	limit := min(len(closure), reconcileWalkLimit)
 	g.walk(ctx, walkFromBegin, limit, s.upStartAction)
@@ -55,8 +56,9 @@ func (s *Service) reportBlocked(g *reconcileGraph) {
 		return
 	}
 	type blocked struct {
-		cmd Command
-		err error
+		cmd      Command
+		replicas []int
+		err      error
 	}
 	var pending []blocked
 	g.mu.Lock()
@@ -64,25 +66,29 @@ func (s *Service) reportBlocked(g *reconcileGraph) {
 		if v.Command == nil || !v.InClosure || !v.Blocked {
 			continue
 		}
-		pending = append(pending, blocked{cmd: *v.Command, err: v.Err})
+		pending = append(
+			pending,
+			blocked{cmd: *v.Command, replicas: v.replicaIndices(), err: v.Err},
+		)
 	}
 	g.mu.Unlock()
 	for _, b := range pending {
-		// Report the block against every replica so the trace lists each scale
-		// index that never ran, matching the create/start lines above it.
-		s.reportInstances(b.cmd, PhaseError, b.err, nil)
+		// Report the block against every covered replica so the trace lists each
+		// scale index that never ran, matching the create/start lines above it.
+		s.reportReplicas(b.cmd, b.replicas, PhaseError, b.err, nil)
 	}
 }
 
-// upStartAction starts (or confirms running) every replica of a command and,
-// when a dependent needs its completion, waits for all replicas to stop so
-// completion edges can progress from the current run's terminal state.
+// upStartAction starts (or confirms running) every replica the vertex covers
+// and, when a dependent needs its completion, waits for those replicas to stop
+// so completion edges can progress from the current run's terminal state.
 func (s *Service) upStartAction(
 	ctx context.Context,
 	g *reconcileGraph,
 	v *graphVertex,
 ) actionResult {
 	cmd := v.Command
+	replicas := v.replicaIndices()
 
 	active := make(map[string]bool, len(v.Snapshot.Instances))
 	for _, in := range v.Snapshot.Instances {
@@ -90,18 +96,20 @@ func (s *Service) upStartAction(
 			in.State == model.EventTypeStarting
 	}
 
-	// Start every replica that is not already active, reporting each by its scale
-	// index (instances[i] is replica i+1) so the trace lists all replicas rather
-	// than collapsing them onto one command line.
-	instances := cmd.InstanceNames()
-	for i, genName := range instances {
+	// Start every covered replica that is not already active, reporting each by
+	// its scale index (instances[i] is replica replicas[i]) so the trace lists
+	// all replicas rather than collapsing them onto one command line.
+	instances := make([]string, len(replicas))
+	for i, idx := range replicas {
+		genName := InstanceName(cmd.GeneratedName, idx)
+		instances[i] = genName
 		// Idempotency: starting/running replicas are already active. Everything
 		// else (created/exited/failed/absent) gets a Start, matching low-level
 		// cmdman start and project-only compose start.
 		if active[genName] {
 			continue
 		}
-		disp := instanceDisplayName(*cmd, i+1)
+		disp := instanceDisplayName(*cmd, idx)
 		s.report(disp, PhaseStarting, nil, nil)
 		if err := s.svc.Start(ctx, genName); err != nil {
 			contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: start failed",
@@ -118,34 +126,35 @@ func (s *Service) upStartAction(
 	// No dependent waits on our termination: record running and let dependents
 	// on the running condition proceed without blocking on completion.
 	if !g.anyDependentNeedsCompletion(v.ID) {
-		s.reportInstances(*cmd, PhaseRunning, nil, v.Snapshot.ExitCode)
+		s.reportReplicas(*cmd, replicas, PhaseRunning, nil, v.Snapshot.ExitCode)
 		return actionResult{State: model.EventTypeRunning, ExitCode: v.Snapshot.ExitCode}
 	}
 
 	// A completion edge depends on us: observe the terminal state of every
-	// replica this run. cmdman.Service.Start returns nil even if a command exits
-	// before running is observed, so completion must come from Wait(stopped),
-	// never inferred from Start alone.
-	s.reportInstances(*cmd, PhaseWaiting, nil, nil)
+	// covered replica this run. cmdman.Service.Start returns nil even if a
+	// command exits before running is observed, so completion must come from
+	// Wait(stopped), never inferred from Start alone.
+	s.reportReplicas(*cmd, replicas, PhaseWaiting, nil, nil)
 	results, werr := s.svc.Wait(ctx, cmdman.WaitRequest{
 		Targets:   instances,
 		Condition: cmdman.WaitConditionStopped,
 	})
 	if werr != nil {
-		s.reportInstances(*cmd, PhaseError, werr, nil)
+		s.reportReplicas(*cmd, replicas, PhaseError, werr, nil)
 		return actionResult{State: model.EventTypeRunning, Err: werr}
 	}
 
 	// Reduce per-replica wait results to a single terminal state for the vertex,
 	// reporting each replica's own terminal phase as we go. Service.Wait returns
-	// one result per target in argument order, so results[i] is replica i+1. A
-	// replica with a recorded exit code exited (possibly non-zero); one without
-	// is a monitor/subprocess failure. completed is satisfied by either; the
-	// successful condition additionally checks the exit code (see aggregate).
+	// one result per target in argument order, so results[i] is replica
+	// replicas[i]. A replica with a recorded exit code exited (possibly
+	// non-zero); one without is a monitor/subprocess failure. completed is
+	// satisfied by either; the successful condition additionally checks the exit
+	// code (see aggregate).
 	insts := make([]instanceSnapshot, 0, len(results))
 	var firstErr error
 	for i, r := range results {
-		disp := instanceDisplayName(*cmd, i+1)
+		disp := instanceDisplayName(*cmd, replicas[i])
 		st := model.EventTypeExited
 		switch {
 		case r.Err != nil:
@@ -180,11 +189,12 @@ func (s *Service) upStartAction(
 //
 // Dependents are pulled into the closure transitively (resolveStopTargetCommands)
 // so a dependency is never stopped while a command that depends on it is still
-// running.
+// running. A pulled-in dependent covers every replica; a targeted command
+// covers the replicas targets selects.
 func (s *Service) reconcileStop(
 	ctx context.Context,
 	spec ComposeSpec,
-	names []string,
+	targets targetSet,
 ) ([]StopOutcome, error) {
 	if err := ValidateDAG(spec.Commands); err != nil {
 		return nil, err
@@ -195,8 +205,8 @@ func (s *Service) reconcileStop(
 		return nil, err
 	}
 
-	closure := resolveStopTargetCommands(spec, names)
-	g := buildReconcileGraph(spec, snaps, closure)
+	closure := resolveStopTargetCommands(spec, targets.names())
+	g := buildReconcileGraph(spec, snaps, closure, targets)
 
 	limit := min(len(closure), reconcileWalkLimit)
 	g.walk(
@@ -212,22 +222,24 @@ func (s *Service) reconcileStop(
 	return g.stopOutcomes(spec), nil
 }
 
-// stopAction stops a single command. Only a command with a live monitor
-// (starting/running) is stopped; created/exited/failed are already terminal and
-// a stop on them would only return monitor-connect errors, so they are no-ops.
+// stopAction stops the replicas a vertex covers. Only a replica with a live
+// monitor (starting/running) is stopped; created/exited/failed are already
+// terminal and a stop on them would only return monitor-connect errors, so they
+// are no-ops.
 func (s *Service) stopAction(
 	ctx context.Context,
 	v *graphVertex,
 	project string,
 ) actionResult {
 	cmd := v.Command
+	// The graph narrowed the snapshot to the covered replicas.
 	snap := v.Snapshot
 
 	live := snap.activeInstances()
 	if len(live) == 0 {
-		// Nothing to stop: every replica is already terminal. Report skipped for
-		// each replica, keeping the observed aggregate state for diagnostics.
-		s.reportInstances(*cmd, PhaseSkipped, nil, snap.ExitCode)
+		// Nothing to stop: every covered replica is already terminal. Report
+		// skipped for each, keeping the observed aggregate state for diagnostics.
+		s.reportReplicas(*cmd, v.replicaIndices(), PhaseSkipped, nil, snap.ExitCode)
 		return actionResult{State: snap.State, ExitCode: snap.ExitCode}
 	}
 

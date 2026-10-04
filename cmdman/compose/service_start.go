@@ -10,10 +10,12 @@ import (
 
 // StartOption configures a Start operation.
 type StartOption struct {
-	// CommandNames optionally narrows the start to a subset of commands. When
-	// a compose file or stored dependency graph is available, dependencies of
-	// the named commands are pulled in automatically.
-	CommandNames []string
+	// Targets optionally narrows the start to a subset of commands or replicas.
+	// Empty targets the whole project. When a compose file or stored dependency
+	// graph is available, dependencies of the targeted commands are pulled in
+	// automatically, every replica of them. A replica index must name a stored
+	// replica.
+	Targets []Target
 }
 
 // StartResult is the aggregated result of a compose start operation.
@@ -36,23 +38,31 @@ func (s *Service) Start(
 	selection ProjectSelection,
 	opts StartOption,
 ) (*StartResult, error) {
-	if selection.Spec != nil {
-		return s.startWithSpec(ctx, selection, opts)
+	entries, err := s.svc.List(ctx, cmdman.ListRequest{
+		AllStates: true,
+		Labels:    projectLabels(selection.WorkDir, selection.Project),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list project commands: %w", err)
 	}
-	return s.startWithoutSpec(ctx, selection, opts)
+
+	targets, err := resolveTargets(opts.Targets, storedReplicas(selection.Spec, entries))
+	if err != nil {
+		return nil, err
+	}
+
+	if selection.Spec != nil {
+		return s.startWithSpec(ctx, *selection.Spec, targets)
+	}
+	return s.startWithoutSpec(ctx, selection, entries, targets)
 }
 
 func (s *Service) startWithSpec(
 	ctx context.Context,
-	selection ProjectSelection,
-	opts StartOption,
+	spec ComposeSpec,
+	targets targetSet,
 ) (*StartResult, error) {
-	spec := *selection.Spec
-	if err := validateCommandNames(opts.CommandNames, &spec, nil); err != nil {
-		return nil, err
-	}
-
-	starts, err := s.reconcileStart(ctx, spec, opts.CommandNames)
+	starts, err := s.reconcileStart(ctx, spec, targets)
 	if err != nil {
 		return nil, err
 	}
@@ -66,19 +76,9 @@ func (s *Service) startWithSpec(
 func (s *Service) startWithoutSpec(
 	ctx context.Context,
 	selection ProjectSelection,
-	opts StartOption,
+	entries []cmdmanEntry,
+	targets targetSet,
 ) (*StartResult, error) {
-	entries, err := s.svc.List(ctx, cmdman.ListRequest{
-		AllStates: true,
-		Labels:    projectLabels(selection.WorkDir, selection.Project),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list project commands: %w", err)
-	}
-
-	if err := validateCommandNames(opts.CommandNames, nil, entries); err != nil {
-		return nil, err
-	}
 	if len(entries) == 0 {
 		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose start: no commands found for project",
 			"project", selection.Project,
@@ -97,7 +97,7 @@ func (s *Service) startWithoutSpec(
 			"compose start: stored dependency graph is ambiguous; pass -f or --project-name",
 		)
 	}
-	starts, err := s.reconcileStart(ctx, spec, opts.CommandNames)
+	starts, err := s.reconcileStart(ctx, spec, targets)
 	if err != nil {
 		return nil, err
 	}

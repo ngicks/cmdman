@@ -19,16 +19,17 @@ func composeEventsCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 		flagUntil    string
 		flagTypes    []string
 		flagFormat   string
+		flagScale    int
 	)
 
 	cmd := &cobra.Command{
 		Use:               "events [COMMAND...]",
 		Short:             "Stream events for compose commands",
-		Args:              cobra.ArbitraryArgs,
+		Args:              scaleArgs(cobra.ArbitraryArgs, &flagScale),
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeEvents(
-				cmd, rf, cf, args,
+				cmd, rf, cf, args, flagScale,
 				flagNoFollow, flagSince, flagUntil, flagTypes, flagFormat,
 			)
 		},
@@ -46,6 +47,7 @@ func composeEventsCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	cmd.Flags().StringSliceVar(&flagTypes, "type", nil,
 		"Filter by event type (repeatable)")
 	cmd.Flags().StringVar(&flagFormat, "format", "", cli.EventsFormatUsage())
+	addScaleFlag(cmd, &flagScale)
 
 	parent.AddCommand(cmd)
 }
@@ -55,6 +57,7 @@ func runComposeEvents(
 	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
+	scale int,
 	noFollow bool,
 	sinceFlag string,
 	untilFlag string,
@@ -93,11 +96,11 @@ func runComposeEvents(
 	defer svc.Close()
 
 	sub, err := compose.NewService(svc).Events(cmd.Context(), selection, compose.EventsOption{
-		CommandNames: commandNames,
-		NoFollow:     noFollow,
-		Since:        since,
-		Until:        until,
-		Types:        typeFilter,
+		Targets:  composeTargets(commandNames, scale),
+		NoFollow: noFollow,
+		Since:    since,
+		Until:    until,
+		Types:    typeFilter,
 	})
 	if err != nil {
 		return err

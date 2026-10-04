@@ -10,19 +10,21 @@ import (
 func composeInspectCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagFormat string
+		flagScale  int
 	)
 
 	cmd := &cobra.Command{
 		Use:               "inspect [COMMAND...]",
 		Short:             "Show merged definition, state, and exit history for compose commands",
-		Args:              cobra.ArbitraryArgs,
+		Args:              scaleArgs(cobra.ArbitraryArgs, &flagScale),
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeInspect(cmd, rf, cf, args, flagFormat)
+			return runComposeInspect(cmd, rf, cf, args, flagScale, flagFormat)
 		},
 	}
 
 	cmd.Flags().StringVar(&flagFormat, "format", "", cli.InspectFormatUsage())
+	addScaleFlag(cmd, &flagScale)
 
 	parent.AddCommand(cmd)
 }
@@ -32,6 +34,7 @@ func runComposeInspect(
 	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
+	scale int,
 	format string,
 ) error {
 	selection, err := compose.LoadOrProject(cf.normalizeOpts())
@@ -45,7 +48,9 @@ func runComposeInspect(
 	}
 	defer svc.Close()
 
-	outputs, err := compose.NewService(svc).Inspect(cmd.Context(), selection, commandNames)
+	outputs, err := compose.NewService(svc).Inspect(cmd.Context(), selection, compose.InspectOption{
+		Targets: composeTargets(commandNames, scale),
+	})
 	if err != nil {
 		return err
 	}

@@ -80,11 +80,12 @@ func (s *Service) ResolveReplicas(
 		return nil, fmt.Errorf("list project commands: %w", err)
 	}
 
-	if err := validateCommandNames([]string{commandName}, selection.Spec, entries); err != nil {
+	targets, err := resolveTargets(TargetsOf(commandName), storedReplicas(selection.Spec, entries))
+	if err != nil {
 		return nil, err
 	}
 
-	matched := filterByCommandNames(entries, []string{commandName})
+	matched := targets.filter(entries)
 	if len(matched) == 0 {
 		return nil, fmt.Errorf(
 			"compose command %q not found in project (has it been created?)", commandName)

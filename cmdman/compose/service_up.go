@@ -7,9 +7,10 @@ import (
 // UpOption configures an Up operation (a Create followed by a Start), so it
 // embeds both option sets.
 //
-// CreateOption and StartOption both carry CommandNames; Up reads the create
-// side (opts.CreateOption.CommandNames), so set the same names on both — or just
-// the create side — when targeting a subset.
+// CreateOption and StartOption both carry Targets; Up reads the create side
+// (opts.CreateOption.Targets), so set the same targets on both — or just the
+// create side — when targeting a subset. A replica index must lie within the
+// scale the spec declares for its command.
 type UpOption struct {
 	CreateOption
 	StartOption
@@ -30,12 +31,17 @@ func (s *Service) Up(
 	spec ComposeSpec,
 	opts UpOption,
 ) (*UpResult, error) {
-	createResult, err := s.Create(ctx, spec, opts.CreateOption)
+	targets, err := resolveTargets(opts.CreateOption.Targets, declaredReplicas(spec))
 	if err != nil {
 		return nil, err
 	}
 
-	starts, err := s.reconcileStart(ctx, spec, opts.CreateOption.CommandNames)
+	createResult, err := s.create(ctx, spec, opts.RemoveOrphan, targets)
+	if err != nil {
+		return nil, err
+	}
+
+	starts, err := s.reconcileStart(ctx, spec, targets)
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,8 @@ package compose
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 )
 
 // ScaleOption configures [Service.Scale]. File/ProjectName/WorkDir are the
@@ -44,13 +46,10 @@ func (s *Service) Scale(ctx context.Context, opts ScaleOption) (*UpResult, error
 		return nil, err
 	}
 
-	names := make([]string, 0, len(opts.Scales))
-	for name := range opts.Scales {
-		names = append(names, name)
-	}
+	targets := TargetsOf(slices.Sorted(maps.Keys(opts.Scales))...)
 	return s.Up(ctx, spec, UpOption{
-		CreateOption: CreateOption{CommandNames: names},
-		StartOption:  StartOption{CommandNames: names},
+		CreateOption: CreateOption{Targets: targets},
+		StartOption:  StartOption{Targets: targets},
 	})
 }
 

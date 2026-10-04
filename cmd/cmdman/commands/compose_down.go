@@ -13,8 +13,14 @@ func composeDownCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	)
 
 	cmd := &cobra.Command{
-		Use:               "down [COMMAND...]",
-		Short:             "Stop and remove compose commands",
+		Use:   "down [COMMAND...]",
+		Short: "Stop and remove compose commands",
+		Long: `Stop and remove compose commands.
+
+With no COMMAND, down tears the whole project down; with COMMANDs, it removes
+those commands and the commands that depend on them. Down removes every replica
+of a command; to remove replicas, scale the command down with
+"cmdman compose scale COMMAND=N".`,
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -54,7 +60,7 @@ func runComposeDown(
 
 	result, err := compose.NewService(svc, compose.WithReporter(prog)).Down(
 		cmd.Context(), selection, compose.DownOption{
-			CommandNames: commandNames,
+			Targets: compose.TargetsOf(commandNames...),
 		})
 	if err != nil {
 		return err

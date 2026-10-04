@@ -8,15 +8,21 @@ import (
 )
 
 func composeRestartCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
+	var (
+		flagScale int
+	)
+
 	cmd := &cobra.Command{
 		Use:               "restart [COMMAND...]",
 		Short:             "Stop then start compose commands",
-		Args:              cobra.ArbitraryArgs,
+		Args:              scaleArgs(cobra.ArbitraryArgs, &flagScale),
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeRestart(cmd, rf, cf, args)
+			return runComposeRestart(cmd, rf, cf, args, flagScale)
 		},
 	}
+
+	addScaleFlag(cmd, &flagScale)
 
 	parent.AddCommand(cmd)
 }
@@ -26,6 +32,7 @@ func runComposeRestart(
 	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
+	scale int,
 ) error {
 	selection, err := compose.LoadOrProject(cf.normalizeOpts())
 	if err != nil {
@@ -39,7 +46,7 @@ func runComposeRestart(
 	defer svc.Close()
 
 	result, err := compose.NewService(svc).Restart(cmd.Context(), selection, compose.RestartOption{
-		CommandNames: commandNames,
+		Targets: composeTargets(commandNames, scale),
 	})
 	if err != nil {
 		return err

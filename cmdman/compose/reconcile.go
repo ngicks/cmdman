@@ -42,6 +42,19 @@ type instanceSnapshot struct {
 	ExitCode *int
 }
 
+// only narrows the snapshot to the replicas with the given scale indices and
+// re-aggregates state and exit code over them.
+func (s commandSnapshot) only(scaleIndices []int) commandSnapshot {
+	var insts []instanceSnapshot
+	for _, in := range s.Instances {
+		if slices.Contains(scaleIndices, in.ScaleIndex) {
+			insts = append(insts, in)
+		}
+	}
+	state, exit := aggregateInstances(insts)
+	return commandSnapshot{Instances: insts, State: state, ExitCode: exit}
+}
+
 // activeInstances returns the replicas with a live monitor (running/starting) —
 // the only ones a stop can act on.
 func (s commandSnapshot) activeInstances() []instanceSnapshot {
@@ -221,6 +234,10 @@ type graphVertex struct {
 	// when they appear as a dependency edge.
 	InClosure bool
 
+	// Replicas are the ascending scale indices the action covers, nil meaning
+	// every replica of Command. When set, Snapshot covers only these replicas.
+	Replicas []int
+
 	// Scheduling state, guarded by reconcileGraph.mu.
 	Queued     bool
 	InProgress bool
@@ -239,6 +256,25 @@ type graphVertex struct {
 	// vertices so teardown reporting can reflect what actually happened (for a
 	// stop walk that is reverse-dependency order). 0 means not yet consumed.
 	Order int
+}
+
+// replicaIndices returns the ascending scale indices a command vertex's action
+// covers.
+func (v *graphVertex) replicaIndices() []int {
+	if v.Replicas != nil {
+		return v.Replicas
+	}
+	return allReplicaIndices(*v.Command)
+}
+
+// allReplicaIndices returns 1..cmd.Scale, the scale index of every replica of
+// cmd.
+func allReplicaIndices(cmd Command) []int {
+	out := make([]int, max(cmd.Scale, 1))
+	for i := range out {
+		out[i] = i + 1
+	}
+	return out
 }
 
 // reconcileGraph is in-process reconciliation state. It is built from the spec
@@ -274,10 +310,15 @@ type graphAction func(context.Context, *reconcileGraph, *graphVertex) actionResu
 // snapshot, and marks closure membership. Construction is uniform: begin->cmd
 // and cmd->end edges are added for every command, so root/leaf detection is a
 // property of the edges rather than special-cased.
+//
+// An in-closure command that targets narrows to specific replicas gets those
+// replicas as its Replicas and a snapshot of them alone; every other command
+// covers all of its replicas.
 func buildReconcileGraph(
 	spec ComposeSpec,
 	snaps map[string]commandSnapshot,
 	closure map[string]struct{},
+	targets targetSet,
 ) *reconcileGraph {
 	g := &reconcileGraph{Vertices: make(map[vertexID]*graphVertex, len(spec.Commands)+2)}
 
@@ -299,6 +340,13 @@ func buildReconcileGraph(
 		id := vertexID(c.Name)
 		snap := snaps[c.Name]
 		_, in := closure[c.Name]
+		var replicas []int
+		if in {
+			replicas = targets[c.Name]
+		}
+		if replicas != nil {
+			snap = snap.only(replicas)
+		}
 		g.Vertices[id] = &graphVertex{
 			ID:        id,
 			Command:   c,
@@ -306,6 +354,7 @@ func buildReconcileGraph(
 			State:     snap.State,
 			ExitCode:  snap.ExitCode,
 			InClosure: in,
+			Replicas:  replicas,
 			Parents:   map[vertexID]graphEdge{},
 			Children:  map[vertexID]graphEdge{},
 		}

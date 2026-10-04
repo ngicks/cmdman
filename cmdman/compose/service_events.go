@@ -12,8 +12,10 @@ import (
 
 // EventsOption configures a compose Events subscription.
 type EventsOption struct {
-	// CommandNames optionally narrows the target set to specific compose command names.
-	CommandNames []string
+	// Targets optionally narrows the target set to specific compose commands or
+	// replicas. Empty targets the whole project. A replica index must name a
+	// stored replica.
+	Targets []Target
 	// NoFollow delivers existing entries and exits instead of tailing new events.
 	NoFollow bool
 	// Since/Until clamp the event time window (see cmdman.EventsRequest).
@@ -24,8 +26,8 @@ type EventsOption struct {
 }
 
 // Events subscribes to the event log filtered to the selected project's command
-// IDs. With no command-name filter it covers every command in the project;
-// names narrow the set.
+// IDs. With no targets it covers every command in the project; targets narrow
+// the set.
 //
 // The project command IDs are resolved up front and set as the subscription's
 // ID filter, so only events for project commands are delivered. Per
@@ -45,12 +47,11 @@ func (s *Service) Events(
 		return nil, fmt.Errorf("list project commands: %w", err)
 	}
 
-	if err := validateCommandNames(opts.CommandNames, selection.Spec, entries); err != nil {
+	targets, err := resolveTargets(opts.Targets, storedReplicas(selection.Spec, entries))
+	if err != nil {
 		return nil, err
 	}
-	if len(opts.CommandNames) > 0 {
-		entries = filterByCommandNames(entries, opts.CommandNames)
-	}
+	entries = targets.filter(entries)
 
 	if len(entries) == 0 {
 		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose events: no commands found for project",

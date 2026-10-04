@@ -10,6 +10,7 @@ import (
 func composeStatusCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagFormat string
+		flagScale  int
 	)
 
 	cmd := &cobra.Command{
@@ -22,14 +23,15 @@ detail of every command, plus the title it last set and whether its bell is
 still unread. Commands that are not running have nothing to report.
 
 Writing a status is per command - see ` + "`cmdman status set`" + `.`,
-		Args:              cobra.ArbitraryArgs,
+		Args:              scaleArgs(cobra.ArbitraryArgs, &flagScale),
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeStatus(cmd, rf, cf, args, flagFormat)
+			return runComposeStatus(cmd, rf, cf, args, flagScale, flagFormat)
 		},
 	}
 
 	cmd.Flags().StringVar(&flagFormat, "format", "", cli.ComposeStatusFormatUsage())
+	addScaleFlag(cmd, &flagScale)
 
 	parent.AddCommand(cmd)
 }
@@ -39,6 +41,7 @@ func runComposeStatus(
 	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
+	scale int,
 	format string,
 ) error {
 	selection, err := compose.LoadOrWorkdir(cf.normalizeOpts())
@@ -52,7 +55,9 @@ func runComposeStatus(
 	}
 	defer svc.Close()
 
-	states, err := compose.NewService(svc).Status(cmd.Context(), selection, commandNames)
+	states, err := compose.NewService(svc).Status(cmd.Context(), selection, compose.StatusOption{
+		Targets: composeTargets(commandNames, scale),
+	})
 	if err != nil {
 		return err
 	}

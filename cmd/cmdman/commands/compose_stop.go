@@ -10,19 +10,21 @@ import (
 func composeStopCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagProgress string
+		flagScale    int
 	)
 
 	cmd := &cobra.Command{
 		Use:               "stop [COMMAND...]",
 		Short:             "Stop running compose commands",
-		Args:              cobra.ArbitraryArgs,
+		Args:              scaleArgs(cobra.ArbitraryArgs, &flagScale),
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeStop(cmd, rf, cf, args, flagProgress)
+			return runComposeStop(cmd, rf, cf, args, flagScale, flagProgress)
 		},
 	}
 
 	cmd.Flags().StringVar(&flagProgress, "progress", "auto", cli.ProgressFlagUsage)
+	addScaleFlag(cmd, &flagScale)
 	_ = cmd.RegisterFlagCompletionFunc("progress", progressCompletions)
 
 	parent.AddCommand(cmd)
@@ -33,6 +35,7 @@ func runComposeStop(
 	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
+	scale int,
 	progress string,
 ) error {
 	selection, err := compose.LoadOrProject(cf.normalizeOpts())
@@ -54,7 +57,7 @@ func runComposeStop(
 
 	result, err := compose.NewService(svc, compose.WithReporter(prog)).Stop(
 		cmd.Context(), selection, compose.StopOption{
-			CommandNames: commandNames,
+			Targets: composeTargets(commandNames, scale),
 		})
 	if err != nil {
 		return err

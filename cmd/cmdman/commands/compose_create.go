@@ -10,20 +10,22 @@ import (
 func composeCreateCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagRemoveOrphan bool
+		flagScale        int
 	)
 
 	cmd := &cobra.Command{
 		Use:               "create [COMMAND...]",
 		Short:             "Create compose commands without starting them",
-		Args:              cobra.ArbitraryArgs,
+		Args:              scaleArgs(cobra.ArbitraryArgs, &flagScale),
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeCreate(cmd, rf, cf, args, flagRemoveOrphan)
+			return runComposeCreate(cmd, rf, cf, args, flagScale, flagRemoveOrphan)
 		},
 	}
 
 	cmd.Flags().BoolVar(&flagRemoveOrphan, "remove-orphan", false,
 		"Remove stopped orphan commands (running orphans are skipped)")
+	addScaleFlag(cmd, &flagScale)
 
 	parent.AddCommand(cmd)
 }
@@ -33,6 +35,7 @@ func runComposeCreate(
 	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
+	scale int,
 	removeOrphan bool,
 ) error {
 	spec, err := compose.LoadAndNormalize(cf.normalizeOpts())
@@ -48,7 +51,7 @@ func runComposeCreate(
 
 	result, err := compose.NewService(svc).Create(cmd.Context(), spec, compose.CreateOption{
 		RemoveOrphan: removeOrphan,
-		CommandNames: commandNames,
+		Targets:      composeTargets(commandNames, scale),
 	})
 	if err != nil {
 		return err

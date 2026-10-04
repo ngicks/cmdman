@@ -276,7 +276,7 @@ func TestInspectReturnsProjectOutputsSorted(t *testing.T) {
 		},
 	}}
 
-	out, err := svc.Inspect(context.Background(), ProjectSelection{WorkDir: "/wd"}, nil)
+	out, err := svc.Inspect(context.Background(), ProjectSelection{WorkDir: "/wd"}, InspectOption{})
 	if err != nil {
 		t.Fatalf("Inspect failed: %v", err)
 	}

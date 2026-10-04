@@ -14,8 +14,10 @@ import (
 
 // DownOption configures a Down operation.
 type DownOption struct {
-	// CommandNames optionally narrows the target set to specific compose command names.
-	CommandNames []string
+	// Targets optionally narrows the teardown to specific compose commands.
+	// Empty targets the whole project. A target selecting a single replica is
+	// rejected: see [Service.Down].
+	Targets []Target
 }
 
 // DownResult is the aggregated result of a compose down operation.
@@ -35,11 +37,17 @@ type RemoveOutcome struct {
 // Stop phase: same ordering as Stop (reverse-dependency up walk). Remove
 // phase: fully concurrent after all stops complete.
 //
-// With no command names and a loaded Spec, Down is the destructive whole-project
+// With no targets and a loaded Spec, Down is the destructive whole-project
 // teardown: because selection is by the (workdir, project) label pair, it also
-// stops and removes orphans of that pair (resolved-decision 20). With command
-// names, the target set is the named commands plus their recursive dependents;
-// only that set is stopped and removed.
+// stops and removes orphans of that pair (resolved-decision 20). With targets,
+// the target set is the targeted commands plus their recursive dependents; only
+// that set is stopped and removed.
+//
+// Down removes whole commands only. Removing one replica would leave a gap in
+// the command's scale indices, and both the fileless project reconstruction and
+// the start waits assume replicas are numbered 1..N without gaps. A target with
+// a non-zero ScaleIndex is therefore an error; scaling the command down
+// ([Service.Scale]) is how replicas are removed.
 //
 // Per resolved-decision 21, failures are aggregated; every command is attempted.
 func (s *Service) Down(
@@ -47,6 +55,16 @@ func (s *Service) Down(
 	selection ProjectSelection,
 	opts DownOption,
 ) (*DownResult, error) {
+	for _, t := range opts.Targets {
+		if t.ScaleIndex != 0 {
+			return nil, fmt.Errorf(
+				"compose down: cannot remove replica %d of %q alone; scale the command down instead",
+				t.ScaleIndex,
+				t.Command,
+			)
+		}
+	}
+
 	allEntries, err := s.svc.List(ctx, cmdman.ListRequest{
 		AllStates: true,
 		Labels:    projectLabels(selection.WorkDir, selection.Project),
@@ -55,7 +73,8 @@ func (s *Service) Down(
 		return nil, fmt.Errorf("list project commands: %w", err)
 	}
 
-	if err := validateCommandNames(opts.CommandNames, selection.Spec, allEntries); err != nil {
+	targets, err := resolveTargets(opts.Targets, storedReplicas(selection.Spec, allEntries))
+	if err != nil {
 		return nil, err
 	}
 
@@ -75,10 +94,7 @@ func (s *Service) Down(
 		}
 	}
 
-	selected := allEntries
-	if len(opts.CommandNames) > 0 {
-		selected = filterByCommandNames(allEntries, opts.CommandNames)
-	}
+	selected := targets.filter(allEntries)
 	if len(selected) == 0 {
 		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose down: no commands found for project",
 			"project", selection.Project,
@@ -95,18 +111,18 @@ func (s *Service) Down(
 	if spec != nil {
 		// Stop the declared closure (named + recursive dependents) in
 		// reverse-dependency order via the reconcile graph.
-		stops, err = s.reconcileStop(ctx, *spec, opts.CommandNames)
+		stops, err = s.reconcileStop(ctx, *spec, targets)
 		if err != nil {
 			return nil, err
 		}
-		if len(opts.CommandNames) == 0 {
+		if len(targets) == 0 {
 			// Whole-project teardown: also stop running orphans, remove everything.
 			stops = append(
 				stops, s.stopOrphans(ctx, allEntries, *spec, selection.Project)...)
 			removeTargets = allEntries
 		} else {
 			// Scoped teardown: remove exactly the stopped closure.
-			closure := resolveStopTargetCommands(*spec, opts.CommandNames)
+			closure := resolveStopTargetCommands(*spec, targets.names())
 			removeTargets = filterEntriesInClosure(allEntries, closure)
 		}
 	} else {

@@ -13,8 +13,10 @@ import (
 
 // RestartOption configures a Restart operation.
 type RestartOption struct {
-	// CommandNames optionally narrows the target set to specific compose command names.
-	CommandNames []string
+	// Targets optionally narrows the restart to specific compose commands or
+	// replicas. Empty targets the whole project. A replica index must name a
+	// stored replica.
+	Targets []Target
 }
 
 // RestartResult is the aggregated result of a compose restart operation.
@@ -54,7 +56,8 @@ func (s *Service) Restart(
 		return nil, fmt.Errorf("list project commands: %w", err)
 	}
 
-	if err := validateCommandNames(opts.CommandNames, selection.Spec, entries); err != nil {
+	targets, err := resolveTargets(opts.Targets, storedReplicas(selection.Spec, entries))
+	if err != nil {
 		return nil, err
 	}
 
@@ -69,10 +72,7 @@ func (s *Service) Restart(
 	}
 
 	if selection.Spec != nil {
-		if len(opts.CommandNames) > 0 {
-			entries = filterByCommandNames(entries, opts.CommandNames)
-		}
-		return s.restartWithSpec(ctx, selection, entries)
+		return s.restartWithSpec(ctx, selection, targets.filter(entries))
 	}
 	spec, ok, err := reconstructProjectFromMeta(selection, entries)
 	if err != nil {
@@ -84,13 +84,12 @@ func (s *Service) Restart(
 		)
 	}
 	selection.Spec = &spec
-	if len(opts.CommandNames) > 0 {
-		entries = filterByCommandNames(entries, opts.CommandNames)
-	}
-	return s.restartWithSpec(ctx, selection, entries)
+	return s.restartWithSpec(ctx, selection, targets.filter(entries))
 }
 
-// restartWithSpec restarts using DAG ordering (reverse stop, forward start).
+// restartWithSpec restarts using DAG ordering (reverse stop, forward start). It
+// stops and starts exactly the replicas in entries, so the caller narrows
+// entries to the targeted replicas.
 func (s *Service) restartWithSpec(
 	ctx context.Context,
 	selection ProjectSelection,
@@ -172,8 +171,8 @@ func (s *Service) restartWithSpec(
 }
 
 // stopLayerRestartConcurrent stops a layer for the restart operation, recording
-// results into outByCommand. Every replica of each command is stopped; the
-// command's outcome records the first stop error across its replicas.
+// results into outByCommand. Every replica idsByCommand holds for each command
+// is stopped; the command's outcome records the first stop error across them.
 func stopLayerRestartConcurrent(
 	ctx context.Context,
 	s *Service,
@@ -214,8 +213,8 @@ func stopLayerRestartConcurrent(
 }
 
 // startLayerRestartConcurrent starts a layer for the restart operation,
-// recording results into outByCommand. Every replica of each command is
-// started; the command's outcome records the first start error.
+// recording results into outByCommand. Every replica genNamesByCommand holds for
+// each command is started; the command's outcome records the first start error.
 func startLayerRestartConcurrent(
 	ctx context.Context,
 	s *Service,
@@ -253,7 +252,7 @@ func startLayerRestartConcurrent(
 }
 
 // buildGenNamesByCommand groups the existing entries' cmdman names by their
-// compose command name, so every replica of a command is restarted.
+// compose command name, so every replica in entries is restarted.
 func buildGenNamesByCommand(entries []cmdmanEntry) map[string][]string {
 	m := make(map[string][]string, len(entries))
 	for _, e := range entries {

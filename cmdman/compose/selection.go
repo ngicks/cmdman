@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/ngicks/cmdman/cmdman/store"
@@ -127,26 +126,6 @@ func ResolveMuxSelectionByName(
 	return selection, nil
 }
 
-// filterByCommandNames returns only the entries whose LabelCommand matches one
-// of the provided names.
-func filterByCommandNames(entries []cmdmanEntry, names []string) []cmdmanEntry {
-	set := make(map[string]struct{}, len(names))
-	for _, n := range names {
-		set[n] = struct{}{}
-	}
-	out := entries[:0:0]
-	for _, e := range entries {
-		if e.ConfigJSON == nil {
-			continue
-		}
-		cmdName := e.ConfigJSON.Labels[LabelCommand]
-		if _, ok := set[cmdName]; ok {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
 // commandNameOf returns the compose command name (LabelCommand) recorded on an
 // entry, or "" when the entry has no stored config or label.
 func commandNameOf(e cmdmanEntry) string {
@@ -170,47 +149,6 @@ func buildIDsByCommand(entries []cmdmanEntry) map[string][]string {
 		}
 	}
 	return m
-}
-
-// validateCommandNames rejects supplied command-name filters that don't match
-// any compose command in the available set. The available set comes from the
-// loaded spec when available, or from the LabelCommand values of the existing
-// project-labeled entries otherwise. Returns nil when names is empty (no
-// filter) or every name is recognized.
-func validateCommandNames(
-	names []string,
-	spec *ComposeSpec,
-	entries []cmdmanEntry,
-) error {
-	if len(names) == 0 {
-		return nil
-	}
-	known := make(map[string]struct{})
-	if spec != nil {
-		for _, nc := range spec.Commands {
-			known[nc.Name] = struct{}{}
-		}
-	} else {
-		for _, e := range entries {
-			if e.ConfigJSON == nil {
-				continue
-			}
-			if n := e.ConfigJSON.Labels[LabelCommand]; n != "" {
-				known[n] = struct{}{}
-			}
-		}
-	}
-	var unknown []string
-	for _, n := range names {
-		if _, ok := known[n]; !ok {
-			unknown = append(unknown, n)
-		}
-	}
-	if len(unknown) == 0 {
-		return nil
-	}
-	slices.Sort(unknown)
-	return fmt.Errorf("unknown compose command(s): %v", unknown)
 }
 
 // reverseLayers reverses a slice of layers in-place.

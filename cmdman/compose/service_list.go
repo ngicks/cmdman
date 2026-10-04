@@ -25,6 +25,14 @@ type ProjectSummary struct {
 	Failed      int
 }
 
+// PsOption configures a Ps operation.
+type PsOption struct {
+	// Targets optionally narrows the listing to specific compose commands or
+	// replicas. Empty lists the whole project. A replica index must name a
+	// stored replica.
+	Targets []Target
+}
+
 // CommandStatus describes one stored command in a compose project, together
 // with the runtime state its monitor holds for the current run (the same
 // fields [CommandRuntimeState] carries; a command with no live monitor keeps
@@ -120,7 +128,7 @@ func (s *Service) ListProjects(ctx context.Context) ([]ProjectSummary, error) {
 func (s *Service) Ps(
 	ctx context.Context,
 	selection ProjectSelection,
-	commandNames []string,
+	opts PsOption,
 ) ([]CommandStatus, error) {
 	entries, err := s.svc.List(ctx, cmdman.ListRequest{
 		AllStates: true,
@@ -130,12 +138,11 @@ func (s *Service) Ps(
 		return nil, fmt.Errorf("list project commands: %w", err)
 	}
 
-	if err := validateCommandNames(commandNames, selection.Spec, entries); err != nil {
+	targets, err := resolveTargets(opts.Targets, storedReplicas(selection.Spec, entries))
+	if err != nil {
 		return nil, err
 	}
-	if len(commandNames) > 0 {
-		entries = filterByCommandNames(entries, commandNames)
-	}
+	entries = targets.filter(entries)
 
 	runtime := s.runtimeStates(ctx, entries)
 

@@ -15,11 +15,13 @@ import (
 type CreateOption struct {
 	// RemoveOrphan causes stopped orphan commands to be removed.
 	// Running orphans are reported and skipped (resolved-decision 4: no force in v1).
-	// Ignored when CommandNames targets a subset.
+	// Ignored when Targets targets a subset.
 	RemoveOrphan bool
-	// CommandNames optionally narrows the operation to specific compose command
-	// names and their transitive after-dependencies. Empty targets every command.
-	CommandNames []string
+	// Targets optionally narrows the operation to specific compose commands or
+	// replicas and their transitive after-dependencies, every replica of those.
+	// Empty targets every command. A replica index must lie within the scale the
+	// spec declares for its command.
+	Targets []Target
 }
 
 // CreateResult is the aggregated result of a compose create operation.
@@ -41,18 +43,31 @@ type ActionOutcome struct {
 //  1. Lists existing project-labeled commands.
 //  2. Calls ComputePlan. Returns a conflict error if the compose file differs.
 //  3. Handles orphans: warns (default) or removes stopped orphans when opts.RemoveOrphan
-//     is set. Skipped when opts.CommandNames targets a subset.
-//  4. Executes create/recreate/unchanged actions for the targeted commands and
+//     is set. Skipped when opts.Targets targets a subset.
+//  4. Removes the surplus replicas a scale-down left behind. Skipped when a
+//     target selects specific replicas, since such a target concerns those
+//     replicas alone.
+//  5. Executes create/recreate/unchanged actions for the targeted replicas and
 //     aggregates outcomes.
 func (s *Service) Create(
 	ctx context.Context,
 	spec ComposeSpec,
 	opts CreateOption,
 ) (*CreateResult, error) {
-	if err := validateCommandNames(opts.CommandNames, &spec, nil); err != nil {
+	targets, err := resolveTargets(opts.Targets, declaredReplicas(spec))
+	if err != nil {
 		return nil, err
 	}
+	return s.create(ctx, spec, opts.RemoveOrphan, targets)
+}
 
+// create is [Service.Create] for already resolved targets.
+func (s *Service) create(
+	ctx context.Context,
+	spec ComposeSpec,
+	removeOrphan bool,
+	targets targetSet,
+) (*CreateResult, error) {
 	existing, err := s.svc.List(ctx, cmdman.ListRequest{
 		AllStates: true,
 		Labels: map[string]string{
@@ -74,21 +89,28 @@ func (s *Service) Create(
 		)
 	}
 
-	targets := resolveTargetCommands(spec, opts.CommandNames)
+	closure := resolveTargetCommands(spec, targets.names())
 
 	var actions []ActionOutcome
 	// Orphan handling is a whole-project concern; skip it when a subset is targeted.
-	if len(opts.CommandNames) == 0 {
-		orphanOutcomes := s.handleOrphans(ctx, spec, plan.Orphans, opts.RemoveOrphan)
+	if len(targets) == 0 {
+		orphanOutcomes := s.handleOrphans(ctx, spec, plan.Orphans, removeOrphan)
 		actions = append(actions, orphanOutcomes...)
 	}
 
-	// Surplus replicas from a scale-down are always reconciled away (scoped to the
-	// targeted commands), regardless of --remove-orphan.
-	actions = append(actions, s.handleExcessReplicas(ctx, spec, plan.ExcessReplicas, targets)...)
+	// Surplus replicas from a scale-down are reconciled away (scoped to the
+	// targeted commands), regardless of --remove-orphan. A replica-scoped target
+	// asks about its replicas only, so it leaves the surplus alone.
+	if !targets.replicaScoped() {
+		actions = append(
+			actions, s.handleExcessReplicas(ctx, spec, plan.ExcessReplicas, closure)...)
+	}
 
 	for _, action := range plan.Actions {
-		if _, ok := targets[action.Desired.Name]; !ok {
+		if _, ok := closure[action.Desired.Name]; !ok {
+			continue
+		}
+		if !targets.covers(action.Desired.Name, action.ScaleIndex) {
 			continue
 		}
 		outcome, err := s.executeAction(ctx, spec, action)

@@ -141,7 +141,7 @@ func composeCommandNames(
 	}
 	defer svc.Close()
 
-	statuses, err := compose.NewService(svc).Ps(cmd.Context(), selection, nil)
+	statuses, err := compose.NewService(svc).Ps(cmd.Context(), selection, compose.PsOption{})
 	if err != nil {
 		return nil
 	}

@@ -101,17 +101,22 @@ func (s *Service) report(command string, phase Phase, err error, exit *int) {
 	s.reporter.Report(Event{Command: command, Phase: phase, Err: err, ExitCode: exit})
 }
 
-// reportInstances emits phase for every replica of cmd, labeling each by its
-// 1-based scale index via [instanceDisplayName]. This keeps the progress view
-// consistent with the create phase: a scaled command's replicas each get their
-// own line ("<name>-1".."<name>-N") rather than collapsing onto the bare
-// command name. An unscaled command yields the single bare-name line.
-func (s *Service) reportInstances(cmd Command, phase Phase, err error, exit *int) {
+// reportReplicas emits phase for each replica of cmd whose 1-based scale index
+// is in scaleIndices, labeling each via [instanceDisplayName]. This keeps the
+// progress view consistent with the create phase: a scaled command's replicas
+// each get their own line ("<name>-1".."<name>-N") rather than collapsing onto
+// the bare command name. An unscaled command yields the single bare-name line.
+func (s *Service) reportReplicas(
+	cmd Command,
+	scaleIndices []int,
+	phase Phase,
+	err error,
+	exit *int,
+) {
 	if s.reporter == nil {
 		return
 	}
-	scale := max(cmd.Scale, 1)
-	for idx := 1; idx <= scale; idx++ {
+	for _, idx := range scaleIndices {
 		s.report(instanceDisplayName(cmd, idx), phase, err, exit)
 	}
 }

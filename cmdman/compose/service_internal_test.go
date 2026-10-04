@@ -434,7 +434,7 @@ func TestStartWithoutSpecUsesStoredAfterDependencies(t *testing.T) {
 	result, err := env.svcEntries(entries).Start(
 		context.Background(),
 		ProjectSelection{WorkDir: "/wd", Project: "proj"},
-		StartOption{CommandNames: []string{"worker"}},
+		StartOption{Targets: TargetsOf("worker")},
 	)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -458,7 +458,7 @@ func TestStopWithoutSpecUsesStoredAfterDependents(t *testing.T) {
 	result, err := env.svcEntries(entries).Stop(
 		context.Background(),
 		ProjectSelection{WorkDir: "/wd", Project: "proj"},
-		StopOption{CommandNames: []string{"api"}},
+		StopOption{Targets: TargetsOf("api")},
 	)
 	if err != nil {
 		t.Fatalf("Stop: %v", err)
@@ -947,7 +947,8 @@ func TestReconcileStopWithNamesIncludesDependents(t *testing.T) {
 		"solo":   model.EventTypeRunning,
 	}
 
-	outcomes, err := env.svc(states).reconcileStop(context.Background(), spec, []string{"api"})
+	outcomes, err := env.svc(states).reconcileStop(
+		context.Background(), spec, targetSet{"api": nil})
 	if err != nil {
 		t.Fatalf("reconcileStop: %v", err)
 	}
