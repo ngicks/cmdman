@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] start [--progress MODE] [COMMAND...]
+cmdman compose [selection flags] start [--progress MODE] [--scale N] [COMMAND...]
 ```
 
 ## Description
@@ -32,6 +32,8 @@ Uses the compose selection flags documented in
 
 - `--progress auto|tty|json|quiet`: progress output mode. `auto` chooses TTY
   output on terminals and JSON otherwise.
+- `--scale N`: start only replica N (1-based) of exactly one COMMAND. N must name
+  an existing replica. Its dependencies are still started in full.
 
 ## See Also
 

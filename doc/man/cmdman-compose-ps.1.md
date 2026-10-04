@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] ps [--format FORMAT] [COMMAND...]
+cmdman compose [selection flags] ps [--format FORMAT] [--scale N] [COMMAND...]
 ```
 
 ## Description
@@ -48,6 +48,8 @@ for a project summary across the whole data directory.
 ## Options
 
 - `--format FORMAT`: built-in table, `json`, or a Go template.
+- `--scale N`: list only replica N (1-based) of exactly one COMMAND. N must name
+  an existing replica.
 
 ## See Also
 

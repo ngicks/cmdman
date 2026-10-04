@@ -7,7 +7,8 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] up [--remove-orphan] [--progress MODE] [--mux] [COMMAND...]
+cmdman compose [selection flags] up [--remove-orphan] [--progress MODE] [--mux] [--scale N]
+    [COMMAND...]
 ```
 
 ## Description
@@ -47,12 +48,16 @@ Uses the compose selection flags documented in
   [`cmdman compose mux up`](./cmdman-compose-mux.1.md). A project whose file has
   no `mux:` section is brought up as usual and the dashboard is skipped with a
   warning.
+- `--scale N`: create and start only replica N (1-based) of exactly one COMMAND.
+  N must lie within the command's declared `scale`. Its `after` dependencies are
+  still brought up in full, and surplus replicas left by a scale-down are kept.
 
 ## Examples
 
 ```sh
 cmdman compose up
 cmdman compose up api
+cmdman compose up --scale 2 worker
 cmdman compose --project-name preview up --remove-orphan
 ```
 

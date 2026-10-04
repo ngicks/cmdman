@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] restart [COMMAND...]
+cmdman compose [selection flags] restart [--scale N] [COMMAND...]
 ```
 
 ## Description
@@ -31,7 +31,8 @@ Uses the compose selection flags documented in
 
 ## Options
 
-No command-specific options.
+- `--scale N`: restart only replica N (1-based) of exactly one COMMAND. N must
+  name an existing replica.
 
 ## See Also
 

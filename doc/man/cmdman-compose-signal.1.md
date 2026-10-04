@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] signal --signal SIGNAL [COMMAND...]
+cmdman compose [selection flags] signal --signal SIGNAL [--scale N] [COMMAND...]
 ```
 
 ## Description
@@ -29,6 +29,8 @@ Uses the compose selection flags documented in
 
 - `-s, --signal SIGNAL`: required signal to send. Accepts symbolic names with
   or without `SIG` and numeric signal values.
+- `--scale N`: signal only replica N (1-based) of exactly one COMMAND. N must
+  name an existing replica.
 
 ## See Also
 

@@ -34,6 +34,8 @@ Uses the compose selection flags documented in
 - `--until TIME`: upper time bound. Accepts the same forms as `--since`.
 - `--type TYPE`: filter by event type. Repeatable.
 - `--format FORMAT`: built-in output, `json`, or a Go template.
+- `--scale N`: report only replica N (1-based) of exactly one COMMAND. N must
+  name an existing replica.
 
 ## See Also
 

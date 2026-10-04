@@ -24,6 +24,9 @@ its recursive dependents. Only that closure is stopped and removed. Dependency
 ordering is used for stopping; removal begins after all stop attempts complete.
 Failures are aggregated and do not prevent other targets from being attempted.
 
+Down removes every replica of a command. To remove replicas, scale the command
+down with `cmdman compose scale COMMAND=N`.
+
 ## Selection Flags
 
 Uses the compose selection flags documented in

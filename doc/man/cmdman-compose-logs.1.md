@@ -32,12 +32,15 @@ Uses the compose selection flags documented in
 - `--until RFC3339`: upper time bound.
 - `--head N`: return only the first N records per command.
 - `--tail N`: return only the last N records per command.
+- `--scale N`: read only replica N (1-based) of exactly one COMMAND. N must name
+  an existing replica.
 
 ## Examples
 
 ```sh
 cmdman compose logs --tail 50
 cmdman compose logs --follow api worker
+cmdman compose logs --scale 2 worker
 ```
 
 ## See Also

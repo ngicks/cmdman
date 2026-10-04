@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] create [--remove-orphan] [COMMAND...]
+cmdman compose [selection flags] create [--remove-orphan] [--scale N] [COMMAND...]
 ```
 
 ## Description
@@ -34,6 +34,9 @@ Uses the compose selection flags documented in
 
 - `--remove-orphan`: remove stopped orphan commands before reconciliation.
   Running orphans are skipped.
+- `--scale N`: reconcile only replica N (1-based) of exactly one COMMAND. N must
+  lie within the command's declared `scale`. Its `after` dependencies are still
+  reconciled in full, and surplus replicas left by a scale-down are kept.
 
 ## See Also
 
