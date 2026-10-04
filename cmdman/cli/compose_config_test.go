@@ -22,6 +22,31 @@ func TestRenderComposeConfigCanonicalYAML(t *testing.T) {
 				Env:           []string{"A=1", "B=2"},
 				RestartPolicy: "on-failure:3",
 				After:         map[string]compose.CanonicalAfter{"db": {Condition: "completed"}},
+				Hooks: []compose.CanonicalLifecycleHook{
+					{
+						Name: "notify",
+						StartPost: &compose.CanonicalLifecycleExec{
+							Args:    []string{"notify-send", "web started"},
+							OnError: "fail",
+						},
+						StopPost: &compose.CanonicalLifecycleExec{
+							Args:    []string{"notify-send", "web stopped"},
+							OnError: "ignore",
+						},
+					},
+					{
+						Name:     "scratch",
+						Resource: "scratch",
+						CreatePre: &compose.CanonicalLifecycleExec{
+							Args:    []string{"mktemp", "-d"},
+							OnError: "fail",
+						},
+						RemovePost: &compose.CanonicalLifecycleExec{
+							Args:    []string{"rm", "-rf", "dir"},
+							OnError: "continue",
+						},
+					},
+				},
 			},
 			"db": {
 				Dir:  "/work",
@@ -55,6 +80,31 @@ commands:
     after:
       db:
         condition: completed
+    hooks:
+      - name: notify
+        start_post:
+          args:
+            - notify-send
+            - web started
+          on_error: fail
+        stop_post:
+          args:
+            - notify-send
+            - web stopped
+          on_error: ignore
+      - name: scratch
+        resource: scratch
+        create_pre:
+          args:
+            - mktemp
+            - -d
+          on_error: fail
+        remove_post:
+          args:
+            - rm
+            - -rf
+            - dir
+          on_error: continue
 `
 	assert.Equal(t, buf.String(), want)
 

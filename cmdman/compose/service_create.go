@@ -331,6 +331,7 @@ func buildCreateRequest(
 		ENV_CMDMAN_COMPOSE_WORK_DIR + "=" + spec.WorkDir,
 		ENV_CMDMAN_COMPOSE_WORK_DIR_HASH + "=" + workdirHash(spec.WorkDir),
 		ENV_CMDMAN_COMPOSE_PROJECT + "=" + spec.Project,
+		ENV_CMDMAN_COMPOSE_COMMAND + "=" + nc.Name,
 	}
 	importHostEnv := nc.ImportHostEnv
 	injectEnv := nc.InjectEnv

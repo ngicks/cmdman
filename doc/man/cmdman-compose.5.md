@@ -123,8 +123,11 @@ commands:
       - net-${CMDMAN_COMPOSE_WORK_DIR_HASH}-${CMDMAN_COMPOSE_PROJECT}
 ```
 
-Each replica of a command also receives `CMDMAN_COMPOSE_SCALE_INDEX`, its
-1-based replica index, and `CMDMAN_COMPOSE_SCALE`, the command's replica count.
+Each replica of a command also receives these variables:
+
+- `CMDMAN_COMPOSE_COMMAND`: command name under `commands`.
+- `CMDMAN_COMPOSE_SCALE_INDEX`: 1-based replica index.
+- `CMDMAN_COMPOSE_SCALE`: the command's replica count.
 
 Injected variables are applied after `env`, so they override an `env` entry of
 the same name. They are injected even when `inject_env` is `false`.

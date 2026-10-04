@@ -51,6 +51,29 @@ type CanonicalCommand struct {
 	LogOpts         map[string]string         `yaml:"log_opts,omitempty" json:"log_opts,omitzero"`
 	After           map[string]CanonicalAfter `yaml:"after,omitempty" json:"after,omitzero"`
 	Scale           int                       `yaml:"scale,omitempty" json:"scale,omitzero"`
+	Hooks           []CanonicalLifecycleHook  `yaml:"hooks,omitempty" json:"hooks,omitzero"`
+}
+
+// CanonicalLifecycleHook is one resolved hook item in a [CanonicalCommand].
+// Events the item does not set are omitted.
+type CanonicalLifecycleHook struct {
+	Name       string                  `yaml:"name" json:"name"`
+	Resource   string                  `yaml:"resource,omitempty" json:"resource,omitzero"`
+	CreatePre  *CanonicalLifecycleExec `yaml:"create_pre,omitempty" json:"create_pre,omitzero"`
+	CreatePost *CanonicalLifecycleExec `yaml:"create_post,omitempty" json:"create_post,omitzero"`
+	StartPre   *CanonicalLifecycleExec `yaml:"start_pre,omitempty" json:"start_pre,omitzero"`
+	StartPost  *CanonicalLifecycleExec `yaml:"start_post,omitempty" json:"start_post,omitzero"`
+	StopPre    *CanonicalLifecycleExec `yaml:"stop_pre,omitempty" json:"stop_pre,omitzero"`
+	StopPost   *CanonicalLifecycleExec `yaml:"stop_post,omitempty" json:"stop_post,omitzero"`
+	RemovePre  *CanonicalLifecycleExec `yaml:"remove_pre,omitempty" json:"remove_pre,omitzero"`
+	RemovePost *CanonicalLifecycleExec `yaml:"remove_post,omitempty" json:"remove_post,omitzero"`
+}
+
+// CanonicalLifecycleExec is one resolved hook event, always in the mapping
+// form. OnError is always populated ("fail" when the compose file omits it).
+type CanonicalLifecycleExec struct {
+	Args    []string `yaml:"args" json:"args"`
+	OnError string   `yaml:"on_error" json:"on_error"`
 }
 
 // CanonicalAfter is the resolved dependency condition for one predecessor.
@@ -111,7 +134,37 @@ func canonicalCommand(c Command) CanonicalCommand {
 		LogOpts:         c.LogOpts,
 		After:           after,
 		Scale:           canonicalScale(c.Scale),
+		Hooks:           canonicalLifecycleHooks(c.Hooks),
 	}
+}
+
+func canonicalLifecycleHooks(hooks []LifecycleHook) []CanonicalLifecycleHook {
+	if len(hooks) == 0 {
+		return nil
+	}
+	out := make([]CanonicalLifecycleHook, len(hooks))
+	for i, h := range hooks {
+		exec := func(ev LifecycleEvent) *CanonicalLifecycleExec {
+			e, ok := h.Events[ev]
+			if !ok {
+				return nil
+			}
+			return &CanonicalLifecycleExec{Args: e.Args, OnError: string(e.OnError.resolved())}
+		}
+		out[i] = CanonicalLifecycleHook{
+			Name:       h.Name,
+			Resource:   h.Resource,
+			CreatePre:  exec(LifecycleCreatePre),
+			CreatePost: exec(LifecycleCreatePost),
+			StartPre:   exec(LifecycleStartPre),
+			StartPost:  exec(LifecycleStartPost),
+			StopPre:    exec(LifecycleStopPre),
+			StopPost:   exec(LifecycleStopPost),
+			RemovePre:  exec(LifecycleRemovePre),
+			RemovePost: exec(LifecycleRemovePost),
+		}
+	}
+	return out
 }
 
 // canonicalScale renders the scale only when it deviates from the default of 1,
