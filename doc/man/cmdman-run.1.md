@@ -22,6 +22,11 @@ PTY. The default detach sequence is `Ctrl-P`, `Ctrl-Q`.
 All creation flags have the same persistence and environment semantics as
 `cmdman create`.
 
+With `--replace`, `cmdman run` replaces the stopped command of the same name as
+`cmdman create --replace` does, then starts the replacement. A running or
+starting command of that name makes `cmdman run --replace` fail without
+touching it.
+
 ## Options
 
 `cmdman run` accepts every option documented by
@@ -35,6 +40,7 @@ All creation flags have the same persistence and environment semantics as
 
 ```sh
 cmdman run --name api --restart always -- ./api
+cmdman run --replace --name api --restart always -- ./api
 cmdman run --name repl --tty --attach -- python
 ```
 

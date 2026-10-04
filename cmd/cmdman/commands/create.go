@@ -25,6 +25,7 @@ type createFlags struct {
 	ScrollbackBytes int
 	LogDriver       string
 	LogOpts         []string
+	Replace         bool
 }
 
 func bindCreateFlags(cmd *cobra.Command, f *createFlags) {
@@ -74,6 +75,12 @@ func bindCreateFlags(cmd *cobra.Command, f *createFlags) {
 		"log-opt",
 		nil,
 		"Log driver option KEY=VALUE (repeatable; k8s-file: path, max-size, max-file)",
+	)
+	flags.BoolVar(
+		&f.Replace,
+		"replace",
+		false,
+		"Replace the stopped command of the same --name; refused while it is running",
 	)
 
 	_ = cmd.RegisterFlagCompletionFunc("restart", restartPolicyCompletions)
@@ -168,6 +175,7 @@ func doCreate(
 		LogDriver:       logdriver.LogDriver(flags.LogDriver),
 		LogOpts:         logOpts,
 		Argv:            args,
+		Replace:         flags.Replace,
 	})
 	if err != nil {
 		return "", "", err

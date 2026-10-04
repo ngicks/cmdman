@@ -23,6 +23,15 @@ syntax is required.
 The working directory, environment, restart policy, stop signal, TTY choice,
 scrollback limit, log driver, labels, and argv are persisted.
 
+With `--replace`, a command that already carries the given name is swapped for
+the new definition in one step. The new command gets a new ID; the old record,
+its exit history, and its command directory are removed, and the event log
+records a `removed` event for the old ID and a `created` event for the new one.
+cmdman refuses to replace a command in the `running` or `starting` state; stop
+it first. An invalid new definition or any other failure before the swap leaves
+the existing command unchanged. When no command carries the name, `--replace`
+creates the command as usual.
+
 ## Options
 
 - `-n, --name NAME`: assign a unique human-readable target name.
@@ -47,11 +56,14 @@ scrollback limit, log driver, labels, and argv are persisted.
 - `--rm`: remove the command record after its terminal exit.
 - `--scrollback-bytes N`: in-memory output replay limit for attaching clients.
 - `--log-driver k8s-file|none` and `--log-opt KEY=VALUE`: persistent logging.
+- `--replace`: replace the stopped command named by `--name` with this
+  definition. Requires `--name`.
 
 ## Examples
 
 ```sh
 cmdman create --name worker --restart on-failure:5 -- ./worker
+cmdman create --replace --name worker --restart always -- ./worker
 cmdman create --name shell --tty --env TERM=xterm-256color -- /bin/zsh
 cmdman create --name inner --inject-env=false -- ./entrypoint
 cmdman start worker

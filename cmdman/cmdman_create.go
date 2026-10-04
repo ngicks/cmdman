@@ -2,6 +2,7 @@ package cmdman
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"time"
@@ -51,6 +52,11 @@ type CreateRequest struct {
 	// defaults in CmdmanConfig.DefaultHooks (D17/D40).
 	Hooks model.HookSet
 	Argv  []string
+	// Replace swaps an existing command of the same Name for the new one. A
+	// running or starting command is refused, and any failure before the swap
+	// commits leaves the existing command untouched. Without such a command
+	// Replace creates as usual. Replace requires Name.
+	Replace bool
 }
 
 // CreateResult is the result of creating a command record.
@@ -60,6 +66,9 @@ type CreateResult struct {
 }
 
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult, error) {
+	if req.Replace && req.Name == "" {
+		return nil, errors.New("replace requires a name")
+	}
 	cfg := s.buildCommandConfig(req)
 	if err := cfg.ValidateCreate(); err != nil {
 		return nil, err
@@ -82,14 +91,13 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	if err := st.InsertCommandConfig(id, req.Name, cfg); err != nil {
-		return nil, fmt.Errorf("insert config: %w", err)
+	if req.Replace {
+		err = s.replaceOrInsertCommand(ctx, st, id, req.Name, cfg)
+	} else {
+		err = insertCommand(st, id, req.Name, cfg)
 	}
-	if err := store.WriteCommandConfig(cfg.CommandDir, cfg); err != nil {
-		return nil, fmt.Errorf("materialize config: %w", err)
-	}
-	if err := st.InsertCommandState(id, model.EventTypeCreated, &model.CommandState{}); err != nil {
-		return nil, fmt.Errorf("insert state: %w", err)
+	if err != nil {
+		return nil, err
 	}
 
 	s.emitEvent(ctx, model.Event{
@@ -101,6 +109,19 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 	})
 
 	return &CreateResult{ID: id, Name: req.Name}, nil
+}
+
+func insertCommand(st *store.Store, id, name string, cfg *model.CommandConfig) error {
+	if err := st.InsertCommandConfig(id, name, cfg); err != nil {
+		return fmt.Errorf("insert config: %w", err)
+	}
+	if err := store.WriteCommandConfig(cfg.CommandDir, cfg); err != nil {
+		return fmt.Errorf("materialize config: %w", err)
+	}
+	if err := st.InsertCommandState(id, model.EventTypeCreated, &model.CommandState{}); err != nil {
+		return fmt.Errorf("insert state: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) buildCommandConfig(req CreateRequest) *model.CommandConfig {

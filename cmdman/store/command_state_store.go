@@ -15,15 +15,27 @@ func (s *Store) InsertCommandState(
 	state model.EventType,
 	stateJSON *model.CommandState,
 ) error {
-	data, err := json.Marshal(stateJSON)
+	params, err := insertCommandStateParams(id, state, stateJSON)
 	if err != nil {
 		return err
 	}
-	return s.queries.InsertCommandState(context.Background(), query.InsertCommandStateParams{
+	return s.queries.InsertCommandState(context.Background(), params)
+}
+
+func insertCommandStateParams(
+	id string,
+	state model.EventType,
+	stateJSON *model.CommandState,
+) (query.InsertCommandStateParams, error) {
+	data, err := json.Marshal(stateJSON)
+	if err != nil {
+		return query.InsertCommandStateParams{}, err
+	}
+	return query.InsertCommandStateParams{
 		ID:    id,
 		State: string(state),
 		Json:  string(data),
-	})
+	}, nil
 }
 
 // UpdateCommandState updates the state and JSON of a CommandState row.
