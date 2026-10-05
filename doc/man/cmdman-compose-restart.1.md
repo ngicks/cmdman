@@ -26,8 +26,9 @@ command is labeled `<command>-<index>`, and the replica of an unscaled command
 is labeled by the command name. Target selection is project-scoped, so service
 names resolve only within the selected `(workdir, project)` pair.
 
-Each starting or running replica runs the `stop_pre` and `stop_post` hooks
-stored on it around its stop. Every replica then runs `start_pre` and
+Restart stops only the replicas that are starting or running. Each of these
+runs the `stop_pre` and `stop_post` hooks stored on it around its stop. Every
+replica, including one that never started, then runs `start_pre` and
 `start_post` around its start. The start hooks come from the compose file when
 one is loaded and from the copy stored on the replica otherwise. A replica
 whose stop hook fails under `on_error: fail` is not started. A start hook that

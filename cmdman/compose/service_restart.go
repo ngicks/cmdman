@@ -246,12 +246,14 @@ func stopLayerRestartConcurrent(
 }
 
 // restartStop stops the replica e for a restart. A live replica stops inside
-// the stop hooks stored on it. startable reports whether the restart of e goes
-// on to its start. A failed stop hook ends the restart of e. A failed stop
-// alone leaves the start to be tried.
+// the stop hooks stored on it. Any other replica counts as stopped already:
+// cmdman cannot stop one that never started, which has no monitor, and one
+// that ended has nothing left to stop. startable reports whether the restart
+// of e goes on to its start. A failed stop hook ends the restart of e. A
+// failed stop alone leaves the start to be tried.
 func (s *Service) restartStop(ctx context.Context, e cmdmanEntry) (startable bool, err error) {
 	if e.State != model.EventTypeRunning && e.State != model.EventTypeStarting {
-		return true, s.stopForRecreate(ctx, e.ID)
+		return true, nil
 	}
 	hookFailed, err := s.stopReplica(ctx, e, false)
 	return !hookFailed, err

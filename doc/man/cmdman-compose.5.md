@@ -351,7 +351,8 @@ removing a replica with plain `cmdman` verbs leaves the value in place. The
 hooks own whatever the value names, such as a directory or a port.
 [`cmdman compose down`](./cmdman-compose-down.1.md) runs the stored release
 of a value whose replica is gone. It also runs the stored `stop_pre` or
-`stop_post` release of a replica it removes without stopping it.
+`stop_post` release of a replica it removes without stopping it. A recreate
+and the removal of a surplus replica run these stop releases the same way.
 
 [`cmdman compose resource get`](./cmdman-compose-resource.1.md) prints a value.
 
@@ -398,11 +399,14 @@ events in the order they run, with the step between them.
   every new replica.
 - They recreate a changed replica in two parts. The old replica runs
   `stop_pre`, stop, `stop_post` when it is starting or running, and then
-  `remove_pre`, removal, `remove_post`. The new replica runs `create_pre`,
-  create, `create_post`.
+  `remove_pre`, removal, `remove_post`. An old replica that was neither
+  starting nor running then runs its stored `stop_pre` or `stop_post`
+  releases. The new replica runs `create_pre`, create, `create_post`.
 - They remove a surplus replica of a scale-down the same way. It runs
   `stop_pre`, stop, `stop_post` when it is starting or running, and then
-  `remove_pre`, removal, `remove_post`.
+  `remove_pre`, removal, `remove_post`. A surplus replica that was neither
+  starting nor running then runs its stored `stop_pre` or `stop_post`
+  releases.
 - With `--remove-orphan`, every stopped orphan runs `remove_pre`, removal,
   `remove_post`. A running orphan is skipped and runs no hooks.
 - `compose start` and `compose up` run `start_pre`, start, `start_post` for

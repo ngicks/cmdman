@@ -34,11 +34,20 @@ it is starting or running, and then its stored remove hooks. With
 at that hook and makes create exit non-zero. See
 [Lifecycle Hooks](./cmdman-compose.5.md#lifecycle-hooks).
 
+A recreate or a scale-down removes a replica that is neither starting nor
+running without a stop. Such a replica runs no stop hooks. Once create removes
+such a replica, it runs the stored `stop_pre` or `stop_post` release of each
+resource of the replica, as [`compose down`](./cmdman-compose-down.1.md)
+does. A recreate runs these releases before the create hooks of the new
+replica. A release that fails under `on_error: fail` or `on_error: continue`
+keeps its value. Under `on_error: fail`, it also ends the action of the
+replica and makes create exit non-zero.
+
 Once create removes a replica, it also removes the hook commands that the
 failed hooks of the replica left for inspection. A recreate, the removal of a
 surplus replica, and `--remove-orphan` all remove a replica. A hook command
-that is still running stays. The resource values of the removed replica stay
-as well.
+that is still running stays. The removal itself drops no resource value of
+the replica.
 
 Create writes its progress output first and then one result line per action.
 

@@ -3,6 +3,7 @@ package compose
 import (
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -643,11 +644,24 @@ func acquirePort(
 	state model.EventType,
 ) hookReplica {
 	t.Helper()
+	return acquireReplicaPort(t, f, s, nc, 1, state)
+}
+
+// acquireReplicaPort is [acquirePort] for replica idx, valued port-<idx>.
+func acquireReplicaPort(
+	t *testing.T,
+	f *fakeCmdman,
+	s *Service,
+	nc Command,
+	idx int,
+	state model.EventType,
+) hookReplica {
+	t.Helper()
 	spec := stepSpec(nc)
-	putReplica(t, f, spec, nc, 1, state)
-	r := s.specHookReplica(spec, nc, 1)
+	putReplica(t, f, spec, nc, idx, state)
+	r := s.specHookReplica(spec, nc, idx)
 	f.run = func(string, cmdman.CreateRequest) fakeRun {
-		return fakeRun{exit: new(0), stdout: []string{"port-1"}}
+		return fakeRun{exit: new(0), stdout: []string{"port-" + strconv.Itoa(idx)}}
 	}
 	_, err := s.runLifecycleEvent(t.Context(), r, nc.Hooks, LifecycleStartPre)
 	assert.NilError(t, err)
@@ -759,6 +773,133 @@ func TestDownRunsTheReleaseOfAReplicaOnce(t *testing.T) {
 		_, held := holderValue(t, f, r, "port")
 		assert.Assert(t, held)
 	})
+}
+
+func TestRecreateReleasesStopResourceOfReplicaItDidNotStop(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state model.EventType
+		// failing is the "<hook>.<event>" whose exec command exits 1.
+		failing   string
+		wantErr   string
+		wantTrace []string
+		wantHeld  bool
+	}{
+		{
+			name:  "exited",
+			state: model.EventTypeExited,
+			wantTrace: []string{
+				"port.start_pre", "gate.remove_pre", "remove", "gate.remove_post",
+				"port.stop_post", "create",
+			},
+		},
+		{
+			name:  "running releases at its stop",
+			state: model.EventTypeRunning,
+			wantTrace: []string{
+				"port.start_pre", "stop", "port.stop_post", "gate.remove_pre", "remove",
+				"gate.remove_post", "create",
+			},
+		},
+		{
+			name:    "a failed release keeps the holder",
+			state:   model.EventTypeExited,
+			failing: "port.stop_post",
+			wantErr: `value "port-1"`,
+			wantTrace: []string{
+				"port.start_pre", "gate.remove_pre", "remove", "gate.remove_post",
+				"port.stop_post",
+			},
+			wantHeld: true,
+		},
+		{
+			name:      "a replica left in place keeps its resource",
+			state:     model.EventTypeExited,
+			failing:   "gate.remove_pre",
+			wantErr:   `hook "gate" remove_pre`,
+			wantTrace: []string{"port.start_pre", "gate.remove_pre"},
+			wantHeld:  true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeCmdman()
+			s := f.service(nil)
+			nc := stepCommand("web", 1,
+				portHook(""), eventHook("gate", "", LifecycleRemovePre, LifecycleRemovePost))
+			r := acquirePort(t, f, s, nc, tc.state)
+			f.run = nil
+			if tc.failing != "" {
+				failExec(f, "."+tc.failing)
+			}
+			changed := nc
+			changed.Args = []string{"sleep", "600"}
+
+			res, err := s.Create(t.Context(), stepSpec(changed), CreateOption{})
+
+			assert.NilError(t, err)
+			assert.Equal(t, len(res.Actions), 1)
+			if tc.wantErr == "" {
+				assert.NilError(t, res.Actions[0].Err)
+			} else {
+				assert.ErrorContains(t, res.Actions[0].Err, tc.wantErr)
+			}
+			assert.DeepEqual(t, lifecycleTrace(f, r.Name), tc.wantTrace)
+			_, held := holderValue(t, f, r, "port")
+			assert.Equal(t, held, tc.wantHeld)
+		})
+	}
+}
+
+func TestScaleDownReleasesStopResourceOfReplicaItDidNotStop(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		exit     int
+		wantErr  string
+		wantHeld bool
+	}{
+		{name: "success"},
+		{name: "a failed release keeps the holder", exit: 1, wantErr: `value "port-2"`, wantHeld: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeCmdman()
+			s := f.service(nil)
+			nc := stepCommand("web", 2, portHook(""))
+			kept := acquireReplicaPort(t, f, s, nc, 1, model.EventTypeExited)
+			surplus := acquireReplicaPort(t, f, s, nc, 2, model.EventTypeExited)
+			var released []string
+			f.run = func(name string, req cmdman.CreateRequest) fakeRun {
+				if strings.HasSuffix(name, ".port.stop_post") {
+					v, _ := envValue(req.Env, ENV_CMDMAN_COMPOSE_RESOURCE_VALUE)
+					released = append(released, v)
+					return fakeRun{exit: new(tc.exit)}
+				}
+				return fakeRun{exit: new(0)}
+			}
+			scaled := nc
+			scaled.Scale = 1
+
+			res, err := s.Create(t.Context(), stepSpec(scaled), CreateOption{})
+
+			assert.NilError(t, err)
+			outcomes := map[string]error{}
+			for _, a := range res.Actions {
+				outcomes[a.Command] = a.Err
+			}
+			if tc.wantErr == "" {
+				assert.NilError(t, outcomes["web-2"])
+			} else {
+				assert.ErrorContains(t, outcomes["web-2"], tc.wantErr)
+			}
+			assert.DeepEqual(t, released, []string{"port-2"})
+			assert.DeepEqual(t, lifecycleTrace(f, surplus.Name),
+				[]string{"port.start_pre", "remove", "port.stop_post"})
+			_, held := holderValue(t, f, surplus, "port")
+			assert.Equal(t, held, tc.wantHeld)
+			value, held := holderValue(t, f, kept, "port")
+			assert.Assert(t, held, "the kept replica keeps its resource")
+			assert.Equal(t, value, "port-1")
+		})
+	}
 }
 
 // putStrandedHolder stores the holder of resource scratch of replica 1 of web,

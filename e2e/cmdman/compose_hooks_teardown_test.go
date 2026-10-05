@@ -192,6 +192,116 @@ commands:
 	}
 }
 
+func TestComposeHooksRecreateReleasesStartResourceOfExitedReplica(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-hooks-recreate-exited"
+	counter := filepath.Join(wd, "counter.txt")
+	released := filepath.Join(wd, "released.txt")
+	acquire := fmt.Sprintf(`n=$$(cat %[1]s 2>/dev/null || echo 0); n=$$((n+1)); `+
+		`echo $$n > %[1]s; echo port-$$n`, shellQuote(counter))
+	release := `echo "$$CMDMAN_COMPOSE_RESOURCE_VALUE" >> ` + shellQuote(released)
+	// tag is an argument true ignores, so editing it only recreates web.
+	webYAML := func(tag string) string {
+		return fmt.Sprintf(`name: %s
+commands:
+  web:
+    args: ["true", %q]
+    hooks:
+      - name: port
+        resource: port
+        start_pre: [sh, -c, %q]
+        stop_post: [sh, -c, %q]
+`, project, tag, acquire, release)
+	}
+	composePath := writeComposeFile(t, wd, webYAML("v1"))
+	t.Cleanup(func() {
+		ctx := context.Background()
+		cleanupProject(ctx, env, wd, project)
+		cleanupIntermediates(ctx, env, wd, project)
+	})
+	compose := func(args ...string) *Cmd {
+		return env.Cmd(append([]string{"compose", "--workdir", wd, "-f", composePath}, args...)...)
+	}
+
+	compose("up").Run(ctx, t)
+	env.waitForState(ctx, replicaID(ctx, t, env, wd, project, "web", 1), "exited",
+		defaultTimeout)
+	if got := compose("resource", "get", "web", "port").Run(ctx, t); got != "port-1" {
+		t.Fatalf("resource after up = %q, want port-1", got)
+	}
+
+	writeComposeFile(t, wd, webYAML("v2"))
+	// web exited on its own, so the recreate runs no stop hooks for it.
+	stdout := compose("up", "--progress", "json").Run(ctx, t)
+
+	if got := fileLines(t, released); !slices.Equal(got, []string{"port-1"}) {
+		t.Errorf("released = %q, want [port-1]", got)
+	}
+	if !hasHookRecord(hookProgress(t, stdout), "web", "port", "stop_post", "hook-succeeded") {
+		t.Errorf("the recreate should report the stop_post release:\n%s", stdout)
+	}
+	if got := compose("resource", "get", "web", "port").Run(ctx, t); got != "port-2" {
+		t.Errorf("resource after the recreate = %q, want port-2", got)
+	}
+}
+
+func TestComposeHooksScaleDownReleasesStartResourceOfExitedReplica(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-hooks-scale-exited"
+	released := filepath.Join(wd, "released.txt")
+	release := `echo "$$CMDMAN_COMPOSE_RESOURCE_VALUE" >> ` + shellQuote(released)
+	composePath := writeComposeFile(t, wd, fmt.Sprintf(`name: %s
+commands:
+  web:
+    scale: 2
+    args: ["true"]
+    hooks:
+      - name: port
+        resource: port
+        start_pre: [sh, -c, "echo port-$$CMDMAN_COMPOSE_SCALE_INDEX"]
+        stop_post: [sh, -c, %q]
+`, project, release))
+	t.Cleanup(func() {
+		ctx := context.Background()
+		cleanupProject(ctx, env, wd, project)
+		cleanupIntermediates(ctx, env, wd, project)
+	})
+	compose := func(args ...string) *Cmd {
+		return env.Cmd(append([]string{"compose", "--workdir", wd, "-f", composePath}, args...)...)
+	}
+
+	compose("up").Run(ctx, t)
+	for idx := 1; idx <= 2; idx++ {
+		env.waitForState(ctx, replicaID(ctx, t, env, wd, project, "web", idx), "exited",
+			defaultTimeout)
+	}
+	replica1 := composeReplica(ctx, env, wd, project, "web", 1)["Name"].(string)
+	replica2 := composeReplica(ctx, env, wd, project, "web", 2)["Name"].(string)
+
+	// web-2 exited on its own, so the scale-down runs no stop hooks for it.
+	stdout := compose("scale", "--progress", "json", "web=1").Run(ctx, t)
+
+	if got := fileLines(t, released); !slices.Equal(got, []string{"port-2"}) {
+		t.Errorf("released = %q, want [port-2]", got)
+	}
+	if !hasHookRecord(hookProgress(t, stdout), "web-2", "port", "stop_post", "hook-succeeded") {
+		t.Errorf("the scale-down should report the stop_post release:\n%s", stdout)
+	}
+	names := commandNames(ctx, t, env)
+	if holder := replica2 + ".res.port"; slices.Contains(names, holder) {
+		t.Errorf("the release should remove the holder %s: %q", holder, names)
+	}
+	if holder := replica1 + ".res.port"; !slices.Contains(names, holder) {
+		t.Errorf("the kept replica should keep its holder %s: %q", holder, names)
+	}
+}
+
 func TestComposeHooksRestartRunsStopThenStartHooks(t *testing.T) {
 	t.Parallel()
 	ctx := testContext(t)
@@ -220,6 +330,39 @@ func TestComposeHooksRestartRunsStopThenStartHooks(t *testing.T) {
 	if got := markedEvents(t, marker, "web", 1); !slices.Equal(got, want) {
 		t.Fatalf("hooks of the restart = %q, want %q", got, want)
 	}
+}
+
+func TestComposeHooksRestartStartsReplicaThatNeverStarted(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-hooks-restart-created"
+	marker := filepath.Join(wd, "marker.txt")
+	composePath := writeComposeFile(t, wd, markedWebYAML(project, marker, "v1", 1))
+	t.Cleanup(func() {
+		ctx := context.Background()
+		cleanupProject(ctx, env, wd, project)
+		cleanupIntermediates(ctx, env, wd, project)
+	})
+	compose := func(args ...string) *Cmd {
+		return env.Cmd(append([]string{"compose", "--workdir", wd, "-f", composePath}, args...)...)
+	}
+
+	compose("create").Run(ctx, t)
+	if st := composeReplicaState(ctx, env, wd, project, "web", 1); st != "created" {
+		t.Fatalf("web should be created, got %q", st)
+	}
+	clearMarker(t, marker)
+
+	compose("restart").Run(ctx, t)
+
+	want := []string{"v1 start_pre", "v1 start_post"}
+	if got := markedEvents(t, marker, "web", 1); !slices.Equal(got, want) {
+		t.Errorf("hooks of the restart = %q, want %q", got, want)
+	}
+	env.waitForState(ctx, replicaID(ctx, t, env, wd, project, "web", 1), "running",
+		defaultTimeout)
 }
 
 func TestComposeHooksRestartProgress(t *testing.T) {

@@ -188,8 +188,11 @@ func (s *Service) executeAction(
 		// recreated. The stop is surfaced as its own stopping → stopped step in the
 		// trace so the user sees the command go down before it comes back. A stop
 		// failure aborts the recreate (the still-running command must not be
-		// removed out from under its live monitor).
-		if existing.State == model.EventTypeRunning || existing.State == model.EventTypeStarting {
+		// removed out from under its live monitor). Any other command is removed
+		// without a stop, and the stop releases stored for it run once it is gone.
+		live := existing.State == model.EventTypeRunning ||
+			existing.State == model.EventTypeStarting
+		if live {
 			contextkey.ValueSlogLoggerDefault(ctx).Info(
 				"compose: stopping changed command before recreate",
 				"project", spec.Project,
@@ -212,9 +215,9 @@ func (s *Service) executeAction(
 		}
 
 		s.report(disp, PhaseRecreating, nil, nil)
-		_, err = s.removeWithHooks(ctx, old, oldHooks, cmdman.RemoveRequest{
+		err = s.removeReplica(ctx, old, oldHooks, cmdman.RemoveRequest{
 			Targets: []string{existing.ID},
-		})
+		}, live)
 		if err != nil {
 			werr := fmt.Errorf("remove command %q for recreate: %w", disp, err)
 			s.report(disp, PhaseError, werr, nil)
@@ -288,10 +291,12 @@ func replicaNamer(spec *ComposeSpec, entries []cmdmanEntry) func(cmdmanEntry) st
 }
 
 // handleExcessReplicas stops (when live) and removes surplus replicas left by a
-// scale-down, each inside the stop and remove hooks stored on it. Only replicas
-// whose command is in the target set are touched, so a subset operation never
-// tears down a replica it was not asked about. Each removal is reported as its
-// own removing → removed/error step.
+// scale-down, each inside the stop and remove hooks stored on it. A replica
+// that is not live is removed without a stop, and the stop releases stored for
+// it run once it is gone ([Service.removeReplica]). Only replicas whose command
+// is in the target set are touched, so a subset operation never tears down a
+// replica it was not asked about. Each removal is reported as its own removing
+// → removed/error step.
 func (s *Service) handleExcessReplicas(
 	ctx context.Context,
 	spec ComposeSpec,
@@ -321,7 +326,8 @@ func (s *Service) handleExcessReplicas(
 		}
 
 		// Stop a live replica before removal so its monitor is not yanked.
-		if e.State == model.EventTypeRunning || e.State == model.EventTypeStarting {
+		live := e.State == model.EventTypeRunning || e.State == model.EventTypeStarting
+		if live {
 			if _, err := s.stopWithHooks(ctx, r, hooks, e.ID); err != nil {
 				werr := fmt.Errorf("stop excess replica %q (%s): %w", disp, e.ID, err)
 				s.report(disp, PhaseError, werr, nil)
@@ -332,10 +338,10 @@ func (s *Service) handleExcessReplicas(
 			}
 		}
 
-		_, err = s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
+		err = s.removeReplica(ctx, r, hooks, cmdman.RemoveRequest{
 			Targets: []string{e.ID},
 			Force:   true,
-		})
+		}, live)
 		if err != nil {
 			werr := fmt.Errorf("remove excess replica %q (%s): %w", disp, e.ID, err)
 			contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: remove excess replica failed",
