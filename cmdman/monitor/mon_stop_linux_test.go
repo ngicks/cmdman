@@ -22,7 +22,7 @@ import (
 func TestMonitorSignalReachesGroupDuringSweep(t *testing.T) {
 	// Only what is reparented here can be waited on below, which is how the
 	// signal's effect is told apart from a pid that simply went away.
-	assert.NilError(t, becomeSubreaper())
+	becomeSubreaperForTest(t)
 
 	dir := t.TempDir()
 	survivorPidPath := filepath.Join(dir, "survivor.pid")

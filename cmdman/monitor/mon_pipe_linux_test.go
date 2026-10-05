@@ -30,7 +30,7 @@ func TestMonitorPipeRunEndsWhileALeftoverHoldsStdout(t *testing.T) {
 	// The sweep is what takes the leftover down, and it reaches only what is
 	// reparented to this process. In the monitor RunMonitor arranges that; here
 	// the test process is the monitor.
-	assert.NilError(t, becomeSubreaper())
+	becomeSubreaperForTest(t)
 
 	dir := t.TempDir()
 	holderPidPath := filepath.Join(dir, "holder.pid")
