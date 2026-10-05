@@ -18,8 +18,10 @@ broadcasts to every command in the selected project.
 
 Targets must have live PTYs (`tty: true`). Default key-name translation,
 literal byte input, hexadecimal byte input, and sequence repetition behave like
-direct `cmdman send-keys`. Outcomes are reported per service so one failure
-does not hide results for the other targets.
+direct `cmdman send-keys`. Outcomes are reported per replica so one failure
+does not hide results for the other targets. A replica of a scaled command is
+labeled `<command>-<index>`, and the replica of an unscaled command is labeled
+by the command name.
 
 ## Selection Flags
 

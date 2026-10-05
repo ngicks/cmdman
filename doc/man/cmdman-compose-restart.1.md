@@ -20,10 +20,11 @@ forward dependency order; work within each layer is concurrent. Orphans are
 skipped. When no compose file is loaded, dependency order is reconstructed from
 stored compose labels.
 
-The operation reports outcomes per command. It writes its progress output
-first and then one result line per command. Target selection is
-project-scoped, so service names resolve only within the selected
-`(workdir, project)` pair.
+The operation reports outcomes per replica. It writes its progress output
+first and then one result line per replica it restarted. A replica of a scaled
+command is labeled `<command>-<index>`, and the replica of an unscaled command
+is labeled by the command name. Target selection is project-scoped, so service
+names resolve only within the selected `(workdir, project)` pair.
 
 Each starting or running replica runs the `stop_pre` and `stop_post` hooks
 stored on it around its stop. Every replica then runs `start_pre` and
