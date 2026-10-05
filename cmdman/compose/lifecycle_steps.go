@@ -2,6 +2,7 @@ package compose
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -148,6 +149,65 @@ func (s *Service) removeWithHooks(
 	return true, err
 }
 
+// removeReplica removes the replica r inside hooks as [Service.removeWithHooks]
+// does. stopped tells whether the operation stopped r first. One it did not
+// stop, as it stops only a starting or running replica, never ran the stop_pre
+// or stop_post release of a resource a start of r acquired. Once such an r is
+// removed, removeReplica runs those releases as compose down does
+// ([teardown.releaseLeft]), and their failures join err. An r left in place
+// keeps its resources.
+func (s *Service) removeReplica(
+	ctx context.Context,
+	r hookReplica,
+	hooks []LifecycleHook,
+	req cmdman.RemoveRequest,
+	stopped bool,
+) error {
+	removed, err := s.removeWithHooks(ctx, r, hooks, req)
+	if removed && !stopped {
+		err = errors.Join(err, s.releaseStopResources(ctx, r))
+	}
+	return err
+}
+
+// releaseStopResources runs the stored stop_pre or stop_post release of every
+// resource held for the replica r, as [Service.runRelease] runs it under the
+// on_error stored with it. Every release is tried, and their failures are
+// returned. A release that fails keeps its value for the next compose down. A
+// holder that cannot be read is left alone with a warning, as compose down
+// leaves it.
+func (s *Service) releaseStopResources(ctx context.Context, r hookReplica) error {
+	logger := contextkey.ValueSlogLoggerDefault(ctx)
+	entries, err := s.svc.List(ctx, cmdman.ListRequest{
+		AllStates: true,
+		Labels: map[string]string{
+			LabelIntermediate: IntermediateHolder,
+			LabelOwner:        r.Name,
+			LabelHooksProject: r.Project,
+			LabelHooksWorkdir: r.WorkDir,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("look up resource holders of %s: %w", r.Name, err)
+	}
+	var errs []error
+	for _, e := range entries {
+		h, err := decodeHolder(e)
+		if err != nil {
+			logger.WarnContext(ctx, "compose: skip unreadable resource holder",
+				"holder", e.Name, "error", err)
+			continue
+		}
+		if !h.releasedAtStop() {
+			continue
+		}
+		if _, err := s.runRelease(ctx, h, false); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // forcedHooks returns hooks with every on_error fail, explicit or by default,
 // turned into continue, so a failing hook is warned about and the operation
 // goes on. ignore is left as it is: it already lets the operation go on, and a
@@ -269,12 +329,7 @@ func (t *teardown) markRemoved(name string) {
 // failed or the hooks could not be read. Such a release waits for the next
 // down.
 func (t *teardown) releaseLeft(h resourceHolder) bool {
-	if h.Release == nil {
-		return false
-	}
-	switch h.Release.Event {
-	case LifecycleStopPre, LifecycleStopPost:
-	default:
+	if !h.releasedAtStop() {
 		return false
 	}
 	t.mu.Lock()

@@ -142,6 +142,20 @@ func (h resourceHolder) hookName() string {
 	return h.Ref.Key
 }
 
+// releasedAtStop reports whether h stores a stop_pre or stop_post release, the
+// release of a resource a start acquired. Only a stop of the replica runs it.
+func (h resourceHolder) releasedAtStop() bool {
+	if h.Release == nil {
+		return false
+	}
+	switch h.Release.Event {
+	case LifecycleStopPre, LifecycleStopPost:
+		return true
+	default:
+		return false
+	}
+}
+
 // replica describes the replica h is held for, as its release hook sees it,
 // from what h records. The replica itself may be gone.
 func (h resourceHolder) replica() hookReplica {
