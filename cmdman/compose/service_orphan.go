@@ -65,7 +65,7 @@ func (s *Service) handleOrphans(
 
 		r, hooks, err := storedHookReplica(orphan)
 		if err == nil {
-			_, err = s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
+			err = s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
 				Targets: []string{orphan.ID},
 			})
 		}

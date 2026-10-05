@@ -473,3 +473,164 @@ commands:
 		t.Fatalf("resource get = %q, want the value create_pre acquired", got)
 	}
 }
+
+// hasHookRecord reports whether events hold a record of hook's lifecycle event
+// for command in phase.
+func hasHookRecord(events []hookProgressEvent, command, hook, lifecycle, phase string) bool {
+	return slices.ContainsFunc(events, func(ev hookProgressEvent) bool {
+		return ev.Command == command && ev.Hook == hook && ev.Lifecycle == lifecycle &&
+			ev.Phase == phase
+	})
+}
+
+// hasResultLine reports whether stdout holds the plain result line of command
+// with status, as the compose verbs that print one per outcome write it.
+func hasResultLine(stdout, status, command string) bool {
+	for line := range strings.SplitSeq(stdout, "\n") {
+		if slices.Equal(strings.Fields(line), []string{status, command}) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestComposeHooksUpHoldsReplicaWhoseCreatePostFailed(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-hooks-create-post-hold"
+	composePath := writeComposeFile(t, wd, fmt.Sprintf(`name: %s
+commands:
+  web:
+    args: [sleep, "300"]
+    hooks:
+      - name: gate
+        create_post: [sh, -c, "exit 3"]
+  app:
+    args: [sleep, "300"]
+    after:
+      web:
+        condition: running
+`, project))
+	t.Cleanup(func() {
+		ctx := context.Background()
+		cleanupProject(ctx, env, wd, project)
+		cleanupIntermediates(ctx, env, wd, project)
+	})
+
+	res := env.Cmd("compose", "--workdir", wd, "-f", composePath,
+		"up", "--progress", "json").ExpectFail(ctx, t, "compose operation(s) failed")
+
+	for _, command := range []string{"web", "app"} {
+		if st := composeReplicaState(ctx, env, wd, project, command, 1); st != "created" {
+			t.Errorf("%s should stay created, got %q", command, st)
+		}
+	}
+	events := parseProgress(t, res.Stdout)
+	if !slices.ContainsFunc(events, func(ev progressEvent) bool {
+		return ev.Command == "web" && ev.Phase == "skipped" &&
+			strings.Contains(ev.Error, "not started") &&
+			strings.Contains(ev.Error, `hook "gate" create_post`)
+	}) {
+		t.Errorf("web should be reported skipped with the create_post failure:\n%s", res.Stdout)
+	}
+	if progressReached(events, "web", "starting") {
+		t.Errorf("web should not be started:\n%s", res.Stdout)
+	}
+	if !progressReached(events, "app", "error") || progressReached(events, "app", "starting") {
+		t.Errorf("app should be reported blocked:\n%s", res.Stdout)
+	}
+}
+
+func TestComposeHooksCreateProgress(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-hooks-create-progress"
+	marker := filepath.Join(wd, "marker.txt")
+	composePath := writeComposeFile(t, wd, markedWebYAML(project, marker, "v1", 1)+
+		`      - name: warn
+        create_post:
+          args: [sh, -c, "exit 1"]
+          on_error: continue
+`)
+	t.Cleanup(func() {
+		ctx := context.Background()
+		cleanupProject(ctx, env, wd, project)
+		cleanupIntermediates(ctx, env, wd, project)
+	})
+
+	stdout := env.Cmd("compose", "--workdir", wd, "-f", composePath,
+		"create", "--progress", "json").Run(ctx, t)
+
+	events := hookProgress(t, stdout)
+	for _, want := range []struct{ hook, lifecycle, phase string }{
+		{"mark", "create_pre", "hook-running"},
+		{"mark", "create_pre", "hook-succeeded"},
+		{"mark", "create_post", "hook-succeeded"},
+		{"warn", "create_post", "hook-warning"},
+	} {
+		if !hasHookRecord(events, "web", want.hook, want.lifecycle, want.phase) {
+			t.Errorf("no %s record of %s %s:\n%s", want.phase, want.hook, want.lifecycle, stdout)
+		}
+	}
+	if !hasResultLine(stdout, "create", "web") {
+		t.Errorf("create should still print its result line:\n%s", stdout)
+	}
+}
+
+func TestComposeHooksScaleDownRemovesLeftHookCommands(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-hooks-scale-left"
+	composePath := writeComposeFile(t, wd, fmt.Sprintf(`name: %s
+commands:
+  web:
+    scale: 2
+    args: [sleep, "300"]
+    hooks:
+      - name: scratch
+        resource: scratch
+        create_pre: [sh, -c, "echo scratch-$$CMDMAN_COMPOSE_SCALE_INDEX"]
+        remove_post: [sh, -c, "exit 1"]
+`, project))
+	t.Cleanup(func() {
+		ctx := context.Background()
+		cleanupProject(ctx, env, wd, project)
+		cleanupIntermediates(ctx, env, wd, project)
+	})
+	compose := func(args ...string) *Cmd {
+		return env.Cmd(append([]string{"compose", "--workdir", wd, "-f", composePath}, args...)...)
+	}
+
+	compose("up").Run(ctx, t)
+	for idx := 1; idx <= 2; idx++ {
+		env.waitForState(ctx, replicaID(ctx, t, env, wd, project, "web", idx), "running",
+			defaultTimeout)
+	}
+	replica2 := composeReplica(ctx, env, wd, project, "web", 2)["Name"].(string)
+
+	res := compose("scale", "--progress", "json", "web=1").ExpectFail(ctx, t,
+		"compose operation(s) failed")
+
+	if !hasHookRecord(hookProgress(t, res.Stdout), "web-2", "scratch", "remove_post",
+		"hook-failed") {
+		t.Errorf("the remove_post of web-2 should be reported failed:\n%s", res.Stdout)
+	}
+	if composeReplica(ctx, env, wd, project, "web", 2) != nil {
+		t.Errorf("replica 2 should be removed before remove_post")
+	}
+	names := commandNames(ctx, t, env)
+	if slices.ContainsFunc(names, func(name string) bool {
+		return strings.Contains(name, ".hook.")
+	}) {
+		t.Errorf("the removed replica should take its hook commands along: %q", names)
+	}
+	if holder := replica2 + ".res.scratch"; !slices.Contains(names, holder) {
+		t.Errorf("the holder %s should outlive its replica: %q", holder, names)
+	}
+}

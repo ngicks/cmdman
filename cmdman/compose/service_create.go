@@ -62,16 +62,16 @@ func (s *Service) Create(
 	return res, err
 }
 
-// create is [Service.Create] for already resolved targets. aborted maps the
-// cmdman command name of every replica whose recreate failed to that failure:
-// such a replica is either the old one or gone, and no start should take it
-// for the replica the spec describes.
+// create is [Service.Create] for already resolved targets. held maps the cmdman
+// command name of every replica whose create or recreate failed to that
+// failure. Such a replica is the old one, a new one whose create_post failed,
+// or gone, and no start should take it for the replica the spec describes.
 func (s *Service) create(
 	ctx context.Context,
 	spec ComposeSpec,
 	removeOrphan bool,
 	targets targetSet,
-) (_ *CreateResult, aborted map[string]error, _ error) {
+) (_ *CreateResult, held map[string]error, _ error) {
 	existing, err := s.svc.List(ctx, cmdman.ListRequest{
 		AllStates: true,
 		Labels: map[string]string{
@@ -122,11 +122,11 @@ func (s *Service) create(
 			// internal/unexpected error; individual cmd errors are in Err field
 			return nil, nil, err
 		}
-		if action.Kind == ActionRecreate && outcome.Err != nil {
-			if aborted == nil {
-				aborted = make(map[string]error)
+		if outcome.Err != nil {
+			if held == nil {
+				held = make(map[string]error)
 			}
-			aborted[action.InstanceName] = outcome.Err
+			held[action.InstanceName] = outcome.Err
 		}
 		actions = append(actions, outcome)
 	}
@@ -135,7 +135,7 @@ func (s *Service) create(
 	// Create unconditionally), so this one site owns history-row creation.
 	s.recordProject(ctx, spec)
 
-	return &CreateResult{Actions: actions}, aborted, nil
+	return &CreateResult{Actions: actions}, held, nil
 }
 
 // executeAction carries out a single plan action (one replica) and returns its
@@ -212,7 +212,7 @@ func (s *Service) executeAction(
 		}
 
 		s.report(disp, PhaseRecreating, nil, nil)
-		_, err = s.removeWithHooks(ctx, old, oldHooks, cmdman.RemoveRequest{
+		err = s.removeWithHooks(ctx, old, oldHooks, cmdman.RemoveRequest{
 			Targets: []string{existing.ID},
 		})
 		if err != nil {
@@ -309,7 +309,7 @@ func (s *Service) handleExcessReplicas(
 			}
 		}
 
-		_, err = s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
+		err = s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
 			Targets: []string{e.ID},
 			Force:   true,
 		})

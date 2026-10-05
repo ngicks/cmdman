@@ -113,7 +113,11 @@ func (r *ttyReporter) Close() error {
 	r.render() // final frame
 	// render leaves the cursor on the block's last line (no trailing newline);
 	// move below it so the shell prompt / later output starts on a fresh line.
-	_, _ = io.WriteString(r.out, "\n")
+	// An operation that reported nothing, such as a restart of commands without
+	// hooks, drew no block, and a newline would only leave an empty line.
+	if r.drawn > 0 {
+		_, _ = io.WriteString(r.out, "\n")
+	}
 	r.mu.Unlock()
 
 	close(r.stopTick)

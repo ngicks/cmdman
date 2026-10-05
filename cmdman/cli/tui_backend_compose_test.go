@@ -106,6 +106,11 @@ func TestComposeUpStreamDropsHookEvents(t *testing.T) {
 			Exec:       "abc-proj-web-1.hook.scratch.create_pre",
 		})
 	}
+	stream.Report(compose.Event{
+		Command: "web",
+		Phase:   compose.PhaseHookWarning,
+		Err:     errors.New("remove without the stored hooks"),
+	})
 	stream.Report(compose.Event{Command: "web", Phase: compose.PhaseCreated})
 	stream.finish(nil)
 

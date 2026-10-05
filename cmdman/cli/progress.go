@@ -58,9 +58,9 @@ type ComposeProgress interface {
 	Close() error
 }
 
-// NewComposeProgress builds a progress reporter for op ("up"/"start"/"stop"/
-// "down"), choosing the renderer from mode and, for ProgressAuto, whether out is
-// a terminal.
+// NewComposeProgress builds a progress reporter for op, the compose verb it
+// reports ("up", "create", "restart", ...), choosing the renderer from mode
+// and, for ProgressAuto, whether out is a terminal.
 func NewComposeProgress(out io.Writer, mode ProgressMode, op string) ComposeProgress {
 	switch resolveProgressMode(out, mode) {
 	case ProgressQuiet:

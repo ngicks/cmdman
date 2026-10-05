@@ -472,8 +472,14 @@ func (r *replicaRecorder) waitedTargets() [][]string {
 
 func (r *replicaRecorder) service(reporter Reporter) *Service {
 	return &Service{reporter: reporter, svc: testCmdmanSvc{
-		list: func(context.Context, cmdman.ListRequest) ([]store.CommandEntry, error) {
-			return r.entries, nil
+		list: func(_ context.Context, req cmdman.ListRequest) ([]store.CommandEntry, error) {
+			var out []store.CommandEntry
+			for _, e := range r.entries {
+				if hasLabels(e, req.Labels) {
+					out = append(out, e)
+				}
+			}
+			return out, nil
 		},
 		create: func(_ context.Context, req cmdman.CreateRequest) (*cmdman.CreateResult, error) {
 			r.record(&r.created, req.Name)
@@ -542,6 +548,17 @@ func replicaEntry(t *testing.T, cmd Command, idx int, state model.EventType) sto
 			Labels: BuildLabels(reconcileSpec(cmd), cmd, hash, idx),
 		},
 	}
+}
+
+// hasLabels reports whether e carries every label of selector, as a list by
+// labels selects it.
+func hasLabels(e store.CommandEntry, selector map[string]string) bool {
+	for k, v := range selector {
+		if e.ConfigJSON == nil || e.ConfigJSON.Labels[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 func entryIDs(entries []store.CommandEntry) []string {

@@ -262,6 +262,18 @@ func TestTTYReporterRepaintHasNoTrailingNewline(t *testing.T) {
 	}
 }
 
+func TestTTYReporterWithoutEventsWritesNothing(t *testing.T) {
+	var buf bytes.Buffer
+	r := newTTYReporter(&buf)
+
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("a reporter that got no event should write nothing, wrote %q", buf.String())
+	}
+}
+
 // lastFrame returns the body of the renderer's final in-place repaint:
 // everything after the last cursor-up-to-top control it emits at the start of
 // each frame. Earlier frames (including transient phases mid-step) precede it.

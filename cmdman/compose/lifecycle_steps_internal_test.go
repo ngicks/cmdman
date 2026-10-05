@@ -455,6 +455,130 @@ func TestRemoveOrphanPreHookFailureKeepsIt(t *testing.T) {
 	assert.Assert(t, kept)
 }
 
+// putExec stores the exec command that runs ev of hook mark for r, left in
+// state, and returns its name.
+func putExec(f *fakeCmdman, r hookReplica, ev LifecycleEvent, state model.EventType) string {
+	name := ExecCommandName(r.Name, "mark", ev)
+	f.put(cmdman.CreateRequest{
+		Name:   name,
+		Argv:   []string{"true"},
+		Labels: execLabels(r, "mark", ev),
+	}, state)
+	return name
+}
+
+// execsOf returns the names of the exec commands owned by the replica named
+// replica.
+func execsOf(t *testing.T, f *fakeCmdman, replica string) []string {
+	t.Helper()
+	entries, err := f.list(t.Context(), cmdman.ListRequest{Labels: map[string]string{
+		LabelIntermediate: IntermediateExec,
+		LabelOwner:        replica,
+	}})
+	assert.NilError(t, err)
+	var out []string
+	for _, e := range entries {
+		out = append(out, e.Name)
+	}
+	return out
+}
+
+func actionErrs(actions []ActionOutcome) error {
+	var errs []error
+	for _, a := range actions {
+		errs = append(errs, a.Err)
+	}
+	return errors.Join(errs...)
+}
+
+func TestRemovedReplicaTakesTheExecsItsFailedHooksLeft(t *testing.T) {
+	hooks := []LifecycleHook{
+		eventHook("mark", "", LifecycleRemovePre, LifecycleRemovePost),
+		scratchHook("", ""),
+	}
+	web := stepCommand("web", 2, hooks...)
+	keep := stepCommand("keep", 1)
+	for _, tc := range []struct {
+		name string
+		// idx is the replica of web the operation removes.
+		idx int
+		// remove runs the operation and returns the failures it reports.
+		remove func(t *testing.T, s *Service) error
+	}{
+		{
+			name: "recreate",
+			idx:  1,
+			remove: func(t *testing.T, s *Service) error {
+				changed := web
+				changed.Hooks = append(
+					[]LifecycleHook{eventHook("new", "", LifecycleCreatePre)}, hooks...)
+				res, err := s.Create(t.Context(), stepSpec(changed), CreateOption{})
+				assert.NilError(t, err)
+				return actionErrs(res.Actions)
+			},
+		},
+		{
+			name: "scale-down surplus",
+			idx:  2,
+			remove: func(t *testing.T, s *Service) error {
+				scaled := web
+				scaled.Scale = 1
+				res, err := s.Create(t.Context(), stepSpec(scaled), CreateOption{})
+				assert.NilError(t, err)
+				return actionErrs(res.Actions)
+			},
+		},
+		{
+			name: "remove orphan",
+			idx:  1,
+			remove: func(t *testing.T, s *Service) error {
+				res, err := s.Create(
+					t.Context(), stepSpec(keep), CreateOption{RemoveOrphan: true})
+				assert.NilError(t, err)
+				return actionErrs(res.Actions)
+			},
+		},
+		{
+			name: "down",
+			idx:  1,
+			remove: func(t *testing.T, s *Service) error {
+				res, err := s.Down(t.Context(), storedSelection(), DownOption{})
+				assert.NilError(t, err)
+				var errs []error
+				for _, o := range res.Removes {
+					errs = append(errs, o.Err)
+				}
+				return errors.Join(errs...)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeCmdman()
+			failExec(f, ".mark.remove_post")
+			spec := stepSpec(web, keep)
+			for idx := 1; idx <= 2; idx++ {
+				putReplica(t, f, spec, web, idx, model.EventTypeExited)
+			}
+			putReplica(t, f, spec, keep, 1, model.EventTypeExited)
+			s := f.service(nil)
+			r := s.specHookReplica(spec, web, tc.idx)
+			putExec(f, r, LifecycleStartPre, model.EventTypeExited)
+			running := putExec(f, r, LifecycleStartPost, model.EventTypeRunning)
+			putTestHolder(f, r, "scratch", "/tmp/scratch")
+
+			err := tc.remove(t, s)
+
+			assert.ErrorContains(t, err, `hook "mark" remove_post`)
+			_, left := f.get(r.Name)
+			assert.Assert(t, !left, "the replica should be removed")
+			assert.DeepEqual(t, execsOf(t, f, r.Name), []string{running})
+			value, held := holderValue(t, f, r, "scratch")
+			assert.Assert(t, held, "the holder outlives its replica")
+			assert.Equal(t, value, "/tmp/scratch")
+		})
+	}
+}
+
 func TestUpRunsStartHooksAroundEachStartedReplica(t *testing.T) {
 	f := newFakeCmdman()
 	nc := stepCommand("web", 2, eventHook("mark", "", lifecycleEvents[:]...))
@@ -525,6 +649,73 @@ func TestUpStartHookFailureFailsTheStart(t *testing.T) {
 				"a dependent of a failed start must not start")
 			_, kept := f.get(replicaName(a, 1) + ".hook.mark" + tc.failing)
 			assert.Assert(t, kept, "the failed exec command is kept")
+		})
+	}
+}
+
+func TestUpHoldsNewReplicaWhoseCreateFailed(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		failing     string
+		onError     OnError
+		wantErr     string
+		wantTrace   []string
+		wantReplica bool
+	}{
+		{
+			name:        "create_post leaves the replica created",
+			failing:     ".create_post",
+			wantErr:     `hook "mark" create_post`,
+			wantTrace:   []string{"mark.create_pre", "create", "mark.create_post"},
+			wantReplica: true,
+		},
+		{
+			name:      "create_pre leaves no replica",
+			failing:   ".create_pre",
+			wantErr:   `hook "mark" create_pre`,
+			wantTrace: []string{"mark.create_pre"},
+		},
+		{
+			name:        "continue starts the replica",
+			failing:     ".create_post",
+			onError:     OnErrorContinue,
+			wantTrace:   []string{"mark.create_pre", "create", "mark.create_post", "start"},
+			wantReplica: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeCmdman()
+			failExec(f, tc.failing)
+			rec := &commandPhaseReporter{}
+			web := stepCommand("web", 1,
+				eventHook("mark", tc.onError, LifecycleCreatePre, LifecycleCreatePost))
+			app := stepCommand("app", 1)
+			app.After = []AfterSpec{{Name: "web", Condition: ConditionRunning}}
+
+			res, err := f.service(rec).Up(t.Context(), stepSpec(web, app), UpOption{})
+
+			assert.NilError(t, err)
+			starts := map[string]error{}
+			for _, s := range res.Starts {
+				starts[s.Command] = s.Err
+			}
+			assert.DeepEqual(t, lifecycleTrace(f, replicaName(web, 1)), tc.wantTrace)
+			replica, exists := f.get(replicaName(web, 1))
+			assert.Equal(t, exists, tc.wantReplica)
+			if tc.wantErr == "" {
+				assert.NilError(t, starts["web"])
+				assert.NilError(t, starts["app"])
+				return
+			}
+			assert.ErrorContains(t, starts["web"], "not started")
+			assert.ErrorContains(t, starts["web"], tc.wantErr)
+			assert.ErrorContains(t, starts["app"], `dependency "web" failed`)
+			assert.Assert(t, rec.reached("web", PhaseSkipped))
+			assert.Assert(t, !slices.Contains(lifecycleTrace(f, replicaName(app, 1)), "start"),
+				"a dependent of a held replica must not start")
+			if tc.wantReplica {
+				assert.Equal(t, replica.State, model.EventTypeCreated)
+			}
 		})
 	}
 }

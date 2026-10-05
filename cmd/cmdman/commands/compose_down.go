@@ -33,7 +33,8 @@ of a command; to remove replicas, scale the command down with
 	_ = cmd.RegisterFlagCompletionFunc("progress", progressCompletions)
 	// No -f shorthand: the compose group's persistent --file owns -f.
 	cmd.Flags().BoolVar(&flagForce, "force", false,
-		"Treat every failing hook as on_error continue, so every replica is torn down")
+		"Treat every failing hook as on_error continue, and tear down a replica with"+
+			" undecodable stored hooks without running them")
 
 	parent.AddCommand(cmd)
 }

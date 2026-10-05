@@ -174,6 +174,57 @@ func TestComposeHooksRestartRunsStopThenStartHooks(t *testing.T) {
 	}
 }
 
+func TestComposeHooksRestartProgress(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-hooks-restart-progress"
+	marker := filepath.Join(wd, "marker.txt")
+	composePath := writeComposeFile(t, wd, markedWebYAML(project, marker, "v1", 1)+
+		`      - name: warn
+        stop_pre:
+          args: [sh, -c, "exit 1"]
+          on_error: continue
+`)
+	t.Cleanup(func() {
+		ctx := context.Background()
+		cleanupProject(ctx, env, wd, project)
+		cleanupIntermediates(ctx, env, wd, project)
+	})
+	compose := func(args ...string) *Cmd {
+		return env.Cmd(append([]string{"compose", "--workdir", wd, "-f", composePath}, args...)...)
+	}
+
+	compose("up").Run(ctx, t)
+	env.waitForState(ctx, replicaID(ctx, t, env, wd, project, "web", 1), "running",
+		defaultTimeout)
+
+	stdout := compose("restart", "--progress", "json").Run(ctx, t)
+
+	events := hookProgress(t, stdout)
+	for _, want := range []struct{ hook, lifecycle, phase string }{
+		{"mark", "stop_pre", "hook-succeeded"},
+		{"mark", "stop_post", "hook-succeeded"},
+		{"mark", "start_pre", "hook-running"},
+		{"mark", "start_post", "hook-succeeded"},
+		{"warn", "stop_pre", "hook-warning"},
+	} {
+		if !hasHookRecord(events, "web", want.hook, want.lifecycle, want.phase) {
+			t.Errorf("no %s record of %s %s:\n%s", want.phase, want.hook, want.lifecycle, stdout)
+		}
+	}
+	for _, ev := range parseProgress(t, stdout) {
+		if ev.Op != "restart" {
+			t.Errorf("a restart record names op %q:\n%s", ev.Op, stdout)
+			break
+		}
+	}
+	if !hasResultLine(stdout, "restarted", "web") {
+		t.Errorf("restart should still print its result line:\n%s", stdout)
+	}
+}
+
 func TestComposeHooksDownKeepsReplicaWhoseStopPreFails(t *testing.T) {
 	t.Parallel()
 	ctx := testContext(t)

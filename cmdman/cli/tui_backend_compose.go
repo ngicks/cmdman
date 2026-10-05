@@ -208,11 +208,12 @@ func newComposeUpStream(ctx context.Context) *composeUpStream {
 	}
 }
 
-// Report implements compose.Reporter. Events of a hook run are dropped: they
-// carry the replica's name, and the TUI keys a replica's mark by that name, so
-// a hook phase would overwrite the replica's own state.
+// Report implements compose.Reporter. Hook events are dropped: the events of a
+// hook run, which set Hook, and a hook warning of the replica itself, which
+// does not. Both carry the replica's name, and the TUI keys a replica's mark by
+// that name, so a hook phase would overwrite the replica's own state.
 func (s *composeUpStream) Report(ev compose.Event) {
-	if ev.Hook != "" {
+	if ev.Hook != "" || ev.Phase == compose.PhaseHookWarning {
 		return
 	}
 	out := tui.ComposeUpEvent{

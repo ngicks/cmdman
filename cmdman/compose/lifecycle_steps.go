@@ -120,28 +120,32 @@ func (s *Service) stopWithHooks(
 
 // removeWithHooks runs remove_pre of hooks for r, removes the replica req
 // targets, then runs remove_post. remove_post still finds the resource values
-// of r: a holder outlives its replica. removed reports whether the replica is
-// gone, which a failed remove_post does not change.
+// of r: a holder outlives its replica. A failed remove_post leaves the replica
+// removed. Once the replica is gone, the exec commands its failed hooks left
+// for inspection go with it, since no later operation of the replica would
+// replace or remove them. These include the one a failed remove_post just
+// left.
 func (s *Service) removeWithHooks(
 	ctx context.Context,
 	r hookReplica,
 	hooks []LifecycleHook,
 	req cmdman.RemoveRequest,
-) (removed bool, err error) {
+) error {
 	if _, err := s.runLifecycleEvent(ctx, r, hooks, LifecycleRemovePre); err != nil {
-		return false, err
+		return err
 	}
 	results, err := s.svc.Remove(ctx, req)
 	if err != nil {
-		return false, err
+		return err
 	}
 	for _, res := range results {
 		if res.Err != nil {
-			return false, res.Err
+			return res.Err
 		}
 	}
 	_, err = s.runLifecycleEvent(ctx, r, hooks, LifecycleRemovePost)
-	return true, err
+	s.removeLeftExecs(ctx, r)
+	return err
 }
 
 // forcedHooks returns hooks with every on_error fail, explicit or by default,
@@ -252,22 +256,16 @@ func (s *Service) teardownStop(ctx context.Context, t *teardown, e cmdmanEntry) 
 }
 
 // teardownRemove removes the replica e for t, by force should it still run,
-// inside the remove hooks [Service.teardownHooks] returns for t.force. Once e
-// is gone, the exec commands its failed hooks left for inspection go with it:
-// no later operation of e would replace or remove them.
+// inside the remove hooks [Service.teardownHooks] returns for t.force.
 func (s *Service) teardownRemove(ctx context.Context, t *teardown, e cmdmanEntry) error {
 	r, hooks, err := s.teardownHooks(ctx, e, t.force, "remove")
 	if err != nil {
 		return err
 	}
-	removed, err := s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
+	return s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
 		Targets: []string{e.ID},
 		Force:   true,
 	})
-	if removed {
-		s.removeLeftExecs(ctx, r)
-	}
-	return err
 }
 
 // removeLeftExecs removes the exec commands of r that are not running. A
