@@ -368,7 +368,10 @@ of `cmdman compose ps` shows it.
   the event succeeds. A failed event keeps it under every `on_error`. Read
   the failure with `cmdman logs <replica>.hook.<item>.<event>` or
   `cmdman inspect`. The next run of the same event for the same replica
-  replaces it. `compose down` removes it together with its replica.
+  replaces it. A compose verb that removes the replica also removes every
+  exec command of the replica that is not running. A recreate, the removal of
+  a surplus replica, `--remove-orphan`, and `compose down` all remove a
+  replica.
 - A holder keeps one resource value. Its name is `<replica>.res.<key>`. cmdman
   never starts it. A holder outlives its replica. A `remove_post` release and
   a later `compose down` still find the value.
@@ -402,7 +405,9 @@ events in the order they run, with the step between them.
 - With `--remove-orphan`, every stopped orphan runs `remove_pre`, removal,
   `remove_post`. A running orphan is skipped and runs no hooks.
 - `compose start` and `compose up` run `start_pre`, start, `start_post` for
-  every replica that is neither starting nor running.
+  every replica that is neither starting nor running. `compose up` does not
+  start a replica whose create or recreate failed in the same run, and runs no
+  start hooks for it.
 - `compose stop` runs `stop_pre`, stop, `stop_post` for every starting or
   running replica.
 - `compose restart` runs `stop_pre`, stop, `stop_post` for every starting or
@@ -469,10 +474,11 @@ variable at run time needs a shell or a program that reads its environment.
 
 ### Progress Output
 
-`compose up`, `compose start`, `compose stop`, `compose down`, and
-`compose scale` report every hook run in their progress output. In `tty` mode,
-each hook run gets a line labeled `<command> hook <item>.<event>`. The line
-shows the latest output of the hook while it runs.
+`compose create`, `compose up`, `compose start`, `compose stop`,
+`compose restart`, `compose down`, and `compose scale` report every hook run in
+their progress output. In `tty` mode, each hook run gets a line labeled
+`<command> hook <item>.<event>`. The line shows the latest output of the hook
+while it runs.
 
 In `json` mode, a record of a hook run sets `hook`, `lifecycle`, `exec`, and
 `scaleIndex` to the item name, the event, the exec command name, and the
@@ -482,15 +488,23 @@ replica index. Its `phase` is one of these values:
 - `hook-succeeded`: the hook exited with code 0.
 - `hook-failed`: the hook failed under `on_error: fail`, or the verb was
   interrupted.
-- `hook-warning`: the hook failed under `on_error: continue`.
+- `hook-warning`: the hook failed under `on_error: continue`, or under
+  `on_error: fail` with `compose down --force`.
 - `hook-ignored`: the hook failed under `on_error: ignore`.
 - `hook-output`: one line of hook output. `line` holds the line, and `stream`
   holds `stdout` or `stderr`.
 
 The record that ends a run carries `exitCode` when the hook exited, and
-`error` when the hook failed. `compose create` and `compose restart` have no
-progress output. They report the error of a hook that fails under
-`on_error: fail` in their result.
+`error` when the hook failed.
+
+`compose down --force` also writes a `hook-warning` record that sets no
+`hook`, `lifecycle`, `exec`, or `scaleIndex`. That record belongs to the
+replica itself. Down could not decode the hooks stored on the replica and tore
+the replica down without them. Its `error` holds the decoding error.
+
+`compose create` and `compose restart` write one result line per outcome to
+standard output after their progress output. The other verbs write only
+progress output.
 
 ### Example
 

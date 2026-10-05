@@ -31,8 +31,11 @@ Failures are aggregated so unrelated commands can still be attempted.
 
 Up runs the hooks of [`compose create`](./cmdman-compose-create.1.md) and then
 the hooks of [`compose start`](./cmdman-compose-start.1.md). A replica whose
-recreate failed is not started. The start of its command fails and blocks the
-commands that depend on it. See
+create or recreate failed is not started. This includes a new replica whose
+`create_post` failed under `on_error: fail` after its create. Up reports such
+a replica as skipped with the failure. The start of its command fails and
+blocks the commands that depend on it. Like `compose create`, up removes the
+hook commands that the failed hooks of a removed replica left. See
 [Lifecycle Hooks](./cmdman-compose.5.md#lifecycle-hooks).
 
 ## Selection Flags

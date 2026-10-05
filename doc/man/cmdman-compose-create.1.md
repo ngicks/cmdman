@@ -7,7 +7,8 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] create [--remove-orphan] [--scale N] [COMMAND...]
+cmdman compose [selection flags] create [--remove-orphan] [--progress MODE] [--scale N]
+    [COMMAND...]
 ```
 
 ## Description
@@ -33,6 +34,14 @@ hooks. A hook that fails under `on_error: fail` ends the action of its replica
 at that hook and makes create exit non-zero. See
 [Lifecycle Hooks](./cmdman-compose.5.md#lifecycle-hooks).
 
+Once create removes a replica, it also removes the hook commands that the
+failed hooks of the replica left for inspection. A recreate, the removal of a
+surplus replica, and `--remove-orphan` all remove a replica. A hook command
+that is still running stays. The resource values of the removed replica stay
+as well.
+
+Create writes its progress output first and then one result line per action.
+
 ## Selection Flags
 
 Uses the compose selection flags documented in
@@ -43,6 +52,9 @@ Uses the compose selection flags documented in
 
 - `--remove-orphan`: remove stopped orphan commands before reconciliation.
   Running orphans are skipped.
+- `--progress auto|tty|json|quiet`: progress output mode. `auto` chooses TTY
+  output on terminals and JSON otherwise. Hook runs have records of their own;
+  see [Progress Output](./cmdman-compose.5.md#progress-output).
 - `--scale N`: reconcile only replica N (1-based) of exactly one COMMAND. N must
   lie within the command's declared `scale`. Its `after` dependencies are still
   reconciled in full, and surplus replicas left by a scale-down are kept.

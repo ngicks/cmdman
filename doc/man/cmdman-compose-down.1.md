@@ -31,7 +31,8 @@ Each replica runs the hooks stored on it. A running replica runs `stop_pre`,
 stops, then runs `stop_post`. Every replica then runs `remove_pre`, is removed,
 then runs `remove_post`. `remove_post` still reads the values of the replica's
 resources. Once a replica is removed, down also removes the hook commands its
-failed hooks left for inspection.
+failed hooks left for inspection. These include the hook command of a failed
+`remove_post`. A hook command that is still running stays.
 
 A hook that fails under `on_error: fail` keeps its replica:
 
@@ -41,6 +42,9 @@ A hook that fails under `on_error: fail` keeps its replica:
 - A failed `remove_pre` keeps the replica from being removed.
 - A failed `remove_post` comes after the removal. A resource it was to release
   keeps its value, which the error names.
+
+Stored hooks that down cannot decode also keep their replica. Down reports the
+decoding error and runs no hook for that replica.
 
 A replica whose stop fails for any other reason is removed by force. Down exits
 non-zero when it keeps a replica.
@@ -60,6 +64,10 @@ as one stored by `compose resource set` alone, stays. The retry needs no
 compose file, so `cmdman compose -p NAME down` retries the releases of a project
 whose file is gone.
 
+When down cannot list the resources of the project, it reports the failure as a
+failed release and exits non-zero. Down still reports the stop and remove
+outcomes of the replicas it tore down before that.
+
 ## Selection Flags
 
 Uses the compose selection flags documented in
@@ -73,8 +81,11 @@ Uses the compose selection flags documented in
   see [Progress Output](./cmdman-compose.5.md#progress-output).
 - `--force`: treat every hook that fails under `on_error: fail` as
   `on_error: continue`. Down reports the failure as a warning and stops and
-  removes the replica anyway. A retried release that fails keeps its value
-  with a warning. `--force` has no `-f` short form: `-f` is `--file`.
+  removes the replica anyway. A replica whose stored hooks down cannot decode
+  is stopped and removed without its hooks. Down reports that with a
+  `hook-warning` record that names no hook. A retried release that fails keeps
+  its value with a warning. `--force` has no `-f` short form: `-f` is
+  `--file`.
 
 ## See Also
 
