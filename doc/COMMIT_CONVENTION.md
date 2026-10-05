@@ -54,8 +54,8 @@ The scope names the module, package, skill, or directory the change touches.
 
 | situation                                   | scope                                     | example                                      |
 | :------------------------------------------ | :---------------------------------------- | :------------------------------------------- |
-| one module / package / skill                | its row in the **Scopes** table           | `✨(tool): add default targets`              |
-| a few modules                               | comma-separated, no spaces                | `📝(cc-workers,nggoal): ask availability`    |
+| one module / package / skill                | its row in the **Scopes** table           | `✨(monitor): sweep processes on run end`    |
+| a few modules                               | comma-separated, no spaces                | `📝(compose,man): document lifecycle hooks`  |
 | cross-cutting, or scopes exceed ~16 chars   | omit the parentheses entirely             | `📝: all instructions non-conditional`       |
 | no meaningful scope (repo root, misc files) | omit the parentheses entirely             | `🐛: fix typo`                               |
 | not in the **Scopes** table                 | add a row first, in its own 📝 commit     | `📝(doc): add scope for new-skill`           |
@@ -117,9 +117,9 @@ When context matters (why, not what), add one after a blank line:
 ## Examples
 
 ```
-✨(tool): add default targets
+✨(monitor): sweep processes on run end
 🐛: fix typo
-📝(go-edit-cobra): forbid non-inline field in *cobra.Command
+📝(man): document --force in compose down
 🔥: remove fragile test
 👷: bump LLM stuff
 📦: bump golang.org/x/sys to v0.30.0
