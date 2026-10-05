@@ -2,8 +2,11 @@ package cmdman_test
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRm_ExitedCommand(t *testing.T) {
@@ -123,18 +126,66 @@ func TestRm_ExitStatusIgnoreErrors(t *testing.T) {
 	env.run(ctx, "rm", "rm-ignore-errors")
 }
 
+// TestRm_ForceRunningCommand pins rm --force on a running command: the command
+// stops through its monitor, so neither the command nor a process it spawned
+// outlives the removal.
 func TestRm_ForceRunningCommand(t *testing.T) {
 	t.Parallel()
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
-	id := env.run(ctx, "run", "-n", "force-rm", "--", "/bin/sh", "-c", "sleep 300")
+	dir := t.TempDir()
+	childPidFile := filepath.Join(dir, "child.pid")
+	spawnedPidFile := filepath.Join(dir, "spawned.pid")
+	env.run(ctx, "run", "-n", "force-rm", "--", "/bin/sh", "-c", fmt.Sprintf(
+		"sleep 300 & echo $! > %s; echo $$ > %s; wait", spawnedPidFile, childPidFile,
+	))
+	// Not ctx: cleanup runs after the test's context is already cancelled.
+	t.Cleanup(func() { env.cleanupCommand(context.Background(), "force-rm") })
+
 	env.waitForState(ctx, "force-rm", "running", defaultTimeout)
 
+	child := readPidFile(t, childPidFile)
+	spawned := readPidFile(t, spawnedPidFile)
+	t.Cleanup(func() {
+		killIfAlive(child)
+		killIfAlive(spawned)
+	})
+
+	id := env.resolvedID(ctx, "force-rm")
 	env.run(ctx, "rm", "-f", "force-rm")
 
-	entries := env.lsJSON(ctx)
-	for _, e := range entries {
+	for _, e := range env.lsJSON(ctx) {
+		if e["ID"] == id {
+			t.Error("command still appears in ls after force rm")
+		}
+	}
+	for _, pid := range []int{child, spawned} {
+		waitUntil(t, 5*time.Second, func() bool { return !processExists(pid) },
+			"pid %d is still in /proc after rm --force", pid)
+	}
+}
+
+// TestRm_ForceAutoRemoveCommand pins rm --force on a running command created
+// with --rm: the monitor deletes the record itself once the stop lands, and the
+// removal still succeeds.
+func TestRm_ForceAutoRemoveCommand(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	env.run(ctx, "run", "--rm", "-n", "force-rm-auto", "--", "/bin/sh", "-c", "sleep 300")
+	// Not ctx: cleanup runs after the test's context is already cancelled.
+	t.Cleanup(func() { env.cleanupCommand(context.Background(), "force-rm-auto") })
+
+	env.waitForState(ctx, "force-rm-auto", "running", defaultTimeout)
+
+	id := env.resolvedID(ctx, "force-rm-auto")
+	if out := env.run(ctx, "rm", "-f", "force-rm-auto"); !strings.Contains(out, id) {
+		t.Errorf("expected rm to report %s, got %q", id, out)
+	}
+
+	for _, e := range env.lsJSON(ctx) {
 		if e["ID"] == id {
 			t.Error("command still appears in ls after force rm")
 		}
