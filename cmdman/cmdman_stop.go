@@ -14,6 +14,10 @@ import (
 	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
+// defaultStopTimeout is how long a stop waits for the command to go down before
+// it escalates to SIGKILL.
+const defaultStopTimeout = 10 * time.Second
+
 // StopRequest defines a stop operation across explicit targets and/or labels.
 type StopRequest struct {
 	Targets []string
@@ -38,7 +42,7 @@ func (s *Service) Stop(ctx context.Context, req StopRequest) ([]StopResult, erro
 
 	timeout := req.Timeout
 	if timeout <= 0 {
-		timeout = 10 * time.Second
+		timeout = defaultStopTimeout
 	}
 	results := make([]StopResult, 0, len(ids))
 	for _, id := range ids {
@@ -50,6 +54,9 @@ func (s *Service) Stop(ctx context.Context, req StopRequest) ([]StopResult, erro
 	return results, nil
 }
 
+// stop stops id through its monitor, escalating to SIGKILL after timeout. A
+// monitor that does not answer is taken for dead: stop marks the command failed
+// and reports no error.
 func (s *Service) stop(
 	ctx context.Context,
 	st *store.Store,
@@ -57,20 +64,33 @@ func (s *Service) stop(
 	signalOverride string,
 	timeout time.Duration,
 ) error {
+	_, err := s.stopReportingUnreachable(ctx, st, id, signalOverride, timeout)
+	return err
+}
+
+// stopReportingUnreachable is stop that also reports whether the monitor did
+// not answer, for a caller that has its own way to deal with such a monitor.
+func (s *Service) stopReportingUnreachable(
+	ctx context.Context,
+	st *store.Store,
+	id string,
+	signalOverride string,
+	timeout time.Duration,
+) (unreachable bool, err error) {
 	state, _, stateJSON, err := st.GetCommandState(id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("get command state: %w", err)
+		return false, fmt.Errorf("get command state: %w", err)
 	}
 	if state == model.EventTypeExited || state == model.EventTypeFailed {
-		return nil
+		return false, nil
 	}
 
 	_, _, cfg, err := st.GetCommandConfig(id)
 	if err != nil {
-		return fmt.Errorf("get command config: %w", err)
+		return false, fmt.Errorf("get command config: %w", err)
 	}
 
 	effective := cfg.StopSignal
@@ -82,7 +102,7 @@ func (s *Service) stop(
 	}
 	sig, _, err := hrstr.ParseSignal(effective)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	s.emitEvent(ctx, model.Event{
@@ -96,24 +116,24 @@ func (s *Service) stop(
 
 	if err := s.sendStop(ctx, st, id, sig); err != nil {
 		if isMonitorUnavailable(err) {
-			return monitor.MarkMonitorDied(ctx, st, s.cfg, id, stateJSON, cfg)
+			return true, monitor.MarkMonitorDied(ctx, st, s.cfg, id, stateJSON, cfg)
 		}
-		return err
+		return false, err
 	}
 	if err := waitForStopped(ctx, st, id, timeout); err == nil {
-		return nil
+		return false, nil
 	} else if !errors.Is(err, context.DeadlineExceeded) {
-		return err
+		return false, err
 	}
 
 	killSig, _, _ := hrstr.ParseSignal("SIGKILL")
 	if err := s.sendStop(ctx, st, id, killSig); err != nil {
-		return fmt.Errorf("timeout waiting for stop, and SIGKILL failed: %w", err)
+		return false, fmt.Errorf("timeout waiting for stop, and SIGKILL failed: %w", err)
 	}
 	if err := waitForStopped(ctx, st, id, timeout); err != nil {
-		return fmt.Errorf("timeout waiting for stop after SIGKILL: %w", err)
+		return false, fmt.Errorf("timeout waiting for stop after SIGKILL: %w", err)
 	}
-	return nil
+	return false, nil
 }
 
 func (s *Service) sendStop(ctx context.Context, st *store.Store, id string, sig int32) error {

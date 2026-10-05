@@ -26,7 +26,7 @@ func rmCmd(parent *cobra.Command, rf *rootFlags) {
 
 	cmd.Flags().StringArrayVarP(&flagLabel, "label", "l", nil, "Target commands matching labels")
 	cmd.Flags().
-		BoolVarP(&flagForce, "force", "f", false, "Force remove running commands (sends SIGKILL)")
+		BoolVarP(&flagForce, "force", "f", false, "Stop running commands first, then remove them")
 	cmd.Flags().BoolVar(&flagIgnoreErrors, "ignore-errors", false,
 		"Exit 0 even when some targets failed; failures are still printed")
 
