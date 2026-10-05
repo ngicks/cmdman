@@ -73,6 +73,8 @@ func clearMarker(t *testing.T, marker string) {
 // cleanupIntermediates removes the hook commands and resource holders of a
 // project, which carry no project labels for cleanupProject to go by.
 func cleanupIntermediates(ctx context.Context, e *testEnv, wd, project string) {
+	// Detached for the reason cleanupCommand is: it runs from t.Cleanup.
+	ctx = context.WithoutCancel(ctx)
 	ids, _, _ := e.exec(ctx, "ls", "-a",
 		"-l", "cmdman.compose.hooks.workdir="+wd,
 		"-l", "cmdman.compose.hooks.project="+project,

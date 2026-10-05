@@ -97,6 +97,8 @@ func composeCommandLabel(entry map[string]any) string {
 
 // cleanupProject removes every command that carries the given project label.
 func cleanupProject(ctx context.Context, e *testEnv, workdir, project string) {
+	// Detached for the reason cleanupCommand is: it runs from t.Cleanup.
+	ctx = context.WithoutCancel(ctx)
 	entries, _, _ := e.exec(ctx, "ls", "-a",
 		"-l", "cmdman.compose.workdir="+workdir,
 		"-l", "cmdman.compose.project="+project,
