@@ -252,6 +252,11 @@ func (e *testEnv) lsJSON(ctx context.Context, extraArgs ...string) []map[string]
 // cleanupCommand stops and removes a command, ignoring errors.
 func (e *testEnv) cleanupCommand(ctx context.Context, idOrName string) {
 	e.t.Helper()
+	// Callers register this with t.Cleanup, and the test's context is already
+	// cancelled by then: a cancelled ctx would kill each invocation before it
+	// stops anything, leaking the monitor and its child. Cmd.Exec still bounds
+	// every invocation with its own timeout.
+	ctx = context.WithoutCancel(ctx)
 	e.exec(ctx, "stop", idOrName)
 	// Wait a moment for the monitor to exit.
 	time.Sleep(200 * time.Millisecond)

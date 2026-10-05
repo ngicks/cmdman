@@ -31,6 +31,8 @@ func resourceHolders(ctx context.Context, e *testEnv, wd, project string) []map[
 // cleanupResourceHolders removes the resource holders of a project, which the
 // project labels cleanupProject goes by do not select.
 func cleanupResourceHolders(ctx context.Context, e *testEnv, wd, project string) {
+	// Detached for the reason cleanupCommand is: it runs from t.Cleanup.
+	ctx = context.WithoutCancel(ctx)
 	for _, h := range resourceHolders(ctx, e, wd, project) {
 		e.exec(ctx, "rm", "-f", h["ID"].(string))
 	}
