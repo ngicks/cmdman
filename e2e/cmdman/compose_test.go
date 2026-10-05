@@ -498,6 +498,62 @@ func TestComposeUpRecreateRunningCommand(t *testing.T) {
 	env.waitForState(ctx, idAfter, "running", 5*time.Second)
 }
 
+// TestComposeUpRecreateOnMaxRetriesChange verifies that editing only the retry
+// count of an on-failure restart policy makes `compose up` recreate the command,
+// and that the recreated command carries the new count.
+func TestComposeUpRecreateOnMaxRetriesChange(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-recreate-retries"
+	composePath := writeComposeFile(t, wd, composeOnFailureYAML(project, 2))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+
+	if _, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up"); err != nil {
+		t.Fatalf("compose up #1 failed: %v", err)
+	}
+
+	idBefore := composeCommandID(ctx, env, wd, project, "alpha")
+	if idBefore == "" {
+		t.Fatalf("alpha was not created by up #1")
+	}
+	// Wait for the short-running command to exit so recreate isn't skipped.
+	env.waitForState(ctx, idBefore, "exited", 5*time.Second)
+
+	writeComposeFile(t, wd, composeOnFailureYAML(project, 3))
+
+	stdout, _, err := env.exec(ctx, "compose", "--workdir", wd, "-f", composePath, "up")
+	if err != nil {
+		t.Fatalf("compose up #2 failed: %v\nstdout:\n%s", err, stdout)
+	}
+	if !progressReached(parseProgress(t, stdout), "alpha", "recreated") {
+		t.Fatalf("expected recreate for alpha after a retry count edit; got:\n%s", stdout)
+	}
+
+	idAfter := composeCommandID(ctx, env, wd, project, "alpha")
+	if idAfter == "" {
+		t.Fatalf("alpha missing after recreate")
+	}
+	if idAfter == idBefore {
+		t.Fatalf("alpha id should have changed after recreate: still %s", idAfter)
+	}
+	cfg, _ := env.inspectJSON(ctx, idAfter)["Config"].(map[string]any)
+	if got, _ := cfg["max_retries"].(float64); got != 3 {
+		t.Fatalf("recreated alpha max_retries = %v, want 3", cfg["max_retries"])
+	}
+}
+
+// composeOnFailureYAML returns a one-command compose file whose command exits 0
+// under an on-failure restart policy capped at maxRetries.
+func composeOnFailureYAML(name string, maxRetries int) string {
+	return fmt.Sprintf(`name: %s
+commands:
+  alpha:
+    args: [sh, -c, "echo alpha"]
+    restart_policy: on-failure:%d
+`, name, maxRetries)
+}
+
 // composeRecreateRunningYAML returns a one-command compose file whose single
 // long-running command sleeps for the given duration. Varying the duration
 // changes the config hash, which is enough to force a recreate.
