@@ -166,8 +166,8 @@ func TestComposeScaleFlagTargetsOneReplica(t *testing.T) {
 
 	t.Run("send-keys", func(t *testing.T) {
 		out := compose("send-keys", "--scale", "2", "web", "--", "Enter").Run(ctx, t)
-		if strings.Count(out, "sent") != 1 {
-			t.Fatalf("send-keys --scale 2 should reach one replica, got:\n%s", out)
+		if strings.Count(out, "sent") != 1 || !hasResultLine(out, "sent", "web-2") {
+			t.Fatalf("send-keys --scale 2 should report web-2 only, got:\n%s", out)
 		}
 		waitUntil(t, defaultTimeout, func() bool {
 			return strings.Contains(compose("logs", "--scale", "2", "web").Run(ctx, t), "rx-2")
@@ -196,7 +196,10 @@ func TestComposeScaleFlagTargetsOneReplica(t *testing.T) {
 	})
 
 	t.Run("restart", func(t *testing.T) {
-		compose("restart", "--scale", "2", "web").Run(ctx, t)
+		out := compose("restart", "--scale", "2", "web").Run(ctx, t)
+		if strings.Count(out, "restarted") != 1 || !hasResultLine(out, "restarted", "web-2") {
+			t.Fatalf("restart --scale 2 should report web-2 only, got:\n%s", out)
+		}
 		waitUntil(t, defaultTimeout, func() bool {
 			return runCount(t, runs2) == 2
 		}, "replica 2 should have run again")
@@ -215,8 +218,9 @@ func TestComposeScaleFlagTargetsOneReplica(t *testing.T) {
 	t.Run("wait", func(t *testing.T) {
 		// Replica 1 keeps running, so a wait that reached it would not return.
 		out := compose("wait", "--scale", "2", "web").WithTimeout(defaultTimeout).Run(ctx, t)
-		if strings.Count(out, "done") != 1 {
-			t.Fatalf("wait --scale 2 should report one replica, got:\n%s", out)
+		if strings.Count(out, "done") != 1 || !strings.HasPrefix(
+			strings.Join(strings.Fields(out), " "), "done web-2") {
+			t.Fatalf("wait --scale 2 should report web-2 only, got:\n%s", out)
 		}
 	})
 
@@ -230,7 +234,10 @@ func TestComposeScaleFlagTargetsOneReplica(t *testing.T) {
 	})
 
 	t.Run("signal", func(t *testing.T) {
-		compose("signal", "--scale", "2", "web", "--signal", "SIGTERM").Run(ctx, t)
+		out := compose("signal", "--scale", "2", "web", "--signal", "SIGTERM").Run(ctx, t)
+		if strings.Count(out, "signaled") != 1 || !hasResultLine(out, "signaled", "web-2") {
+			t.Fatalf("signal --scale 2 should report web-2 only, got:\n%s", out)
+		}
 		waitUntil(t, defaultTimeout, func() bool {
 			return isStopped(composeReplicaState(ctx, env, wd, project, "web", 2))
 		}, "replica 2 should stop on SIGTERM")
