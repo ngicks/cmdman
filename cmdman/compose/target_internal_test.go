@@ -302,14 +302,42 @@ func TestRestartActsOnSelectedReplicas(t *testing.T) {
 		replicaEntry(t, c, 1, model.EventTypeRunning),
 	}}
 
-	_, err := rec.service(nil).Restart(
+	selection := ProjectSelection{WorkDir: "/wd", Project: "proj"}
+	restartCommands := func(res *RestartResult) []string {
+		var out []string
+		for _, o := range res.Restarts {
+			assert.NilError(t, o.StopErr, o.Command)
+			assert.NilError(t, o.StartErr, o.Command)
+			out = append(out, o.Command)
+		}
+		return out
+	}
+
+	res, err := rec.service(nil).Restart(
 		context.Background(),
-		ProjectSelection{WorkDir: "/wd", Project: "proj"},
+		selection,
 		RestartOption{Targets: []Target{{"a", 1}, {"a", 3}, {"b", 0}}},
 	)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, rec.sorted(&rec.stopped), []string{"id-a-1", "id-a-3", "id-b-1"})
 	assert.DeepEqual(t, rec.sorted(&rec.started), []string{"gen-a-1", "gen-a-3", "gen-b-1"})
+	assert.DeepEqual(t, restartCommands(res), []string{"a-1", "a-3", "b"})
+
+	res, err = rec.service(nil).Restart(
+		context.Background(), selection, RestartOption{Targets: TargetsOf("c")})
+	assert.NilError(t, err)
+	assert.DeepEqual(t, restartCommands(res), []string{"c"})
+
+	res, err = rec.service(nil).Restart(context.Background(), selection, RestartOption{})
+	assert.NilError(t, err)
+	assert.DeepEqual(t, restartCommands(res), []string{"a-1", "a-2", "a-3", "b", "c"})
+
+	// The spec declares d, which has no stored replica to restart.
+	spec := reconcileSpec(a, b, c, replicaCmd("d", 1))
+	res, err = rec.service(nil).Restart(
+		context.Background(), SelectionFromSpec(&spec), RestartOption{Targets: TargetsOf("b", "d")})
+	assert.NilError(t, err)
+	assert.DeepEqual(t, restartCommands(res), []string{"b"})
 }
 
 func TestUpActsOnSelectedReplicas(t *testing.T) {
