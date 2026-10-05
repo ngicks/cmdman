@@ -264,6 +264,29 @@ func entryDisplayName(e store.CommandEntry) string {
 	return fmt.Sprintf("%s-%d", name, idx)
 }
 
+// replicaNamer returns the label of each stored replica of a project for
+// outcome lines. It labels a replica the way start and stop progress does, by
+// [instanceDisplayName], against the larger of the replica count spec declares
+// and the highest scale index stored in entries. entries must be the whole
+// project: the label of a replica depends on its siblings, targeted or not.
+//
+// The scale label of a stored replica is not consulted: a scale-up leaves it on
+// the replicas it does not create, so the first replica would read as unscaled.
+// The stored index keeps every label distinct when spec declares fewer replicas
+// than are stored.
+func replicaNamer(spec *ComposeSpec, entries []cmdmanEntry) func(cmdmanEntry) string {
+	scales := storedReplicas(nil, entries)
+	if spec != nil {
+		for name, n := range declaredReplicas(*spec) {
+			scales[name] = max(scales[name], n)
+		}
+	}
+	return func(e cmdmanEntry) string {
+		name := commandNameOf(e)
+		return instanceDisplayName(Command{Name: name, Scale: scales[name]}, scaleIndexOf(e))
+	}
+}
+
 // handleExcessReplicas stops (when live) and removes surplus replicas left by a
 // scale-down, each inside the stop and remove hooks stored on it. Only replicas
 // whose command is in the target set are touched, so a subset operation never

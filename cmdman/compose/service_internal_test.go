@@ -21,6 +21,7 @@ type testCmdmanSvc struct {
 	inspect  func(context.Context, string) (*cmdman.InspectOutput, error)
 	events   func(context.Context, cmdman.EventsRequest) (*cmdman.EventsSubscription, error)
 	sendKeys func(context.Context, string, cmdman.SendKeysRequest) error
+	signal   func(context.Context, string, int32) error
 	capture  func(context.Context, string, cmdman.CaptureScreenRequest) ([]byte, error)
 	start    func(context.Context, string) error
 	wait     func(context.Context, cmdman.WaitRequest) ([]cmdman.WaitResult, error)
@@ -93,7 +94,10 @@ func (s testCmdmanSvc) Stop(
 	return nil, nil
 }
 
-func (s testCmdmanSvc) Signal(context.Context, string, int32) error {
+func (s testCmdmanSvc) Signal(ctx context.Context, idOrName string, sig int32) error {
+	if s.signal != nil {
+		return s.signal(ctx, idOrName, sig)
+	}
 	return nil
 }
 

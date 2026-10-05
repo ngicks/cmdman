@@ -3,7 +3,6 @@ package compose
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"golang.org/x/sync/errgroup"
 
@@ -32,8 +31,11 @@ type SendKeysResult struct {
 	Outcomes []SendKeysOutcome
 }
 
-// SendKeysOutcome records the result of sending keys to a single compose command.
+// SendKeysOutcome records the result of sending keys to a single replica of a
+// compose command.
 type SendKeysOutcome struct {
+	// Command labels the replica: the bare command name for an unscaled command,
+	// "<command>-<index>" for a scaled one.
 	Command string
 	Err     error
 }
@@ -66,6 +68,7 @@ func (s *Service) SendKeys(
 	if err != nil {
 		return nil, err
 	}
+	nameOf := replicaNamer(selection.Spec, entries)
 	entries = targets.filter(entries)
 
 	if len(entries) == 0 {
@@ -85,21 +88,18 @@ func (s *Service) SendKeys(
 		RepeatCount: opts.RepeatCount,
 	}
 
-	var (
-		mu       sync.Mutex
-		outcomes []SendKeysOutcome
-	)
+	outcomes := make([]SendKeysOutcome, len(entries))
 	eg, _ := errgroup.WithContext(ctx)
 
-	for _, entry := range entries {
+	for i, entry := range entries {
 		id := entry.ID
-		name := commandNameOf(entry)
+		name := nameOf(entry)
 
 		eg.Go(func() error {
 			err := s.svc.SendKeys(ctx, id, req)
-			outcome := SendKeysOutcome{Command: name}
+			outcomes[i] = SendKeysOutcome{Command: name}
 			if err != nil {
-				outcome.Err = fmt.Errorf("send-keys command %q (%s): %w", name, id, err)
+				outcomes[i].Err = fmt.Errorf("send-keys command %q (%s): %w", name, id, err)
 				contextkey.ValueSlogLoggerDefault(ctx).Warn("compose send-keys: send failed",
 					"project", selection.Project,
 					"command", name,
@@ -107,9 +107,6 @@ func (s *Service) SendKeys(
 					"error", err,
 				)
 			}
-			mu.Lock()
-			outcomes = append(outcomes, outcome)
-			mu.Unlock()
 			return nil // always nil — aggregate, never short-circuit
 		})
 	}

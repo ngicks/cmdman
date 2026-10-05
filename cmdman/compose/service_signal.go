@@ -3,7 +3,6 @@ package compose
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"golang.org/x/sync/errgroup"
 
@@ -28,8 +27,11 @@ type SignalResult struct {
 	Outcomes []SignalOutcome
 }
 
-// SignalOutcome records the result of signaling a single compose command.
+// SignalOutcome records the result of signaling a single replica of a compose
+// command.
 type SignalOutcome struct {
+	// Command labels the replica: the bare command name for an unscaled command,
+	// "<command>-<index>" for a scaled one.
 	Command string
 	Err     error
 }
@@ -69,6 +71,7 @@ func (s *Service) Signal(
 	if err != nil {
 		return nil, err
 	}
+	nameOf := replicaNamer(selection.Spec, entries)
 	entries = targets.filter(entries)
 
 	if len(entries) == 0 {
@@ -80,25 +83,18 @@ func (s *Service) Signal(
 		return &SignalResult{}, nil
 	}
 
-	var (
-		mu       sync.Mutex
-		outcomes []SignalOutcome
-	)
+	outcomes := make([]SignalOutcome, len(entries))
 	eg, _ := errgroup.WithContext(ctx)
 
-	for _, entry := range entries {
-		cmdName := ""
-		if entry.ConfigJSON != nil {
-			cmdName = entry.ConfigJSON.Labels[LabelCommand]
-		}
+	for i, entry := range entries {
 		id := entry.ID
-		name := cmdName
+		name := nameOf(entry)
 
 		eg.Go(func() error {
 			err := s.svc.Signal(ctx, id, sig)
-			outcome := SignalOutcome{Command: name}
+			outcomes[i] = SignalOutcome{Command: name}
 			if err != nil {
-				outcome.Err = fmt.Errorf("signal command %q (%s): %w", name, id, err)
+				outcomes[i].Err = fmt.Errorf("signal command %q (%s): %w", name, id, err)
 				contextkey.ValueSlogLoggerDefault(ctx).Warn("compose signal: signal failed",
 					"project", selection.Project,
 					"command", name,
@@ -106,9 +102,6 @@ func (s *Service) Signal(
 					"error", err,
 				)
 			}
-			mu.Lock()
-			outcomes = append(outcomes, outcome)
-			mu.Unlock()
 			return nil // always nil — aggregate, never short-circuit
 		})
 	}
