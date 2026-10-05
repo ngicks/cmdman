@@ -36,11 +36,17 @@ const defaultTimeout = 10 * time.Second
 var cmdmanBin string
 
 func TestMain(m *testing.M) {
+	os.Exit(runMain(m))
+}
+
+// runMain holds TestMain's body so its deferred removal of the binary's temp
+// directory runs: os.Exit in TestMain skips deferred calls.
+func runMain(m *testing.M) int {
 	// Build the cmdman binary into a temp directory.
 	tmp, err := os.MkdirTemp("", "cmdman-e2e-bin-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create temp dir: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	defer os.RemoveAll(tmp)
 
@@ -52,11 +58,11 @@ func TestMain(m *testing.M) {
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "build cmdman: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	cmdmanBin = bin
 
-	os.Exit(m.Run())
+	return m.Run()
 }
 
 func repoRoot() string {
