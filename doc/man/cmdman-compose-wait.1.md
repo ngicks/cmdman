@@ -17,8 +17,10 @@ Waits for selected compose services to reach `stopped`, `created`, `starting`,
 interval is 250ms. With no names, every command in the selected project is
 waited on.
 
-One outcome is printed per service. Missing services normally fail the
-operation, which is useful for catching misspelled service names in automation.
+One outcome is printed per replica. A replica of a scaled command is labeled
+`<command>-<index>`, and the replica of an unscaled command is labeled by the
+command name. Missing services normally fail the operation, which is useful for
+catching misspelled service names in automation.
 
 ## Selection Flags
 

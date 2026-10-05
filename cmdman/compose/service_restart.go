@@ -3,6 +3,7 @@ package compose
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -25,14 +26,18 @@ type RestartResult struct {
 	Restarts []RestartOutcome
 }
 
-// RestartOutcome records the result of restarting a single compose command.
+// RestartOutcome records the result of restarting a single replica of a
+// compose command.
 type RestartOutcome struct {
+	// Command labels the replica: the bare command name for an unscaled command,
+	// "<command>-<index>" for a scaled one.
 	Command  string
 	StopErr  error
 	StartErr error
 }
 
-// Restart stops then starts project-labeled commands.
+// Restart stops then starts project-labeled commands, and reports one outcome
+// per replica it restarted.
 //
 // When Spec is loaded:
 //   - Stop phase: reverse DAG order (dependents before dependencies), concurrent within each layer.
@@ -73,7 +78,7 @@ func (s *Service) Restart(
 	}
 
 	if selection.Spec != nil {
-		return s.restartWithSpec(ctx, selection, targets.filter(entries), hooksFromSpec)
+		return s.restartWithSpec(ctx, selection, entries, targets, hooksFromSpec)
 	}
 	spec, ok, err := reconstructProjectFromMeta(selection, entries)
 	if err != nil {
@@ -85,12 +90,12 @@ func (s *Service) Restart(
 		)
 	}
 	selection.Spec = &spec
-	return s.restartWithSpec(ctx, selection, targets.filter(entries), hooksFromStored)
+	return s.restartWithSpec(ctx, selection, entries, targets, hooksFromStored)
 }
 
 // restartWithSpec restarts using DAG ordering (reverse stop, forward start). It
-// stops and starts exactly the replicas in entries, so the caller narrows
-// entries to the targeted replicas.
+// stops and starts exactly the replicas of entries, every stored replica of the
+// project, that targets selects, and reports one outcome per such replica.
 //
 // A live replica stops inside the stop hooks stored on it. Every replica starts
 // inside the start hooks src says to run for it. A hook that fails under
@@ -100,6 +105,7 @@ func (s *Service) restartWithSpec(
 	ctx context.Context,
 	selection ProjectSelection,
 	entries []cmdmanEntry,
+	targets targetSet,
 	src hookSource,
 ) (*RestartResult, error) {
 	layers, err := TopoLayers(selection.Spec.Commands)
@@ -107,6 +113,8 @@ func (s *Service) restartWithSpec(
 		return nil, fmt.Errorf("topo layers: %w", err)
 	}
 
+	nameOf := replicaNamer(selection.Spec, entries)
+	entries = targets.filter(entries)
 	entriesByCommand := buildEntriesByCommand(entries)
 	cmdByName := make(map[string]Command, len(selection.Spec.Commands))
 	for _, nc := range selection.Spec.Commands {
@@ -142,9 +150,16 @@ func (s *Service) restartWithSpec(
 	copy(stopLayers, layers)
 	reverseLayers(stopLayers)
 
-	outByCommand := make(map[string]*RestartOutcome)
-	for _, nc := range selection.Spec.Commands {
-		outByCommand[nc.Name] = &RestartOutcome{Command: nc.Name}
+	// One outcome per restarted replica, keyed by its ID. An orphan has none: no
+	// layer names its command, so it is neither stopped nor started.
+	outByID := make(map[string]*RestartOutcome, len(entries))
+	for name, replicas := range entriesByCommand {
+		if _, inYAML := yamlNames[name]; !inYAML {
+			continue
+		}
+		for _, e := range replicas {
+			outByID[e.ID] = &RestartOutcome{Command: nameOf(e)}
+		}
 	}
 
 	for _, layer := range stopLayers {
@@ -153,7 +168,7 @@ func (s *Service) restartWithSpec(
 			s,
 			layer,
 			entriesByCommand,
-			outByCommand,
+			outByID,
 			held,
 			selection.Project,
 		)
@@ -166,7 +181,7 @@ func (s *Service) restartWithSpec(
 			s,
 			layer,
 			entriesByCommand,
-			outByCommand,
+			outByID,
 			held,
 			selection.Project,
 			func(ctx context.Context, e cmdmanEntry) error {
@@ -176,12 +191,12 @@ func (s *Service) restartWithSpec(
 		)
 	}
 
-	// Collect results in stable order (same order as YAML/topo-sorted).
+	// Collect results in stable order: topo-sorted commands, each by scale index.
 	var restarts []RestartOutcome
 	for _, layer := range layers {
 		for _, name := range layer {
-			if o, ok := outByCommand[name]; ok {
-				restarts = append(restarts, *o)
+			for _, e := range entriesByCommand[name] {
+				restarts = append(restarts, *outByID[e.ID])
 			}
 		}
 	}
@@ -190,15 +205,15 @@ func (s *Service) restartWithSpec(
 }
 
 // stopLayerRestartConcurrent stops a layer for the restart operation, recording
-// results into outByCommand. Every replica entriesByCommand holds for each
-// command is stopped; the command's outcome records the first stop error across
-// them. A replica whose stop hooks failed is added to held.
+// each replica's stop error into its outcome in outByID. Every replica
+// entriesByCommand holds for each command is stopped. A replica whose stop hooks
+// failed is added to held.
 func stopLayerRestartConcurrent(
 	ctx context.Context,
 	s *Service,
 	layer []string,
 	entriesByCommand map[string][]cmdmanEntry,
-	outByCommand map[string]*RestartOutcome,
+	outByID map[string]*RestartOutcome,
 	held map[string]struct{},
 	project string,
 ) {
@@ -217,14 +232,12 @@ func stopLayerRestartConcurrent(
 						"error", stopErr,
 					)
 				}
-				mu.Lock()
-				if o, ok := outByCommand[name]; ok && stopErr != nil && o.StopErr == nil {
-					o.StopErr = stopErr
-				}
+				outByID[e.ID].StopErr = stopErr
 				if !startable {
+					mu.Lock()
 					held[e.ID] = struct{}{}
+					mu.Unlock()
 				}
-				mu.Unlock()
 				return nil
 			})
 		}
@@ -245,20 +258,19 @@ func (s *Service) restartStop(ctx context.Context, e cmdmanEntry) (startable boo
 }
 
 // startLayerRestartConcurrent starts a layer for the restart operation,
-// recording results into outByCommand. Every replica entriesByCommand holds for
-// each command is started by start unless held holds it; the command's outcome
-// records the first start error.
+// recording each replica's start error into its outcome in outByID. Every
+// replica entriesByCommand holds for each command is started by start unless
+// held holds it.
 func startLayerRestartConcurrent(
 	ctx context.Context,
 	s *Service,
 	layer []string,
 	entriesByCommand map[string][]cmdmanEntry,
-	outByCommand map[string]*RestartOutcome,
+	outByID map[string]*RestartOutcome,
 	held map[string]struct{},
 	project string,
 	start func(context.Context, cmdmanEntry) error,
 ) {
-	var mu sync.Mutex
 	eg, _ := errgroup.WithContext(ctx)
 
 	for _, name := range layer {
@@ -276,11 +288,7 @@ func startLayerRestartConcurrent(
 						"error", startErr,
 					)
 				}
-				mu.Lock()
-				if o, ok := outByCommand[name]; ok && startErr != nil && o.StartErr == nil {
-					o.StartErr = startErr
-				}
-				mu.Unlock()
+				outByID[e.ID].StartErr = startErr
 				return nil
 			})
 		}
@@ -289,13 +297,19 @@ func startLayerRestartConcurrent(
 }
 
 // buildEntriesByCommand groups the existing entries by their compose command
-// name, so every replica in entries is restarted.
+// name, each group in ascending scale index, so every replica in entries is
+// restarted.
 func buildEntriesByCommand(entries []cmdmanEntry) map[string][]cmdmanEntry {
 	m := make(map[string][]cmdmanEntry, len(entries))
 	for _, e := range entries {
 		if name := commandNameOf(e); name != "" {
 			m[name] = append(m[name], e)
 		}
+	}
+	for _, replicas := range m {
+		slices.SortFunc(replicas, func(a, b cmdmanEntry) int {
+			return scaleIndexOf(a) - scaleIndexOf(b)
+		})
 	}
 	return m
 }

@@ -30,8 +30,11 @@ type WaitResult struct {
 	Outcomes []WaitOutcome
 }
 
-// WaitOutcome records the result of waiting for a single compose command.
+// WaitOutcome records the result of waiting for a single replica of a compose
+// command.
 type WaitOutcome struct {
+	// Command labels the replica: the bare command name for an unscaled command,
+	// "<command>-<index>" for a scaled one.
 	Command  string
 	ExitCode *int
 	Err      error
@@ -62,6 +65,7 @@ func (s *Service) Wait(
 	if err != nil {
 		return nil, err
 	}
+	nameOf := replicaNamer(selection.Spec, entries)
 	entries = targets.filter(entries)
 
 	if len(entries) == 0 {
@@ -73,16 +77,12 @@ func (s *Service) Wait(
 		return &WaitResult{}, nil
 	}
 
-	// Build ID list and a reverse map from ID → compose command name.
+	// Build ID list and a reverse map from ID → replica label.
 	ids := make([]string, 0, len(entries))
 	nameByID := make(map[string]string, len(entries))
 	for _, e := range entries {
 		ids = append(ids, e.ID)
-		name := ""
-		if e.ConfigJSON != nil {
-			name = e.ConfigJSON.Labels[LabelCommand]
-		}
-		nameByID[e.ID] = name
+		nameByID[e.ID] = nameOf(e)
 	}
 
 	condition := opts.Condition

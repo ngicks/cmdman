@@ -1126,6 +1126,53 @@ func TestComposeRestart(t *testing.T) {
 	}
 }
 
+// TestComposeRestartReportsOnlyTargets restarts one command at a time and checks
+// that the result lines name the replicas of that command and nothing else.
+func TestComposeRestartReportsOnlyTargets(t *testing.T) {
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-restart-targets"
+	composePath := writeComposeFile(t, wd, fmt.Sprintf(`name: %s
+commands:
+  web:
+    scale: 2
+    args: [sleep, "300"]
+  db:
+    args: [sleep, "300"]
+`, project))
+	t.Cleanup(func() { cleanupProject(context.Background(), env, wd, project) })
+
+	compose := func(args ...string) *Cmd {
+		return env.Cmd(append([]string{"compose", "--workdir", wd, "-f", composePath}, args...)...)
+	}
+	waitRunning := func() {
+		for _, e := range env.lsJSON(ctx,
+			"-l", "cmdman.compose.workdir="+wd,
+			"-l", "cmdman.compose.project="+project,
+		) {
+			env.waitForState(ctx, e["ID"].(string), "running", defaultTimeout)
+		}
+	}
+
+	compose("up").Run(ctx, t)
+	waitRunning()
+
+	out := compose("restart", "db").Run(ctx, t)
+	if strings.Count(out, "restarted") != 1 || !hasResultLine(out, "restarted", "db") {
+		t.Fatalf("restart db should report db only, got:\n%s", out)
+	}
+	waitRunning()
+
+	out = compose("restart", "web").Run(ctx, t)
+	if strings.Count(out, "restarted") != 2 ||
+		!hasResultLine(out, "restarted", "web-1") ||
+		!hasResultLine(out, "restarted", "web-2") {
+		t.Fatalf("restart web should report web-1 and web-2 only, got:\n%s", out)
+	}
+	waitRunning()
+}
+
 func TestComposeReverseDepOrderStop(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnv(t)

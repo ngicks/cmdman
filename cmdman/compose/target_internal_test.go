@@ -99,6 +99,55 @@ func TestStoredReplicas(t *testing.T) {
 	assert.DeepEqual(t, storedReplicas(&spec, entries), map[string]int{"a": 3, "c": 0})
 }
 
+func TestReplicaNamer(t *testing.T) {
+	b := replicaCmd("b", 1)
+	// Replica 1 was created at scale 1 and kept its labels through the scale-up
+	// that created replica 2.
+	scaledUp := []store.CommandEntry{
+		replicaEntry(t, replicaCmd("a", 1), 1, model.EventTypeRunning),
+		replicaEntry(t, replicaCmd("a", 2), 2, model.EventTypeRunning),
+		replicaEntry(t, b, 1, model.EventTypeRunning),
+	}
+	unscaled := []store.CommandEntry{
+		replicaEntry(t, replicaCmd("a", 1), 1, model.EventTypeRunning),
+		replicaEntry(t, b, 1, model.EventTypeRunning),
+	}
+	declaredThree := reconcileSpec(replicaCmd("a", 3), b)
+	declaredOne := reconcileSpec(replicaCmd("a", 1), b)
+
+	cases := []struct {
+		name    string
+		spec    *ComposeSpec
+		entries []store.CommandEntry
+		want    []string
+	}{
+		{name: "stored replicas", entries: scaledUp, want: []string{"a-1", "a-2", "b"}},
+		{name: "unscaled", entries: unscaled, want: []string{"a", "b"}},
+		{
+			name:    "spec declares more replicas than stored",
+			spec:    &declaredThree,
+			entries: unscaled,
+			want:    []string{"a-1", "b"},
+		},
+		{
+			name:    "spec declares fewer replicas than stored",
+			spec:    &declaredOne,
+			entries: scaledUp,
+			want:    []string{"a-1", "a-2", "b"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			nameOf := replicaNamer(tc.spec, tc.entries)
+			var got []string
+			for _, e := range tc.entries {
+				got = append(got, nameOf(e))
+			}
+			assert.DeepEqual(t, got, tc.want)
+		})
+	}
+}
+
 func TestTargetSetFilter(t *testing.T) {
 	a, b, c := replicaCmd("a", 3), replicaCmd("b", 1), replicaCmd("c", 1)
 	entries := []store.CommandEntry{
@@ -253,14 +302,42 @@ func TestRestartActsOnSelectedReplicas(t *testing.T) {
 		replicaEntry(t, c, 1, model.EventTypeRunning),
 	}}
 
-	_, err := rec.service(nil).Restart(
+	selection := ProjectSelection{WorkDir: "/wd", Project: "proj"}
+	restartCommands := func(res *RestartResult) []string {
+		var out []string
+		for _, o := range res.Restarts {
+			assert.NilError(t, o.StopErr, o.Command)
+			assert.NilError(t, o.StartErr, o.Command)
+			out = append(out, o.Command)
+		}
+		return out
+	}
+
+	res, err := rec.service(nil).Restart(
 		context.Background(),
-		ProjectSelection{WorkDir: "/wd", Project: "proj"},
+		selection,
 		RestartOption{Targets: []Target{{"a", 1}, {"a", 3}, {"b", 0}}},
 	)
 	assert.NilError(t, err)
 	assert.DeepEqual(t, rec.sorted(&rec.stopped), []string{"id-a-1", "id-a-3", "id-b-1"})
 	assert.DeepEqual(t, rec.sorted(&rec.started), []string{"gen-a-1", "gen-a-3", "gen-b-1"})
+	assert.DeepEqual(t, restartCommands(res), []string{"a-1", "a-3", "b"})
+
+	res, err = rec.service(nil).Restart(
+		context.Background(), selection, RestartOption{Targets: TargetsOf("c")})
+	assert.NilError(t, err)
+	assert.DeepEqual(t, restartCommands(res), []string{"c"})
+
+	res, err = rec.service(nil).Restart(context.Background(), selection, RestartOption{})
+	assert.NilError(t, err)
+	assert.DeepEqual(t, restartCommands(res), []string{"a-1", "a-2", "a-3", "b", "c"})
+
+	// The spec declares d, which has no stored replica to restart.
+	spec := reconcileSpec(a, b, c, replicaCmd("d", 1))
+	res, err = rec.service(nil).Restart(
+		context.Background(), SelectionFromSpec(&spec), RestartOption{Targets: TargetsOf("b", "d")})
+	assert.NilError(t, err)
+	assert.DeepEqual(t, restartCommands(res), []string{"b"})
 }
 
 func TestUpActsOnSelectedReplicas(t *testing.T) {
@@ -367,25 +444,62 @@ func TestFlatVerbsActOnSelectedReplicas(t *testing.T) {
 	selection := ProjectSelection{WorkDir: "/wd", Project: "proj"}
 	targets := []Target{{"a", 1}, {"a", 3}, {"b", 0}}
 	want := []string{"id-a-1", "id-a-3", "id-b-1"}
+	wantOutcomes := []string{"a-1", "a-3", "b"}
 	ctx := context.Background()
+
+	t.Run("signal", func(t *testing.T) {
+		rec := &replicaRecorder{entries: entries}
+		res, err := rec.service(nil).Signal(ctx, selection, SignalOption{
+			Targets: targets,
+			Signal:  "SIGTERM",
+		})
+		assert.NilError(t, err)
+		assert.DeepEqual(t, rec.sorted(&rec.signaled), want)
+		var names []string
+		for _, o := range res.Outcomes {
+			names = append(names, o.Command)
+		}
+		assert.DeepEqual(t, names, wantOutcomes)
+	})
 
 	t.Run("send-keys", func(t *testing.T) {
 		rec := &replicaRecorder{entries: entries}
-		_, err := rec.service(nil).SendKeys(ctx, selection, SendKeysOption{
+		res, err := rec.service(nil).SendKeys(ctx, selection, SendKeysOption{
 			Targets: targets,
 			Keys:    []string{"Enter"},
 		})
 		assert.NilError(t, err)
 		assert.DeepEqual(t, rec.sorted(&rec.sentKeys), want)
+		var names []string
+		for _, o := range res.Outcomes {
+			names = append(names, o.Command)
+		}
+		assert.DeepEqual(t, names, wantOutcomes)
 	})
 
 	t.Run("wait", func(t *testing.T) {
 		rec := &replicaRecorder{entries: entries}
-		_, err := rec.service(nil).Wait(ctx, selection, WaitOption{Targets: targets})
+		res, err := rec.service(nil).Wait(ctx, selection, WaitOption{Targets: targets})
 		assert.NilError(t, err)
 		waited := rec.waitedTargets()
 		assert.Equal(t, len(waited), 1)
 		assert.DeepEqual(t, slices.Sorted(slices.Values(waited[0])), want)
+		var names []string
+		for _, o := range res.Outcomes {
+			names = append(names, o.Command)
+		}
+		assert.DeepEqual(t, names, wantOutcomes)
+	})
+
+	t.Run("a single targeted replica keeps its index", func(t *testing.T) {
+		rec := &replicaRecorder{entries: entries}
+		res, err := rec.service(nil).Signal(ctx, selection, SignalOption{
+			Targets: []Target{{"a", 1}},
+			Signal:  "SIGTERM",
+		})
+		assert.NilError(t, err)
+		assert.Equal(t, len(res.Outcomes), 1)
+		assert.Equal(t, res.Outcomes[0].Command, "a-1")
 	})
 
 	t.Run("events", func(t *testing.T) {
@@ -448,6 +562,7 @@ type replicaRecorder struct {
 	stopped         []string // ids
 	removed         []string // ids
 	sentKeys        []string // ids
+	signaled        []string // ids
 	eventIDs        []string
 	waited          [][]string
 }
@@ -515,6 +630,10 @@ func (r *replicaRecorder) service(reporter Reporter) *Service {
 		},
 		sendKeys: func(_ context.Context, id string, _ cmdman.SendKeysRequest) error {
 			r.record(&r.sentKeys, id)
+			return nil
+		},
+		signal: func(_ context.Context, id string, _ int32) error {
+			r.record(&r.signaled, id)
 			return nil
 		},
 		events: func(

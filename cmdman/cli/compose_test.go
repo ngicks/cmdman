@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -175,4 +176,55 @@ func TestPrintComposeLogsPrefixesTimeAndCommand(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, stdout.String(), "2026-05-24T01:02:03.456789Z alpha |line-from-alpha\n")
 	assert.Equal(t, stderr.String(), "")
+}
+
+func TestPrintComposeOutcomesOneLinePerReplica(t *testing.T) {
+	boom := errors.New("boom")
+	zero := 0
+
+	t.Run("restart", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		err := PrintRestartResult(&stdout, &stderr, []compose.RestartOutcome{
+			{Command: "web-1"},
+			{Command: "web-2", StartErr: boom},
+			{Command: "db"},
+		})
+		assert.ErrorContains(t, err, "1 compose restart operation(s) failed")
+		assert.Equal(t, stdout.String(),
+			"restarted    web-1\n"+
+				"error        web-2 (start: boom)\n"+
+				"restarted    db\n")
+		assert.Equal(t, stderr.String(), "error: boom\n")
+	})
+
+	t.Run("signal", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		err := PrintSignalResult(&stdout, &stderr, []compose.SignalOutcome{
+			{Command: "web-1"},
+			{Command: "web-2"},
+		})
+		assert.NilError(t, err)
+		assert.Equal(t, stdout.String(), "signaled     web-1\nsignaled     web-2\n")
+	})
+
+	t.Run("send-keys", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		err := PrintSendKeysResult(&stdout, &stderr, []compose.SendKeysOutcome{
+			{Command: "web-2"},
+		})
+		assert.NilError(t, err)
+		assert.Equal(t, stdout.String(), "sent         web-2\n")
+	})
+
+	t.Run("wait", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		err := PrintWaitResult(&stdout, &stderr, []compose.WaitOutcome{
+			{Command: "web-1", ExitCode: &zero},
+			{Command: "web-2"},
+		})
+		assert.NilError(t, err)
+		assert.Equal(t, stdout.String(),
+			"done         web-1 (exit code: 0)\n"+
+				"done         web-2\n")
+	})
 }

@@ -17,7 +17,9 @@ all project commands are targeted. This is a raw signal operation: it does not
 wait, escalate, or suppress configured restart policy as a graceful stop does.
 
 The signal is required and accepts forms such as `SIGTERM`, `TERM`, `HUP`, and
-`15`. Results are reported per service.
+`15`. Results are reported per replica. A replica of a scaled command is
+labeled `<command>-<index>`, and the replica of an unscaled command is labeled
+by the command name.
 
 ## Selection Flags
 
