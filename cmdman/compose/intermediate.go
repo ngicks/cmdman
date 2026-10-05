@@ -193,13 +193,12 @@ func (h resourceHolder) createRequest() (cmdman.CreateRequest, error) {
 	// The holder is never started. Env is the release hook's environment, kept
 	// as given so that it reaches the exec command which eventually runs the
 	// release; that command gets its own cmdman context variables.
-	off := false
 	return cmdman.CreateRequest{
 		Name:          h.name(),
 		Dir:           h.Dir,
 		Env:           h.Env,
-		ImportHostEnv: &off,
-		InjectEnv:     &off,
+		ImportHostEnv: new(false),
+		InjectEnv:     new(false),
 		Argv:          []string{"true"},
 		LogDriver:     logdriver.DriverNone,
 		RestartPolicy: model.RestartPolicyNo,
@@ -301,16 +300,29 @@ func (s *Service) removeIntermediate(ctx context.Context, id string) error {
 	return nil
 }
 
+// stopLiveIntermediate stops the intermediate e when it is starting or running.
+// cmdman cannot stop a command in any other state: one that never started has
+// no monitor to stop, and one that ended is stopped already.
+func (s *Service) stopLiveIntermediate(ctx context.Context, e cmdmanEntry) error {
+	if e.State != model.EventTypeRunning && e.State != model.EventTypeStarting {
+		return nil
+	}
+	return s.stopForRecreate(ctx, e.ID)
+}
+
 // clearStaleExecs stops and removes the exec commands an earlier run of the
 // same hook event left, as selected by labels, so the name is free again and no
-// earlier run is still going when the next one starts.
+// earlier run is still going when the next one starts. Only a starting or
+// running one is stopped: one that never started, such as the exec command of
+// a run that died between its create and its start, has no monitor a stop could
+// reach.
 func (s *Service) clearStaleExecs(ctx context.Context, labels map[string]string) error {
 	entries, err := s.svc.List(ctx, cmdman.ListRequest{AllStates: true, Labels: labels})
 	if err != nil {
 		return fmt.Errorf("look up earlier hook commands: %w", err)
 	}
 	for _, e := range entries {
-		if err := s.stopForRecreate(ctx, e.ID); err != nil {
+		if err := s.stopLiveIntermediate(ctx, e); err != nil {
 			return fmt.Errorf("stop earlier hook command %s: %w", e.Name, err)
 		}
 		if err := s.removeIntermediate(ctx, e.ID); err != nil {

@@ -50,8 +50,8 @@ type cmdmanSvc interface {
 // It is testable without the CLI.
 type Service struct {
 	svc cmdmanSvc
-	// reporter receives lifecycle state-trace events during up/start/stop/down.
-	// nil disables reporting (see report).
+	// reporter receives lifecycle state-trace events during create, up, start,
+	// stop, restart, down and scale. nil disables reporting (see report).
 	reporter Reporter
 	// frameSvc is the seam [Service.MuxUp] hands to mux for the default_frame it
 	// shows (V9). nil is the "no service behind the frame verbs" value; see

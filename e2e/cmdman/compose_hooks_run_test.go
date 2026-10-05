@@ -474,6 +474,53 @@ commands:
 	}
 }
 
+func TestComposeHooksUpClearsLeftExecThatNeverStarted(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-hooks-left-created"
+	marker := filepath.Join(wd, "marker.txt")
+	composePath := writeComposeFile(t, wd, markedWebYAML(project, marker, "v1", 1))
+	t.Cleanup(func() {
+		ctx := context.Background()
+		cleanupProject(ctx, env, wd, project)
+		cleanupIntermediates(ctx, env, wd, project)
+	})
+	compose := func(args ...string) *Cmd {
+		return env.Cmd(append([]string{"compose", "--workdir", wd, "-f", composePath}, args...)...)
+	}
+
+	compose("create").Run(ctx, t)
+	replica := composeReplica(ctx, env, wd, project, "web", 1)["Name"].(string)
+	// The exec command of a run that ended between its create and its start
+	// is left created, with no monitor to stop.
+	exec := replica + ".hook.mark.start_pre"
+	env.Cmd("create", "-n", exec,
+		"-l", "cmdman.compose.intermediate=exec",
+		"-l", "cmdman.compose.owner="+replica,
+		"-l", "cmdman.compose.hooks.project="+project,
+		"-l", "cmdman.compose.hooks.workdir="+wd,
+		"-l", "cmdman.compose.hook=mark",
+		"-l", "cmdman.compose.hook-event=start_pre",
+		"--", "true",
+	).Run(ctx, t)
+	clearMarker(t, marker)
+
+	compose("up").Run(ctx, t)
+
+	want := []string{"v1 start_pre", "v1 start_post"}
+	if got := markedEvents(t, marker, "web", 1); !slices.Equal(got, want) {
+		t.Errorf("hooks of web = %q, want %q", got, want)
+	}
+	env.waitForState(ctx, replica, "running", defaultTimeout)
+	if names := commandNames(ctx, t, env); slices.ContainsFunc(names, func(name string) bool {
+		return strings.Contains(name, ".hook.")
+	}) {
+		t.Errorf("the left hook command should be replaced and removed: %q", names)
+	}
+}
+
 // hasHookRecord reports whether events hold a record of hook's lifecycle event
 // for command in phase.
 func hasHookRecord(events []hookProgressEvent, command, hook, lifecycle, phase string) bool {

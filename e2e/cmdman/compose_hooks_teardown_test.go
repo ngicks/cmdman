@@ -144,6 +144,54 @@ func TestComposeHooksStopReleasesStartResource(t *testing.T) {
 	}
 }
 
+func TestComposeHooksDownReleasesStartResourceOfExitedReplica(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-hooks-down-exited"
+	released := filepath.Join(wd, "released.txt")
+	release := `echo "$$CMDMAN_COMPOSE_RESOURCE_VALUE" >> ` + shellQuote(released)
+	composePath := writeComposeFile(t, wd, fmt.Sprintf(`name: %s
+commands:
+  web:
+    args: ["true"]
+    hooks:
+      - name: port
+        resource: port
+        start_pre: [echo, port-1]
+        stop_post: [sh, -c, %q]
+`, project, release))
+	t.Cleanup(func() {
+		ctx := context.Background()
+		cleanupProject(ctx, env, wd, project)
+		cleanupIntermediates(ctx, env, wd, project)
+	})
+	compose := func(args ...string) *Cmd {
+		return env.Cmd(append([]string{"compose", "--workdir", wd, "-f", composePath}, args...)...)
+	}
+
+	compose("up").Run(ctx, t)
+	env.waitForState(ctx, replicaID(ctx, t, env, wd, project, "web", 1), "exited",
+		defaultTimeout)
+	if got := compose("resource", "get", "web", "port").Run(ctx, t); got != "port-1" {
+		t.Fatalf("resource after up = %q, want port-1", got)
+	}
+
+	// web exited on its own, so down runs no stop hooks for it.
+	stdout := compose("down", "--progress", "json").Run(ctx, t)
+
+	if got := fileLines(t, released); !slices.Equal(got, []string{"port-1"}) {
+		t.Errorf("released = %q, want [port-1]", got)
+	}
+	if !hasHookRecord(hookProgress(t, stdout), "web", "port", "stop_post", "hook-succeeded") {
+		t.Errorf("down should report the stop_post release:\n%s", stdout)
+	}
+	if names := commandNames(ctx, t, env); len(names) != 0 {
+		t.Errorf("down should leave no command or holder behind: %q", names)
+	}
+}
+
 func TestComposeHooksRestartRunsStopThenStartHooks(t *testing.T) {
 	t.Parallel()
 	ctx := testContext(t)

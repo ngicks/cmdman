@@ -620,6 +620,147 @@ func TestDownRemovePostFailureKeepsHolderForTheNextDown(t *testing.T) {
 	assert.Assert(t, !held, "the retried release removed the holder")
 }
 
+// portHook acquires resource port at start_pre and releases it at stop_post
+// under onError.
+func portHook(onError OnError) LifecycleHook {
+	return LifecycleHook{
+		Name:     "port",
+		Resource: "port",
+		Events: map[LifecycleEvent]LifecycleExec{
+			LifecycleStartPre: {Args: []string{"alloc"}},
+			LifecycleStopPost: {Args: []string{"free"}, OnError: onError},
+		},
+	}
+}
+
+// acquirePort stores replica 1 of nc in state and acquires its port resource,
+// valued port-1, as a start does. It returns the replica as its hooks see it.
+func acquirePort(
+	t *testing.T,
+	f *fakeCmdman,
+	s *Service,
+	nc Command,
+	state model.EventType,
+) hookReplica {
+	t.Helper()
+	spec := stepSpec(nc)
+	putReplica(t, f, spec, nc, 1, state)
+	r := s.specHookReplica(spec, nc, 1)
+	f.run = func(string, cmdman.CreateRequest) fakeRun {
+		return fakeRun{exit: new(0), stdout: []string{"port-1"}}
+	}
+	_, err := s.runLifecycleEvent(t.Context(), r, nc.Hooks, LifecycleStartPre)
+	assert.NilError(t, err)
+	return r
+}
+
+func TestDownReleasesStopResourceOfReplicaItDidNotStop(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		force     bool
+		exit      int
+		wantErr   string
+		wantHeld  bool
+		wantPhase Phase
+	}{
+		{name: "success", exit: 0, wantPhase: PhaseHookSucceeded},
+		{
+			name:      "fail keeps the holder",
+			exit:      1,
+			wantErr:   `value "port-1"`,
+			wantHeld:  true,
+			wantPhase: PhaseHookFailed,
+		},
+		{
+			name:      "force turns fail into continue",
+			force:     true,
+			exit:      1,
+			wantHeld:  true,
+			wantPhase: PhaseHookWarning,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeCmdman()
+			rec := &commandPhaseReporter{}
+			s := f.service(rec)
+			nc := stepCommand("web", 1,
+				portHook(""), eventHook("mark", "", LifecycleRemovePre, LifecycleRemovePost))
+			// The command exited on its own, so down does not stop it.
+			r := acquirePort(t, f, s, nc, model.EventTypeExited)
+			release := ExecCommandName(r.Name, "port", LifecycleStopPost)
+			var releaseEnv []string
+			f.run = func(name string, req cmdman.CreateRequest) fakeRun {
+				if name == release {
+					releaseEnv = req.Env
+					return fakeRun{exit: new(tc.exit)}
+				}
+				return fakeRun{exit: new(0)}
+			}
+
+			res, err := s.Down(t.Context(), storedSelection(), DownOption{Force: tc.force})
+
+			assert.NilError(t, err)
+			assert.NilError(t, removeOutcomes(res)["web"])
+			assert.Equal(t, len(res.Releases), 1)
+			assert.Equal(t, res.Releases[0].Holder, HolderName(r.Name, "port"))
+			if tc.wantErr == "" {
+				assert.NilError(t, res.Releases[0].Err)
+			} else {
+				assert.ErrorContains(t, res.Releases[0].Err, tc.wantErr)
+			}
+			assert.DeepEqual(t, lifecycleTrace(f, r.Name), []string{
+				"port.start_pre", "mark.remove_pre", "remove", "mark.remove_post",
+				"port.stop_post",
+			})
+			assert.Equal(t, execCreated(f, release), 1)
+			value, _ := envValue(releaseEnv, ENV_CMDMAN_COMPOSE_RESOURCE_VALUE)
+			assert.Equal(t, value, "port-1")
+			assert.Assert(t, rec.reached("web", tc.wantPhase))
+			_, held := holderValue(t, f, r, "port")
+			assert.Equal(t, held, tc.wantHeld)
+		})
+	}
+}
+
+func TestDownRunsTheReleaseOfAReplicaOnce(t *testing.T) {
+	t.Run("a release the stop ran waits for the next down", func(t *testing.T) {
+		f := newFakeCmdman()
+		s := f.service(nil)
+		nc := stepCommand("web", 1, portHook(OnErrorContinue))
+		r := acquirePort(t, f, s, nc, model.EventTypeRunning)
+		release := ExecCommandName(r.Name, "port", LifecycleStopPost)
+		failExecNamed(f, release)
+
+		res, err := s.Down(t.Context(), storedSelection(), DownOption{})
+
+		assert.NilError(t, err)
+		assert.NilError(t, removeOutcomes(res)["web"])
+		assert.Equal(t, len(res.Releases), 0)
+		assert.Equal(t, execCreated(f, release), 1)
+		_, replicaLeft := f.get(r.Name)
+		assert.Assert(t, !replicaLeft)
+		_, held := holderValue(t, f, r, "port")
+		assert.Assert(t, held)
+	})
+
+	t.Run("a replica down does not remove keeps its resource", func(t *testing.T) {
+		f := newFakeCmdman()
+		s := f.service(nil)
+		nc := stepCommand("web", 1, portHook(""), eventHook("gate", "", LifecycleRemovePre))
+		r := acquirePort(t, f, s, nc, model.EventTypeExited)
+		failExecNamed(f, ExecCommandName(r.Name, "gate", LifecycleRemovePre))
+
+		res, err := s.Down(t.Context(), storedSelection(), DownOption{})
+
+		assert.NilError(t, err)
+		assert.ErrorContains(t, removeOutcomes(res)["web"], `hook "gate" remove_pre`)
+		assert.Equal(t, len(res.Releases), 0)
+		assert.Equal(t, execCreated(f, ExecCommandName(r.Name, "port", LifecycleStopPost)), 0)
+		_, held := holderValue(t, f, r, "port")
+		assert.Assert(t, held)
+	})
+}
+
 // putStrandedHolder stores the holder of resource scratch of replica 1 of web,
 // acquired by hook slot, whose replica is gone. Its release runs at
 // remove_post under onError.

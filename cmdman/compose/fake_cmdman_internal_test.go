@@ -52,6 +52,9 @@ type fakeCmdman struct {
 	// stopErr fails the stop of the named command, leaving it as it is, when
 	// it returns non-nil.
 	stopErr func(name string) error
+	// startErr fails the start of the named command, leaving it as it is,
+	// when it returns non-nil.
+	startErr func(name string) error
 	// started is called after a command has started.
 	started func(name string)
 }
@@ -224,6 +227,12 @@ func (f *fakeCmdman) start(_ context.Context, idOrName string) error {
 		return fmt.Errorf("no command %q", idOrName)
 	}
 	f.calls = append(f.calls, "start "+c.entry.Name)
+	if f.startErr != nil {
+		if err := f.startErr(c.entry.Name); err != nil {
+			f.mu.Unlock()
+			return err
+		}
+	}
 	run := fakeRun{exit: new(0)}
 	if f.run != nil {
 		run = f.run(c.entry.Name, c.req)
@@ -306,6 +315,15 @@ func (f *fakeCmdman) stop(_ context.Context, req cmdman.StopRequest) ([]cmdman.S
 				out = append(out, cmdman.StopResult{ID: c.entry.ID, Err: err})
 				continue
 			}
+		}
+		// cmdman stops a command through its monitor, which one that never
+		// started does not have.
+		if c.entry.State == model.EventTypeCreated {
+			out = append(out, cmdman.StopResult{
+				ID:  c.entry.ID,
+				Err: fmt.Errorf("%q: no socket path for command", c.entry.ID),
+			})
+			continue
 		}
 		if c.entry.State == model.EventTypeRunning {
 			finishFake(c, new(143))

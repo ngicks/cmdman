@@ -23,7 +23,7 @@ type DownOption struct {
 	// continue: the failure is reported as a warning, and the replica is
 	// stopped and removed all the same. A replica whose stored hooks cannot be
 	// decoded is stopped and removed without them, with a warning. The stored
-	// releases a whole-project down retries are forced the same way.
+	// releases a whole-project down runs are forced the same way.
 	Force bool
 }
 
@@ -32,7 +32,8 @@ type DownResult struct {
 	Stops   []StopOutcome
 	Removes []RemoveOutcome
 	// Releases are the stored releases a whole-project down ran for the
-	// resources whose replica was already gone.
+	// resources whose replica was already gone, and for the stop releases of
+	// the replicas it removed without stopping them.
 	Releases []ReleaseOutcome
 }
 
@@ -79,13 +80,18 @@ type ReleaseOutcome struct {
 // a non-zero ScaleIndex is therefore an error; scaling the command down
 // ([Service.Scale]) is how replicas are removed.
 //
-// A whole-project down then retries the resources of the project left behind
-// by a replica that no longer existed when Down began: the release stored with
+// A whole-project down then releases the resources of the project left behind
+// by a replica that no longer existed when Down began, and the resources with a
+// stop_pre or stop_post release of a replica Down removed without stopping it,
+// such as one whose command had exited on its own: the release stored with
 // each runs as the release hook would have, under the on_error stored with it,
-// and the holder goes once the release succeeds. A holder that stores no
-// release stays. This needs no compose file. A failure to list the holders
-// becomes a failed ReleaseOutcome. Down returns no error for it, so the
-// outcomes of the replicas already torn down still reach the caller.
+// and the holder goes once the release succeeds. These run after the remove
+// hooks of every replica. A release that the hooks of a replica ran in this
+// down and that failed waits for the next down. A holder that stores no release stays. This needs
+// no compose
+// file. A failure to list the holders becomes a failed ReleaseOutcome. Down
+// returns no error for it, so the outcomes of the replicas already torn down
+// still reach the caller.
 //
 // Per resolved-decision 21, failures are aggregated; every command is attempted.
 func (s *Service) Down(
@@ -165,7 +171,7 @@ func (s *Service) Down(
 	}
 
 	if len(targets) == 0 {
-		result.Releases = s.releaseStranded(ctx, selection, allEntries, opts.Force)
+		result.Releases = s.releaseStranded(ctx, selection, allEntries, td)
 	}
 
 	if len(selected) == 0 && len(result.Releases) == 0 {
@@ -179,16 +185,18 @@ func (s *Service) Down(
 }
 
 // releaseStranded runs the stored release of every resource of selection whose
-// replica is not among replicas, the project's replicas as Down found them
-// before tearing any down. A replica Down removes has had its release run by
-// its own hooks; one that fails is retried by the next down. A holder that
-// stores no release is left alone, and so is one that cannot be read. A
-// failure to list the holders is the one outcome returned.
+// replica is gone, unless td has run that release. Such a replica is either not
+// among replicas, the project's replicas as Down found them before tearing any
+// down, or one td removed without running the stop release of the resource
+// ([teardown.releaseLeft]). A release td ran and that failed waits for the next
+// down, so no release runs twice in one down. A holder that stores no release
+// is left alone, and so is one that cannot be read. A failure to list the
+// holders is the one outcome returned.
 func (s *Service) releaseStranded(
 	ctx context.Context,
 	selection ProjectSelection,
 	replicas []cmdmanEntry,
-	force bool,
+	td *teardown,
 ) []ReleaseOutcome {
 	logger := contextkey.ValueSlogLoggerDefault(ctx)
 	labels := hooksProjectLabels(selection.WorkDir, selection.Project)
@@ -216,7 +224,10 @@ func (s *Service) releaseStranded(
 				"holder", e.Name, "error", err)
 			continue
 		}
-		if _, ok := live[h.Owner]; ok || h.Release == nil {
+		if h.Release == nil {
+			continue
+		}
+		if _, ok := live[h.Owner]; ok && !td.releaseLeft(h) {
 			continue
 		}
 		stranded = append(stranded, h)
@@ -226,7 +237,7 @@ func (s *Service) releaseStranded(
 	var eg errgroup.Group
 	for i, h := range stranded {
 		eg.Go(func() error {
-			_, err := s.runRelease(ctx, h, force)
+			_, err := s.runRelease(ctx, h, td.force)
 			if err != nil {
 				logger.WarnContext(ctx, "compose down: release failed",
 					"project", h.Ref.Project,

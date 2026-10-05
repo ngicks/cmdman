@@ -212,7 +212,7 @@ func (s *Service) executeAction(
 		}
 
 		s.report(disp, PhaseRecreating, nil, nil)
-		err = s.removeWithHooks(ctx, old, oldHooks, cmdman.RemoveRequest{
+		_, err = s.removeWithHooks(ctx, old, oldHooks, cmdman.RemoveRequest{
 			Targets: []string{existing.ID},
 		})
 		if err != nil {
@@ -309,7 +309,7 @@ func (s *Service) handleExcessReplicas(
 			}
 		}
 
-		err = s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
+		_, err = s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
 			Targets: []string{e.ID},
 			Force:   true,
 		})

@@ -266,6 +266,57 @@ func TestRunLifecycleEventClearsStaleExec(t *testing.T) {
 	assert.Assert(t, !staleLeft)
 }
 
+func TestRunLifecycleEventClearsStaleExecThatNeverStarted(t *testing.T) {
+	f := newFakeCmdman()
+	s := f.service(nil)
+	r := testHookReplica()
+	exec := ExecCommandName(r.Name, "scratch", LifecycleCreatePre)
+	staleID := f.put(cmdman.CreateRequest{
+		Name:   exec,
+		Argv:   []string{"mktemp", "-d"},
+		Labels: execLabels(r, "scratch", LifecycleCreatePre),
+	}, model.EventTypeCreated)
+
+	_, err := s.runLifecycleEvent(
+		t.Context(), r, []LifecycleHook{scratchHook("", "")}, LifecycleCreatePre)
+	assert.NilError(t, err)
+
+	calls := f.callLog()
+	assert.Assert(t, !slices.Contains(calls, "stop "+exec),
+		"a command that never started has no monitor to stop; calls %v", calls)
+	remove := slices.Index(calls, "remove "+exec)
+	create := slices.Index(calls, "create "+exec)
+	start := slices.Index(calls, "start "+exec)
+	assert.Assert(t, remove >= 0 && remove < create && create < start,
+		"want remove, create, then start of %s; calls %v", exec, calls)
+	_, staleLeft := f.get(staleID)
+	assert.Assert(t, !staleLeft)
+	_, held := holderValue(t, f, r, "scratch")
+	assert.Assert(t, held, "the hook ran and acquired the resource")
+}
+
+func TestRunLifecycleEventCancelledStartStopsNoUnstartedExec(t *testing.T) {
+	f := newFakeCmdman()
+	ctx, cancel := context.WithCancel(t.Context())
+	f.startErr = func(string) error {
+		cancel()
+		return context.Canceled
+	}
+	s := f.service(nil)
+	r := testHookReplica()
+	exec := ExecCommandName(r.Name, "scratch", LifecycleCreatePre)
+
+	_, err := s.runLifecycleEvent(
+		ctx, r, []LifecycleHook{scratchHook("", "")}, LifecycleCreatePre)
+
+	assert.Assert(t, errors.Is(err, context.Canceled), "got %v", err)
+	assert.Assert(t, !slices.Contains(f.callLog(), "stop "+exec),
+		"calls %v", f.callLog())
+	left, ok := f.get(exec)
+	assert.Assert(t, ok)
+	assert.Equal(t, left.State, model.EventTypeCreated)
+}
+
 func TestRunLifecycleEventCancellationStopsExec(t *testing.T) {
 	f := newFakeCmdman()
 	f.run = func(string, cmdman.CreateRequest) fakeRun { return fakeRun{block: true} }

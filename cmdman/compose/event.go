@@ -2,9 +2,11 @@ package compose
 
 import "github.com/ngicks/cmdman/cmdman/logdriver"
 
-// Phase is a single lifecycle state in a compose up/start/stop/down state
-// trace. The set is shared by every lifecycle operation; which phases actually
-// appear depends on the operation (e.g. only stop/down emit stopping/stopped).
+// Phase is a single lifecycle state in the state trace of a compose lifecycle
+// operation: create, up, start, stop, restart, down or scale. The set is shared
+// by every lifecycle operation; which phases actually appear depends on the
+// operation (e.g. only the operations that stop a command emit
+// stopping/stopped).
 //
 // Phases are either transient ("…ing": work is in flight) or terminal (a
 // result). Reporters render transient phases as in-progress and terminal phases
@@ -38,10 +40,13 @@ const (
 	// Terminal (down remove phase).
 	PhaseRemoved Phase = "removed"
 
-	// Terminal, any phase. PhaseSkipped marks a command that needed no action
-	// (e.g. an already-terminal command on stop, or a running orphan left in
-	// place). PhaseFailed marks a monitored process that ended without an exit
-	// code. PhaseError marks a failed compose operation step.
+	// Terminal, any phase. PhaseSkipped marks a command the operation left as
+	// it was. Without [Event.Err] it needed no action (e.g. an
+	// already-terminal command on stop, or a running orphan left in place).
+	// With Err an earlier failure held it back: up does not start a replica
+	// whose create failed, and down keeps a replica whose stop hook failed.
+	// PhaseFailed marks a monitored process that ended without an exit code.
+	// PhaseError marks a failed compose operation step.
 	PhaseSkipped Phase = "skipped"
 	PhaseFailed  Phase = "failed"
 	PhaseError   Phase = "error"
@@ -120,8 +125,8 @@ type Reporter interface {
 type ServiceOption func(*Service)
 
 // WithReporter installs a progress Reporter that receives a state-trace event
-// stream during up/start/stop/down. A nil reporter (the default) disables
-// reporting entirely.
+// stream during the lifecycle operations: create, up, start, stop, restart, down
+// and scale. A nil reporter (the default) disables reporting entirely.
 func WithReporter(r Reporter) ServiceOption {
 	return func(s *Service) { s.reporter = r }
 }

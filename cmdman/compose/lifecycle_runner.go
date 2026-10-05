@@ -245,13 +245,12 @@ func (s *Service) execHookValue(
 	if h.Resource != "" {
 		env = append(env, ENV_CMDMAN_COMPOSE_RESOURCE_VALUE+"="+value)
 	}
-	importHostEnv := false
 	created, err := s.svc.Create(ctx, cmdman.CreateRequest{
 		Name:          run.exec,
 		Dir:           r.Dir,
 		Argv:          exec.Args,
 		Env:           env,
-		ImportHostEnv: &importHostEnv,
+		ImportHostEnv: new(false),
 		// The exec command's stdout is read back for a resource value, which
 		// needs a driver that keeps the output.
 		LogDriver:     logdriver.DriverK8sFile,
@@ -369,15 +368,31 @@ func hookExit(name string, results []cmdman.WaitResult) (*int, error) {
 	}
 }
 
-// stopCancelledExec stops the exec command id of a cancelled hook. ctx is
+// stopCancelledExec stops the exec command id of a cancelled hook when it is
+// starting or running. A start cut short can leave it never started. ctx is
 // already done, so the stop runs on a context of its own that keeps ctx's
 // values.
 func (s *Service) stopCancelledExec(ctx context.Context, run hookRun, id string) {
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), hookStopTimeout)
 	defer cancel()
-	if err := s.stopForRecreate(stopCtx, id); err != nil {
-		contextkey.ValueSlogLoggerDefault(ctx).WarnContext(ctx,
-			"compose: stop cancelled hook command", "command", run.exec, "error", err)
+	logger := contextkey.ValueSlogLoggerDefault(ctx)
+	entries, err := s.svc.List(stopCtx, cmdman.ListRequest{
+		AllStates: true,
+		Labels:    execLabels(run.replica, run.hook, run.event),
+	})
+	if err != nil {
+		logger.WarnContext(ctx,
+			"compose: look up cancelled hook command", "command", run.exec, "error", err)
+		return
+	}
+	for _, e := range entries {
+		if e.ID != id {
+			continue
+		}
+		if err := s.stopLiveIntermediate(stopCtx, e); err != nil {
+			logger.WarnContext(ctx,
+				"compose: stop cancelled hook command", "command", run.exec, "error", err)
+		}
 	}
 }
 

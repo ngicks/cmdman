@@ -121,31 +121,31 @@ func (s *Service) stopWithHooks(
 // removeWithHooks runs remove_pre of hooks for r, removes the replica req
 // targets, then runs remove_post. remove_post still finds the resource values
 // of r: a holder outlives its replica. A failed remove_post leaves the replica
-// removed. Once the replica is gone, the exec commands its failed hooks left
-// for inspection go with it, since no later operation of the replica would
-// replace or remove them. These include the one a failed remove_post just
-// left.
+// removed, which removed reports. Once the replica is gone, the exec commands
+// its failed hooks left for inspection go with it, since no later operation of
+// the replica would replace or remove them. These include the one a failed
+// remove_post just left.
 func (s *Service) removeWithHooks(
 	ctx context.Context,
 	r hookReplica,
 	hooks []LifecycleHook,
 	req cmdman.RemoveRequest,
-) error {
+) (removed bool, err error) {
 	if _, err := s.runLifecycleEvent(ctx, r, hooks, LifecycleRemovePre); err != nil {
-		return err
+		return false, err
 	}
 	results, err := s.svc.Remove(ctx, req)
 	if err != nil {
-		return err
+		return false, err
 	}
 	for _, res := range results {
 		if res.Err != nil {
-			return res.Err
+			return false, res.Err
 		}
 	}
 	_, err = s.runLifecycleEvent(ctx, r, hooks, LifecycleRemovePost)
 	s.removeLeftExecs(ctx, r)
-	return err
+	return true, err
 }
 
 // forcedHooks returns hooks with every on_error fail, explicit or by default,
@@ -230,6 +230,10 @@ type teardown struct {
 	// kept maps the ID of every replica a failed stop hook keeps from being
 	// removed to that failure.
 	kept map[string]error
+	// stopped holds the name of every replica t set out to stop.
+	stopped map[string]bool
+	// removed holds the name of every replica t removed.
+	removed map[string]bool
 }
 
 // keptBy returns the stop hook failure that keeps the replica id, or nil.
@@ -239,10 +243,50 @@ func (t *teardown) keptBy(id string) error {
 	return t.kept[id]
 }
 
+func (t *teardown) markStopped(name string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.stopped == nil {
+		t.stopped = make(map[string]bool)
+	}
+	t.stopped[name] = true
+}
+
+func (t *teardown) markRemoved(name string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.removed == nil {
+		t.removed = make(map[string]bool)
+	}
+	t.removed[name] = true
+}
+
+// releaseLeft reports whether t removed the replica h is held for without
+// running the release of h: the release is a stop event, and t removed the
+// replica without stopping it, as happens to a replica that is not starting or
+// running. Every other release of a removed replica ran with the stop or
+// remove hooks of t, or was skipped along with them when a step before it
+// failed or the hooks could not be read. Such a release waits for the next
+// down.
+func (t *teardown) releaseLeft(h resourceHolder) bool {
+	if h.Release == nil {
+		return false
+	}
+	switch h.Release.Event {
+	case LifecycleStopPre, LifecycleStopPost:
+	default:
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.removed[h.Owner] && !t.stopped[h.Owner]
+}
+
 // teardownStop stops the live replica e for t inside the stop hooks stored on
 // it. A failed stop hook keeps e from the removal that follows in a down; a
 // failed stop alone does not, as down removes such a replica by force.
 func (s *Service) teardownStop(ctx context.Context, t *teardown, e cmdmanEntry) error {
+	t.markStopped(e.Name)
 	hookFailed, err := s.stopReplica(ctx, e, t.force)
 	if hookFailed {
 		t.mu.Lock()
@@ -262,10 +306,14 @@ func (s *Service) teardownRemove(ctx context.Context, t *teardown, e cmdmanEntry
 	if err != nil {
 		return err
 	}
-	return s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
+	removed, err := s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
 		Targets: []string{e.ID},
 		Force:   true,
 	})
+	if removed {
+		t.markRemoved(e.Name)
+	}
+	return err
 }
 
 // removeLeftExecs removes the exec commands of r that are not running. A

@@ -13,8 +13,8 @@ import (
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
-// ProgressMode selects how compose lifecycle progress (up/start/stop/down) is
-// rendered.
+// ProgressMode selects how the progress of a compose lifecycle operation
+// (create, up, start, stop, restart, down or scale) is rendered.
 type ProgressMode string
 
 const (
