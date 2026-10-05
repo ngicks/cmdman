@@ -327,7 +327,7 @@ func TestHashGoldenDigest(t *testing.T) {
 	assert.Equal(
 		t,
 		h,
-		"sha256:d504574af28888499b3a4ec7b36fd373e361d79bb254b2b1e4148808cf07cf27",
+		"sha256:6c8f529fe9b0e140b0a5a3672e6dd2540c750c292df4a9ed7a2d6713e2924542",
 	)
 }
 
@@ -379,6 +379,24 @@ func TestHashChangesOnInjectEnv(t *testing.T) {
 	assert.NilError(t, err)
 
 	assert.Assert(t, h1 != h2, "hash must change when inject_env changes")
+}
+
+func TestHashChangesOnMaxRetries(t *testing.T) {
+	cmd := compose.Command{
+		Name:          "api",
+		Args:          []string{"go", "run", "./cmd/api"},
+		Dir:           "/work",
+		RestartPolicy: model.RestartPolicyOnFailure,
+		MaxRetries:    2,
+	}
+	h1, err := compose.Hash(cmd)
+	assert.NilError(t, err)
+
+	cmd.MaxRetries = 3
+	h2, err := compose.Hash(cmd)
+	assert.NilError(t, err)
+
+	assert.Assert(t, h1 != h2, "hash must change when the on-failure retry count changes")
 }
 
 func TestImportHostEnvDefaultsTrue(t *testing.T) {

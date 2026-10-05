@@ -176,6 +176,7 @@ func Hash(cmd Command) (string, error) {
 		ImportHostEnv:   cmd.ImportHostEnv,
 		InjectEnv:       cmd.InjectEnv,
 		RestartPolicy:   string(cmd.RestartPolicy),
+		MaxRetries:      cmd.MaxRetries,
 		StopSignal:      cmd.StopSignal,
 		Tty:             cmd.Tty,
 		ScrollbackBytes: cmd.ScrollbackBytes,
