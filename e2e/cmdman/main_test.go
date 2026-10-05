@@ -15,13 +15,25 @@ import (
 	"time"
 )
 
-// hermeticEnviron is os.Environ() with every CMDMAN_* variable removed: when
-// the suite itself runs under a cmdman-supervised command, ambient identity
-// (e.g. CMDMAN_CMD_ID) must not reach the child.
+// hermeticEnviron is os.Environ() with every CMDMAN_* variable removed and
+// SHELL pinned to /bin/sh.
+//
+// CMDMAN_* goes because, when the suite itself runs under a cmdman-supervised
+// command, ambient identity (e.g. CMDMAN_CMD_ID) must not reach the child.
+//
+// SHELL is pinned because a tmux server takes its default-shell from the SHELL
+// of the process that starts it, and every pane the mux driver splits or
+// creates runs that shell until the driver respawns it with a viewer. The
+// driver titles a pane just before that respawn, so a login shell whose rc sets
+// the terminal title on startup can land its title in between and overwrite the
+// pane name for good: no later write restores it. Which pane loses depends on
+// how fast the developer's shell starts, which is what made title assertions
+// flaky under load.
 func hermeticEnviron() []string {
-	return slices.DeleteFunc(os.Environ(), func(s string) bool {
-		return strings.HasPrefix(s, "CMDMAN_")
+	env := slices.DeleteFunc(os.Environ(), func(s string) bool {
+		return strings.HasPrefix(s, "CMDMAN_") || strings.HasPrefix(s, "SHELL=")
 	})
+	return append(env, "SHELL=/bin/sh")
 }
 
 func must(t *testing.T, err error) {
