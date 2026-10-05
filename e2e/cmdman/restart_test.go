@@ -2,6 +2,7 @@ package cmdman_test
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -116,5 +117,73 @@ func TestRestartCmd_Multiple(t *testing.T) {
 			t.Errorf("%s: expected at least 1 exit_history entry after restart, got %d",
 				name, len(history))
 		}
+	}
+}
+
+// TestRestartCmd_ExitStatusOnFailure pins the exit status of a restart whose
+// target failed: the failure does not keep the next target from being
+// restarted, the per-target line goes to stderr, the aggregate names the verb,
+// and the process exits 1.
+//
+// The failing target is a command whose executable does not exist, so its start
+// half fails. An unknown name cannot serve: it aborts the whole call before any
+// target is attempted.
+func TestRestartCmd_ExitStatusOnFailure(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	env.Create(ctx, "restart-exit-broken", filepath.Join(t.TempDir(), "missing.sh"))
+	env.Run(ctx, "restart-exit-running", "/bin/sh", "-c", "sleep 300")
+	env.waitForState(ctx, "restart-exit-running", "running", defaultTimeout)
+
+	id := env.resolvedID(ctx, "restart-exit-broken")
+	res := env.Cmd("restart", "restart-exit-broken", "restart-exit-running").ExpectFail(ctx, t,
+		"restart "+id+": start:",
+		"one or more restart operations failed",
+	)
+	if code := exitStatusOf(t, res.Err); code != 1 {
+		t.Errorf("expected exit status 1, got %d", code)
+	}
+
+	env.waitForState(ctx, "restart-exit-running", "running", defaultTimeout)
+	info := env.inspectJSON(ctx, "restart-exit-running")
+	history, _ := info["ExitHistory"].([]any)
+	if len(history) < 1 {
+		t.Errorf("expected at least 1 exit_history entry after restart, got %d", len(history))
+	}
+}
+
+// TestRestartCmd_ExitStatusIgnoreErrors is TestRestartCmd_ExitStatusOnFailure
+// with --ignore-errors: the per-target line survives, the aggregate does not,
+// and the process exits 0.
+func TestRestartCmd_ExitStatusIgnoreErrors(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	env.Create(ctx, "restart-ignore-broken", filepath.Join(t.TempDir(), "missing.sh"))
+	env.Run(ctx, "restart-ignore-running", "/bin/sh", "-c", "sleep 300")
+	env.waitForState(ctx, "restart-ignore-running", "running", defaultTimeout)
+
+	id := env.resolvedID(ctx, "restart-ignore-broken")
+	res := env.Cmd(
+		"restart", "--ignore-errors", "restart-ignore-broken", "restart-ignore-running",
+	).Exec(ctx)
+	if res.Err != nil {
+		t.Fatalf("restart --ignore-errors failed: %v\nstderr:\n%s", res.Err, res.Stderr)
+	}
+	if want := "restart " + id + ": start:"; !strings.Contains(res.Stderr, want) {
+		t.Errorf("expected %q in stderr, got %q", want, res.Stderr)
+	}
+	if strings.Contains(res.Stderr, "one or more restart operations failed") {
+		t.Errorf("--ignore-errors should suppress the aggregate, got stderr=%q", res.Stderr)
+	}
+
+	env.waitForState(ctx, "restart-ignore-running", "running", defaultTimeout)
+	info := env.inspectJSON(ctx, "restart-ignore-running")
+	history, _ := info["ExitHistory"].([]any)
+	if len(history) < 1 {
+		t.Errorf("expected at least 1 exit_history entry after restart, got %d", len(history))
 	}
 }
