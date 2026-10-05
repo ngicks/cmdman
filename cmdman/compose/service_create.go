@@ -15,11 +15,13 @@ import (
 type CreateOption struct {
 	// RemoveOrphan causes stopped orphan commands to be removed.
 	// Running orphans are reported and skipped (resolved-decision 4: no force in v1).
-	// Ignored when CommandNames targets a subset.
+	// Ignored when Targets targets a subset.
 	RemoveOrphan bool
-	// CommandNames optionally narrows the operation to specific compose command
-	// names and their transitive after-dependencies. Empty targets every command.
-	CommandNames []string
+	// Targets optionally narrows the operation to specific compose commands or
+	// replicas and their transitive after-dependencies, every replica of those.
+	// Empty targets every command. A replica index must lie within the scale the
+	// spec declares for its command.
+	Targets []Target
 }
 
 // CreateResult is the aggregated result of a compose create operation.
@@ -41,18 +43,35 @@ type ActionOutcome struct {
 //  1. Lists existing project-labeled commands.
 //  2. Calls ComputePlan. Returns a conflict error if the compose file differs.
 //  3. Handles orphans: warns (default) or removes stopped orphans when opts.RemoveOrphan
-//     is set. Skipped when opts.CommandNames targets a subset.
-//  4. Executes create/recreate/unchanged actions for the targeted commands and
+//     is set. Skipped when opts.Targets targets a subset.
+//  4. Removes the surplus replicas a scale-down left behind. Skipped when a
+//     target selects specific replicas, since such a target concerns those
+//     replicas alone.
+//  5. Executes create/recreate/unchanged actions for the targeted replicas and
 //     aggregates outcomes.
 func (s *Service) Create(
 	ctx context.Context,
 	spec ComposeSpec,
 	opts CreateOption,
 ) (*CreateResult, error) {
-	if err := validateCommandNames(opts.CommandNames, &spec, nil); err != nil {
+	targets, err := resolveTargets(opts.Targets, declaredReplicas(spec))
+	if err != nil {
 		return nil, err
 	}
+	res, _, err := s.create(ctx, spec, opts.RemoveOrphan, targets)
+	return res, err
+}
 
+// create is [Service.Create] for already resolved targets. held maps the cmdman
+// command name of every replica whose create or recreate failed to that
+// failure. Such a replica is the old one, a new one whose create_post failed,
+// or gone, and no start should take it for the replica the spec describes.
+func (s *Service) create(
+	ctx context.Context,
+	spec ComposeSpec,
+	removeOrphan bool,
+	targets targetSet,
+) (_ *CreateResult, held map[string]error, _ error) {
 	existing, err := s.svc.List(ctx, cmdman.ListRequest{
 		AllStates: true,
 		Labels: map[string]string{
@@ -61,12 +80,12 @@ func (s *Service) Create(
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("list existing commands: %w", err)
+		return nil, nil, fmt.Errorf("list existing commands: %w", err)
 	}
 
 	plan, err := ComputePlan(spec, existing)
 	if err != nil {
-		return nil, fmt.Errorf(
+		return nil, nil, fmt.Errorf(
 			"compute plan for project %q in %q: %w",
 			spec.Project,
 			spec.WorkDir,
@@ -74,26 +93,40 @@ func (s *Service) Create(
 		)
 	}
 
-	targets := resolveTargetCommands(spec, opts.CommandNames)
+	closure := resolveTargetCommands(spec, targets.names())
 
 	var actions []ActionOutcome
 	// Orphan handling is a whole-project concern; skip it when a subset is targeted.
-	if len(opts.CommandNames) == 0 {
-		orphanOutcomes := s.handleOrphans(ctx, spec, plan.Orphans, opts.RemoveOrphan)
+	if len(targets) == 0 {
+		orphanOutcomes := s.handleOrphans(ctx, spec, plan.Orphans, removeOrphan)
 		actions = append(actions, orphanOutcomes...)
 	}
 
-	// Surplus replicas from a scale-down are always reconciled away (scoped to the
-	// targeted commands), regardless of --remove-orphan.
-	actions = append(actions, s.handleExcessReplicas(ctx, spec, plan.ExcessReplicas, targets)...)
+	// Surplus replicas from a scale-down are reconciled away (scoped to the
+	// targeted commands), regardless of --remove-orphan. A replica-scoped target
+	// asks about its replicas only, so it leaves the surplus alone.
+	if !targets.replicaScoped() {
+		actions = append(
+			actions, s.handleExcessReplicas(ctx, spec, plan.ExcessReplicas, closure)...)
+	}
 
 	for _, action := range plan.Actions {
-		if _, ok := targets[action.Desired.Name]; !ok {
+		if _, ok := closure[action.Desired.Name]; !ok {
+			continue
+		}
+		if !targets.covers(action.Desired.Name, action.ScaleIndex) {
 			continue
 		}
 		outcome, err := s.executeAction(ctx, spec, action)
 		if err != nil {
-			return nil, err // internal/unexpected error; individual cmd errors are in Err field
+			// internal/unexpected error; individual cmd errors are in Err field
+			return nil, nil, err
+		}
+		if outcome.Err != nil {
+			if held == nil {
+				held = make(map[string]error)
+			}
+			held[action.InstanceName] = outcome.Err
 		}
 		actions = append(actions, outcome)
 	}
@@ -102,7 +135,7 @@ func (s *Service) Create(
 	// Create unconditionally), so this one site owns history-row creation.
 	s.recordProject(ctx, spec)
 
-	return &CreateResult{Actions: actions}, nil
+	return &CreateResult{Actions: actions}, held, nil
 }
 
 // executeAction carries out a single plan action (one replica) and returns its
@@ -125,7 +158,8 @@ func (s *Service) executeAction(
 	case ActionCreate:
 		s.report(disp, PhaseCreating, nil, nil)
 		req := buildCreateRequest(spec, nc, action.DesiredHash, instName, action.ScaleIndex)
-		_, err := s.svc.Create(ctx, req)
+		err := s.createWithHooks(
+			ctx, s.specHookReplica(spec, nc, action.ScaleIndex), nc.Hooks, req)
 		if err != nil {
 			werr := fmt.Errorf("create command %q (%s): %w", disp, instName, err)
 			s.report(disp, PhaseError, werr, nil)
@@ -140,6 +174,14 @@ func (s *Service) executeAction(
 			werr := fmt.Errorf("recreate command %q: missing existing entry", disp)
 			s.report(disp, PhaseSkipped, werr, nil)
 			return ActionOutcome{Command: disp, Action: "skipped", Err: werr}, nil
+		}
+		// The replica going away runs the hooks stored on it. The spec may
+		// declare other hooks by now.
+		old, oldHooks, err := storedHookReplica(*existing)
+		if err != nil {
+			werr := fmt.Errorf("recreate command %q: %w", disp, err)
+			s.report(disp, PhaseError, werr, nil)
+			return ActionOutcome{Command: disp, Action: "recreate", Err: werr}, nil
 		}
 
 		// A running/starting command is stopped before it can be removed and
@@ -156,7 +198,7 @@ func (s *Service) executeAction(
 				"state", existing.State,
 			)
 			s.report(disp, PhaseStopping, nil, nil)
-			if err := s.stopForRecreate(ctx, existing.ID); err != nil {
+			if _, err := s.stopWithHooks(ctx, old, oldHooks, existing.ID); err != nil {
 				werr := fmt.Errorf(
 					"stop command %q (%s) for recreate: %w",
 					disp,
@@ -170,7 +212,7 @@ func (s *Service) executeAction(
 		}
 
 		s.report(disp, PhaseRecreating, nil, nil)
-		results, err := s.svc.Remove(ctx, cmdman.RemoveRequest{
+		_, err = s.removeWithHooks(ctx, old, oldHooks, cmdman.RemoveRequest{
 			Targets: []string{existing.ID},
 		})
 		if err != nil {
@@ -178,16 +220,10 @@ func (s *Service) executeAction(
 			s.report(disp, PhaseError, werr, nil)
 			return ActionOutcome{Command: disp, Action: "recreate", Err: werr}, nil
 		}
-		for _, r := range results {
-			if r.Err != nil {
-				werr := fmt.Errorf("remove command %q for recreate: %w", disp, r.Err)
-				s.report(disp, PhaseError, werr, nil)
-				return ActionOutcome{Command: disp, Action: "recreate", Err: werr}, nil
-			}
-		}
 
 		req := buildCreateRequest(spec, nc, action.DesiredHash, instName, action.ScaleIndex)
-		_, err = s.svc.Create(ctx, req)
+		err = s.createWithHooks(
+			ctx, s.specHookReplica(spec, nc, action.ScaleIndex), nc.Hooks, req)
 		if err != nil {
 			werr := fmt.Errorf("create command %q after remove: %w", disp, err)
 			s.report(disp, PhaseError, werr, nil)
@@ -229,9 +265,10 @@ func entryDisplayName(e store.CommandEntry) string {
 }
 
 // handleExcessReplicas stops (when live) and removes surplus replicas left by a
-// scale-down. Only replicas whose command is in the target set are touched, so a
-// subset operation never tears down a replica it was not asked about. Each
-// removal is reported as its own removing → removed/error step.
+// scale-down, each inside the stop and remove hooks stored on it. Only replicas
+// whose command is in the target set are touched, so a subset operation never
+// tears down a replica it was not asked about. Each removal is reported as its
+// own removing → removed/error step.
 func (s *Service) handleExcessReplicas(
 	ctx context.Context,
 	spec ComposeSpec,
@@ -250,9 +287,19 @@ func (s *Service) handleExcessReplicas(
 		disp := fmt.Sprintf("%s-%d", cmdName, scaleIndexOf(e))
 		s.report(disp, PhaseRemoving, nil, nil)
 
+		r, hooks, err := storedHookReplica(e)
+		if err != nil {
+			werr := fmt.Errorf("remove excess replica %q (%s): %w", disp, e.ID, err)
+			s.report(disp, PhaseError, werr, nil)
+			outcomes = append(outcomes, ActionOutcome{
+				Command: disp, Action: "remove-excess", Err: werr,
+			})
+			continue
+		}
+
 		// Stop a live replica before removal so its monitor is not yanked.
 		if e.State == model.EventTypeRunning || e.State == model.EventTypeStarting {
-			if err := s.stopForRecreate(ctx, e.ID); err != nil {
+			if _, err := s.stopWithHooks(ctx, r, hooks, e.ID); err != nil {
 				werr := fmt.Errorf("stop excess replica %q (%s): %w", disp, e.ID, err)
 				s.report(disp, PhaseError, werr, nil)
 				outcomes = append(outcomes, ActionOutcome{
@@ -262,18 +309,10 @@ func (s *Service) handleExcessReplicas(
 			}
 		}
 
-		results, err := s.svc.Remove(ctx, cmdman.RemoveRequest{
+		_, err = s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
 			Targets: []string{e.ID},
 			Force:   true,
 		})
-		if err == nil {
-			for _, r := range results {
-				if r.Err != nil {
-					err = r.Err
-					break
-				}
-			}
-		}
 		if err != nil {
 			werr := fmt.Errorf("remove excess replica %q (%s): %w", disp, e.ID, err)
 			contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: remove excess replica failed",
@@ -325,13 +364,7 @@ func buildCreateRequest(
 	// drift. The project identity is already part of the generated name, so
 	// hashing it again would add nothing. Host-env inheritance is governed
 	// explicitly by ImportHostEnv below.
-	appendEnv := []string{
-		ENV_CMDMAN_COMPOSE_SCALE_INDEX + "=" + strconv.Itoa(scaleIndex),
-		ENV_CMDMAN_COMPOSE_SCALE + "=" + strconv.Itoa(max(nc.Scale, 1)),
-		ENV_CMDMAN_COMPOSE_WORK_DIR + "=" + spec.WorkDir,
-		ENV_CMDMAN_COMPOSE_WORK_DIR_HASH + "=" + workdirHash(spec.WorkDir),
-		ENV_CMDMAN_COMPOSE_PROJECT + "=" + spec.Project,
-	}
+	appendEnv := composeContextEnv(spec.Project, spec.WorkDir, nc.Name, scaleIndex, nc.Scale)
 	importHostEnv := nc.ImportHostEnv
 	injectEnv := nc.InjectEnv
 	return cmdman.CreateRequest{
@@ -351,5 +384,18 @@ func buildCreateRequest(
 		LogOpts:         nc.LogOpts,
 		AutoRemove:      false, // compose owns lifecycle
 		Labels:          BuildLabels(spec, nc, configHash, scaleIndex),
+	}
+}
+
+// composeContextEnv returns the environment entries that tell a process which
+// replica of which compose project it runs for.
+func composeContextEnv(project, workDir, command string, scaleIndex, scale int) []string {
+	return []string{
+		ENV_CMDMAN_COMPOSE_SCALE_INDEX + "=" + strconv.Itoa(scaleIndex),
+		ENV_CMDMAN_COMPOSE_SCALE + "=" + strconv.Itoa(max(scale, 1)),
+		ENV_CMDMAN_COMPOSE_WORK_DIR + "=" + workDir,
+		ENV_CMDMAN_COMPOSE_WORK_DIR_HASH + "=" + workdirHash(workDir),
+		ENV_CMDMAN_COMPOSE_PROJECT + "=" + project,
+		ENV_CMDMAN_COMPOSE_COMMAND + "=" + command,
 	}
 }

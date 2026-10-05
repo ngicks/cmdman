@@ -83,6 +83,50 @@ func TestMergeProjectInfosStampsIdentity(t *testing.T) {
 	}
 }
 
+func TestComposeUpStreamDropsHookEvents(t *testing.T) {
+	stream := newComposeUpStream(t.Context())
+	hookPhases := []compose.Phase{
+		compose.PhaseHookRunning,
+		compose.PhaseHookOutput,
+		compose.PhaseHookSucceeded,
+		compose.PhaseHookFailed,
+		compose.PhaseHookWarning,
+		compose.PhaseHookIgnored,
+	}
+
+	stream.Report(compose.Event{Command: "web", Phase: compose.PhaseCreating})
+	for _, phase := range hookPhases {
+		stream.Report(compose.Event{
+			Command:    "web",
+			Phase:      phase,
+			Err:        errors.New("hook command exited with code 1"),
+			ScaleIndex: 1,
+			Hook:       "scratch",
+			Lifecycle:  compose.LifecycleCreatePre,
+			Exec:       "abc-proj-web-1.hook.scratch.create_pre",
+		})
+	}
+	stream.Report(compose.Event{
+		Command: "web",
+		Phase:   compose.PhaseHookWarning,
+		Err:     errors.New("remove without the stored hooks"),
+	})
+	stream.Report(compose.Event{Command: "web", Phase: compose.PhaseCreated})
+	stream.finish(nil)
+
+	var got []tui.ComposeUpEvent
+	for ev := range stream.Events() {
+		got = append(got, ev)
+	}
+	want := []tui.ComposeUpEvent{
+		{Command: "web", Phase: string(compose.PhaseCreating)},
+		{Command: "web", Phase: string(compose.PhaseCreated), Terminal: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("hook events must not reach the replica's mark:\ngot  %+v\nwant %+v", got, want)
+	}
+}
+
 const cwdComposeYAML = "name: cwdproj\ncommands:\n  a:\n    args: [echo, a]\n"
 
 func TestAppendCwdProjectAddsUnregisteredProject(t *testing.T) {

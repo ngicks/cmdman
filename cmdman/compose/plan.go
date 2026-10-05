@@ -228,7 +228,7 @@ func BuildLabels(
 	configHash string,
 	scaleIndex int,
 ) map[string]string {
-	labels := make(map[string]string, len(cmd.Labels)+9)
+	labels := make(map[string]string, len(cmd.Labels)+10)
 	maps.Copy(labels, cmd.Labels)
 	labels[LabelProject] = spec.Project
 	labels[LabelCommand] = cmd.Name
@@ -244,6 +244,13 @@ func BuildLabels(
 			panic(fmt.Sprintf("compose: marshal normalized after label: %v", err))
 		}
 		labels[LabelAfter] = string(after)
+	}
+	if len(cmd.Hooks) > 0 {
+		hooks, err := json.Marshal(cmd.Hooks)
+		if err != nil {
+			panic(fmt.Sprintf("compose: marshal normalized hooks label: %v", err))
+		}
+		labels[LabelHooks] = string(hooks)
 	}
 	return labels
 }

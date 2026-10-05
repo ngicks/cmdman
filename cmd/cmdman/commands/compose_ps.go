@@ -10,19 +10,21 @@ import (
 func composePsCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagFormat string
+		flagScale  int
 	)
 
 	cmd := &cobra.Command{
 		Use:               "ps [COMMAND...]",
 		Short:             "List commands in a compose project",
-		Args:              cobra.ArbitraryArgs,
+		Args:              scaleArgs(cobra.ArbitraryArgs, &flagScale),
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposePs(cmd, rf, cf, args, flagFormat)
+			return runComposePs(cmd, rf, cf, args, flagScale, flagFormat)
 		},
 	}
 
 	cmd.Flags().StringVar(&flagFormat, "format", "", cli.ComposePsFormatUsage())
+	addScaleFlag(cmd, &flagScale)
 
 	parent.AddCommand(cmd)
 }
@@ -32,6 +34,7 @@ func runComposePs(
 	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
+	scale int,
 	format string,
 ) error {
 	selection, err := compose.LoadOrWorkdir(cf.normalizeOpts())
@@ -45,7 +48,9 @@ func runComposePs(
 	}
 	defer svc.Close()
 
-	statuses, err := compose.NewService(svc).Ps(cmd.Context(), selection, commandNames)
+	statuses, err := compose.NewService(svc).Ps(cmd.Context(), selection, compose.PsOption{
+		Targets: composeTargets(commandNames, scale),
+	})
 	if err != nil {
 		return err
 	}

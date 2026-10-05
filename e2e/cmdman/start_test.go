@@ -3,6 +3,7 @@ package cmdman_test
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestStart_FromFailedState verifies that `cmdman start` accepts a command
@@ -40,6 +41,25 @@ func TestStart_FromFailedState(t *testing.T) {
 	exitCode, _ := info["ExitCode"].(float64)
 	if exitCode != 0 {
 		t.Errorf("expected exit_code=0 after restart from failed, got %v", exitCode)
+	}
+}
+
+// TestStart_CommandThatExitsAtOnce verifies that start returns as soon as a
+// command that exits right away has exited, instead of polling on for a
+// running state the command has already left behind.
+func TestStart_CommandThatExitsAtOnce(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	env.Create(ctx, "start-quick-exit", "true")
+
+	for range 2 {
+		began := time.Now()
+		env.run(ctx, "start", "start-quick-exit")
+		if took := time.Since(began); took > 3*time.Second {
+			t.Fatalf("start of a command that exits at once took %s", took)
+		}
+		env.waitForState(ctx, "start-quick-exit", "exited", defaultTimeout)
 	}
 }
 

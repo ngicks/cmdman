@@ -7,7 +7,8 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] up [--remove-orphan] [--progress MODE] [--mux] [COMMAND...]
+cmdman compose [selection flags] up [--remove-orphan] [--progress MODE] [--mux] [--scale N]
+    [COMMAND...]
 ```
 
 ## Description
@@ -28,6 +29,15 @@ logs.
 
 Failures are aggregated so unrelated commands can still be attempted.
 
+Up runs the hooks of [`compose create`](./cmdman-compose-create.1.md) and then
+the hooks of [`compose start`](./cmdman-compose-start.1.md). A replica whose
+create or recreate failed is not started. This includes a new replica whose
+`create_post` failed under `on_error: fail` after its create. Up reports such
+a replica as skipped with the failure. The start of its command fails and
+blocks the commands that depend on it. Like `compose create`, up removes the
+hook commands that the failed hooks of a removed replica left. See
+[Lifecycle Hooks](./cmdman-compose.5.md#lifecycle-hooks).
+
 ## Selection Flags
 
 Uses the compose selection flags documented in
@@ -39,7 +49,8 @@ Uses the compose selection flags documented in
 - `--remove-orphan`: remove stopped orphan commands before reconciliation.
   Running orphans are skipped.
 - `--progress auto|tty|json|quiet`: progress output mode. `auto` chooses TTY
-  output on terminals and JSON otherwise.
+  output on terminals and JSON otherwise. Hook runs have records of their own;
+  see [Progress Output](./cmdman-compose.5.md#progress-output).
 - `--mux`: after a successful up, open the multiplexer dashboard described by
   the compose file's `mux:` section, so one command both brings the project up
   and shows its layout. The dashboard opens at layout 0 instead of cycling, so
@@ -47,12 +58,16 @@ Uses the compose selection flags documented in
   [`cmdman compose mux up`](./cmdman-compose-mux.1.md). A project whose file has
   no `mux:` section is brought up as usual and the dashboard is skipped with a
   warning.
+- `--scale N`: create and start only replica N (1-based) of exactly one COMMAND.
+  N must lie within the command's declared `scale`. Its `after` dependencies are
+  still brought up in full, and surplus replicas left by a scale-down are kept.
 
 ## Examples
 
 ```sh
 cmdman compose up
 cmdman compose up api
+cmdman compose up --scale 2 worker
 cmdman compose --project-name preview up --remove-orphan
 ```
 

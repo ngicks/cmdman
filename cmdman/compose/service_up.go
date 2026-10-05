@@ -7,9 +7,10 @@ import (
 // UpOption configures an Up operation (a Create followed by a Start), so it
 // embeds both option sets.
 //
-// CreateOption and StartOption both carry CommandNames; Up reads the create
-// side (opts.CreateOption.CommandNames), so set the same names on both — or just
-// the create side — when targeting a subset.
+// CreateOption and StartOption both carry Targets; Up reads the create side
+// (opts.CreateOption.Targets), so set the same targets on both — or just the
+// create side — when targeting a subset. A replica index must lie within the
+// scale the spec declares for its command.
 type UpOption struct {
 	CreateOption
 	StartOption
@@ -24,18 +25,28 @@ type UpResult struct {
 // Up performs idempotent convergence: runs Create then starts the targeted
 // commands honoring after.Condition via the DAG-aware concurrent starter.
 //
+// A replica whose create or recreate failed is not started: it is the old
+// replica, a new replica whose create_post failed, or no replica at all. It is
+// reported skipped with the failure, and its command's start fails, which
+// blocks the commands that depend on it.
+//
 // Per resolved-decision 21, failures are aggregated; remaining commands continue.
 func (s *Service) Up(
 	ctx context.Context,
 	spec ComposeSpec,
 	opts UpOption,
 ) (*UpResult, error) {
-	createResult, err := s.Create(ctx, spec, opts.CreateOption)
+	targets, err := resolveTargets(opts.CreateOption.Targets, declaredReplicas(spec))
 	if err != nil {
 		return nil, err
 	}
 
-	starts, err := s.reconcileStart(ctx, spec, opts.CreateOption.CommandNames)
+	createResult, held, err := s.create(ctx, spec, opts.RemoveOrphan, targets)
+	if err != nil {
+		return nil, err
+	}
+
+	starts, err := s.reconcileStart(ctx, spec, targets, hooksFromSpec, held)
 	if err != nil {
 		return nil, err
 	}

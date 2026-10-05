@@ -15,15 +15,18 @@ func composeWaitCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 		flagCondition string
 		flagInterval  time.Duration
 		flagIgnore    bool
+		flagScale     int
 	)
 
 	cmd := &cobra.Command{
 		Use:               "wait [COMMAND...]",
 		Short:             "Wait for compose commands to reach a condition",
-		Args:              cobra.ArbitraryArgs,
+		Args:              scaleArgs(cobra.ArbitraryArgs, &flagScale),
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeWait(cmd, rf, cf, args, flagCondition, flagInterval, flagIgnore)
+			return runComposeWait(
+				cmd, rf, cf, args, flagScale, flagCondition, flagInterval, flagIgnore,
+			)
 		},
 	}
 
@@ -33,6 +36,7 @@ func composeWaitCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 		"Polling interval (default: 250ms)")
 	cmd.Flags().BoolVar(&flagIgnore, "ignore", false,
 		"Ignore commands that cannot be resolved")
+	addScaleFlag(cmd, &flagScale)
 	_ = cmd.RegisterFlagCompletionFunc("condition", waitConditionCompletions)
 
 	parent.AddCommand(cmd)
@@ -43,6 +47,7 @@ func runComposeWait(
 	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
+	scale int,
 	condition string,
 	interval time.Duration,
 	ignore bool,
@@ -59,10 +64,10 @@ func runComposeWait(
 	defer svc.Close()
 
 	result, err := compose.NewService(svc).Wait(cmd.Context(), selection, compose.WaitOption{
-		CommandNames: commandNames,
-		Condition:    model.EventType(condition),
-		Interval:     interval,
-		Ignore:       ignore,
+		Targets:   composeTargets(commandNames, scale),
+		Condition: model.EventType(condition),
+		Interval:  interval,
+		Ignore:    ignore,
 	})
 	if err != nil {
 		return err

@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] inspect [--format FORMAT] [COMMAND...]
+cmdman compose [selection flags] inspect [--format FORMAT] [--scale N] [COMMAND...]
 ```
 
 ## Description
@@ -30,6 +30,8 @@ Uses the compose selection flags documented in
 ## Options
 
 - `--format FORMAT`: built-in output, `json`, or a Go template.
+- `--scale N`: inspect only replica N (1-based) of exactly one COMMAND. N must
+  name an existing replica.
 
 ## See Also
 

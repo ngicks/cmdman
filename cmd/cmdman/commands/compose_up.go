@@ -12,6 +12,7 @@ func composeUpCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 		flagRemoveOrphan bool
 		flagProgress     string
 		flagMux          bool
+		flagScale        int
 	)
 
 	cmd := &cobra.Command{
@@ -25,10 +26,12 @@ and shows its layout. The dashboard opens at layout 0 instead of cycling, so
 re-running up --mux keeps the same layout; cycling stays with "compose mux up".
 A project with no "mux:" section is brought up as usual and the dashboard is
 skipped with a warning.`,
-		Args:              cobra.ArbitraryArgs,
+		Args:              scaleArgs(cobra.ArbitraryArgs, &flagScale),
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeUp(cmd, rf, cf, args, flagRemoveOrphan, flagProgress, flagMux)
+			return runComposeUp(
+				cmd, rf, cf, args, flagScale, flagRemoveOrphan, flagProgress, flagMux,
+			)
 		},
 	}
 
@@ -38,6 +41,7 @@ skipped with a warning.`,
 	cmd.Flags().BoolVar(&flagMux, "mux", false,
 		`Open the compose file's "mux:" dashboard after a successful up`+
 			" (skipped with a warning when the file has no mux: section)")
+	addScaleFlag(cmd, &flagScale)
 	_ = cmd.RegisterFlagCompletionFunc("progress", progressCompletions)
 
 	parent.AddCommand(cmd)
@@ -48,6 +52,7 @@ func runComposeUp(
 	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
+	scale int,
 	removeOrphan bool,
 	progress string,
 	withMux bool,
@@ -76,14 +81,15 @@ func runComposeUp(
 		compose.WithReporter(prog),
 		compose.WithFrameSvc(cli.NewFrameSvc(svc)),
 	)
+	targets := composeTargets(commandNames, scale)
 	result, err := composeSvc.Up(
 		cmd.Context(), spec, compose.UpOption{
 			CreateOption: compose.CreateOption{
 				RemoveOrphan: removeOrphan,
-				CommandNames: commandNames,
+				Targets:      targets,
 			},
 			StartOption: compose.StartOption{
-				CommandNames: commandNames,
+				Targets: targets,
 			},
 		})
 	if err != nil {

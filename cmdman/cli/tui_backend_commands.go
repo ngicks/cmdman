@@ -18,8 +18,9 @@ import (
 )
 
 // ListCommands lists every command. Compose-managed commands (carrying the
-// project and workdir labels) are grouped by project; standalone commands keep
-// an empty project and group under their working directory.
+// project and workdir labels) and the intermediates lifecycle hooks created
+// for them are grouped by project; standalone commands keep an empty project
+// and group under their working directory.
 //
 // The listing carries no runtime state: the TUI subscribes to every live
 // command's monitor through WatchRuntimeState and keeps what those streams
@@ -46,7 +47,15 @@ func (b *serviceBackend) ListCommands(ctx context.Context) ([]tui.CommandInfo, e
 // every compose-created command carries a scale index (an unscaled command's
 // sole instance has index 1), so the single-replica case is collapsed to the
 // zero value here rather than reported as replica 1 of 1.
+//
+// An intermediate, a command lifecycle hooks created for a replica, is grouped
+// under the project of that replica and named after it (see
+// intermediateName), with the replica's scale.
 func commandInfos(entries []store.CommandEntry) []tui.CommandInfo {
+	byName := make(map[string]store.CommandEntry, len(entries))
+	for _, e := range entries {
+		byName[e.Name] = e
+	}
 	var out []tui.CommandInfo
 	for _, e := range entries {
 		var labels map[string]string
@@ -61,14 +70,25 @@ func commandInfos(entries []store.CommandEntry) []tui.CommandInfo {
 		}
 		project := labels[compose.LabelProject]
 		workdir, hasWorkdir := labels[compose.LabelWorkdir]
-		if !hasWorkdir {
-			workdir = dir
-		}
 		name := e.Name
 		if cmd := labels[compose.LabelCommand]; cmd != "" {
 			name = cmd
 		}
-		scaleIndex, scaleCount := compose.ScaleOf(labels)
+		scaleLabels := labels
+		if labels[compose.LabelIntermediate] != "" {
+			var owner map[string]string
+			if o, ok := byName[labels[compose.LabelOwner]]; ok && o.ConfigJSON != nil {
+				owner = o.ConfigJSON.Labels
+			}
+			project = labels[compose.LabelHooksProject]
+			workdir, hasWorkdir = labels[compose.LabelHooksWorkdir]
+			name = intermediateName(e.Name, labels, owner)
+			scaleLabels = owner
+		}
+		if !hasWorkdir {
+			workdir = dir
+		}
+		scaleIndex, scaleCount := compose.ScaleOf(scaleLabels)
 		if scaleIndex <= 0 || scaleCount <= 1 {
 			scaleIndex, scaleCount = 0, 0
 		}
@@ -86,6 +106,30 @@ func commandInfos(entries []store.CommandEntry) []tui.CommandInfo {
 		})
 	}
 	return out
+}
+
+// intermediateName names the intermediate called name the way compose names it
+// after its replica's cmdman name, but after the replica's compose command
+// instead, so its row reads like the replica's: "web.res.scratch". labels are
+// the intermediate's and owner the replica's, nil when the replica is gone. It
+// falls back to name when the command is not known.
+func intermediateName(name string, labels, owner map[string]string) string {
+	command := owner[compose.LabelCommand]
+	if command == "" {
+		command = labels[compose.LabelResourceCommand]
+	}
+	if command == "" {
+		return name
+	}
+	switch labels[compose.LabelIntermediate] {
+	case compose.IntermediateHolder:
+		return compose.HolderName(command, labels[compose.LabelResourceKey])
+	case compose.IntermediateExec:
+		return compose.ExecCommandName(command, labels[compose.LabelHook],
+			compose.LifecycleEvent(labels[compose.LabelHookEvent]))
+	default:
+		return name
+	}
 }
 
 func (b *serviceBackend) Start(ctx context.Context, id string) error {

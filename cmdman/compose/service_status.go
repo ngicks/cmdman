@@ -10,6 +10,14 @@ import (
 	"github.com/ngicks/cmdman/cmdman/model"
 )
 
+// StatusOption configures a Status operation.
+type StatusOption struct {
+	// Targets optionally narrows the target set to specific compose commands or
+	// replicas. Empty targets the whole project. A replica index must name a
+	// stored replica.
+	Targets []Target
+}
+
 // CommandRuntimeState is what one command of a compose project says about
 // itself: the stored process state plus the runtime state its monitor holds for
 // the current run. A command with no live monitor keeps the zero runtime fields.
@@ -32,7 +40,7 @@ type CommandRuntimeState struct {
 func (s *Service) Status(
 	ctx context.Context,
 	selection ProjectSelection,
-	commandNames []string,
+	opts StatusOption,
 ) ([]CommandRuntimeState, error) {
 	entries, err := s.svc.List(ctx, cmdman.ListRequest{
 		AllStates: true,
@@ -42,12 +50,11 @@ func (s *Service) Status(
 		return nil, fmt.Errorf("list project commands: %w", err)
 	}
 
-	if err := validateCommandNames(commandNames, selection.Spec, entries); err != nil {
+	targets, err := resolveTargets(opts.Targets, storedReplicas(selection.Spec, entries))
+	if err != nil {
 		return nil, err
 	}
-	if len(commandNames) > 0 {
-		entries = filterByCommandNames(entries, commandNames)
-	}
+	entries = targets.filter(entries)
 
 	runtime := s.runtimeStates(ctx, entries)
 

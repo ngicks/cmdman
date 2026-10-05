@@ -31,6 +31,8 @@ Uses the compose selection flags documented in
 - `--condition STATE`: wait condition. Defaults to `stopped`.
 - `--interval DURATION`: polling interval. Defaults to `250ms`.
 - `--ignore`: ignore commands that cannot be resolved.
+- `--scale N`: wait only for replica N (1-based) of exactly one COMMAND. N must
+  name an existing replica.
 
 ## See Also
 

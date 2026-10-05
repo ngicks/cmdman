@@ -56,9 +56,13 @@ func TestExecuteActionRecreateStopsRunningCommand(t *testing.T) {
 	}
 
 	action := CommandAction{
-		Kind:        ActionRecreate,
-		Desired:     reconcileCmd("alpha"),
-		Existing:    &store.CommandEntry{ID: "id-alpha", State: model.EventTypeRunning},
+		Kind:    ActionRecreate,
+		Desired: reconcileCmd("alpha"),
+		Existing: &store.CommandEntry{
+			ID:         "id-alpha",
+			State:      model.EventTypeRunning,
+			ConfigJSON: &model.CommandConfig{},
+		},
 		DesiredHash: "h2",
 	}
 	outcome, err := svc.executeAction(
@@ -107,9 +111,13 @@ func TestExecuteActionRecreateStopFailureAbortsRecreate(t *testing.T) {
 	}
 
 	action := CommandAction{
-		Kind:     ActionRecreate,
-		Desired:  reconcileCmd("alpha"),
-		Existing: &store.CommandEntry{ID: "id-alpha", State: model.EventTypeRunning},
+		Kind:    ActionRecreate,
+		Desired: reconcileCmd("alpha"),
+		Existing: &store.CommandEntry{
+			ID:         "id-alpha",
+			State:      model.EventTypeRunning,
+			ConfigJSON: &model.CommandConfig{},
+		},
 	}
 	outcome, err := svc.executeAction(
 		context.Background(),

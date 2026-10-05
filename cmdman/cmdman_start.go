@@ -23,7 +23,7 @@ func (s *Service) Start(ctx context.Context, idOrName string) error {
 		return fmt.Errorf("get command config: %w", err)
 	}
 
-	state, _, _, err := st.GetCommandState(id)
+	state, _, stateJSON, err := st.GetCommandState(id)
 	if err != nil {
 		return fmt.Errorf("get command state: %w", err)
 	}
@@ -43,7 +43,10 @@ func (s *Service) Start(ctx context.Context, idOrName string) error {
 	if err := monitor.SpawnMonitor(s.cfg, id); err != nil {
 		return fmt.Errorf("spawn monitor: %w", err)
 	}
-	if finalState, err := monitor.WaitForState(st, id, model.EventTypeRunning, 100); err != nil {
+	since := monitor.StateMark{State: state, MonitorPID: stateJSON.MonitorPID}
+	if finalState, err := monitor.WaitForState(
+		st, id, model.EventTypeRunning, since, 100,
+	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}

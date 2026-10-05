@@ -14,6 +14,7 @@ func composeSendKeysCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) 
 		flagLiteral     bool
 		flagHex         bool
 		flagRepeatCount int
+		flagScale       int
 	)
 
 	cmd := &cobra.Command{
@@ -25,11 +26,14 @@ func composeSendKeysCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) 
 			"selects compose commands (every command when empty), everything after\n" +
 			"is the key sequence sent to each. Examples:\n" +
 			"  cmdman compose send-keys api worker -- C-c Enter\n" +
+			"  cmdman compose send-keys --scale 2 worker -- Enter   # replica 2 only\n" +
 			"  cmdman compose send-keys -- Enter   # broadcast to every command",
-		Args:              cobra.ArbitraryArgs,
+		Args:              scaleArgsBeforeDash(cobra.ArbitraryArgs, &flagScale),
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeSendKeys(cmd, rf, cf, args, flagLiteral, flagHex, flagRepeatCount)
+			return runComposeSendKeys(
+				cmd, rf, cf, args, flagScale, flagLiteral, flagHex, flagRepeatCount,
+			)
 		},
 	}
 
@@ -38,6 +42,7 @@ func composeSendKeysCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) 
 		"Send keys literally, without translating key names")
 	flags.BoolVarP(&flagHex, "hex", "H", false, "Treat keys as hexadecimal byte values")
 	flags.IntVarP(&flagRepeatCount, "repeat-count", "N", 1, "Repeat the key sequence N times")
+	addScaleFlag(cmd, &flagScale)
 
 	parent.AddCommand(cmd)
 }
@@ -47,6 +52,7 @@ func runComposeSendKeys(
 	rf *rootFlags,
 	cf *composeFlags,
 	args []string,
+	scale int,
 	literal, hexMode bool,
 	repeatCount int,
 ) error {
@@ -76,11 +82,11 @@ func runComposeSendKeys(
 		cmd.Context(),
 		selection,
 		compose.SendKeysOption{
-			CommandNames: commandNames,
-			Keys:         keys,
-			Literal:      literal,
-			Hex:          hexMode,
-			RepeatCount:  repeatCount,
+			Targets:     composeTargets(commandNames, scale),
+			Keys:        keys,
+			Literal:     literal,
+			Hex:         hexMode,
+			RepeatCount: repeatCount,
 		},
 	)
 	if err != nil {

@@ -12,7 +12,8 @@ import (
 
 // handleOrphans processes the orphan list. When removeOrphan is false it emits
 // a structured slog.Warn per orphan and returns no outcomes. When removeOrphan
-// is true it removes stopped orphans and skips running ones (resolved-decision 4).
+// is true it removes stopped orphans inside the remove hooks stored on them and
+// skips running ones (resolved-decision 4).
 func (s *Service) handleOrphans(
 	ctx context.Context,
 	spec ComposeSpec,
@@ -62,9 +63,12 @@ func (s *Service) handleOrphans(
 			continue
 		}
 
-		results, err := s.svc.Remove(ctx, cmdman.RemoveRequest{
-			Targets: []string{orphan.ID},
-		})
+		r, hooks, err := storedHookReplica(orphan)
+		if err == nil {
+			_, err = s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
+				Targets: []string{orphan.ID},
+			})
+		}
 		if err != nil {
 			contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: failed to remove orphan command",
 				"project", spec.Project,
@@ -77,33 +81,6 @@ func (s *Service) handleOrphans(
 				Command: cmdName,
 				Action:  "remove-orphan",
 				Err:     fmt.Errorf("remove orphan command %q (%s): %w", cmdName, orphan.ID, err),
-			})
-			continue
-		}
-		var removeErr error
-		for _, r := range results {
-			if r.Err != nil {
-				removeErr = r.Err
-				break
-			}
-		}
-		if removeErr != nil {
-			contextkey.ValueSlogLoggerDefault(ctx).Warn("compose: failed to remove orphan command",
-				"project", spec.Project,
-				"workdir", spec.WorkDir,
-				"command", cmdName,
-				"id", orphan.ID,
-				"error", removeErr,
-			)
-			outcomes = append(outcomes, ActionOutcome{
-				Command: cmdName,
-				Action:  "remove-orphan",
-				Err: fmt.Errorf(
-					"remove orphan command %q (%s): %w",
-					cmdName,
-					orphan.ID,
-					removeErr,
-				),
 			})
 			continue
 		}

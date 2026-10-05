@@ -101,11 +101,26 @@ type hashCanonical struct {
 	LogOpts         map[string]string `json:"log_opts,omitzero"`
 	UserLabels      map[string]string `json:"user_labels,omitzero"`
 	After           []hashAfterSpec   `json:"after,omitzero"`
+	// Hooks keeps declaration order, so reordering the hooks: list counts as a
+	// config change, as reordering args does.
+	Hooks []hashLifecycleHook `json:"hooks,omitzero"`
 }
 
 type hashAfterSpec struct {
 	Name      string `json:"name"`
 	Condition string `json:"condition"`
+}
+
+type hashLifecycleHook struct {
+	Name     string `json:"name"`
+	Resource string `json:"resource,omitzero"`
+	// encoding/json sorts map keys, so the event order is deterministic.
+	Events map[string]hashLifecycleExec `json:"events"`
+}
+
+type hashLifecycleExec struct {
+	Args    []string `json:"args"`
+	OnError string   `json:"on_error"`
 }
 
 // Hash computes the config hash for a normalized command.
@@ -134,6 +149,21 @@ func Hash(cmd Command) (string, error) {
 		})
 	}
 
+	var hooks []hashLifecycleHook
+	if len(cmd.Hooks) > 0 {
+		hooks = make([]hashLifecycleHook, len(cmd.Hooks))
+		for i, h := range cmd.Hooks {
+			events := make(map[string]hashLifecycleExec, len(h.Events))
+			for ev, e := range h.Events {
+				events[string(ev)] = hashLifecycleExec{
+					Args:    e.Args,
+					OnError: string(e.OnError.resolved()),
+				}
+			}
+			hooks[i] = hashLifecycleHook{Name: h.Name, Resource: h.Resource, Events: events}
+		}
+	}
+
 	envCopy := make([]string, len(cmd.Env))
 	copy(envCopy, cmd.Env)
 	slices.Sort(envCopy)
@@ -153,6 +183,7 @@ func Hash(cmd Command) (string, error) {
 		LogOpts:         sortedMapCopy(logOpts),
 		UserLabels:      sortedMapCopy(userLabels),
 		After:           afterList,
+		Hooks:           hooks,
 	}
 
 	data, err := json.Marshal(canon)

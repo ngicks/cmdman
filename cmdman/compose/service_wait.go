@@ -12,8 +12,10 @@ import (
 
 // WaitOption configures a Wait operation.
 type WaitOption struct {
-	// CommandNames optionally narrows the target set to specific compose command names.
-	CommandNames []string
+	// Targets optionally narrows the target set to specific compose commands or
+	// replicas. Empty targets the whole project. A replica index must name a
+	// stored replica.
+	Targets []Target
 	// Condition is the wait condition (default "stopped").
 	// Valid values: "stopped", "created", "starting", "running", "exited", "failed".
 	Condition model.EventType
@@ -56,12 +58,11 @@ func (s *Service) Wait(
 		return nil, fmt.Errorf("list project commands: %w", err)
 	}
 
-	if err := validateCommandNames(opts.CommandNames, selection.Spec, entries); err != nil {
+	targets, err := resolveTargets(opts.Targets, storedReplicas(selection.Spec, entries))
+	if err != nil {
 		return nil, err
 	}
-	if len(opts.CommandNames) > 0 {
-		entries = filterByCommandNames(entries, opts.CommandNames)
-	}
+	entries = targets.filter(entries)
 
 	if len(entries) == 0 {
 		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose wait: no commands found for project",

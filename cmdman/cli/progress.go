@@ -13,8 +13,8 @@ import (
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
-// ProgressMode selects how compose lifecycle progress (up/start/stop/down) is
-// rendered.
+// ProgressMode selects how the progress of a compose lifecycle operation
+// (create, up, start, stop, restart, down or scale) is rendered.
 type ProgressMode string
 
 const (
@@ -58,9 +58,9 @@ type ComposeProgress interface {
 	Close() error
 }
 
-// NewComposeProgress builds a progress reporter for op ("up"/"start"/"stop"/
-// "down"), choosing the renderer from mode and, for ProgressAuto, whether out is
-// a terminal.
+// NewComposeProgress builds a progress reporter for op, the compose verb it
+// reports ("up", "create", "restart", ...), choosing the renderer from mode
+// and, for ProgressAuto, whether out is a terminal.
 func NewComposeProgress(out io.Writer, mode ProgressMode, op string) ComposeProgress {
 	switch resolveProgressMode(out, mode) {
 	case ProgressQuiet:
@@ -101,14 +101,21 @@ func (quietReporter) Close() error         { return nil }
 
 // progressLine is the JSONL wire shape emitted by jsonReporter. One object per
 // line, reporting a command's state transition and, on a terminal phase, its
-// result (exit code / error).
+// result (exit code / error). A hook event also names the hook run it belongs
+// to, and a hook-output event carries one line of the hook's output.
 type progressLine struct {
-	Op       string `json:"op"`
-	Command  string `json:"command"`
-	Phase    string `json:"phase"`
-	Terminal bool   `json:"terminal"`
-	ExitCode *int   `json:"exitCode,omitzero"`
-	Error    string `json:"error,omitzero"`
+	Op         string `json:"op"`
+	Command    string `json:"command"`
+	Phase      string `json:"phase"`
+	Terminal   bool   `json:"terminal"`
+	ExitCode   *int   `json:"exitCode,omitzero"`
+	Error      string `json:"error,omitzero"`
+	ScaleIndex int    `json:"scaleIndex,omitzero"`
+	Hook       string `json:"hook,omitzero"`
+	Lifecycle  string `json:"lifecycle,omitzero"`
+	Exec       string `json:"exec,omitzero"`
+	Stream     string `json:"stream,omitzero"`
+	Line       string `json:"line,omitzero"`
 }
 
 // jsonReporter writes one JSON object per event, newline-delimited (JSONL).
@@ -124,11 +131,17 @@ func newJSONReporter(out io.Writer, op string) *jsonReporter {
 
 func (r *jsonReporter) Report(ev compose.Event) {
 	line := progressLine{
-		Op:       r.op,
-		Command:  ev.Command,
-		Phase:    string(ev.Phase),
-		Terminal: ev.Phase.Terminal(),
-		ExitCode: ev.ExitCode,
+		Op:         r.op,
+		Command:    ev.Command,
+		Phase:      string(ev.Phase),
+		Terminal:   ev.Phase.Terminal(),
+		ExitCode:   ev.ExitCode,
+		ScaleIndex: ev.ScaleIndex,
+		Hook:       ev.Hook,
+		Lifecycle:  string(ev.Lifecycle),
+		Exec:       ev.Exec,
+		Stream:     string(ev.Stream),
+		Line:       ev.Line,
 	}
 	if ev.Err != nil {
 		line.Error = ev.Err.Error()
@@ -199,7 +212,8 @@ func StopResultErr(stops []compose.StopOutcome) error {
 	return aggregateErrors("compose stop operation", errs)
 }
 
-// DownResultErr returns a combined error when any stop or remove failed.
+// DownResultErr returns a combined error when any stop, remove or release
+// failed.
 func DownResultErr(result *compose.DownResult) error {
 	var errs []error
 	for _, s := range result.Stops {
@@ -208,6 +222,11 @@ func DownResultErr(result *compose.DownResult) error {
 		}
 	}
 	for _, r := range result.Removes {
+		if r.Err != nil {
+			errs = append(errs, r.Err)
+		}
+	}
+	for _, r := range result.Releases {
 		if r.Err != nil {
 			errs = append(errs, r.Err)
 		}

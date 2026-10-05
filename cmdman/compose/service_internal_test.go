@@ -434,7 +434,7 @@ func TestStartWithoutSpecUsesStoredAfterDependencies(t *testing.T) {
 	result, err := env.svcEntries(entries).Start(
 		context.Background(),
 		ProjectSelection{WorkDir: "/wd", Project: "proj"},
-		StartOption{CommandNames: []string{"worker"}},
+		StartOption{Targets: TargetsOf("worker")},
 	)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -458,7 +458,7 @@ func TestStopWithoutSpecUsesStoredAfterDependents(t *testing.T) {
 	result, err := env.svcEntries(entries).Stop(
 		context.Background(),
 		ProjectSelection{WorkDir: "/wd", Project: "proj"},
-		StopOption{CommandNames: []string{"api"}},
+		StopOption{Targets: TargetsOf("api")},
 	)
 	if err != nil {
 		t.Fatalf("Stop: %v", err)
@@ -532,7 +532,7 @@ func TestReconcileStartReportsEveryScaleIndex(t *testing.T) {
 	}
 
 	spec := reconcileSpec(Command{Name: "web", GeneratedName: "gen-web", Scale: 3})
-	outcomes, err := svc.reconcileStart(context.Background(), spec, nil)
+	outcomes, err := svc.reconcileStart(context.Background(), spec, nil, hooksFromSpec, nil)
 	if err != nil {
 		t.Fatalf("reconcileStart: %v", err)
 	}
@@ -594,7 +594,8 @@ func TestReconcileRunningConditionStartsDependentWithoutWaitingForExit(t *testin
 		close(releaseAPI)
 	}()
 
-	outcomes, err := env.svc(states).reconcileStart(context.Background(), spec, nil)
+	outcomes, err := env.svc(states).
+		reconcileStart(context.Background(), spec, nil, hooksFromSpec, nil)
 	if err != nil {
 		t.Fatalf("reconcileStart: %v", err)
 	}
@@ -637,7 +638,8 @@ func TestReconcileCompletedConditionWaitsForTerminal(t *testing.T) {
 		close(releaseWait)
 	}()
 
-	outcomes, err := env.svc(states).reconcileStart(context.Background(), spec, nil)
+	outcomes, err := env.svc(states).
+		reconcileStart(context.Background(), spec, nil, hooksFromSpec, nil)
 	if err != nil {
 		t.Fatalf("reconcileStart: %v", err)
 	}
@@ -666,7 +668,8 @@ func TestReconcileCompletedSuccessfullyBlocksOnNonZeroExit(t *testing.T) {
 		"worker": model.EventTypeCreated,
 	}
 
-	outcomes, err := env.svc(states).reconcileStart(context.Background(), spec, nil)
+	outcomes, err := env.svc(states).
+		reconcileStart(context.Background(), spec, nil, hooksFromSpec, nil)
 	if err != nil {
 		t.Fatalf("reconcileStart: %v", err)
 	}
@@ -713,7 +716,8 @@ func TestReconcileStaleTerminalStateDoesNotSatisfyCompleted(t *testing.T) {
 		close(releaseWait)
 	}()
 
-	outcomes, err := env.svc(states).reconcileStart(context.Background(), spec, nil)
+	outcomes, err := env.svc(states).
+		reconcileStart(context.Background(), spec, nil, hooksFromSpec, nil)
 	if err != nil {
 		t.Fatalf("reconcileStart: %v", err)
 	}
@@ -738,7 +742,8 @@ func TestReconcileRestartsExitedAndFailed(t *testing.T) {
 		"beta":  model.EventTypeFailed,
 	}
 
-	outcomes, err := env.svc(states).reconcileStart(context.Background(), spec, nil)
+	outcomes, err := env.svc(states).
+		reconcileStart(context.Background(), spec, nil, hooksFromSpec, nil)
 	if err != nil {
 		t.Fatalf("reconcileStart: %v", err)
 	}
@@ -762,7 +767,8 @@ func TestReconcileSkipsActiveCommands(t *testing.T) {
 		"beta":  model.EventTypeStarting,
 	}
 
-	outcomes, err := env.svc(states).reconcileStart(context.Background(), spec, nil)
+	outcomes, err := env.svc(states).
+		reconcileStart(context.Background(), spec, nil, hooksFromSpec, nil)
 	if err != nil {
 		t.Fatalf("reconcileStart: %v", err)
 	}
@@ -805,7 +811,8 @@ func TestReconcileIndependentCommandsStartConcurrently(t *testing.T) {
 		"beta":  model.EventTypeCreated,
 	}
 
-	outcomes, err := env.svc(states).reconcileStart(context.Background(), spec, nil)
+	outcomes, err := env.svc(states).
+		reconcileStart(context.Background(), spec, nil, hooksFromSpec, nil)
 	if err != nil {
 		t.Fatalf("reconcileStart: %v", err)
 	}
@@ -837,7 +844,7 @@ func TestReconcileFailedBranchDoesNotBlockSibling(t *testing.T) {
 
 	// Inject a logger via context to prove the service-layer warning wiring works.
 	buf, ctx := warnLogger()
-	outcomes, err := env.svc(states).reconcileStart(ctx, spec, nil)
+	outcomes, err := env.svc(states).reconcileStart(ctx, spec, nil, hooksFromSpec, nil)
 	if err != nil {
 		t.Fatalf("reconcileStart: %v", err)
 	}
@@ -885,7 +892,7 @@ func TestReconcileStopVisitsDependentsBeforeDependencies(t *testing.T) {
 		"worker": model.EventTypeRunning,
 	}
 
-	outcomes, err := env.svc(states).reconcileStop(context.Background(), spec, nil)
+	outcomes, err := env.svc(states).reconcileStop(context.Background(), spec, nil, &teardown{})
 	if err != nil {
 		t.Fatalf("reconcileStop: %v", err)
 	}
@@ -917,7 +924,7 @@ func TestReconcileStopSkipsNonRunning(t *testing.T) {
 		"gamma": model.EventTypeFailed,
 	}
 
-	outcomes, err := env.svc(states).reconcileStop(context.Background(), spec, nil)
+	outcomes, err := env.svc(states).reconcileStop(context.Background(), spec, nil, &teardown{})
 	if err != nil {
 		t.Fatalf("reconcileStop: %v", err)
 	}
@@ -947,7 +954,8 @@ func TestReconcileStopWithNamesIncludesDependents(t *testing.T) {
 		"solo":   model.EventTypeRunning,
 	}
 
-	outcomes, err := env.svc(states).reconcileStop(context.Background(), spec, []string{"api"})
+	outcomes, err := env.svc(states).reconcileStop(
+		context.Background(), spec, targetSet{"api": nil}, &teardown{})
 	if err != nil {
 		t.Fatalf("reconcileStop: %v", err)
 	}
@@ -983,7 +991,7 @@ func TestReconcileStopContinuesPastFailedDependent(t *testing.T) {
 	}
 
 	buf, ctx := warnLogger()
-	outcomes, err := env.svc(states).reconcileStop(ctx, spec, nil)
+	outcomes, err := env.svc(states).reconcileStop(ctx, spec, nil, &teardown{})
 	if err != nil {
 		t.Fatalf("reconcileStop: %v", err)
 	}
@@ -1105,6 +1113,9 @@ func TestListProjectsGroupsComposeCommands(t *testing.T) {
 		list: func(_ context.Context, req cmdman.ListRequest) ([]store.CommandEntry, error) {
 			if !req.AllStates {
 				t.Fatal("expected all states")
+			}
+			if req.Labels[LabelIntermediate] != "" {
+				return nil, nil
 			}
 			if req.Labels[LabelVersion] != LabelVersionValue {
 				t.Fatalf("expected compose label filter, got %#v", req.Labels)

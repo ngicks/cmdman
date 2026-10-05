@@ -18,16 +18,17 @@ func composeLogsCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 		flagUntil  string
 		flagHead   int
 		flagTail   int
+		flagScale  int
 	)
 
 	cmd := &cobra.Command{
 		Use:               "logs [COMMAND...]",
 		Short:             "Fetch logs from compose commands",
-		Args:              cobra.ArbitraryArgs,
+		Args:              scaleArgs(cobra.ArbitraryArgs, &flagScale),
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runComposeLogs(
-				cmd, rf, cf, args,
+				cmd, rf, cf, args, flagScale,
 				flagFollow, flagSince, flagUntil, flagHead, flagTail,
 			)
 		},
@@ -40,6 +41,7 @@ func composeLogsCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 		IntVar(&flagHead, "head", 0, "Return only the first N records per command (0 = no limit)")
 	cmd.Flags().
 		IntVar(&flagTail, "tail", 0, "Return only the last N records per command (0 = no limit)")
+	addScaleFlag(cmd, &flagScale)
 
 	parent.AddCommand(cmd)
 }
@@ -49,6 +51,7 @@ func runComposeLogs(
 	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
+	scale int,
 	follow bool,
 	sinceStr, untilStr string,
 	head, tail int,
@@ -82,12 +85,12 @@ func runComposeLogs(
 	defer cancel()
 
 	msgs, errc := compose.NewService(svc).Logs(ctx, selection, compose.LogsOption{
-		CommandNames: commandNames,
-		Follow:       follow,
-		Since:        since,
-		Until:        until,
-		Head:         head,
-		Tail:         tail,
+		Targets: composeTargets(commandNames, scale),
+		Follow:  follow,
+		Since:   since,
+		Until:   until,
+		Head:    head,
+		Tail:    tail,
 	})
 
 	writeErr := cli.PrintComposeLogs(cmd.OutOrStdout(), cmd.ErrOrStderr(), msgs)

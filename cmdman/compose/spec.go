@@ -4,6 +4,9 @@ package compose
 
 import (
 	"fmt"
+	"iter"
+
+	"go.yaml.in/yaml/v4"
 
 	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"github.com/ngicks/cmdman/cmdman/model"
@@ -29,6 +32,10 @@ const (
 	// LabelScale is the desired replica count of the command this instance
 	// belongs to, recorded so stored state can be read back without the file.
 	LabelScale = "cmdman.compose.scale"
+	// LabelHooks is the command's normalized hooks as a JSON array of
+	// [LifecycleHook], recorded so each replica can run its hooks without the
+	// file. It is absent when the command declares no hooks.
+	LabelHooks = "cmdman.compose.hooks"
 
 	LabelVersionValue = "1"
 )
@@ -98,9 +105,88 @@ type RawCommand struct {
 	After           map[string]AfterSpec `yaml:"after" json:"after"`
 	// Scale is the desired replica count. A pointer so absence (nil → default 1)
 	// is distinguishable from an explicit value; Normalize rejects values < 1.
-	Scale *int `yaml:"scale" json:"scale"`
+	Scale *int               `yaml:"scale" json:"scale"`
+	Hooks []RawLifecycleHook `yaml:"hooks" json:"hooks"`
 	// Unknown captures unrecognized per-command keys so Normalize can warn about them.
 	Unknown map[string]any `yaml:",inline" json:"-"`
+}
+
+// RawLifecycleHook is the raw YAML shape for one item of a command's hooks:
+// list. A nil event field means the item does not set that event.
+type RawLifecycleHook struct {
+	Name       string            `yaml:"name" json:"name"`
+	Resource   string            `yaml:"resource" json:"resource"`
+	CreatePre  *RawLifecycleExec `yaml:"create_pre" json:"create_pre"`
+	CreatePost *RawLifecycleExec `yaml:"create_post" json:"create_post"`
+	StartPre   *RawLifecycleExec `yaml:"start_pre" json:"start_pre"`
+	StartPost  *RawLifecycleExec `yaml:"start_post" json:"start_post"`
+	StopPre    *RawLifecycleExec `yaml:"stop_pre" json:"stop_pre"`
+	StopPost   *RawLifecycleExec `yaml:"stop_post" json:"stop_post"`
+	RemovePre  *RawLifecycleExec `yaml:"remove_pre" json:"remove_pre"`
+	RemovePost *RawLifecycleExec `yaml:"remove_post" json:"remove_post"`
+	// Unknown captures unrecognized item keys so Normalize can warn about them.
+	Unknown map[string]any `yaml:",inline" json:"-"`
+}
+
+// events yields the event fields h sets, in [LifecycleEvent] declaration order.
+func (h RawLifecycleHook) events() iter.Seq2[LifecycleEvent, *RawLifecycleExec] {
+	return func(yield func(LifecycleEvent, *RawLifecycleExec) bool) {
+		for _, f := range [...]struct {
+			event LifecycleEvent
+			exec  *RawLifecycleExec
+		}{
+			{LifecycleCreatePre, h.CreatePre},
+			{LifecycleCreatePost, h.CreatePost},
+			{LifecycleStartPre, h.StartPre},
+			{LifecycleStartPost, h.StartPost},
+			{LifecycleStopPre, h.StopPre},
+			{LifecycleStopPost, h.StopPost},
+			{LifecycleRemovePre, h.RemovePre},
+			{LifecycleRemovePost, h.RemovePost},
+		} {
+			if f.exec != nil && !yield(f.event, f.exec) {
+				return
+			}
+		}
+	}
+}
+
+// RawLifecycleExec is the raw YAML shape for one hook event. In YAML it is
+// either an argv list or a mapping with args and on_error; see
+// [RawLifecycleExec.UnmarshalYAML].
+type RawLifecycleExec struct {
+	Args    []string `yaml:"args" json:"args"`
+	OnError OnError  `yaml:"on_error" json:"on_error"`
+	// Unknown captures unrecognized keys of the mapping form so Normalize can
+	// warn about them.
+	Unknown map[string]any `yaml:",inline" json:"-"`
+}
+
+// UnmarshalYAML accepts either a sequence, read as the argv list with the
+// default on_error, or a mapping with the [RawLifecycleExec] fields.
+func (e *RawLifecycleExec) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.SequenceNode:
+		var args []string
+		if err := node.Decode(&args); err != nil {
+			return err
+		}
+		*e = RawLifecycleExec{Args: args}
+		return nil
+	case yaml.MappingNode:
+		type rawExec RawLifecycleExec
+		var r rawExec
+		if err := node.Decode(&r); err != nil {
+			return err
+		}
+		*e = RawLifecycleExec(r)
+		return nil
+	default:
+		return fmt.Errorf(
+			"line %d: hook event must be an argv list or a mapping with args and on_error",
+			node.Line,
+		)
+	}
 }
 
 // EnvFileSpec describes an env file to load for a command.
@@ -180,6 +266,9 @@ type Command struct {
 	LogDriver       logdriver.LogDriver
 	LogOpts         map[string]string
 	After           []AfterSpec
+	// Hooks are the command's lifecycle hooks in declaration order, with event
+	// args interpolated and every on_error resolved.
+	Hooks []LifecycleHook
 	// Scale is the desired replica count (>= 1). Each replica is a distinct
 	// cmdman command named <GeneratedName>-<index> for index in 1..Scale.
 	Scale int

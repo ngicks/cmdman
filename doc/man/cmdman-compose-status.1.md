@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] status [--format FORMAT] [COMMAND...]
+cmdman compose [selection flags] status [--format FORMAT] [--scale N] [COMMAND...]
 ```
 
 ## Description
@@ -46,12 +46,15 @@ every command in the working directory is listed across all co-located projects.
 ## Options
 
 - `--format FORMAT`: built-in table, `json`, or a Go template.
+- `--scale N`: report only replica N (1-based) of exactly one COMMAND. N must
+  name an existing replica.
 
 ## Examples
 
 ```sh
 cmdman compose status
 cmdman compose status api worker
+cmdman compose status --scale 2 worker
 cmdman compose status --format json
 ```
 

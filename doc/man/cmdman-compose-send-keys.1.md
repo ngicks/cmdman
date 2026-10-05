@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] send-keys [COMMAND...] -- KEY [KEY...]
+cmdman compose [selection flags] send-keys [--scale N] [COMMAND...] -- KEY [KEY...]
 ```
 
 ## Description
@@ -32,11 +32,14 @@ Uses the compose selection flags documented in
 - `-l, --literal`: send arguments literally, without translating key names.
 - `-H, --hex`: treat arguments as hexadecimal byte values.
 - `-N, --repeat-count N`: repeat the full key sequence N times. Defaults to 1.
+- `--scale N`: send only to replica N (1-based) of exactly one COMMAND. N must
+  name an existing replica.
 
 ## Examples
 
 ```sh
 cmdman compose send-keys api worker -- C-c
+cmdman compose send-keys --scale 2 worker -- Enter
 cmdman compose send-keys -- Enter
 cmdman compose send-keys --literal repl -- 'exit()' Enter
 ```

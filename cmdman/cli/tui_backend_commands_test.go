@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"maps"
+	"reflect"
 	"testing"
 
 	"github.com/ngicks/cmdman/cmdman/compose"
@@ -123,5 +125,84 @@ func TestCommandInfosScale(t *testing.T) {
 				tc.id, got.ScaleIndex, got.ScaleCount, tc.wantIndex, tc.wantCount, tc.wantReason,
 			)
 		}
+	}
+}
+
+func TestCommandInfosGroupsIntermediatesUnderTheirProject(t *testing.T) {
+	entry := func(
+		id, name string,
+		state model.EventType,
+		labels map[string]string,
+	) store.CommandEntry {
+		return store.CommandEntry{
+			ID:    id,
+			Name:  name,
+			State: state,
+			// The directory hook commands run in is the replica's, never the project's.
+			ConfigJSON: &model.CommandConfig{Dir: "/work/api/web", Labels: labels},
+		}
+	}
+	hooks := func(kind, owner string, extra map[string]string) map[string]string {
+		labels := map[string]string{
+			compose.LabelIntermediate: kind,
+			compose.LabelOwner:        owner,
+			compose.LabelHooksProject: "api-stack",
+			compose.LabelHooksWorkdir: "/work/api",
+		}
+		maps.Copy(labels, extra)
+		return labels
+	}
+	entries := []store.CommandEntry{
+		entry("r2", "h-api--stack-web-2", model.EventTypeRunning, map[string]string{
+			compose.LabelProject:    "api-stack",
+			compose.LabelWorkdir:    "/work/api",
+			compose.LabelCommand:    "web",
+			compose.LabelScaleIndex: "2",
+			compose.LabelScale:      "3",
+		}),
+		entry("exec", "h-api--stack-web-2.hook.scratch.create_pre", model.EventTypeExited,
+			hooks(compose.IntermediateExec, "h-api--stack-web-2", map[string]string{
+				compose.LabelHook:      "scratch",
+				compose.LabelHookEvent: string(compose.LifecycleCreatePre),
+			})),
+		entry("holder", "h-api--stack-web-2.res.scratch", model.EventTypeCreated,
+			hooks(compose.IntermediateHolder, "h-api--stack-web-2", map[string]string{
+				compose.LabelResourceCommand:    "web",
+				compose.LabelResourceScaleIndex: "2",
+				compose.LabelResourceKey:        "scratch",
+			})),
+		// The replica of this holder is gone; its labels still name the command.
+		entry("orphan", "h-api--stack-db-1.res.data", model.EventTypeCreated,
+			hooks(compose.IntermediateHolder, "h-api--stack-db-1", map[string]string{
+				compose.LabelResourceCommand:    "db",
+				compose.LabelResourceScaleIndex: "1",
+				compose.LabelResourceKey:        "data",
+			})),
+		// So is the replica of this hook run, and nothing names its command.
+		entry("lost", "h-api--stack-old-1.hook.cleanup.remove_post", model.EventTypeExited,
+			hooks(compose.IntermediateExec, "h-api--stack-old-1", map[string]string{
+				compose.LabelHook:      "cleanup",
+				compose.LabelHookEvent: string(compose.LifecycleRemovePost),
+			})),
+	}
+
+	type row struct {
+		Name, Project, Workdir string
+		ScaleIndex, ScaleCount int
+	}
+	var got []row
+	for _, c := range commandInfos(entries) {
+		got = append(got, row{c.Name, c.Project, c.Workdir, c.ScaleIndex, c.ScaleCount})
+	}
+	workdir := normalizePath("/work/api")
+	want := []row{
+		{"web", "api-stack", workdir, 2, 3},
+		{"web.hook.scratch.create_pre", "api-stack", workdir, 2, 3},
+		{"web.res.scratch", "api-stack", workdir, 2, 3},
+		{"db.res.data", "api-stack", workdir, 0, 0},
+		{"h-api--stack-old-1.hook.cleanup.remove_post", "api-stack", workdir, 0, 0},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("intermediates should group under their project:\ngot  %+v\nwant %+v", got, want)
 	}
 }

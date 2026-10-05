@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"charm.land/lipgloss/v2"
 
@@ -58,16 +59,31 @@ func (r *ttyReporter) Report(ev compose.Event) {
 	if r.closed {
 		return
 	}
+	// Each run of a hook event gets a line of its own, so its steps never
+	// refine or settle the steps of the replica it runs for.
+	name := ev.Command
+	if ev.Hook != "" {
+		name = fmt.Sprintf("%s hook %s.%s", ev.Command, ev.Hook, ev.Lifecycle)
+	}
+	steps := r.lines[name]
+	if ev.Phase == compose.PhaseHookOutput {
+		// Output is no step: the latest line shows on the hook's line while the
+		// hook runs.
+		if n := len(steps); n > 0 && !steps[n-1].phase.Terminal() {
+			steps[n-1].output = ev.Line
+			r.render()
+		}
+		return
+	}
 	entry := progressEntry{
 		phase: ev.Phase,
 		err:   errString(ev.Err),
 		exit:  ev.ExitCode,
 	}
-	steps := r.lines[ev.Command]
 	switch {
 	case len(steps) == 0:
-		r.order = append(r.order, ev.Command)
-		r.lines[ev.Command] = []progressEntry{entry}
+		r.order = append(r.order, name)
+		r.lines[name] = []progressEntry{entry}
 	case steps[len(steps)-1].phase.Failed():
 		// A failure is sticky: once a step has failed during this operation, keep
 		// that failure (its kind and detail) as the command's terminal outcome
@@ -78,7 +94,7 @@ func (r *ttyReporter) Report(ev compose.Event) {
 	case steps[len(steps)-1].phase.Terminal():
 		// The previous step reached a terminal milestone; this event opens a new
 		// step on its own line, leaving the milestone visible above it.
-		r.lines[ev.Command] = append(steps, entry)
+		r.lines[name] = append(steps, entry)
 	default:
 		// The current step is still in flight; refine it in place (transient →
 		// transient, or transient → terminal collapses onto the same line).
@@ -97,7 +113,11 @@ func (r *ttyReporter) Close() error {
 	r.render() // final frame
 	// render leaves the cursor on the block's last line (no trailing newline);
 	// move below it so the shell prompt / later output starts on a fresh line.
-	_, _ = io.WriteString(r.out, "\n")
+	// An operation that reported nothing, such as a restart of commands without
+	// hooks, drew no block, and a newline would only leave an empty line.
+	if r.drawn > 0 {
+		_, _ = io.WriteString(r.out, "\n")
+	}
 	r.mu.Unlock()
 
 	close(r.stopTick)
@@ -175,7 +195,13 @@ type progressEntry struct {
 	phase compose.Phase
 	err   string
 	exit  *int
+	// output is the latest output line of a running hook.
+	output string
 }
+
+// maxOutputRunes bounds the hook output shown on a progress line. A line that
+// wraps would break the repaint, which counts one terminal row per line.
+const maxOutputRunes = 60
 
 // spinnerFrames is the braille spinner used for in-progress phases.
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -201,9 +227,33 @@ func renderProgressLine(name string, e progressEntry, frame int) string {
 		fmt.Fprintf(&b, " (exit %d)", *e.exit)
 	}
 	if e.err != "" {
-		b.WriteString(styleErr.Render("  " + firstLine(e.err)))
+		// An ignored failure is shown for what it was, without alarming color.
+		style := styleErr
+		if e.phase == compose.PhaseHookIgnored {
+			style = styleDim
+		}
+		b.WriteString(style.Render("  " + firstLine(e.err)))
+	}
+	if e.output != "" && !e.phase.Terminal() {
+		b.WriteString(styleDim.Render("  " + outputSnippet(e.output)))
 	}
 	return b.String()
+}
+
+// outputSnippet returns s fit for one progress line: control characters, which
+// would move the cursor or restyle the line, dropped and the rest cut to
+// maxOutputRunes.
+func outputSnippet(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+	if runes := []rune(s); len(runes) > maxOutputRunes {
+		return string(runes[:maxOutputRunes-1]) + "…"
+	}
+	return s
 }
 
 // progressMarker selects the leading glyph for a phase by status category:
@@ -213,7 +263,9 @@ func renderProgressLine(name string, e progressEntry, frame int) string {
 //	running      ●  green                running
 //	completed    ✔  green                exited/stopped/removed
 //	skipped      ⊘  yellow               skipped
-//	failed       ✘  red                  error/failed
+//	warning      !  yellow               hook-warning
+//	ignored      -  dim                  hook-ignored
+//	failed       ✘  red                  error/failed/hook-failed
 func progressMarker(p compose.Phase, frame int) string {
 	switch {
 	case !p.Terminal():
@@ -222,6 +274,10 @@ func progressMarker(p compose.Phase, frame int) string {
 		return styleErr.Render("✘")
 	case p == compose.PhaseSkipped:
 		return styleWarn.Render("⊘")
+	case p == compose.PhaseHookWarning:
+		return styleWarn.Render("!")
+	case p == compose.PhaseHookIgnored:
+		return styleDim.Render("-")
 	case isPendingPhase(p):
 		return stylePending.Render("◌")
 	case p == compose.PhaseRunning:

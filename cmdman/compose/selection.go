@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/ngicks/cmdman/cmdman/store"
@@ -127,26 +127,6 @@ func ResolveMuxSelectionByName(
 	return selection, nil
 }
 
-// filterByCommandNames returns only the entries whose LabelCommand matches one
-// of the provided names.
-func filterByCommandNames(entries []cmdmanEntry, names []string) []cmdmanEntry {
-	set := make(map[string]struct{}, len(names))
-	for _, n := range names {
-		set[n] = struct{}{}
-	}
-	out := entries[:0:0]
-	for _, e := range entries {
-		if e.ConfigJSON == nil {
-			continue
-		}
-		cmdName := e.ConfigJSON.Labels[LabelCommand]
-		if _, ok := set[cmdName]; ok {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
 // commandNameOf returns the compose command name (LabelCommand) recorded on an
 // entry, or "" when the entry has no stored config or label.
 func commandNameOf(e cmdmanEntry) string {
@@ -154,63 +134,6 @@ func commandNameOf(e cmdmanEntry) string {
 		return ""
 	}
 	return e.ConfigJSON.Labels[LabelCommand]
-}
-
-// buildIDsByCommand groups the cmdman entry IDs by compose command name
-// (LabelCommand), so a command with multiple replicas maps to all of its IDs.
-func buildIDsByCommand(entries []cmdmanEntry) map[string][]string {
-	m := make(map[string][]string, len(entries))
-	for _, e := range entries {
-		if e.ConfigJSON == nil {
-			continue
-		}
-		name := e.ConfigJSON.Labels[LabelCommand]
-		if name != "" {
-			m[name] = append(m[name], e.ID)
-		}
-	}
-	return m
-}
-
-// validateCommandNames rejects supplied command-name filters that don't match
-// any compose command in the available set. The available set comes from the
-// loaded spec when available, or from the LabelCommand values of the existing
-// project-labeled entries otherwise. Returns nil when names is empty (no
-// filter) or every name is recognized.
-func validateCommandNames(
-	names []string,
-	spec *ComposeSpec,
-	entries []cmdmanEntry,
-) error {
-	if len(names) == 0 {
-		return nil
-	}
-	known := make(map[string]struct{})
-	if spec != nil {
-		for _, nc := range spec.Commands {
-			known[nc.Name] = struct{}{}
-		}
-	} else {
-		for _, e := range entries {
-			if e.ConfigJSON == nil {
-				continue
-			}
-			if n := e.ConfigJSON.Labels[LabelCommand]; n != "" {
-				known[n] = struct{}{}
-			}
-		}
-	}
-	var unknown []string
-	for _, n := range names {
-		if _, ok := known[n]; !ok {
-			unknown = append(unknown, n)
-		}
-	}
-	if len(unknown) == 0 {
-		return nil
-	}
-	slices.Sort(unknown)
-	return fmt.Errorf("unknown compose command(s): %v", unknown)
 }
 
 // reverseLayers reverses a slice of layers in-place.
@@ -249,6 +172,62 @@ func LoadOrProject(opts NormalizeOpts) (ProjectSelection, error) {
 	// selection; when empty it matches every command in this workdir (cwd), which
 	// is how down/stop/... work from the project directory without -f.
 	return workdirSelection(cwd, opts), nil
+}
+
+// ResolveContextSelection resolves the project for an operation that a replica
+// or a hook of a compose project may run on itself, such as `compose resource`.
+//
+// Resolution order:
+//  1. Any of opts.File, opts.ProjectName or opts.WorkDir set: [LoadOrProject].
+//  2. [ENV_CMDMAN_COMPOSE_WORK_DIR] and [ENV_CMDMAN_COMPOSE_PROJECT] both set
+//     and non-empty, as compose sets them for every replica and hook: the
+//     project they name, with no spec loaded.
+//  3. Otherwise [LoadOrProject], which discovers a compose file in the current
+//     directory.
+//
+// lookupEnv reads the environment, normally [os.LookupEnv].
+func ResolveContextSelection(
+	opts NormalizeOpts,
+	lookupEnv func(string) (string, bool),
+) (ProjectSelection, error) {
+	if opts.File != "" || opts.ProjectName != "" || opts.WorkDir != "" {
+		return LoadOrProject(opts)
+	}
+	workDir, _ := lookupEnv(ENV_CMDMAN_COMPOSE_WORK_DIR)
+	project, _ := lookupEnv(ENV_CMDMAN_COMPOSE_PROJECT)
+	if workDir != "" && project != "" {
+		return ProjectSelection{WorkDir: filepath.Clean(workDir), Project: project}, nil
+	}
+	return LoadOrProject(opts)
+}
+
+// ContextScaleIndex returns the scale index the environment names when it is
+// the environment of a replica or hook of command in the project of
+// selection, and 0 otherwise. Compose sets [ENV_CMDMAN_COMPOSE_COMMAND],
+// [ENV_CMDMAN_COMPOSE_PROJECT], [ENV_CMDMAN_COMPOSE_WORK_DIR] and
+// [ENV_CMDMAN_COMPOSE_SCALE_INDEX] there, so a process acting on its own
+// replica need not name it.
+//
+// lookupEnv reads the environment, normally [os.LookupEnv].
+func ContextScaleIndex(
+	selection ProjectSelection,
+	command string,
+	lookupEnv func(string) (string, bool),
+) int {
+	envCommand, _ := lookupEnv(ENV_CMDMAN_COMPOSE_COMMAND)
+	envProject, _ := lookupEnv(ENV_CMDMAN_COMPOSE_PROJECT)
+	envWorkDir, _ := lookupEnv(ENV_CMDMAN_COMPOSE_WORK_DIR)
+	if envCommand == "" || envCommand != command ||
+		envProject != selection.Project ||
+		envWorkDir == "" || filepath.Clean(envWorkDir) != filepath.Clean(selection.WorkDir) {
+		return 0
+	}
+	raw, _ := lookupEnv(ENV_CMDMAN_COMPOSE_SCALE_INDEX)
+	index, err := strconv.Atoi(raw)
+	if err != nil || index < 1 {
+		return 0
+	}
+	return index
 }
 
 // LoadOrWorkdir resolves the project selection for read-only listing operations
@@ -398,6 +377,16 @@ func projectLabels(workDir, project string) map[string]string {
 	labels := map[string]string{LabelWorkdir: workDir}
 	if project != "" {
 		labels[LabelProject] = project
+	}
+	return labels
+}
+
+// hooksProjectLabels is [projectLabels] for the intermediates of the
+// selection, which name their project by the hooks labels instead.
+func hooksProjectLabels(workDir, project string) map[string]string {
+	labels := map[string]string{LabelHooksWorkdir: workDir}
+	if project != "" {
+		labels[LabelHooksProject] = project
 	}
 	return labels
 }

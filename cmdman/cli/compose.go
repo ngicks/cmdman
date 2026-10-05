@@ -72,12 +72,15 @@ const (
 {{- cell (printf "%d" .Running) .W.Running -}}
 {{- cell (printf "%d" .Exited) .W.Exited -}}
 {{- cell (printf "%d" .Failed) .W.Failed -}}
+{{- cell (printf "%d" .Intermediates) .W.Intermediates -}}
 {{- cell .WorkDir .W.WorkDir -}}
 {{- fit .ComposeFile .Win .W.Used -}}`
 
-	DefaultComposePsRowFormat = `{{- cell .Command .W.Command -}}
+	DefaultComposePsRowFormat = `{{- cell (or .Command "-") .W.Command -}}
 {{- cell (shortID .ID) .W.ID -}}
 {{- cell .Name .W.Name -}}
+{{- cell (or .Intermediate "-") .W.Kind -}}
+{{- cell (or .Owner "-") .W.Owner -}}
 {{- cell (printf "%v" .State) .W.State -}}
 {{- cell (exitCode .ExitCode) .W.Code -}}
 {{- cell (or .Status "-") .W.Status -}}
@@ -110,7 +113,8 @@ func RenderComposeProjects(out io.Writer, summaries []compose.ProjectSummary, fo
 	if format == "" || format == "table" {
 		fmt.Fprintln(out, cell("PROJECT", w["Project"])+cell("COMMANDS", w["Commands"])+
 			cell("RUNNING", w["Running"])+cell("EXITED", w["Exited"])+
-			cell("FAILED", w["Failed"])+cell("WORKDIR", w["WorkDir"])+"FILE")
+			cell("FAILED", w["Failed"])+cell("INTERMEDIATES", w["Intermediates"])+
+			cell("WORKDIR", w["WorkDir"])+"FILE")
 		format = DefaultComposeLsRowFormat
 	}
 	return renderTemplate(out, rows, format)
@@ -118,12 +122,13 @@ func RenderComposeProjects(out io.Writer, summaries []compose.ProjectSummary, fo
 
 func measureComposeLs(summaries []compose.ProjectSummary) map[string]int {
 	w := map[string]int{
-		"Project":  width("PROJECT"),
-		"Commands": width("COMMANDS"),
-		"Running":  width("RUNNING"),
-		"Exited":   width("EXITED"),
-		"Failed":   width("FAILED"),
-		"WorkDir":  width("WORKDIR"),
+		"Project":       width("PROJECT"),
+		"Commands":      width("COMMANDS"),
+		"Running":       width("RUNNING"),
+		"Exited":        width("EXITED"),
+		"Failed":        width("FAILED"),
+		"Intermediates": width("INTERMEDIATES"),
+		"WorkDir":       width("WORKDIR"),
 	}
 	for _, s := range summaries {
 		w["Project"] = max(w["Project"], width(s.Project))
@@ -131,10 +136,12 @@ func measureComposeLs(summaries []compose.ProjectSummary) map[string]int {
 		w["Running"] = max(w["Running"], width(fmt.Sprintf("%d", s.Running)))
 		w["Exited"] = max(w["Exited"], width(fmt.Sprintf("%d", s.Exited)))
 		w["Failed"] = max(w["Failed"], width(fmt.Sprintf("%d", s.Failed)))
+		w["Intermediates"] = max(
+			w["Intermediates"], width(fmt.Sprintf("%d", s.Intermediates)))
 		w["WorkDir"] = max(w["WorkDir"], width(s.WorkDir))
 	}
 	w["Used"] = w["Project"] + w["Commands"] + w["Running"] + w["Exited"] +
-		w["Failed"] + w["WorkDir"] + 6*len(columnGap)
+		w["Failed"] + w["Intermediates"] + w["WorkDir"] + 7*len(columnGap)
 	return w
 }
 
@@ -156,7 +163,8 @@ func RenderComposePs(out io.Writer, statuses []compose.CommandStatus, format str
 
 	if format == "" || format == "table" {
 		fmt.Fprintln(out, cell("COMMAND", w["Command"])+cell("ID", w["ID"])+
-			cell("NAME", w["Name"])+cell("STATE", w["State"])+
+			cell("NAME", w["Name"])+cell("KIND", w["Kind"])+cell("OWNER", w["Owner"])+
+			cell("STATE", w["State"])+
 			cell("EXIT CODE", w["Code"])+cell("STATUS", w["Status"])+
 			cell("BELL", w["Bell"])+cell("DETAIL", w["Detail"])+
 			cell("TITLE", w["Title"])+"ARGV")
@@ -170,6 +178,8 @@ func measureComposePs(statuses []compose.CommandStatus) map[string]int {
 		"Command": width("COMMAND"),
 		"ID":      width("ID"),
 		"Name":    width("NAME"),
+		"Kind":    width("KIND"),
+		"Owner":   width("OWNER"),
 		"State":   width("STATE"),
 		"Code":    width("EXIT CODE"),
 		"Status":  width("STATUS"),
@@ -181,14 +191,16 @@ func measureComposePs(statuses []compose.CommandStatus) map[string]int {
 		w["Command"] = max(w["Command"], width(s.Command))
 		w["ID"] = max(w["ID"], width(shortID(s.ID)))
 		w["Name"] = max(w["Name"], width(s.Name))
+		w["Kind"] = max(w["Kind"], width(s.Intermediate))
+		w["Owner"] = max(w["Owner"], width(s.Owner))
 		w["State"] = max(w["State"], width(fmt.Sprintf("%v", s.State)))
 		w["Code"] = max(w["Code"], width(exitCode(s.ExitCode)))
 		w["Status"] = max(w["Status"], width(s.Status))
 		w["Detail"] = max(w["Detail"], width(s.Detail))
 		w["Title"] = max(w["Title"], width(titleText(s.Title)))
 	}
-	w["Used"] = w["Command"] + w["ID"] + w["Name"] + w["State"] + w["Code"] +
-		w["Status"] + w["Detail"] + w["Bell"] + w["Title"] + 9*len(columnGap)
+	w["Used"] = w["Command"] + w["ID"] + w["Name"] + w["Kind"] + w["Owner"] + w["State"] +
+		w["Code"] + w["Status"] + w["Detail"] + w["Bell"] + w["Title"] + 11*len(columnGap)
 	return w
 }
 

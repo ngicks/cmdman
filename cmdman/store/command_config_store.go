@@ -13,16 +13,35 @@ import (
 
 // InsertCommandConfig inserts a new CommandConfig row.
 func (s *Store) InsertCommandConfig(id, name string, cfg *model.CommandConfig) error {
-	data, err := json.Marshal(cfg)
+	params, err := insertCommandConfigParams(id, name, cfg)
 	if err != nil {
 		return err
 	}
-	return s.queries.InsertCommandConfig(context.Background(), query.InsertCommandConfigParams{
+	return s.queries.InsertCommandConfig(context.Background(), params)
+}
+
+func insertCommandConfigParams(
+	id, name string,
+	cfg *model.CommandConfig,
+) (query.InsertCommandConfigParams, error) {
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return query.InsertCommandConfigParams{}, err
+	}
+	return query.InsertCommandConfigParams{
 		ID:        id,
 		Name:      nullableString(name),
 		Createdat: time.Now().UTC().Format(time.RFC3339),
 		Json:      string(data),
-	})
+	}, nil
+}
+
+// ResolveIDByName returns the ID of the command named exactly name, or
+// sql.ErrNoRows when no command carries that name. Unlike ResolveID it never
+// falls back to matching IDs, so a name that happens to prefix an ID does not
+// resolve to that command.
+func (s *Store) ResolveIDByName(name string) (string, error) {
+	return s.queries.ResolveIDByName(context.Background(), name)
 }
 
 // GetCommandConfig retrieves a CommandConfig by exact name, exact ID, or ID prefix.

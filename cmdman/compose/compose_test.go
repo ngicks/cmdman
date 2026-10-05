@@ -298,8 +298,10 @@ func TestHashStability(t *testing.T) {
 // TestHashGoldenDigest pins the digest of a fully populated command. The hash
 // is the drift signal behind LabelConfigHash, so a change to it recreates every
 // compose command that carries the old value: this test is the tripwire that
-// makes such a change deliberate. Hooks are per-command base configuration
-// rather than a compose field (D17), so adding them must not move the digest.
+// makes such a change deliberate. Terminal-sequence hooks (model.HookSet) are
+// per-command base configuration rather than a compose field (D17), so adding
+// them must not move the digest. The command sets no lifecycle hooks, and an
+// absent hooks: list must not move the digest either.
 func TestHashGoldenDigest(t *testing.T) {
 	cmd := compose.Command{
 		Name:            "api",

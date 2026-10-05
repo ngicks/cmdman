@@ -47,7 +47,7 @@ func TestStatusMergesRuntimeStateOntoProjectCommands(t *testing.T) {
 	states, err := svc.Status(
 		context.Background(),
 		ProjectSelection{Project: "proj", WorkDir: "/wd"},
-		nil,
+		StatusOption{},
 	)
 	assert.NilError(t, err)
 
@@ -96,9 +96,9 @@ func TestRuntimeStateFanOutIsBudgeted(t *testing.T) {
 
 	// The callers' contexts carry no deadline of their own: the budget belongs to
 	// the listing, not to whoever remembered to set one.
-	_, err := svc.Status(context.Background(), selection, nil)
+	_, err := svc.Status(context.Background(), selection, StatusOption{})
 	assert.NilError(t, err)
-	_, err = svc.Ps(context.Background(), selection, nil)
+	_, err = svc.Ps(context.Background(), selection, PsOption{})
 	assert.NilError(t, err)
 
 	assert.Equal(t, len(deadlines), 2)
@@ -110,7 +110,7 @@ func TestRuntimeStateFanOutIsBudgeted(t *testing.T) {
 	}
 }
 
-func TestStatusFiltersAndValidatesCommandNames(t *testing.T) {
+func TestStatusFiltersAndValidatesTargets(t *testing.T) {
 	entries := []store.CommandEntry{
 		buildTestProjectEntry(
 			"id-api", "api", "proj", "/wd", "/wd/cmd-compose.yaml", model.EventTypeRunning,
@@ -126,11 +126,12 @@ func TestStatusFiltersAndValidatesCommandNames(t *testing.T) {
 	}}
 	selection := ProjectSelection{Project: "proj", WorkDir: "/wd"}
 
-	states, err := svc.Status(context.Background(), selection, []string{"worker"})
+	states, err := svc.Status(
+		context.Background(), selection, StatusOption{Targets: TargetsOf("worker")})
 	assert.NilError(t, err)
 	assert.Equal(t, len(states), 1)
 	assert.Equal(t, states[0].Command, "worker")
 
-	_, err = svc.Status(context.Background(), selection, []string{"nope"})
+	_, err = svc.Status(context.Background(), selection, StatusOption{Targets: TargetsOf("nope")})
 	assert.ErrorContains(t, err, "unknown compose command(s)")
 }

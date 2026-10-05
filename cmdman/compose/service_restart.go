@@ -8,13 +8,16 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ngicks/cmdman/cmdman"
+	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/go-common/contextkey"
 )
 
 // RestartOption configures a Restart operation.
 type RestartOption struct {
-	// CommandNames optionally narrows the target set to specific compose command names.
-	CommandNames []string
+	// Targets optionally narrows the restart to specific compose commands or
+	// replicas. Empty targets the whole project. A replica index must name a
+	// stored replica.
+	Targets []Target
 }
 
 // RestartResult is the aggregated result of a compose restart operation.
@@ -54,7 +57,8 @@ func (s *Service) Restart(
 		return nil, fmt.Errorf("list project commands: %w", err)
 	}
 
-	if err := validateCommandNames(opts.CommandNames, selection.Spec, entries); err != nil {
+	targets, err := resolveTargets(opts.Targets, storedReplicas(selection.Spec, entries))
+	if err != nil {
 		return nil, err
 	}
 
@@ -69,10 +73,7 @@ func (s *Service) Restart(
 	}
 
 	if selection.Spec != nil {
-		if len(opts.CommandNames) > 0 {
-			entries = filterByCommandNames(entries, opts.CommandNames)
-		}
-		return s.restartWithSpec(ctx, selection, entries)
+		return s.restartWithSpec(ctx, selection, targets.filter(entries), hooksFromSpec)
 	}
 	spec, ok, err := reconstructProjectFromMeta(selection, entries)
 	if err != nil {
@@ -84,25 +85,37 @@ func (s *Service) Restart(
 		)
 	}
 	selection.Spec = &spec
-	if len(opts.CommandNames) > 0 {
-		entries = filterByCommandNames(entries, opts.CommandNames)
-	}
-	return s.restartWithSpec(ctx, selection, entries)
+	return s.restartWithSpec(ctx, selection, targets.filter(entries), hooksFromStored)
 }
 
-// restartWithSpec restarts using DAG ordering (reverse stop, forward start).
+// restartWithSpec restarts using DAG ordering (reverse stop, forward start). It
+// stops and starts exactly the replicas in entries, so the caller narrows
+// entries to the targeted replicas.
+//
+// A live replica stops inside the stop hooks stored on it. Every replica starts
+// inside the start hooks src says to run for it. A hook that fails under
+// on_error fail ends the restart of its replica: one whose stop hooks failed is
+// not started.
 func (s *Service) restartWithSpec(
 	ctx context.Context,
 	selection ProjectSelection,
 	entries []cmdmanEntry,
+	src hookSource,
 ) (*RestartResult, error) {
 	layers, err := TopoLayers(selection.Spec.Commands)
 	if err != nil {
 		return nil, fmt.Errorf("topo layers: %w", err)
 	}
 
-	idsByCommand := buildIDsByCommand(entries)
-	genNamesByCommand := buildGenNamesByCommand(entries)
+	entriesByCommand := buildEntriesByCommand(entries)
+	cmdByName := make(map[string]Command, len(selection.Spec.Commands))
+	for _, nc := range selection.Spec.Commands {
+		cmdByName[nc.Name] = nc
+	}
+	// held collects the IDs of the replicas a failed stop hook leaves out of the
+	// start phase. Only the stop phase writes it, and it ends before the start
+	// phase reads it.
+	held := make(map[string]struct{})
 
 	// Identify orphan entries (in project labels but not in YAML).
 	yamlNames := make(map[string]struct{}, len(selection.Spec.Commands))
@@ -139,10 +152,10 @@ func (s *Service) restartWithSpec(
 			ctx,
 			s,
 			layer,
-			idsByCommand,
+			entriesByCommand,
 			outByCommand,
+			held,
 			selection.Project,
-			true,
 		)
 	}
 
@@ -152,9 +165,14 @@ func (s *Service) restartWithSpec(
 			ctx,
 			s,
 			layer,
-			genNamesByCommand,
+			entriesByCommand,
 			outByCommand,
+			held,
 			selection.Project,
+			func(ctx context.Context, e cmdmanEntry) error {
+				return s.startReplica(
+					ctx, *selection.Spec, src, cmdByName[commandNameOf(e)], e)
+			},
 		)
 	}
 
@@ -172,38 +190,39 @@ func (s *Service) restartWithSpec(
 }
 
 // stopLayerRestartConcurrent stops a layer for the restart operation, recording
-// results into outByCommand. Every replica of each command is stopped; the
-// command's outcome records the first stop error across its replicas.
+// results into outByCommand. Every replica entriesByCommand holds for each
+// command is stopped; the command's outcome records the first stop error across
+// them. A replica whose stop hooks failed is added to held.
 func stopLayerRestartConcurrent(
 	ctx context.Context,
 	s *Service,
 	layer []string,
-	idsByCommand map[string][]string,
+	entriesByCommand map[string][]cmdmanEntry,
 	outByCommand map[string]*RestartOutcome,
+	held map[string]struct{},
 	project string,
-	_ bool, // reserved for future use
 ) {
 	var mu sync.Mutex
 	eg, _ := errgroup.WithContext(ctx)
 
 	for _, name := range layer {
-		for _, id := range idsByCommand[name] {
+		for _, e := range entriesByCommand[name] {
 			eg.Go(func() error {
-				results, stopErr := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{id}})
-				if stopErr == nil {
-					stopErr = firstStopErr(results)
-				}
+				startable, stopErr := s.restartStop(ctx, e)
 				if stopErr != nil {
 					contextkey.ValueSlogLoggerDefault(ctx).Warn("compose restart: stop failed",
 						"project", project,
 						"command", name,
-						"id", id,
+						"id", e.ID,
 						"error", stopErr,
 					)
 				}
 				mu.Lock()
 				if o, ok := outByCommand[name]; ok && stopErr != nil && o.StopErr == nil {
 					o.StopErr = stopErr
+				}
+				if !startable {
+					held[e.ID] = struct{}{}
 				}
 				mu.Unlock()
 				return nil
@@ -213,30 +232,47 @@ func stopLayerRestartConcurrent(
 	_ = eg.Wait()
 }
 
+// restartStop stops the replica e for a restart. A live replica stops inside
+// the stop hooks stored on it. startable reports whether the restart of e goes
+// on to its start. A failed stop hook ends the restart of e. A failed stop
+// alone leaves the start to be tried.
+func (s *Service) restartStop(ctx context.Context, e cmdmanEntry) (startable bool, err error) {
+	if e.State != model.EventTypeRunning && e.State != model.EventTypeStarting {
+		return true, s.stopForRecreate(ctx, e.ID)
+	}
+	hookFailed, err := s.stopReplica(ctx, e, false)
+	return !hookFailed, err
+}
+
 // startLayerRestartConcurrent starts a layer for the restart operation,
-// recording results into outByCommand. Every replica of each command is
-// started; the command's outcome records the first start error.
+// recording results into outByCommand. Every replica entriesByCommand holds for
+// each command is started by start unless held holds it; the command's outcome
+// records the first start error.
 func startLayerRestartConcurrent(
 	ctx context.Context,
 	s *Service,
 	layer []string,
-	genNamesByCommand map[string][]string,
+	entriesByCommand map[string][]cmdmanEntry,
 	outByCommand map[string]*RestartOutcome,
+	held map[string]struct{},
 	project string,
+	start func(context.Context, cmdmanEntry) error,
 ) {
 	var mu sync.Mutex
 	eg, _ := errgroup.WithContext(ctx)
 
 	for _, name := range layer {
-		for _, genName := range genNamesByCommand[name] {
+		for _, e := range entriesByCommand[name] {
+			if _, ok := held[e.ID]; ok {
+				continue
+			}
 			eg.Go(func() error {
-				// Idempotency: if already running/starting, skip.
-				startErr := s.svc.Start(ctx, genName)
+				startErr := start(ctx, e)
 				if startErr != nil {
 					contextkey.ValueSlogLoggerDefault(ctx).Warn("compose restart: start failed",
 						"project", project,
 						"command", name,
-						"generated_name", genName,
+						"generated_name", e.Name,
 						"error", startErr,
 					)
 				}
@@ -252,19 +288,14 @@ func startLayerRestartConcurrent(
 	_ = eg.Wait()
 }
 
-// buildGenNamesByCommand groups the existing entries' cmdman names by their
-// compose command name, so every replica of a command is restarted.
-func buildGenNamesByCommand(entries []cmdmanEntry) map[string][]string {
-	m := make(map[string][]string, len(entries))
+// buildEntriesByCommand groups the existing entries by their compose command
+// name, so every replica in entries is restarted.
+func buildEntriesByCommand(entries []cmdmanEntry) map[string][]cmdmanEntry {
+	m := make(map[string][]cmdmanEntry, len(entries))
 	for _, e := range entries {
-		if e.ConfigJSON == nil {
-			continue
+		if name := commandNameOf(e); name != "" {
+			m[name] = append(m[name], e)
 		}
-		name := e.ConfigJSON.Labels[LabelCommand]
-		if name == "" {
-			continue
-		}
-		m[name] = append(m[name], e.Name)
 	}
 	return m
 }

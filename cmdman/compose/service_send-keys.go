@@ -13,8 +13,10 @@ import (
 
 // SendKeysOption configures a compose SendKeys operation.
 type SendKeysOption struct {
-	// CommandNames optionally narrows the target set to specific compose command names.
-	CommandNames []string
+	// Targets optionally narrows the target set to specific compose commands or
+	// replicas. Empty targets the whole project. A replica index must name a
+	// stored replica.
+	Targets []Target
 	// Keys is the key sequence to send to each targeted command's PTY (required).
 	Keys []string
 	// Literal sends keys verbatim without translating key names.
@@ -38,8 +40,8 @@ type SendKeysOutcome struct {
 
 // SendKeys sends a key sequence to the PTYs of project-labeled commands.
 //
-// Like Signal, this broadcasts to every targeted command; CommandNames narrows
-// the set. Keys is required; an empty value returns an error before any RPC.
+// Like Signal, this broadcasts to every targeted command; Targets narrows the
+// set. Keys is required; an empty value returns an error before any RPC.
 // Per resolved-decision 15, an empty project target set returns no outcomes and
 // logs a warning. Per resolved-decision 21, failures are aggregated and every
 // command in the set is attempted.
@@ -60,12 +62,11 @@ func (s *Service) SendKeys(
 		return nil, fmt.Errorf("list project commands: %w", err)
 	}
 
-	if err := validateCommandNames(opts.CommandNames, selection.Spec, entries); err != nil {
+	targets, err := resolveTargets(opts.Targets, storedReplicas(selection.Spec, entries))
+	if err != nil {
 		return nil, err
 	}
-	if len(opts.CommandNames) > 0 {
-		entries = filterByCommandNames(entries, opts.CommandNames)
-	}
+	entries = targets.filter(entries)
 
 	if len(entries) == 0 {
 		contextkey.ValueSlogLoggerDefault(ctx).Warn(

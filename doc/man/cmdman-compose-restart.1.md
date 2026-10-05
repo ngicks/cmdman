@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] restart [COMMAND...]
+cmdman compose [selection flags] restart [--progress MODE] [--scale N] [COMMAND...]
 ```
 
 ## Description
@@ -20,8 +20,18 @@ forward dependency order; work within each layer is concurrent. Orphans are
 skipped. When no compose file is loaded, dependency order is reconstructed from
 stored compose labels.
 
-The operation reports outcomes per command. Target selection is project-scoped,
-so service names resolve only within the selected `(workdir, project)` pair.
+The operation reports outcomes per command. It writes its progress output
+first and then one result line per command. Target selection is
+project-scoped, so service names resolve only within the selected
+`(workdir, project)` pair.
+
+Each starting or running replica runs the `stop_pre` and `stop_post` hooks
+stored on it around its stop. Every replica then runs `start_pre` and
+`start_post` around its start. The start hooks come from the compose file when
+one is loaded and from the copy stored on the replica otherwise. A replica
+whose stop hook fails under `on_error: fail` is not started. A start hook that
+fails under `on_error: fail` fails the start of its command. See
+[Lifecycle Hooks](./cmdman-compose.5.md#lifecycle-hooks).
 
 ## Selection Flags
 
@@ -31,7 +41,11 @@ Uses the compose selection flags documented in
 
 ## Options
 
-No command-specific options.
+- `--progress auto|tty|json|quiet`: progress output mode. `auto` chooses TTY
+  output on terminals and JSON otherwise. Restart reports its hook runs there;
+  see [Progress Output](./cmdman-compose.5.md#progress-output).
+- `--scale N`: restart only replica N (1-based) of exactly one COMMAND. N must
+  name an existing replica.
 
 ## See Also
 

@@ -42,7 +42,7 @@ func TestBuildReconcileGraphVirtualEdges(t *testing.T) {
 		reconcileCmd("api"),
 		reconcileCmd("worker", AfterSpec{Name: "api", Condition: ConditionRunning}),
 	)
-	g := buildReconcileGraph(spec, nil, fullClosure(spec))
+	g := buildReconcileGraph(spec, nil, fullClosure(spec), nil)
 
 	begin := g.Vertices[beginVertex]
 	end := g.Vertices[endVertex]
@@ -76,7 +76,7 @@ func TestWalkUpVisitsDependentsBeforeDependencies(t *testing.T) {
 		reconcileCmd("c", AfterSpec{Name: "b", Condition: ConditionRunning}),
 		reconcileCmd("d"),
 	)
-	g := buildReconcileGraph(spec, nil, fullClosure(spec))
+	g := buildReconcileGraph(spec, nil, fullClosure(spec), nil)
 
 	var (
 		mu    sync.Mutex
@@ -100,7 +100,7 @@ func TestWalkDownVisitsDependenciesBeforeDependents(t *testing.T) {
 		reconcileCmd("b", AfterSpec{Name: "a", Condition: ConditionRunning}),
 		reconcileCmd("c", AfterSpec{Name: "b", Condition: ConditionRunning}),
 	)
-	g := buildReconcileGraph(spec, nil, fullClosure(spec))
+	g := buildReconcileGraph(spec, nil, fullClosure(spec), nil)
 
 	var (
 		mu    sync.Mutex
@@ -125,7 +125,7 @@ func TestWalkDownClosureExcludesUntargetedCommands(t *testing.T) {
 	snaps := map[string]commandSnapshot{
 		"api": {State: model.EventTypeRunning},
 	}
-	g := buildReconcileGraph(spec, snaps, closure)
+	g := buildReconcileGraph(spec, snaps, closure, nil)
 
 	var (
 		mu    sync.Mutex

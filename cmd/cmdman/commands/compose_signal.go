@@ -10,15 +10,16 @@ import (
 func composeSignalCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagSignal string
+		flagScale  int
 	)
 
 	cmd := &cobra.Command{
 		Use:               "signal [COMMAND...]",
 		Short:             "Send a signal to compose commands",
-		Args:              cobra.ArbitraryArgs,
+		Args:              scaleArgs(cobra.ArbitraryArgs, &flagScale),
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeSignal(cmd, rf, cf, args, flagSignal)
+			return runComposeSignal(cmd, rf, cf, args, flagScale, flagSignal)
 		},
 	}
 
@@ -26,6 +27,7 @@ func composeSignalCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 		&flagSignal, "signal", "s", "",
 		"Signal to send (e.g. SIGTERM, HUP, 15); required",
 	)
+	addScaleFlag(cmd, &flagScale)
 	_ = cmd.RegisterFlagCompletionFunc("signal", signalCompletions)
 
 	parent.AddCommand(cmd)
@@ -36,6 +38,7 @@ func runComposeSignal(
 	rf *rootFlags,
 	cf *composeFlags,
 	commandNames []string,
+	scale int,
 	signal string,
 ) error {
 	selection, err := compose.LoadOrProject(cf.normalizeOpts())
@@ -50,8 +53,8 @@ func runComposeSignal(
 	defer svc.Close()
 
 	result, err := compose.NewService(svc).Signal(cmd.Context(), selection, compose.SignalOption{
-		CommandNames: commandNames,
-		Signal:       signal,
+		Targets: composeTargets(commandNames, scale),
+		Signal:  signal,
 	})
 	if err != nil {
 		return err

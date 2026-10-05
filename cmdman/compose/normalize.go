@@ -44,6 +44,10 @@ const ENV_CMDMAN_COMPOSE_WORK_DIR_HASH = "CMDMAN_COMPOSE_WORK_DIR_HASH"
 // available to interpolation and injected into each replica's environment.
 const ENV_CMDMAN_COMPOSE_PROJECT = "CMDMAN_COMPOSE_PROJECT"
 
+// ENV_CMDMAN_COMPOSE_COMMAND is injected into each replica's environment with
+// the compose command name (the key under commands:).
+const ENV_CMDMAN_COMPOSE_COMMAND = "CMDMAN_COMPOSE_COMMAND"
+
 // NormalizeOpts holds caller-supplied overrides for Normalize.
 type NormalizeOpts struct {
 	// File is an explicit compose file path. When empty, discovery is used.
@@ -222,6 +226,11 @@ func Normalize(
 			interpolatedArgs[i] = v
 		}
 
+		hooks, err := normalizeLifecycleHooks(ctx, project, name, cmd.Hooks, finalLookup)
+		if err != nil {
+			return ComposeSpec{}, fmt.Errorf("command %q: %w", name, err)
+		}
+
 		if err := validateUserLabels(cmd.Labels); err != nil {
 			return ComposeSpec{}, fmt.Errorf("command %q: labels: %w", name, err)
 		}
@@ -285,6 +294,7 @@ func Normalize(
 			LogDriver:       logdriver.LogDriver(cmd.LogDriver),
 			LogOpts:         resolvedLogOpts,
 			After:           afterList,
+			Hooks:           hooks,
 			Scale:           scale,
 			GeneratedName:   genName,
 		}
@@ -606,6 +616,66 @@ func normalizeAfter(cmdName string, after map[string]AfterSpec) ([]AfterSpec, er
 		result = append(result, spec)
 	}
 	return result, nil
+}
+
+// normalizeLifecycleHooks interpolates and validates a command's hooks: list.
+// Event args interpolate with lookup, the lookup the command's own args use,
+// and an omitted on_error resolves to [OnErrorFail] so that the short argv form
+// and an explicit on_error: fail hash and canonicalize the same.
+func normalizeLifecycleHooks(
+	ctx context.Context,
+	project, cmdName string,
+	raw []RawLifecycleHook,
+	lookup template.Mapping,
+) ([]LifecycleHook, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	hooks := make([]LifecycleHook, 0, len(raw))
+	for i, rh := range raw {
+		if rh.Name == "" {
+			return nil, fmt.Errorf("hooks[%d]: name is required", i)
+		}
+		warnUnknownFields(
+			ctx,
+			rh.Unknown,
+			"compose: ignoring unrecognized hook field",
+			"project", project,
+			"command", cmdName,
+			"hook", rh.Name,
+		)
+		events := make(map[LifecycleEvent]LifecycleExec)
+		for ev, exec := range rh.events() {
+			warnUnknownFields(
+				ctx,
+				exec.Unknown,
+				"compose: ignoring unrecognized hook event field",
+				"project", project,
+				"command", cmdName,
+				"hook", rh.Name,
+				"event", string(ev),
+			)
+			args := make([]string, len(exec.Args))
+			for j, arg := range exec.Args {
+				v, err := template.Substitute(arg, lookup)
+				if err != nil {
+					return nil, fmt.Errorf(
+						"hook %q: %s: args[%d] interpolation: %w", rh.Name, ev, j, err)
+				}
+				args[j] = v
+			}
+			events[ev] = LifecycleExec{Args: args, OnError: exec.OnError.resolved()}
+		}
+		hooks = append(hooks, LifecycleHook{
+			Name:     rh.Name,
+			Resource: rh.Resource,
+			Events:   events,
+		})
+	}
+	if err := validateLifecycleHooks(hooks); err != nil {
+		return nil, err
+	}
+	return hooks, nil
 }
 
 // validateRuntimeFields rejects compose-author mistakes that would otherwise
