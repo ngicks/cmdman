@@ -155,7 +155,7 @@ func TestSwitcherFollowsActiveDir(t *testing.T) {
 		t.Fatalf("nothing is active yet, so the directory should still be %q: %q", want, got)
 	}
 
-	m, _ = updWidget(t, m, core.ActiveIdentityLoadedMsg{Identity: "id-api", OK: true})
+	_, _ = updWidget(t, m, core.ActiveIdentityLoadedMsg{Identity: "id-api", OK: true})
 	if got, want := getwd(t), realDir(t, dir); got != want {
 		t.Errorf("working directory = %q, want the active project's %q", got, want)
 	}
