@@ -332,6 +332,39 @@ func TestComposeHooksRestartRunsStopThenStartHooks(t *testing.T) {
 	}
 }
 
+func TestComposeHooksRestartStartsReplicaThatNeverStarted(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-hooks-restart-created"
+	marker := filepath.Join(wd, "marker.txt")
+	composePath := writeComposeFile(t, wd, markedWebYAML(project, marker, "v1", 1))
+	t.Cleanup(func() {
+		ctx := context.Background()
+		cleanupProject(ctx, env, wd, project)
+		cleanupIntermediates(ctx, env, wd, project)
+	})
+	compose := func(args ...string) *Cmd {
+		return env.Cmd(append([]string{"compose", "--workdir", wd, "-f", composePath}, args...)...)
+	}
+
+	compose("create").Run(ctx, t)
+	if st := composeReplicaState(ctx, env, wd, project, "web", 1); st != "created" {
+		t.Fatalf("web should be created, got %q", st)
+	}
+	clearMarker(t, marker)
+
+	compose("restart").Run(ctx, t)
+
+	want := []string{"v1 start_pre", "v1 start_post"}
+	if got := markedEvents(t, marker, "web", 1); !slices.Equal(got, want) {
+		t.Errorf("hooks of the restart = %q, want %q", got, want)
+	}
+	env.waitForState(ctx, replicaID(ctx, t, env, wd, project, "web", 1), "running",
+		defaultTimeout)
+}
+
 func TestComposeHooksRestartProgress(t *testing.T) {
 	t.Parallel()
 	ctx := testContext(t)

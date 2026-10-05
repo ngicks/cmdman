@@ -794,10 +794,16 @@ func TestRestartRunsStoredStopHooksThenStartHooks(t *testing.T) {
 			},
 		},
 		{
-			name:      "not running",
+			name:      "exited",
 			selection: ProjectSelection{WorkDir: "/wd", Project: "proj"},
 			state:     model.EventTypeExited,
-			wantTrace: []string{"stop", "stored.start_pre", "start", "stored.start_post"},
+			wantTrace: []string{"stored.start_pre", "start", "stored.start_post"},
+		},
+		{
+			name:      "never started",
+			selection: ProjectSelection{WorkDir: "/wd", Project: "proj"},
+			state:     model.EventTypeCreated,
+			wantTrace: []string{"stored.start_pre", "start", "stored.start_post"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
