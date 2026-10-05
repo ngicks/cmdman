@@ -349,8 +349,9 @@ by [`cmdman compose resource unset`](./cmdman-compose-resource.1.md). A value
 without a release event stays until `unset` drops it. Stopping, restarting, or
 removing a replica with plain `cmdman` verbs leaves the value in place. The
 hooks own whatever the value names, such as a directory or a port.
-[`cmdman compose down`](./cmdman-compose-down.1.md) retries the stored release
-of a value whose replica is gone.
+[`cmdman compose down`](./cmdman-compose-down.1.md) runs the stored release
+of a value whose replica is gone. It also runs the stored `stop_pre` or
+`stop_post` release of a replica it removes without stopping it.
 
 [`cmdman compose resource get`](./cmdman-compose-resource.1.md) prints a value.
 
@@ -415,8 +416,10 @@ events in the order they run, with the step between them.
   replica. A replica whose stop hook failed is not started.
 - `compose down` runs `stop_pre`, stop, `stop_post` for every starting or
   running replica. It then runs `remove_pre`, removal, `remove_post` for every
-  replica. [cmdman-compose-down(1)](./cmdman-compose-down.1.md) describes the
-  releases it retries.
+  replica. After the remove hooks, down runs the stored `stop_pre` or
+  `stop_post` release of every replica it removed without stopping it.
+  [cmdman-compose-down(1)](./cmdman-compose-down.1.md) describes the stored
+  releases it runs.
 - `compose scale` runs the hooks of `compose up` for the commands it names.
 
 A replica that a verb leaves unchanged runs no hooks.

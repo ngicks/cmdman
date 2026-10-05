@@ -24,8 +24,8 @@ file, and a later `compose up` returns to the `scale` of the file.
 Scale reconciles like [`compose up`](./cmdman-compose-up.1.md) limited to the
 named commands and their `after` dependencies. It runs their hooks the same
 way. A new replica runs its create hooks and start hooks. A surplus replica
-runs the stop hooks stored on it when it is running, and then its stored remove
-hooks. A hook that fails under `on_error: fail` ends the action of its replica
+runs the stop hooks stored on it when it is starting or running, and then its
+stored remove hooks. A hook that fails under `on_error: fail` ends the action of its replica
 at that hook and makes scale exit non-zero. See
 [Lifecycle Hooks](./cmdman-compose.5.md#lifecycle-hooks).
 
