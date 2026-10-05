@@ -70,7 +70,7 @@ func (f *fakeMonitor) peakInFlight() int {
 
 // serveFakeMonitor listens on a Unix socket under the test's temp dir and
 // returns its path.
-func serveFakeMonitor(t *testing.T, srv *fakeMonitor) string {
+func serveFakeMonitor(t *testing.T, srv cmdmanv1pb.CommandMonitorServiceServer) string {
 	t.Helper()
 	sockPath := filepath.Join(t.TempDir(), "monitor.sock")
 	lis, err := net.Listen("unix", sockPath)

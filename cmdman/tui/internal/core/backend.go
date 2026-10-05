@@ -188,7 +188,7 @@ type Backend interface {
 	Stop(ctx context.Context, id string) error
 	// Restart restarts a command using service defaults for signal/timeout.
 	Restart(ctx context.Context, id string) error
-	// Remove removes a command. force sends SIGKILL before removal and is
+	// Remove removes a command. force stops the command before removal and is
 	// required when the command is running.
 	Remove(ctx context.Context, id string, force bool) error
 

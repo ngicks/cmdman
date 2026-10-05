@@ -34,7 +34,7 @@ func (s *Service) Restart(ctx context.Context, req RestartRequest) ([]RestartRes
 
 	timeout := req.Timeout
 	if timeout <= 0 {
-		timeout = 10 * time.Second
+		timeout = defaultStopTimeout
 	}
 	results := make([]RestartResult, 0, len(ids))
 	for _, id := range ids {

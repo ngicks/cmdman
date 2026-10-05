@@ -132,7 +132,7 @@ func (m Model) renderPopup() string {
 		fmt.Fprintf(&b, "project: %s\n", p.project)
 		fmt.Fprintf(&b, "command: %s\n", p.command)
 		if p.kind == popupForceRemove {
-			b.WriteString("\nThis sends SIGKILL before removing the command.\n")
+			b.WriteString("\nThis stops the command before removing it.\n")
 		}
 	}
 	b.WriteByte('\n')
