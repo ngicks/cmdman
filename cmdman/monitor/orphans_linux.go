@@ -16,17 +16,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const (
-	// orphanGrace is how long a process the command left behind has to exit on
-	// SIGTERM before it is killed outright.
-	orphanGrace = 2 * time.Second
-	// sweepBound caps the whole sweep. A process sitting in an uninterruptible
-	// wait ignores SIGKILL too, and without a cap the run would hang on it the
-	// same way it would hang on a pty reader that never wakes.
-	sweepBound = 10 * time.Second
-	// sweepPoll is how often a signalled process is looked at again.
-	sweepPoll = 20 * time.Millisecond
-)
+// sweepPoll is how often a signalled process is looked at again.
+const sweepPoll = 20 * time.Millisecond
 
 // becomeSubreaper makes this process the reaper of its whole descendant tree: a
 // process whose own parent is gone is reparented here instead of to init, so

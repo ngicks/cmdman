@@ -10,19 +10,10 @@ import (
 	"time"
 )
 
-const (
-	// orphanGrace is how long a process the command left behind has to exit on
-	// SIGTERM before it is killed outright.
-	orphanGrace = 2 * time.Second
-	// sweepBound caps the whole sweep, so a process that refuses to die cannot
-	// keep the run from finishing.
-	sweepBound = 10 * time.Second
-	// sweepPoll is how often the process group is checked for whether anything
-	// still answers, so a run whose leftovers exit promptly on SIGTERM does not
-	// pay the whole grace. The Linux path names its own; this build cannot see
-	// it.
-	sweepPoll = 20 * time.Millisecond
-)
+// sweepPoll is how often the process group is checked for whether anything
+// still answers, so a run whose leftovers exit promptly on SIGTERM does not pay
+// the whole grace. The Linux path names its own; this build cannot see it.
+const sweepPoll = 20 * time.Millisecond
 
 // becomeSubreaper does nothing here. PR_SET_CHILD_SUBREAPER is a Linux
 // facility, so a process the command leaves behind is reparented to init and
