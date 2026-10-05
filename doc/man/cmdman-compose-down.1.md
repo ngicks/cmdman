@@ -69,7 +69,8 @@ Uses the compose selection flags documented in
 ## Options
 
 - `--progress auto|tty|json|quiet`: progress output mode. `auto` chooses TTY
-  output on terminals and JSON otherwise.
+  output on terminals and JSON otherwise. Hook runs have records of their own;
+  see [Progress Output](./cmdman-compose.5.md#progress-output).
 - `--force`: treat every hook that fails under `on_error: fail` as
   `on_error: continue`. Down reports the failure as a warning and stops and
   removes the replica anyway. A retried release that fails keeps its value

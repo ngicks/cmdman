@@ -83,6 +83,8 @@ Absolute paths are cleaned and used as-is.
 - `log_driver`: `k8s-file` or `none`.
 - `log_opts`: driver-specific logging options.
 - `after`: dependency map keyed by another command name.
+- `hooks`: ordered list of lifecycle hook items. See
+  [Lifecycle Hooks](#lifecycle-hooks).
 
 Omitted runtime fields are left for cmdman service defaults. For current
 defaults, see [cmdman-create(1)](./cmdman-create.1.md) and
@@ -182,7 +184,8 @@ commands:
 ## Interpolation
 
 String fields that support interpolation include `work_dir`, command `dir`,
-`args`, `env_file.path`, `env` values, and `log_opts.path`.
+`args`, `env_file.path`, `env` values, `log_opts.path`, and the `args` of hook
+events.
 
 Supported forms are compose-style variable expressions such as:
 
@@ -193,6 +196,8 @@ Supported forms are compose-style variable expressions such as:
 - `${VAR?message}`
 - `${VAR:+replacement}`
 - `${VAR+replacement}`
+
+`$$` stands for a literal `$`.
 
 ## Dependencies
 
@@ -245,6 +250,285 @@ labels:
 
 Orphans are retained unless `--remove-orphan` is used or `compose down` removes
 the selected project.
+
+The hash covers `hooks` and the order of their items. Editing a hook therefore
+recreates the command. [Lifecycle Hooks](#lifecycle-hooks) lists the hooks a
+recreate runs.
+
+## Lifecycle Hooks
+
+`hooks` lists items that run commands around the lifecycle steps of each
+replica: create, start, stop, and remove. Only the compose verbs listed under
+[Verbs and Events](#verbs-and-events) run hooks.
+
+```yaml
+commands:
+  web:
+    args: [./web]
+    hooks:
+      - name: migrate
+        create_post: [./migrate, up]
+      - name: notify
+        start_post:
+          args: [./notify, started]
+          on_error: continue
+```
+
+### Hook Items
+
+An item has these fields:
+
+- `name`: required. A hook name follows the rules for command names and must
+  be unique within the command.
+- `resource`: optional resource key. See [Resources](#resources).
+- `create_pre`, `create_post`, `start_pre`, `start_post`, `stop_pre`,
+  `stop_post`, `remove_pre`, `remove_post`: the events of the item. An item
+  sets at least one event.
+
+An event is either an argv list or a mapping:
+
+```yaml
+create_pre: [./prepare, --fast]
+create_post:
+  args: [./prepare, --check]
+  on_error: ignore
+```
+
+- The argv list form uses `on_error: fail`.
+- The mapping form takes `args` and `on_error`. `args` must not be empty.
+
+`args` is argv and is not interpreted as shell source. Use `[sh, -c, CODE]` to
+run shell code. Unknown keys in an item or in an event mapping are ignored with
+a warning. `cmdman compose config` prints every event in the mapping form with
+`on_error` filled in.
+
+An event fails when its command exits with a non-zero code or ends without an
+exit code. `on_error` decides what a failure does:
+
+- `fail`: the default. The failure ends the operation for the replica with an
+  error. A failing `create_pre`, `start_pre`, `stop_pre`, or `remove_pre`
+  skips the step that follows it. A failing `create_post`, `start_post`,
+  `stop_post`, or `remove_post` fails after its step has happened.
+- `continue`: the operation goes on. Progress output reports the failure as a
+  warning.
+- `ignore`: the operation goes on. Progress output reports the failure as
+  ignored. A failed release under `ignore` drops the resource value as if the
+  release had worked.
+
+The items that set an event run one after another in the order of the `hooks`
+list. Different replicas can run their hooks at the same time. Interrupting the
+compose verb stops the hook that is running.
+
+### Resources
+
+An item with `resource` acquires a resource for each replica and stores a value
+for it. The resource key follows the rules for command names and must be unique
+within the command. A resource item sets exactly one acquire event, at most one
+release event, and no other event. The release event must match the acquire
+event:
+
+- An acquire at `create_pre` or `create_post` pairs with a release at
+  `remove_pre` or `remove_post`.
+- An acquire at `start_pre` or `start_post` pairs with a release at `stop_pre`
+  or `stop_post`.
+
+When the acquire event exits with code 0, cmdman takes the last line of its
+stdout that is not blank, trims the surrounding white space, and stores the
+result as the value of the resource for the replica. cmdman does not read
+stderr. An acquire that prints nothing to stdout stores an empty value. Each
+acquire replaces the value stored before it.
+
+Both events find the stored value in `CMDMAN_COMPOSE_RESOURCE_VALUE`. The
+variable is empty when no value is stored. A release that exits with code 0
+drops the value. A release that fails under `on_error: fail` or
+`on_error: continue` keeps the value, and its error names the value.
+
+cmdman never releases a resource on its own. A value is dropped by a release
+event that exits with code 0, by a failed release under `on_error: ignore`, or
+by [`cmdman compose resource unset`](./cmdman-compose-resource.1.md). A value
+without a release event stays until `unset` drops it. Stopping, restarting, or
+removing a replica with plain `cmdman` verbs leaves the value in place. The
+hooks own whatever the value names, such as a directory or a port.
+[`cmdman compose down`](./cmdman-compose-down.1.md) retries the stored release
+of a value whose replica is gone.
+
+[`cmdman compose resource get`](./cmdman-compose-resource.1.md) prints a value.
+
+### Intermediate Commands
+
+The hooks of a replica create two kinds of cmdman commands: exec commands and
+holders. Together they are the intermediates of the replica. In the names
+below, `<replica>` is the cmdman command name of the replica. The `NAME` column
+of `cmdman compose ps` shows it.
+
+- An exec command runs one event of one item. Its name is
+  `<replica>.hook.<item>.<event>`. It runs in the working directory of the
+  replica with the environment of the replica, without a PTY, with
+  `restart_policy: no` and the `k8s-file` log driver. cmdman removes it when
+  the event succeeds. A failed event keeps it under every `on_error`. Read
+  the failure with `cmdman logs <replica>.hook.<item>.<event>` or
+  `cmdman inspect`. The next run of the same event for the same replica
+  replaces it. `compose down` removes it together with its replica.
+- A holder keeps one resource value. Its name is `<replica>.res.<key>`. cmdman
+  never starts it. A holder outlives its replica. A `remove_post` release and
+  a later `compose down` still find the value.
+
+Intermediates carry the labels `cmdman.compose.hooks.project` and
+`cmdman.compose.hooks.workdir` in place of `cmdman.compose.project` and
+`cmdman.compose.workdir`. The compose verbs that act on the commands of a
+project never select them. They appear in these listings:
+
+- `cmdman ls` lists holders and running exec commands. `cmdman ls --all` also
+  lists the exec commands of failed events.
+- [`cmdman compose ps`](./cmdman-compose-ps.1.md) lists both kinds under their
+  project, with `KIND` and `OWNER` columns.
+- [`cmdman compose ls`](./cmdman-compose-ls.1.md) counts them in
+  `INTERMEDIATES`.
+
+### Verbs and Events
+
+Each replica runs the events of its own hooks. Each entry below lists the
+events in the order they run, with the step between them.
+
+- `compose create` and `compose up` run `create_pre`, create, `create_post` for
+  every new replica.
+- They recreate a changed replica in two parts. The old replica runs
+  `stop_pre`, stop, `stop_post` when it is starting or running, and then
+  `remove_pre`, removal, `remove_post`. The new replica runs `create_pre`,
+  create, `create_post`.
+- They remove a surplus replica of a scale-down the same way. It runs
+  `stop_pre`, stop, `stop_post` when it is starting or running, and then
+  `remove_pre`, removal, `remove_post`.
+- With `--remove-orphan`, every stopped orphan runs `remove_pre`, removal,
+  `remove_post`. A running orphan is skipped and runs no hooks.
+- `compose start` and `compose up` run `start_pre`, start, `start_post` for
+  every replica that is neither starting nor running.
+- `compose stop` runs `stop_pre`, stop, `stop_post` for every starting or
+  running replica.
+- `compose restart` runs `stop_pre`, stop, `stop_post` for every starting or
+  running replica. It then runs `start_pre`, start, `start_post` for every
+  replica. A replica whose stop hook failed is not started.
+- `compose down` runs `stop_pre`, stop, `stop_post` for every starting or
+  running replica. It then runs `remove_pre`, removal, `remove_post` for every
+  replica. [cmdman-compose-down(1)](./cmdman-compose-down.1.md) describes the
+  releases it retries.
+- `compose scale` runs the hooks of `compose up` for the commands it names.
+
+A replica that a verb leaves unchanged runs no hooks.
+
+Each replica stores a copy of the hooks it was created with. The stop and
+remove events always come from that copy. `compose stop`, `compose restart`,
+and `compose down` therefore run them without a compose file. A recreate runs
+the old hooks of the replica it replaces. The create events come from the
+compose file. The start events come from the compose file when the verb loads
+one, and from the stored copy otherwise.
+
+Editing a hook changes the configuration hash. The next `compose create` or
+`compose up` recreates the command. The old replica runs its stored stop and
+remove events. The new replica runs the edited create events, and `compose up`
+also runs its edited start events.
+
+Plain `cmdman start`, `cmdman stop`, `cmdman restart`, and `cmdman rm` run no
+hooks, even on a compose replica. A restart by `restart_policy` runs no hooks
+either.
+
+### Hook Environment
+
+A hook command runs with the environment of its replica. That environment
+includes `CMDMAN_COMPOSE_WORK_DIR`, `CMDMAN_COMPOSE_WORK_DIR_HASH`,
+`CMDMAN_COMPOSE_PROJECT`, `CMDMAN_COMPOSE_COMMAND`,
+`CMDMAN_COMPOSE_SCALE_INDEX`, and `CMDMAN_COMPOSE_SCALE`, as described under
+[Environment](#environment). cmdman adds these variables:
+
+- `CMDMAN_COMPOSE_HOOK_NAME`: the `name` of the item.
+- `CMDMAN_COMPOSE_HOOK_EVENT`: the event that runs, such as `start_pre`.
+- `CMDMAN_COMPOSE_RESOURCE_KEY`: the `resource` key. cmdman sets it for a
+  resource item only.
+- `CMDMAN_COMPOSE_RESOURCE_VALUE`: the stored value of the resource, empty when
+  no value is stored. cmdman sets it for a resource item only.
+- `CMDMAN_DATA_DIR` and `CMDMAN_RUNTIME_DIR`: the directories of the cmdman
+  that runs the hook. A `cmdman` started by the hook reaches the same store.
+- `CMDMAN_CONF`: the absolute path of the configuration file. cmdman sets it
+  when it runs with `--config`.
+- `CMDMAN_CMD_ID` and `CMDMAN_CMD_DATA_DIR`: the ID and data directory of the
+  exec command. They do not name the replica.
+
+cmdman interpolates hook `args` when it loads the compose file. Hook `args` see
+the same variables as the `args` of the command. Apart from
+`CMDMAN_COMPOSE_WORK_DIR`, `CMDMAN_COMPOSE_WORK_DIR_HASH`, and
+`CMDMAN_COMPOSE_PROJECT`, the variables above do not exist at that time. `$CMDMAN_COMPOSE_RESOURCE_VALUE` in shell code
+therefore becomes an empty string before the hook runs. Write `$$` to pass a
+`$` through to the shell:
+
+```yaml
+remove_post: [sh, -c, 'rm -rf -- "$$CMDMAN_COMPOSE_RESOURCE_VALUE"']
+```
+
+An argv entry sees a variable only through interpolation. A hook that reads a
+variable at run time needs a shell or a program that reads its environment.
+
+### Progress Output
+
+`compose up`, `compose start`, `compose stop`, `compose down`, and
+`compose scale` report every hook run in their progress output. In `tty` mode,
+each hook run gets a line labeled `<command> hook <item>.<event>`. The line
+shows the latest output of the hook while it runs.
+
+In `json` mode, a record of a hook run sets `hook`, `lifecycle`, `exec`, and
+`scaleIndex` to the item name, the event, the exec command name, and the
+replica index. Its `phase` is one of these values:
+
+- `hook-running`: the hook command started.
+- `hook-succeeded`: the hook exited with code 0.
+- `hook-failed`: the hook failed under `on_error: fail`, or the verb was
+  interrupted.
+- `hook-warning`: the hook failed under `on_error: continue`.
+- `hook-ignored`: the hook failed under `on_error: ignore`.
+- `hook-output`: one line of hook output. `line` holds the line, and `stream`
+  holds `stdout` or `stderr`.
+
+The record that ends a run carries `exitCode` when the hook exited, and
+`error` when the hook failed. `compose create` and `compose restart` have no
+progress output. They report the error of a hook that fails under
+`on_error: fail` in their result.
+
+### Example
+
+```yaml
+name: example
+commands:
+  web:
+    scale: 2
+    args: [./web]
+    hooks:
+      - name: scratch
+        resource: scratch
+        create_pre: [mktemp, -d]
+        remove_post: [sh, -c, 'rm -rf -- "$$CMDMAN_COMPOSE_RESOURCE_VALUE"']
+      - name: runlog
+        resource: runlog
+        start_pre:
+          - sh
+          - -c
+          - 'echo "$$(pwd)/web-$$CMDMAN_COMPOSE_SCALE_INDEX-$$(date +%s).log"'
+        stop_post:
+          args: [sh, -c, 'gzip -- "$$CMDMAN_COMPOSE_RESOURCE_VALUE"']
+          on_error: continue
+      - name: notify
+        start_post:
+          args: [sh, -c, 'echo "web-$$CMDMAN_COMPOSE_SCALE_INDEX up" >> events.log']
+          on_error: ignore
+```
+
+- Each replica of `web` gets a directory from `mktemp -d` before cmdman creates
+  it. `remove_post` deletes the directory after cmdman removes the replica.
+- Each start of a replica records a new log file path. `stop_post` compresses
+  the file after the replica stops. A failed compression is reported as a
+  warning and keeps the value until the next start replaces it.
+- `notify` appends a line to `events.log` after each start. Its failure never
+  fails the start.
+- `./web` reads its own values with `cmdman compose resource get web scratch`
+  and `cmdman compose resource get web runlog`.
 
 ## Mux Section
 

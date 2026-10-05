@@ -23,6 +23,14 @@ stored compose labels.
 The operation reports outcomes per command. Target selection is project-scoped,
 so service names resolve only within the selected `(workdir, project)` pair.
 
+Each starting or running replica runs the `stop_pre` and `stop_post` hooks
+stored on it around its stop. Every replica then runs `start_pre` and
+`start_post` around its start. The start hooks come from the compose file when
+one is loaded and from the copy stored on the replica otherwise. A replica
+whose stop hook fails under `on_error: fail` is not started. A start hook that
+fails under `on_error: fail` fails the start of its command. See
+[Lifecycle Hooks](./cmdman-compose.5.md#lifecycle-hooks).
+
 ## Selection Flags
 
 Uses the compose selection flags documented in

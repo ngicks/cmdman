@@ -22,6 +22,14 @@ is loaded, dependency order is reconstructed from stored compose labels.
 Already starting or running commands are treated as successful. Failures are
 aggregated rather than immediately cancelling unrelated starts.
 
+Start runs `start_pre` before and `start_post` after the start of each
+replica. The hooks come from the compose file when one is loaded and from the
+copy stored on the replica otherwise. Already starting or running replicas run
+no hooks. A hook that fails under `on_error: fail` fails the start
+of its command and blocks the commands that depend on it. The replica stays
+unstarted after a failed `start_pre` and keeps running after a failed
+`start_post`. See [Lifecycle Hooks](./cmdman-compose.5.md#lifecycle-hooks).
+
 ## Selection Flags
 
 Uses the compose selection flags documented in
@@ -31,7 +39,8 @@ Uses the compose selection flags documented in
 ## Options
 
 - `--progress auto|tty|json|quiet`: progress output mode. `auto` chooses TTY
-  output on terminals and JSON otherwise.
+  output on terminals and JSON otherwise. Hook runs have records of their own;
+  see [Progress Output](./cmdman-compose.5.md#progress-output).
 - `--scale N`: start only replica N (1-based) of exactly one COMMAND. N must name
   an existing replica. Its dependencies are still started in full.
 

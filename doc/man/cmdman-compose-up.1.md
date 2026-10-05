@@ -29,6 +29,12 @@ logs.
 
 Failures are aggregated so unrelated commands can still be attempted.
 
+Up runs the hooks of [`compose create`](./cmdman-compose-create.1.md) and then
+the hooks of [`compose start`](./cmdman-compose-start.1.md). A replica whose
+recreate failed is not started. The start of its command fails and blocks the
+commands that depend on it. See
+[Lifecycle Hooks](./cmdman-compose.5.md#lifecycle-hooks).
+
 ## Selection Flags
 
 Uses the compose selection flags documented in
@@ -40,7 +46,8 @@ Uses the compose selection flags documented in
 - `--remove-orphan`: remove stopped orphan commands before reconciliation.
   Running orphans are skipped.
 - `--progress auto|tty|json|quiet`: progress output mode. `auto` chooses TTY
-  output on terminals and JSON otherwise.
+  output on terminals and JSON otherwise. Hook runs have records of their own;
+  see [Progress Output](./cmdman-compose.5.md#progress-output).
 - `--mux`: after a successful up, open the multiplexer dashboard described by
   the compose file's `mux:` section, so one command both brings the project up
   and shows its layout. The dashboard opens at layout 0 instead of cycling, so

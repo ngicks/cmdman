@@ -24,6 +24,15 @@ Commands belonging to the project but absent from the desired file are
 orphans. They are retained by default. Use `compose down` for destructive
 whole-project teardown.
 
+Create runs `create_pre` and `create_post` around the creation of each new
+replica. A recreate runs the stop hooks stored on the old replica when it is
+running, then its stored remove hooks, then the create hooks of the new
+replica. A surplus replica of a scale-down runs its stored stop hooks and
+remove hooks. With `--remove-orphan`, a stopped orphan runs its stored remove
+hooks. A hook that fails under `on_error: fail` ends the action of its replica
+at that hook and makes create exit non-zero. See
+[Lifecycle Hooks](./cmdman-compose.5.md#lifecycle-hooks).
+
 ## Selection Flags
 
 Uses the compose selection flags documented in
