@@ -18,6 +18,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/config"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/store"
+	"golang.org/x/sys/unix"
 	"gotest.tools/v3/assert"
 )
 
@@ -40,7 +41,7 @@ const (
 func TestMonitorRunSweepsWhatTheCommandLeftBehind(t *testing.T) {
 	// The sweep only reaches what is reparented to this process. In the monitor
 	// RunMonitor arranges that; here the test process is the monitor.
-	assert.NilError(t, becomeSubreaper())
+	becomeSubreaperForTest(t)
 
 	dir := t.TempDir()
 	var (
@@ -110,7 +111,7 @@ func TestMonitorRunSweepsWhatTheCommandLeftBehind(t *testing.T) {
 // sweep gives up at its bound instead of holding the run open on it, and the
 // run reports how many it left behind.
 func TestMonitorRunReportsSurvivorsTheSweepCouldNotReap(t *testing.T) {
-	assert.NilError(t, becomeSubreaper())
+	becomeSubreaperForTest(t)
 
 	dir := t.TempDir()
 	survivorPidPath := filepath.Join(dir, "survivor.pid")
@@ -189,6 +190,19 @@ func startSurvivor(t *testing.T, pidPath string, ownSession bool) {
 	}
 	assert.NilError(t, cmd.Start())
 	assert.NilError(t, os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600))
+}
+
+// becomeSubreaperForTest makes the test process the subreaper until the test
+// ends. PR_SET_CHILD_SUBREAPER is process-wide, so left set it would make every
+// later test in the package the parent of whatever its commands orphan, and
+// nothing there waits on those. The reset is registered first so it runs last,
+// after the cleanups that reap the survivors already reparented here.
+func becomeSubreaperForTest(t *testing.T) {
+	t.Helper()
+	assert.NilError(t, becomeSubreaper())
+	t.Cleanup(func() {
+		assert.NilError(t, unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0))
+	})
 }
 
 // newSurvivorMonitor wires the helper process above as one non-TTY command, the
