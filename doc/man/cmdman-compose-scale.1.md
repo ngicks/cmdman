@@ -28,8 +28,9 @@ runs the stop hooks stored on it when it is starting or running, and then its
 stored remove hooks. A surplus replica that is neither starting nor running
 runs no stop hooks. Once scale removes such a replica, it runs the stored
 `stop_pre` or `stop_post` release of each resource of the replica, as
-[`compose down`](./cmdman-compose-down.1.md) does. A hook that fails under `on_error: fail` ends the action of its replica
-at that hook and makes scale exit non-zero. A release that fails under
+[`compose down`](./cmdman-compose-down.1.md) does. A hook that fails under
+`on_error: fail` ends the action of its replica at that hook and makes scale
+exit non-zero. A release that fails under
 `on_error: fail` or `on_error: continue` keeps its value. Under
 `on_error: fail`, it also makes scale exit non-zero. See
 [Lifecycle Hooks](./cmdman-compose.5.md#lifecycle-hooks).

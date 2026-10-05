@@ -84,8 +84,8 @@ func openAttachPopup(project, command, id string) popupState {
 }
 
 // openRemovePopup opens the remove confirmation, defaulting to <cancel>. When
-// the command is running, the force variant is used and the body makes the
-// SIGKILL behavior explicit.
+// the command is running, the force variant is used and the body says the
+// command is stopped before it is removed.
 func openRemovePopup(project, command, id string, running bool) popupState {
 	kind := popupRemove
 	if running {
