@@ -363,6 +363,190 @@ func TestDownForceLetsHookFailuresPass(t *testing.T) {
 	assert.Equal(t, len(all), 0, "the replica and the exec commands of its failed hooks go")
 }
 
+// putUndecodableReplica stores replica idx of nc as putReplica does, left in
+// state, with a hooks label that does not decode.
+func putUndecodableReplica(
+	t *testing.T,
+	f *fakeCmdman,
+	nc Command,
+	idx int,
+	state model.EventType,
+) {
+	t.Helper()
+	hash, err := Hash(nc)
+	assert.NilError(t, err)
+	req := buildCreateRequest(stepSpec(nc), nc, hash, replicaName(nc, idx), idx)
+	req.Labels[LabelHooks] = "not-json"
+	f.put(req, state)
+}
+
+// replicaWarnings returns the errors of the hook-warning events reported for
+// the replica command itself rather than for a hook run of it.
+func replicaWarnings(rec *commandPhaseReporter, command string) []string {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	var out []string
+	for _, ev := range rec.events {
+		if ev.Command == command && ev.Hook == "" && ev.Phase == PhaseHookWarning {
+			out = append(out, ev.Err.Error())
+		}
+	}
+	return out
+}
+
+func TestDownUndecodableStoredHooks(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state model.EventType
+		force bool
+		// steps are the teardown steps that go on without the hooks.
+		steps []string
+	}{
+		{name: "running", state: model.EventTypeRunning},
+		{name: "exited", state: model.EventTypeExited},
+		{
+			name:  "running forced",
+			state: model.EventTypeRunning,
+			force: true,
+			steps: []string{"stop", "remove"},
+		},
+		{name: "exited forced", state: model.EventTypeExited, force: true, steps: []string{"remove"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeCmdman()
+			rec := &commandPhaseReporter{}
+			nc := stepCommand("web", 1, eventHook("mark", "", lifecycleEvents[:]...))
+			putUndecodableReplica(t, f, nc, 1, tc.state)
+			replica := replicaName(nc, 1)
+
+			res, err := f.service(rec).Down(
+				t.Context(), storedSelection(), DownOption{Force: tc.force})
+
+			assert.NilError(t, err)
+			assert.DeepEqual(t, lifecycleTrace(f, replica), tc.steps)
+			warnings := replicaWarnings(rec, "web")
+			assert.Equal(t, len(warnings), len(tc.steps), "warnings: %q", warnings)
+			for i, step := range tc.steps {
+				assert.Assert(t, strings.HasPrefix(warnings[i], step+" without the stored hooks"),
+					warnings[i])
+				assert.Assert(t, strings.Contains(warnings[i], "decode "+LabelHooks), warnings[i])
+			}
+			stored, kept := f.get(replica)
+			if tc.force {
+				assert.Equal(t, len(stopErrs(res.Stops)), 0)
+				assert.NilError(t, removeOutcomes(res)["web"])
+				assert.Assert(t, !kept, "a forced down removes the replica without its hooks")
+				return
+			}
+			assert.ErrorContains(t, removeOutcomes(res)["web"], "decode "+LabelHooks)
+			if tc.state == model.EventTypeRunning {
+				errs := stopErrs(res.Stops)
+				assert.Equal(t, len(errs), 1)
+				assert.ErrorContains(t, errs[0], "decode "+LabelHooks)
+				assert.ErrorContains(t, removeOutcomes(res)["web"], "kept after a failed stop hook")
+			}
+			assert.Assert(t, kept, "the replica whose hooks cannot be read is kept")
+			assert.Equal(t, stored.State, tc.state)
+		})
+	}
+}
+
+func TestUndecodableStoredHooksKeepTheReplica(t *testing.T) {
+	nc := stepCommand("web", 2, eventHook("mark", "", lifecycleEvents[:]...))
+	changed := nc
+	changed.Hooks = []LifecycleHook{eventHook("new", "", LifecycleCreatePre)}
+	scaled := nc
+	scaled.Scale = 1
+	createErrs := func(t *testing.T, s *Service, spec ComposeSpec) error {
+		res, err := s.Create(t.Context(), spec, CreateOption{})
+		assert.NilError(t, err)
+		var errs []error
+		for _, a := range res.Actions {
+			errs = append(errs, a.Err)
+		}
+		return errors.Join(errs...)
+	}
+	for _, tc := range []struct {
+		name string
+		run  func(t *testing.T, s *Service) error
+	}{
+		{
+			name: "stop",
+			run: func(t *testing.T, s *Service) error {
+				res, err := s.Stop(t.Context(), storedSelection(), StopOption{})
+				assert.NilError(t, err)
+				return errors.Join(stopErrs(res.Stops)...)
+			},
+		},
+		{
+			name: "restart",
+			run: func(t *testing.T, s *Service) error {
+				res, err := s.Restart(t.Context(), storedSelection(), RestartOption{})
+				assert.NilError(t, err)
+				var errs []error
+				for _, o := range res.Restarts {
+					errs = append(errs, o.StopErr)
+				}
+				return errors.Join(errs...)
+			},
+		},
+		{
+			name: "recreate",
+			run: func(t *testing.T, s *Service) error {
+				return createErrs(t, s, stepSpec(changed))
+			},
+		},
+		{
+			name: "scale-down",
+			run: func(t *testing.T, s *Service) error {
+				return createErrs(t, s, stepSpec(scaled))
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeCmdman()
+			putReplica(t, f, stepSpec(nc), nc, 1, model.EventTypeRunning)
+			putUndecodableReplica(t, f, nc, 2, model.EventTypeRunning)
+
+			err := tc.run(t, f.service(nil))
+
+			assert.ErrorContains(t, err, "decode "+LabelHooks)
+			assert.Equal(t, len(lifecycleTrace(f, replicaName(nc, 2))), 0)
+			kept, ok := f.get(replicaName(nc, 2))
+			assert.Assert(t, ok, "the replica whose hooks cannot be read is kept")
+			assert.Equal(t, kept.State, model.EventTypeRunning)
+		})
+	}
+}
+
+func TestDownKeepsOutcomesWhenHolderListFails(t *testing.T) {
+	f := newFakeCmdman()
+	rec := &commandPhaseReporter{}
+	nc := stepCommand("web", 1, eventHook("mark", "", lifecycleEvents[:]...))
+	putReplica(t, f, stepSpec(nc), nc, 1, model.EventTypeRunning)
+	f.listErr = func(req cmdman.ListRequest) error {
+		// Only the sweep for stranded releases lists every holder of the
+		// project; the lookup of one holder names its resource key.
+		if req.Labels[LabelIntermediate] == IntermediateHolder &&
+			req.Labels[LabelResourceKey] == "" {
+			return errors.New("database is locked")
+		}
+		return nil
+	}
+
+	res, err := f.service(rec).Down(t.Context(), storedSelection(), DownOption{})
+
+	assert.NilError(t, err)
+	assert.DeepEqual(t, res.Stops, []StopOutcome{{Command: "web"}})
+	assert.DeepEqual(t, res.Removes, []RemoveOutcome{{Command: "web"}})
+	assert.Equal(t, len(res.Releases), 1)
+	assert.Equal(t, res.Releases[0].Holder, "")
+	assert.ErrorContains(t, res.Releases[0].Err, "list resource holders: database is locked")
+	assert.Assert(t, rec.reached("proj", PhaseError))
+	_, left := f.get(replicaName(nc, 1))
+	assert.Assert(t, !left)
+}
+
 func TestForcedHooks(t *testing.T) {
 	hooks := []LifecycleHook{{
 		Name: "h",

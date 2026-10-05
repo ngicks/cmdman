@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"sync"
@@ -20,8 +21,9 @@ type DownOption struct {
 	Targets []Target
 	// Force lets every hook that fails under on_error fail pass as on_error
 	// continue: the failure is reported as a warning, and the replica is
-	// stopped and removed all the same. The stored releases a whole-project
-	// down retries are forced the same way.
+	// stopped and removed all the same. A replica whose stored hooks cannot be
+	// decoded is stopped and removed without them, with a warning. The stored
+	// releases a whole-project down retries are forced the same way.
 	Force bool
 }
 
@@ -43,7 +45,8 @@ type RemoveOutcome struct {
 // ReleaseOutcome records the result of running the stored release of one
 // resource whose replica is gone.
 type ReleaseOutcome struct {
-	// Holder is the cmdman command name of the resource holder.
+	// Holder is the cmdman command name of the resource holder. It is empty
+	// when the holders could not be listed: Err is that failure.
 	Holder string
 	Err    error
 }
@@ -59,8 +62,10 @@ type ReleaseOutcome struct {
 // A replica whose stop_pre or stop_post failed under on_error fail is kept: it
 // is not removed, and its RemoveOutcome carries the failure. A replica whose
 // stop failed for any other reason is removed by force. A remove_pre that
-// fails under on_error fail keeps its replica too. opts.Force lets every
-// failing hook pass as on_error continue instead.
+// fails under on_error fail keeps its replica too, and so do stored hooks that
+// cannot be decoded. opts.Force lets every failing hook pass as on_error
+// continue instead, and tears a replica with undecodable hooks down without
+// them.
 //
 // With no targets and a loaded Spec, Down is the destructive whole-project
 // teardown: because selection is by the (workdir, project) label pair, it also
@@ -78,7 +83,9 @@ type ReleaseOutcome struct {
 // by a replica that no longer existed when Down began: the release stored with
 // each runs as the release hook would have, under the on_error stored with it,
 // and the holder goes once the release succeeds. A holder that stores no
-// release stays. This needs no compose file.
+// release stays. This needs no compose file. A failure to list the holders
+// becomes a failed ReleaseOutcome. Down returns no error for it, so the
+// outcomes of the replicas already torn down still reach the caller.
 //
 // Per resolved-decision 21, failures are aggregated; every command is attempted.
 func (s *Service) Down(
@@ -158,10 +165,7 @@ func (s *Service) Down(
 	}
 
 	if len(targets) == 0 {
-		result.Releases, err = s.releaseStranded(ctx, selection, allEntries, opts.Force)
-		if err != nil {
-			return nil, err
-		}
+		result.Releases = s.releaseStranded(ctx, selection, allEntries, opts.Force)
 	}
 
 	if len(selected) == 0 && len(result.Releases) == 0 {
@@ -178,21 +182,28 @@ func (s *Service) Down(
 // replica is not among replicas, the project's replicas as Down found them
 // before tearing any down. A replica Down removes has had its release run by
 // its own hooks; one that fails is retried by the next down. A holder that
-// stores no release is left alone, and so is one that cannot be read.
+// stores no release is left alone, and so is one that cannot be read. A
+// failure to list the holders is the one outcome returned.
 func (s *Service) releaseStranded(
 	ctx context.Context,
 	selection ProjectSelection,
 	replicas []cmdmanEntry,
 	force bool,
-) ([]ReleaseOutcome, error) {
+) []ReleaseOutcome {
+	logger := contextkey.ValueSlogLoggerDefault(ctx)
 	labels := hooksProjectLabels(selection.WorkDir, selection.Project)
 	labels[LabelIntermediate] = IntermediateHolder
 	entries, err := s.svc.List(ctx, cmdman.ListRequest{AllStates: true, Labels: labels})
 	if err != nil {
-		return nil, fmt.Errorf("compose down: list resource holders: %w", err)
+		err = fmt.Errorf("compose down: list resource holders: %w", err)
+		logger.WarnContext(ctx, "compose down: list resource holders failed",
+			"project", selection.Project, "workdir", selection.WorkDir, "error", err)
+		// The CLI reports failed outcomes by count only, and no holder line
+		// exists for this failure, so the event of the project carries its cause.
+		s.report(cmp.Or(selection.Project, selection.WorkDir), PhaseError, err, nil)
+		return []ReleaseOutcome{{Err: err}}
 	}
 
-	logger := contextkey.ValueSlogLoggerDefault(ctx)
 	live := make(map[string]struct{}, len(replicas))
 	for _, e := range replicas {
 		live[e.Name] = struct{}{}
@@ -228,7 +239,7 @@ func (s *Service) releaseStranded(
 		})
 	}
 	_ = eg.Wait()
-	return outcomes, nil
+	return outcomes
 }
 
 // spansMultipleProjects reports whether entries carry more than one distinct

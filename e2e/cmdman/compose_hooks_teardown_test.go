@@ -236,6 +236,80 @@ commands:
 	}
 }
 
+// replaceHooksLabel replaces the stopped command name with a copy whose
+// cmdman.compose.hooks label is hooks, every other label kept, and starts it.
+func replaceHooksLabel(ctx context.Context, t *testing.T, e *testEnv, name, hooks string) {
+	t.Helper()
+	cfg, _ := e.inspectJSON(ctx, name)["Config"].(map[string]any)
+	dir, _ := cfg["dir"].(string)
+	labels, _ := cfg["labels"].(map[string]any)
+	args := []string{"create", "--replace", "-n", name, "-w", dir}
+	for k, v := range labels {
+		if k != "cmdman.compose.hooks" {
+			args = append(args, "-l", fmt.Sprintf("%s=%v", k, v))
+		}
+	}
+	args = append(args, "-l", "cmdman.compose.hooks="+hooks, "--")
+	for _, a := range cfg["argv"].([]any) {
+		args = append(args, a.(string))
+	}
+	e.Cmd(args...).Run(ctx, t)
+	e.Cmd("start", name).Run(ctx, t)
+	e.waitForState(ctx, name, "running", defaultTimeout)
+}
+
+func TestComposeHooksDownForceTearsDownUndecodableHooks(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-hooks-down-undecodable"
+	marker := filepath.Join(wd, "marker.txt")
+	composePath := writeComposeFile(t, wd, markedWebYAML(project, marker, "v1", 1))
+	t.Cleanup(func() {
+		ctx := context.Background()
+		cleanupProject(ctx, env, wd, project)
+		cleanupIntermediates(ctx, env, wd, project)
+	})
+	compose := func(args ...string) *Cmd {
+		return env.Cmd(append([]string{"compose", "--workdir", wd, "-f", composePath}, args...)...)
+	}
+
+	compose("up").Run(ctx, t)
+	name := composeReplica(ctx, env, wd, project, "web", 1)["Name"].(string)
+	env.waitForState(ctx, name, "running", defaultTimeout)
+	env.Cmd("stop", name).Run(ctx, t)
+	replaceHooksLabel(ctx, t, env, name, "not-json")
+	clearMarker(t, marker)
+
+	res := compose("down", "--progress", "json").ExpectFail(ctx, t,
+		"compose down operation(s) failed")
+
+	if !progressErrorWith(parseProgress(t, res.Stdout), "decode cmdman.compose.hooks") {
+		t.Errorf("down should report the hooks it cannot decode:\n%s", res.Stdout)
+	}
+	if st := composeReplicaState(ctx, env, wd, project, "web", 1); st != "running" {
+		t.Errorf("down without --force should keep the replica running, got %q", st)
+	}
+
+	stdout := compose("down", "--force", "--progress", "json").Run(ctx, t)
+
+	events := parseProgress(t, stdout)
+	if !progressReached(events, "web", "hook-warning") ||
+		!progressErrorWith(events, "decode cmdman.compose.hooks") {
+		t.Errorf("down --force should warn about the hooks it cannot decode:\n%s", stdout)
+	}
+	if !progressReached(events, "web", "removed") {
+		t.Errorf("down --force should remove web:\n%s", stdout)
+	}
+	if got := markedEvents(t, marker, "web", 1); len(got) != 0 {
+		t.Errorf("no hook should run for undecodable hooks, ran %q", got)
+	}
+	if names := commandNames(ctx, t, env); len(names) != 0 {
+		t.Errorf("down --force should leave nothing behind: %q", names)
+	}
+}
+
 // releaseRetryYAML declares web with a scratch resource whose release fails
 // until the file ok exists, and appends the value it releases to released.
 func releaseRetryYAML(project, ok, released string) string {

@@ -53,6 +53,10 @@ const (
 	// continue let pass, and PhaseHookIgnored one that on_error: ignore let pass.
 	// PhaseHookOutput is no state at all: it carries one line of output while
 	// the hook runs.
+	//
+	// A PhaseHookWarning event without [Event.Hook] belongs to the replica
+	// itself: a forced teardown could not read the hooks stored on it and went on
+	// without them.
 	PhaseHookRunning   Phase = "hook-running"
 	PhaseHookSucceeded Phase = "hook-succeeded"
 	PhaseHookFailed    Phase = "hook-failed"
@@ -95,7 +99,7 @@ type Event struct {
 	// ScaleIndex is the 1-based scale index of the replica, set on hook events.
 	ScaleIndex int
 	// Hook is the name of the hook item a hook event belongs to. It is empty
-	// for every other event.
+	// for every other event, and for a PhaseHookWarning of the replica itself.
 	Hook string
 	// Lifecycle is the event the hook runs for.
 	Lifecycle LifecycleEvent

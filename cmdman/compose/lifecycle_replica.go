@@ -60,14 +60,23 @@ func (s *Service) specHookReplica(spec ComposeSpec, nc Command, scaleIndex int) 
 // storedHookReplica describes the stored replica e and returns the hooks
 // recorded on it.
 func storedHookReplica(e cmdmanEntry) (hookReplica, []LifecycleHook, error) {
+	r, err := storedReplica(e)
+	if err != nil {
+		return hookReplica{}, nil, err
+	}
+	hooks, err := storedHooks(e)
+	if err != nil {
+		return hookReplica{}, nil, err
+	}
+	return r, hooks, nil
+}
+
+// storedReplica describes the stored replica e, whatever its stored hooks.
+func storedReplica(e cmdmanEntry) (hookReplica, error) {
 	if e.ConfigJSON == nil {
-		return hookReplica{}, nil, fmt.Errorf("command %q has no stored config", e.Name)
+		return hookReplica{}, fmt.Errorf("command %q has no stored config", e.Name)
 	}
 	labels := e.ConfigJSON.Labels
-	hooks, err := decodeHooksLabel(labels[LabelHooks])
-	if err != nil {
-		return hookReplica{}, nil, fmt.Errorf("command %q: %w", e.Name, err)
-	}
 	index, scale := ScaleOf(labels)
 	return hookReplica{
 		Project:    labels[LabelProject],
@@ -79,7 +88,17 @@ func storedHookReplica(e cmdmanEntry) (hookReplica, []LifecycleHook, error) {
 		Display:    entryDisplayName(e),
 		Dir:        e.ConfigJSON.Dir,
 		Env:        slices.Clone(e.ConfigJSON.Env),
-	}, hooks, nil
+	}, nil
+}
+
+// storedHooks decodes the hooks recorded on the stored replica e, which
+// [storedReplica] has described.
+func storedHooks(e cmdmanEntry) ([]LifecycleHook, error) {
+	hooks, err := decodeHooksLabel(e.ConfigJSON.Labels[LabelHooks])
+	if err != nil {
+		return nil, fmt.Errorf("command %q: %w", e.Name, err)
+	}
+	return hooks, nil
 }
 
 func (r hookReplica) resourceRef(key string) resourceRef {

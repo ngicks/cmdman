@@ -2,6 +2,7 @@ package compose
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/ngicks/cmdman/cmdman"
@@ -163,21 +164,53 @@ func forcedHooks(hooks []LifecycleHook) []LifecycleHook {
 	return out
 }
 
-// stopReplica stops the live replica e inside the stop hooks stored on it. With
-// force every hook failure passes as on_error continue. hookFailed reports as
-// [Service.stopWithHooks] does, and also for hooks that cannot be read, which
-// leaves e running.
+// teardownHooks returns the stored replica e as its hooks see it, and the hooks
+// stored on it to run around step, "stop" or "remove". With force every hook
+// failure passes as on_error continue, and hooks that cannot be decoded are
+// left out with a warning: e is torn down without them. Without force such
+// hooks fail step and leave e as it is.
+func (s *Service) teardownHooks(
+	ctx context.Context,
+	e cmdmanEntry,
+	force bool,
+	step string,
+) (hookReplica, []LifecycleHook, error) {
+	r, err := storedReplica(e)
+	if err != nil {
+		return hookReplica{}, nil, err
+	}
+	hooks, err := storedHooks(e)
+	switch {
+	case err != nil && !force:
+		return hookReplica{}, nil, err
+	case err != nil:
+		warning := fmt.Errorf("%s without the stored hooks: %w", step, err)
+		contextkey.ValueSlogLoggerDefault(ctx).WarnContext(ctx,
+			"compose: tear down without the stored hooks",
+			"command", e.Name, "id", e.ID, "step", step, "error", err)
+		// No hook ran, so the event names no hook and lands on the replica's own
+		// line.
+		s.report(r.Display, PhaseHookWarning, warning, nil)
+		return r, nil, nil
+	case force:
+		return r, forcedHooks(hooks), nil
+	default:
+		return r, hooks, nil
+	}
+}
+
+// stopReplica stops the live replica e inside the stop hooks stored on it, as
+// [Service.teardownHooks] says for force. hookFailed reports as
+// [Service.stopWithHooks] does. It also reports stored hooks that
+// [Service.teardownHooks] refuses; e keeps running then.
 func (s *Service) stopReplica(
 	ctx context.Context,
 	e cmdmanEntry,
 	force bool,
 ) (hookFailed bool, err error) {
-	r, hooks, err := storedHookReplica(e)
+	r, hooks, err := s.teardownHooks(ctx, e, force, "stop")
 	if err != nil {
 		return true, err
-	}
-	if force {
-		hooks = forcedHooks(hooks)
 	}
 	return s.stopWithHooks(ctx, r, hooks, e.ID)
 }
@@ -185,7 +218,8 @@ func (s *Service) stopReplica(
 // teardown is what the replicas one compose stop or down tears down share. It
 // is safe for concurrent use.
 type teardown struct {
-	// force lets every hook failure pass as on_error continue.
+	// force lets every hook failure pass as on_error continue, and tears a
+	// replica whose stored hooks cannot be decoded down without them.
 	force bool
 
 	mu sync.Mutex
@@ -217,17 +251,14 @@ func (s *Service) teardownStop(ctx context.Context, t *teardown, e cmdmanEntry) 
 	return err
 }
 
-// teardownRemove removes the replica e for t inside the remove hooks stored on
-// it, by force should it still run. Once e is gone, the exec commands its
-// failed hooks left for inspection go with it: no later operation of e would
-// replace or remove them.
+// teardownRemove removes the replica e for t, by force should it still run,
+// inside the remove hooks [Service.teardownHooks] returns for t.force. Once e
+// is gone, the exec commands its failed hooks left for inspection go with it:
+// no later operation of e would replace or remove them.
 func (s *Service) teardownRemove(ctx context.Context, t *teardown, e cmdmanEntry) error {
-	r, hooks, err := storedHookReplica(e)
+	r, hooks, err := s.teardownHooks(ctx, e, t.force, "remove")
 	if err != nil {
 		return err
-	}
-	if t.force {
-		hooks = forcedHooks(hooks)
 	}
 	removed, err := s.removeWithHooks(ctx, r, hooks, cmdman.RemoveRequest{
 		Targets: []string{e.ID},

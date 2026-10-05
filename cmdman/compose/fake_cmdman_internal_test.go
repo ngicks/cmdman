@@ -45,6 +45,8 @@ type fakeCmdman struct {
 
 	// run decides what a started command does. nil exits 0 with no output.
 	run func(name string, req cmdman.CreateRequest) fakeRun
+	// listErr fails a List when it returns non-nil.
+	listErr func(req cmdman.ListRequest) error
 	// createErr fails a Create when it returns non-nil.
 	createErr func(req cmdman.CreateRequest) error
 	// stopErr fails the stop of the named command, leaving it as it is, when
@@ -160,6 +162,11 @@ func (f *fakeCmdman) insert(req cmdman.CreateRequest) string {
 func (f *fakeCmdman) list(_ context.Context, req cmdman.ListRequest) ([]store.CommandEntry, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.listErr != nil {
+		if err := f.listErr(req); err != nil {
+			return nil, err
+		}
+	}
 	var out []store.CommandEntry
 	for _, c := range f.commands {
 		matches := true
