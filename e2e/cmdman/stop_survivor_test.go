@@ -21,9 +21,10 @@ func ttySurvivorScript(pidFile string) string {
 }
 
 // TestStop_TtySurvivorHoldsSlave pins the end of a tty run against a process
-// that holds the slave open and refuses the signals a stop sends: the monitor
-// sweeps what the run left behind, so the state reaches exited promptly instead
-// of the command staying pinned in running.
+// that holds the slave open and refuses the signals a stop sends. The monitor
+// sends nothing of its own while a stop is in progress, so the holder outlives
+// the stop's signal and goes down with the stop's SIGKILL at the timeout. The
+// state then reaches exited instead of the command staying pinned in running.
 func TestStop_TtySurvivorHoldsSlave(t *testing.T) {
 	t.Parallel()
 	ctx := testContext(t)
@@ -42,8 +43,13 @@ func TestStop_TtySurvivorHoldsSlave(t *testing.T) {
 
 	start := time.Now()
 	env.run(ctx, "stop", "-t", "3", "tty-holder")
-	if elapsed := time.Since(start); elapsed > 10*time.Second {
+	elapsed := time.Since(start)
+	if elapsed > 10*time.Second {
 		t.Fatalf("stop took %s; the pty holder wedged the end of the run", elapsed)
+	}
+	if elapsed < 3*time.Second {
+		t.Fatalf("stop took %s, less than its 3s timeout; something other than the stop's "+
+			"SIGKILL ended the holder", elapsed)
 	}
 
 	env.waitForState(ctx, "tty-holder", "exited", defaultTimeout)
@@ -53,5 +59,5 @@ func TestStop_TtySurvivorHoldsSlave(t *testing.T) {
 	env.run(ctx, "rm", "tty-holder")
 
 	waitUntil(t, 5*time.Second, func() bool { return !processExists(survivor) },
-		"survivor pid %d is still in /proc; the run did not sweep it", survivor)
+		"survivor pid %d is still in /proc; the stop's SIGKILL did not reach it", survivor)
 }

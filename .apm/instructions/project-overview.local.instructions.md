@@ -57,12 +57,26 @@ Two process roles per command:
   session on both paths) and a `cmd.Cancel` hook that signals the whole **process group**. Hooks
   keep `Setpgid` and stay in the monitor's session. Output fans out to: ring buffer
   (scrollback) + log-driver file + a broadcaster (live streams).
-- Run end: the monitor is a subreaper (Linux), so when the child exits it sweeps the processes the
-  run left in the command's session (reap, SIGTERM, 2 s, SIGKILL, reap; a process that made a
-  session of its own — a detached daemon such as a shared multiplexer server — is left alone)
-  before the state flips; the output readers (pty or monitor-owned pipes) are detached after a bounded
-  drain wait rather than joined, so `cmd.Wait` returns at reap time on both paths. Both
-  anomalies surface as event attrs and `CommandState.Warnings`.
+- Run end: the monitor is a subreaper (Linux). When the child exits, it handles what the run left
+  in the command's session before the state flips. A process that made a session of its own (a
+  detached daemon such as a shared multiplexer server) is always left alone.
+  - Natural exit (crash, own exit): reap, SIGTERM by pid, 2 s, SIGKILL, reap, rescan until the
+    session is empty; bounded at 10 s. Linux signals by pid only and never the process group.
+    Other platforms (no subreaper, no `/proc`) probe the process group, SIGTERM it once when the
+    probe finds a member, and SIGKILL it at the grace.
+  - Stop (`cmdman stop`, `compose stop` / `down`, TUI): the sweep sends no signal on any platform.
+    The stop already signalled the whole group once, and a leftover of a wrapper that died first
+    usually carries out the stop (podman waiting for its container). The monitor only reaps and
+    waits. SIGKILL comes from `--timeout` alone: the client sends it at the timeout, and the
+    monitor escalates at the same deadline itself. An interrupted stop therefore still ends the
+    command. After that SIGKILL the monitor kills each survivor in its own pgid inside the
+    session; whatever is alive 10 s later becomes `survivors_unreaped`. On platforms other than
+    Linux the monitor cannot enumerate survivors, sends nothing after that SIGKILL, and reports no
+    count. A stop during a natural-exit sweep ends that sweep's signalling at once. `--timeout`
+    is the single stop knob; wrappers do not need `exec`.
+  - The output readers (pty or monitor-owned pipes) are detached after a bounded drain wait rather
+    than joined, so `cmd.Wait` returns at reap time on both paths. Both anomalies surface as event
+    attrs and `CommandState.Warnings`.
 - Shutdown: SIGTERM → ctx cancel → signal child's process group → `grpcServer.GracefulStop()`
   → `wg.Wait()`.
 

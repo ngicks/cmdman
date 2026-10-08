@@ -158,7 +158,7 @@ exit 0
 	// What is under test is the run's behaviour while the pipe is still held, so
 	// nothing may take the holder away: the sweep would end it and the read
 	// would finish on its own.
-	m.sweepFn = func(context.Context, *slog.Logger, int) int { return 0 }
+	m.sweepFn = func(context.Context, *slog.Logger, int, func() bool) int { return 0 }
 
 	started := time.Now()
 	assert.Equal(t, runOnceWithin(t, m, 30*time.Second), 0)

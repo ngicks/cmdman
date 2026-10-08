@@ -303,7 +303,8 @@ func (s *monitorServer) Signal(
 }
 
 func (s *monitorServer) Stop(_ context.Context, req *pb.StopRequest) (*pb.StopResponse, error) {
-	if err := s.monitor.StopProcess(syscall.Signal(req.Signal)); err != nil {
+	err := s.monitor.StopProcess(syscall.Signal(req.Signal), req.GetTimeout().AsDuration())
+	if err != nil {
 		return nil, err
 	}
 	return &pb.StopResponse{}, nil

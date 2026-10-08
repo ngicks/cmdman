@@ -63,11 +63,16 @@ type Monitor struct {
 	// run going for a while yet. A stop escalating to SIGKILL in that window still has to reach
 	// whatever the command left behind, so the group id is cleared only once the
 	// run is really over.
-	procMu  sync.Mutex
-	ptmx    *os.File
-	stdin   io.WriteCloser
-	cmd     *exec.Cmd
-	runPgid int
+	//
+	// stopDeadline is the SIGKILL a stop with a timeout has scheduled. The run
+	// disarms it where it gives runPgid up, so a deadline that outlives its run
+	// never lands on a pid handed out again.
+	procMu       sync.Mutex
+	ptmx         *os.File
+	stdin        io.WriteCloser
+	cmd          *exec.Cmd
+	runPgid      int
+	stopDeadline *time.Timer
 	// stdinWriteMu serializes the stdin writes themselves, so two clients
 	// writing at once never interleave bytes inside a chunk.
 	stdinWriteMu sync.Mutex
@@ -112,13 +117,22 @@ type Monitor struct {
 	runAnomalies []runAnomaly
 
 	// sweepFn terminates the processes a finished run left in the command's own
-	// session and reports how many outlived the sweep. It is a field so a test
-	// can drive the giving-up path without a process that genuinely refuses to
-	// die.
-	sweepFn func(ctx context.Context, logger *slog.Logger, pgid int) int
+	// session and reports how many outlived the sweep, or sweepHandedOver once
+	// stopRequested reports a stop. awaitFn waits those processes out while a
+	// stop is in progress and reports how many it left alive. They are fields
+	// so a test can drive the giving-up paths without a process that genuinely
+	// refuses to die, and see what either sends. nil runs the default.
+	sweepFn func(ctx context.Context, logger *slog.Logger, pgid int, stopRequested func() bool) int
+	awaitFn func(ctx context.Context, logger *slog.Logger, pgid int, killed func() bool) int
 
-	// stopRequested is set by the Signal RPC to prevent restarts.
+	// stopRequested is set by a stop to prevent restarts. Nothing clears it: the
+	// loop ends on the first run end that sees it, and the monitor exits with it.
 	stopRequested atomic.Bool
+	// stopKilled is set once a stop's own SIGKILL is on its way, whether the
+	// client sent it or the deadline the monitor armed for the stop did. It is
+	// what lets the run end finish that SIGKILL for what the process group could
+	// not reach. Like stopRequested it is never cleared.
+	stopKilled atomic.Bool
 }
 
 func newMonitor(
@@ -178,6 +192,7 @@ func newMonitor(
 		cfg:               commandCfg,
 		evtLog:            evtLog,
 		sweepFn:           sweepRunSurvivors,
+		awaitFn:           awaitRunSurvivors,
 		ring:              newRingBuffer(commandCfg.ScrollbackBytes),
 		stateJSON: &model.CommandState{
 			MonitorPID: os.Getpid(),
@@ -552,13 +567,49 @@ func (m *Monitor) SignalProcess(sig syscall.Signal) error {
 // job: the loop ends instead of starting another run. SignalProcess keeps
 // returning those errors, because a bare signal that hit nothing is worth
 // reporting.
-func (m *Monitor) StopProcess(sig syscall.Signal) error {
+//
+// A positive timeout on a signal other than SIGKILL schedules a SIGKILL for
+// once it expires. The monitor owns that escalation because the client that
+// asked for the stop may be gone before its own timeout: an interrupted or
+// crashed CLI would otherwise leave a command that ignores sig running for
+// good. Each stop replaces the deadline an earlier one scheduled. The deadline
+// is armed before sig goes out, so a command that dies of sig at once cannot
+// finish its run ahead of the arming and leave the deadline to outlive it.
+func (m *Monitor) StopProcess(sig syscall.Signal, timeout time.Duration) error {
 	m.stopRequested.Store(true)
+	// Latched ahead of the signal for the same reason as the deadline below: a
+	// command that dies of it at once must find the run end already knowing.
+	if sig == syscall.SIGKILL {
+		m.stopKilled.Store(true)
+	}
+
+	m.procMu.Lock()
+	if m.stopDeadline != nil {
+		m.stopDeadline.Stop()
+		m.stopDeadline = nil
+	}
+	if sig != syscall.SIGKILL && timeout > 0 {
+		m.stopDeadline = time.AfterFunc(timeout, m.escalateStop)
+	}
+	m.procMu.Unlock()
+
 	err := m.SignalProcess(sig)
 	if errors.Is(err, errNoRunningProcess) || errors.Is(err, syscall.ESRCH) {
 		return nil
 	}
 	return err
+}
+
+// escalateStop is what a stop's deadline runs: SIGKILL to whatever the command
+// still has, live child or leftovers alike. Nothing left to signal means the
+// stop already worked.
+func (m *Monitor) escalateStop() {
+	m.stopKilled.Store(true)
+	err := m.SignalProcess(syscall.SIGKILL)
+	if err == nil || errors.Is(err, errNoRunningProcess) || errors.Is(err, syscall.ESRCH) {
+		return
+	}
+	m.Logger.Warn("escalate stop to SIGKILL", slog.String("error", err.Error()))
 }
 
 // GetState returns the current command state.

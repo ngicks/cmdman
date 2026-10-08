@@ -12,6 +12,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/monitor"
 	"github.com/ngicks/cmdman/cmdman/store"
 	"github.com/ngicks/cmdman/pkg/hrstr"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // defaultStopTimeout is how long a stop waits for the command to go down before
@@ -69,7 +70,8 @@ func (s *Service) stop(
 }
 
 // stopReportingUnreachable is stop that also reports whether the monitor did
-// not answer, for a caller that has its own way to deal with such a monitor.
+// not answer and died short of recording the end of the run, for a caller that
+// has its own way to deal with such a monitor.
 func (s *Service) stopReportingUnreachable(
 	ctx context.Context,
 	st *store.Store,
@@ -77,7 +79,7 @@ func (s *Service) stopReportingUnreachable(
 	signalOverride string,
 	timeout time.Duration,
 ) (unreachable bool, err error) {
-	state, _, stateJSON, err := st.GetCommandState(id)
+	state, _, _, err := st.GetCommandState(id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -114,9 +116,11 @@ func (s *Service) stopReportingUnreachable(
 		},
 	})
 
-	if err := s.sendStop(ctx, st, id, sig); err != nil {
+	if err := s.sendStop(ctx, st, id, sig, timeout); err != nil {
 		if isMonitorUnavailable(err) {
-			return true, monitor.MarkMonitorDied(ctx, st, s.cfg, id, stateJSON, cfg)
+			// From the user's point of view, a monitor gone before the stop
+			// reached it is a done stop.
+			return s.settleUnreachableMonitor(ctx, st, id, cfg, nil)
 		}
 		return false, err
 	}
@@ -126,9 +130,25 @@ func (s *Service) stopReportingUnreachable(
 		return false, err
 	}
 
+	// The monitor escalates to SIGKILL on its own at the same deadline. This
+	// SIGKILL stays anyway: a duplicate SIGKILL is harmless, and sending it here
+	// keeps the wait below and its error reporting on the client's own clock.
 	killSig, _, _ := hrstr.ParseSignal("SIGKILL")
-	if err := s.sendStop(ctx, st, id, killSig); err != nil {
-		return false, fmt.Errorf("timeout waiting for stop, and SIGKILL failed: %w", err)
+	if err := s.sendStop(ctx, st, id, killSig, 0); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// A command that removes itself is gone from the store once the
+			// monitor's own SIGKILL ended its run, which is the stop having
+			// succeeded.
+			return false, nil
+		}
+		killErr := fmt.Errorf("timeout waiting for stop, and SIGKILL failed: %w", err)
+		if isMonitorUnavailable(err) {
+			// The client's SIGKILL never went out, and a monitor that died short
+			// of recording the end of the run may never have sent its own, so
+			// whatever ignored the stop's signal may still be running.
+			return s.settleUnreachableMonitor(ctx, st, id, cfg, killErr)
+		}
+		return false, killErr
 	}
 	if err := waitForStopped(ctx, st, id, timeout); err != nil {
 		return false, fmt.Errorf("timeout waiting for stop after SIGKILL: %w", err)
@@ -136,7 +156,56 @@ func (s *Service) stopReportingUnreachable(
 	return false, nil
 }
 
-func (s *Service) sendStop(ctx context.Context, st *store.Store, id string, sig int32) error {
+// settleUnreachableMonitor decides what a monitor the stop could not reach
+// means. The state read before the connect can be stale by then: the command
+// may have exited on its own in between, and the monitor escalates a stop at
+// the same deadline as the client, so the run its SIGKILL ends often takes the
+// monitor down before the client's own SIGKILL connects. The monitor records
+// the terminal state before it closes its socket, so the state is read again
+// here, and a terminal state or a removed command is a stop that succeeded.
+// Marking that command failed would turn a clean end into a dead monitor.
+//
+// Anything else is a monitor that died on the way. Its death is recorded on top
+// of the state just read, not the stale one, so nothing the monitor wrote since
+// is lost. The caller passes what the stop reports in that case as retErr. A
+// nil retErr means the monitor's death alone settles the stop. died reports
+// that case, a death stale cleanup recorded included.
+func (s *Service) settleUnreachableMonitor(
+	ctx context.Context,
+	st *store.Store,
+	id string,
+	cfg *model.CommandConfig,
+	retErr error,
+) (died bool, err error) {
+	state, _, stateJSON, err := st.GetCommandState(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, errors.Join(retErr, fmt.Errorf("get command state: %w", err))
+	}
+	if monitor.DiedUnexpectedly(stateJSON) {
+		// Stale cleanup got here first. Its failed state records the monitor's
+		// death, not the end of the run, so whatever ignored the stop's signal may
+		// still be running.
+		return true, retErr
+	}
+	if state == model.EventTypeExited || state == model.EventTypeFailed {
+		return false, nil
+	}
+	if err := monitor.MarkMonitorDied(ctx, st, s.cfg, id, stateJSON, cfg); err != nil {
+		return true, errors.Join(retErr, err)
+	}
+	return true, retErr
+}
+
+func (s *Service) sendStop(
+	ctx context.Context,
+	st *store.Store,
+	id string,
+	sig int32,
+	timeout time.Duration,
+) error {
 	_, _, stateJSON, err := st.GetCommandState(id)
 	if err != nil {
 		return err
@@ -149,7 +218,11 @@ func (s *Service) sendStop(ctx context.Context, st *store.Store, id string, sig 
 	defer conn.Close()
 
 	client := cmdmanv1pb.NewCommandMonitorServiceClient(conn)
-	_, err = client.Stop(ctx, &cmdmanv1pb.StopRequest{Signal: sig})
+	req := &cmdmanv1pb.StopRequest{Signal: sig}
+	if timeout > 0 {
+		req.Timeout = durationpb.New(timeout)
+	}
+	_, err = client.Stop(ctx, req)
 	return err
 }
 

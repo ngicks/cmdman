@@ -68,6 +68,16 @@ func cleanStaleEntry(
 	return MarkMonitorDied(ctx, st, cfg, id, stateJSON, configJSON)
 }
 
+const monitorDiedError = "monitor died unexpectedly"
+
+// DiedUnexpectedly reports whether state is the failure MarkMonitorDied
+// records, as opposed to a run the monitor itself saw end. A run the monitor
+// recorded is over; a monitor that died short of recording it may have left the
+// command running.
+func DiedUnexpectedly(state *model.CommandState) bool {
+	return state != nil && state.Error == monitorDiedError
+}
+
 // MarkMonitorDied flips a command whose monitor has died to failed state,
 // honoring auto-remove. It is exported for the Service stop path, which calls
 // it when the monitor socket is unreachable.
@@ -79,7 +89,7 @@ func MarkMonitorDied(
 	stateJSON *model.CommandState,
 	configJSON *model.CommandConfig,
 ) error {
-	stateJSON.Error = "monitor died unexpectedly"
+	stateJSON.Error = monitorDiedError
 	if err := st.UpdateCommandState(id, model.EventTypeFailed, nil, stateJSON); err != nil {
 		return err
 	}
