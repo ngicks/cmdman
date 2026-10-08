@@ -407,6 +407,8 @@ func buildCreateRequest(
 		RestartPolicy:   nc.RestartPolicy,
 		MaxRetries:      nc.MaxRetries,
 		StopSignal:      nc.StopSignal,
+		StopTimeout:     nc.StopGracePeriod,
+		StopCommand:     nc.Stop,
 		Tty:             nc.Tty,
 		ScrollbackBytes: nc.ScrollbackBytes,
 		LogDriver:       nc.LogDriver,

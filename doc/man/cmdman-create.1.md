@@ -20,8 +20,8 @@ start` later to launch the stored definition.
 without shell parsing. Use an explicit shell such as `sh -c '...'` when shell
 syntax is required.
 
-The working directory, environment, restart policy, stop signal, TTY choice,
-scrollback limit, log driver, labels, and argv are persisted.
+The working directory, environment, restart policy, stop signal, stop timeout,
+TTY choice, scrollback limit, log driver, labels, and argv are persisted.
 
 With `--replace`, a command that already carries the given name is swapped for
 the new definition in one step. The new command gets a new ID; the old record,
@@ -52,6 +52,9 @@ creates the command as usual.
 - `-l, --label KEY=VALUE`: metadata used by `ls --label` and `rm --label`.
 - `--restart no|on-failure[:N]|always`: monitor restart policy.
 - `--stop-signal SIGNAL`: default signal used by `stop`.
+- `--stop-timeout DURATION`: time a stop waits after the stop signal before it
+  sends `SIGKILL`. Give integer seconds or a Go duration such as `1m30s`. The
+  value must be positive. An unset timeout means 10 seconds.
 - `-t, --tty`: allocate a PTY; required for `attach` and `send-keys`.
 - `--rm`: remove the command record after its terminal exit.
 - `--scrollback-bytes N`: in-memory output replay limit for attaching clients.

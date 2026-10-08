@@ -78,6 +78,11 @@ Absolute paths are cleaned and used as-is.
 - `labels`: user metadata. Keys starting with `cmdman.compose.` are reserved.
 - `restart_policy`: `no`, `always`, `on-failure`, or `on-failure:N`.
 - `stop_signal`: signal used by `cmdman stop` when no signal override is given.
+- `stop_grace_period`: time a stop waits after the stop signal before it sends
+  `SIGKILL`. Give integer seconds or a Go duration such as `1m30s`. The value
+  must be positive.
+- `stop`: argv run before the stop signal is sent. Write it as an argv list or
+  as a mapping with `args`. The args are interpolated like `args`.
 - `tty`: whether the command runs behind a PTY.
 - `scrollback_bytes`: scrollback buffer size in bytes. Must be non-negative.
 - `log_driver`: `k8s-file` or `none`.

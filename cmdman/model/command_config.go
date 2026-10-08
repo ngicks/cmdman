@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"github.com/ngicks/cmdman/pkg/hrstr"
@@ -23,8 +24,13 @@ type CommandConfig struct {
 	RestartPolicy RestartPolicy `json:"restart_policy"`
 	// MaxRetries caps the number of automatic restarts under the "on-failure"
 	// policy. Zero means unlimited. It is only valid with "on-failure".
-	MaxRetries      int                 `json:"max_retries,omitzero"`
-	StopSignal      string              `json:"stop_signal,omitzero"`
+	MaxRetries int    `json:"max_retries,omitzero"`
+	StopSignal string `json:"stop_signal,omitzero"`
+	// StopTimeout is how long a stop waits for the command to go down after the
+	// stop signal before it sends SIGKILL. Nil leaves the stop's own default.
+	StopTimeout *Duration `json:"stop_timeout,omitzero"`
+	// StopCommand is run before the stop signal is sent. Nil runs nothing.
+	StopCommand     *StopCommand        `json:"stop_command,omitzero"`
 	Tty             bool                `json:"tty"`
 	ScrollbackBytes int                 `json:"scrollback_bytes"`
 	LogDriver       logdriver.LogDriver `json:"log_driver"`
@@ -39,6 +45,11 @@ type CommandConfig struct {
 	// an event this set does not name falls back to it.
 	Hooks      HookSet `json:"hooks,omitzero"`
 	CommandDir string  `json:"command_dir"`
+}
+
+// StopCommand is the argv of [CommandConfig.StopCommand].
+type StopCommand struct {
+	Args []string `json:"args"`
 }
 
 // Validate rejects incomplete command configs so runtime code can assume values are present.
@@ -82,6 +93,15 @@ func (c *CommandConfig) ValidateCreate() error {
 		if _, _, err := hrstr.ParseSignal(c.StopSignal); err != nil {
 			return fmt.Errorf("command config: invalid stop_signal %q: %w", c.StopSignal, err)
 		}
+	}
+	if c.StopTimeout != nil && *c.StopTimeout <= 0 {
+		return fmt.Errorf(
+			"command config: stop_timeout must be positive: %s",
+			time.Duration(*c.StopTimeout),
+		)
+	}
+	if c.StopCommand != nil && (len(c.StopCommand.Args) == 0 || c.StopCommand.Args[0] == "") {
+		return errors.New("command config: stop_command needs a program name")
 	}
 	if c.ScrollbackBytes <= 0 {
 		return fmt.Errorf(

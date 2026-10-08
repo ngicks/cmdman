@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/store"
+	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
 type createFlags struct {
@@ -20,6 +22,7 @@ type createFlags struct {
 	Label           []string
 	Restart         string
 	StopSignal      string
+	StopTimeout     string
 	Rm              bool
 	Tty             bool
 	ScrollbackBytes int
@@ -56,6 +59,13 @@ func bindCreateFlags(cmd *cobra.Command, f *createFlags) {
 		"Restart policy: no, on-failure[:max-retries], always",
 	)
 	flags.StringVar(&f.StopSignal, "stop-signal", model.DefaultStopSignal, "Default stop signal")
+	flags.StringVar(
+		&f.StopTimeout,
+		"stop-timeout",
+		"",
+		"Time a stop waits after the stop signal before SIGKILL, as integer seconds "+
+			"or a duration like 1m30s (default 10s when unset)",
+	)
 	flags.BoolVar(&f.Rm, "rm", false, "Auto-remove on exit")
 	flags.BoolVarP(&f.Tty, "tty", "t", false, "Allocate a pseudo-TTY")
 	flags.IntVar(
@@ -159,6 +169,14 @@ func doCreate(
 		}
 	}
 
+	var stopTimeout time.Duration
+	if cmd.Flags().Changed("stop-timeout") {
+		stopTimeout, err = hrstr.ParseTimeout(flags.StopTimeout)
+		if err != nil {
+			return "", "", fmt.Errorf("--stop-timeout: %w", err)
+		}
+	}
+
 	result, err := svc.Create(cmd.Context(), cmdman.CreateRequest{
 		Name:            flags.Name,
 		Dir:             flags.Dir,
@@ -169,6 +187,7 @@ func doCreate(
 		RestartPolicy:   restartPolicy,
 		MaxRetries:      maxRetries,
 		StopSignal:      flags.StopSignal,
+		StopTimeout:     stopTimeout,
 		AutoRemove:      flags.Rm,
 		Tty:             flags.Tty,
 		ScrollbackBytes: flags.ScrollbackBytes,
