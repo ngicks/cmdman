@@ -1,8 +1,13 @@
 package compose
 
 import (
+	"context"
 	"errors"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"gotest.tools/v3/assert"
 
@@ -74,23 +79,42 @@ func TestDownRetriesReleaseOfStoppedReplica(t *testing.T) {
 	}
 }
 
+// withoutResourceEnv returns env less the resource key and value, which a
+// release run from a holder sets once more.
+func withoutResourceEnv(env []string) []string {
+	return slices.DeleteFunc(slices.Clone(env), func(kv string) bool {
+		k, _, _ := strings.Cut(kv, "=")
+		return k == ENV_CMDMAN_COMPOSE_RESOURCE_KEY || k == ENV_CMDMAN_COMPOSE_RESOURCE_VALUE
+	})
+}
+
 func TestDownRetriesReleaseOfHolderWithoutStoredRelease(t *testing.T) {
 	f := newFakeCmdman()
 	s := f.service(nil)
-	nc := stepCommand("web", 1, portHook(OnErrorContinue))
+	// Neither the hook name nor the directory of the replica can be told from
+	// the holder: the hook is named apart from its resource, and the replica
+	// runs in a directory of its own.
+	hook := portHook(OnErrorContinue)
+	hook.Name = "net"
+	nc := stepCommand("web", 1, hook)
+	nc.Dir = "/wd/web"
 	spec := stepSpec(nc)
 	putReplica(t, f, spec, nc, 1, model.EventTypeRunning)
 	r := s.specHookReplica(spec, nc, 1)
-	// As compose resource set stores a value no acquire stored before.
-	putTestHolder(f, r, "port", "port-set")
-	release := ExecCommandName(r.Name, "port", LifecycleStopPost)
-	var argvs [][]string
+	err := s.ResourceSet(t.Context(), storedSelection(),
+		ResourceOption{Command: "web", Key: "port"}, "port-set")
+	assert.NilError(t, err)
+	stored, ok := f.get(HolderName(r.Name, "port"))
+	assert.Assert(t, ok)
+	assert.Equal(t, stored.ConfigJSON.Dir, "/wd")
+	release := ExecCommandName(r.Name, "net", LifecycleStopPost)
+	var runs []cmdman.CreateRequest
 	f.run = func(name string, req cmdman.CreateRequest) fakeRun {
 		if name != release {
 			return fakeRun{exit: new(0)}
 		}
-		argvs = append(argvs, req.Argv)
-		if len(argvs) == 1 {
+		runs = append(runs, req)
+		if len(runs) == 1 {
 			return fakeRun{exit: new(1)}
 		}
 		return fakeRun{exit: new(0)}
@@ -100,8 +124,190 @@ func TestDownRetriesReleaseOfHolderWithoutStoredRelease(t *testing.T) {
 
 	assert.NilError(t, err)
 	assert.Equal(t, len(res.Releases), 0, "%+v", res.Releases)
-	assert.DeepEqual(t, argvs, [][]string{{"free"}, {"free"}})
+	assert.Equal(
+		t,
+		execCreated(f, release),
+		2,
+		"the retry replaces the exec command of the first run",
+	)
+	assert.Equal(t, len(runs), 2)
+	first, retry := runs[0], runs[1]
+	assert.DeepEqual(t, first.Argv, []string{"free"})
+	assert.DeepEqual(t, retry.Argv, first.Argv)
+	assert.Equal(t, first.Dir, "/wd/web")
+	assert.Equal(t, retry.Dir, first.Dir)
+	assert.DeepEqual(t, retry.Labels, first.Labels)
+	for key, want := range map[string]string{
+		ENV_CMDMAN_COMPOSE_HOOK_NAME:      "net",
+		ENV_CMDMAN_COMPOSE_HOOK_EVENT:     string(LifecycleStopPost),
+		cmdman.ENV_CMDMAN_DATA_DIR:        "/data",
+		cmdman.ENV_CMDMAN_RUNTIME_DIR:     "/run",
+		ENV_CMDMAN_COMPOSE_RESOURCE_KEY:   "port",
+		ENV_CMDMAN_COMPOSE_RESOURCE_VALUE: "port-set",
+	} {
+		for i, req := range runs {
+			got, ok := envValue(req.Env, key)
+			assert.Assert(t, ok, "run %d sets %s", i+1, key)
+			assert.Equal(t, got, want, "run %d sets %s", i+1, key)
+		}
+	}
+	assert.DeepEqual(t, withoutResourceEnv(retry.Env), withoutResourceEnv(first.Env))
 	_, held := holderValue(t, f, r, "port")
+	assert.Assert(t, !held)
+}
+
+// failFirstHolderLookup fails the first lookup of a holder by its resource key,
+// as a busy store would, and lets every later one through.
+func failFirstHolderLookup(f *fakeCmdman) {
+	failed := false
+	f.listErr = func(req cmdman.ListRequest) error {
+		if failed || req.Labels[LabelResourceKey] == "" {
+			return nil
+		}
+		failed = true
+		return errors.New("database is locked")
+	}
+}
+
+func TestDownDoesNotRetryReleaseWhoseHolderLookupFailed(t *testing.T) {
+	for _, onError := range []OnError{OnErrorFail, OnErrorContinue} {
+		t.Run(string(onError), func(t *testing.T) {
+			f := newFakeCmdman()
+			rec := &commandPhaseReporter{}
+			s := f.service(rec)
+			nc := stepCommand("web", 1, portHook(onError))
+			r := acquirePort(t, f, s, nc, model.EventTypeRunning)
+			release := ExecCommandName(r.Name, "port", LifecycleStopPost)
+			f.run = nil
+			failFirstHolderLookup(f)
+
+			res, err := s.Down(t.Context(), storedSelection(), DownOption{})
+
+			assert.NilError(t, err)
+			assert.Equal(t, execCreated(f, release), 0,
+				"the release never ran, and no retry runs it without its value")
+			assert.Equal(t, len(res.Releases), 1, "%+v", res.Releases)
+			o := res.Releases[0]
+			assert.Equal(t, o.Holder, HolderName(r.Name, "port"))
+			assert.Equal(t, o.Command, "web")
+			assert.Equal(t, o.Resource, "port")
+			assert.Equal(t, o.Value, "")
+			assert.Assert(t, !o.Retried)
+			failure := o.Warning
+			if onError == OnErrorFail {
+				failure = o.Err
+			}
+			assert.ErrorContains(t, failure, "look up holder of resource")
+			assert.ErrorContains(t, failure, "database is locked")
+			assert.Equal(t, len(unreleasedEvents(rec)), 1)
+			value, held := holderValue(t, f, r, "port")
+			assert.Assert(t, held, "the stored holder survives")
+			assert.Equal(t, value, "port-1")
+		})
+	}
+}
+
+// setLabel sets label key of the command named name to value.
+func setLabel(f *fakeCmdman, name, key, value string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lookup(name).entry.ConfigJSON.Labels[key] = value
+}
+
+func TestDownDoesNotRetryReleaseOfUndecodableHolder(t *testing.T) {
+	f := newFakeCmdman()
+	rec := &commandPhaseReporter{}
+	s := f.service(rec)
+	nc := stepCommand("web", 1, portHook(OnErrorContinue))
+	r := acquirePort(t, f, s, nc, model.EventTypeRunning)
+	// The labels that find the holder and its value stay readable.
+	setLabel(f, HolderName(r.Name, "port"), LabelResourceRelease, "{")
+	release := ExecCommandName(r.Name, "port", LifecycleStopPost)
+	var values []string
+	failOnceThenSucceed(f, release, &values)
+
+	res, err := s.Down(t.Context(), storedSelection(), DownOption{})
+
+	assert.NilError(t, err)
+	assert.DeepEqual(t, values, []string{"port-1"})
+	assert.Equal(t, len(res.Releases), 1, "%+v", res.Releases)
+	o := res.Releases[0]
+	assert.Equal(t, o.Holder, HolderName(r.Name, "port"))
+	assert.Equal(t, o.Value, "port-1")
+	assert.Assert(t, !o.Retried)
+	assert.NilError(t, o.Err)
+	assert.ErrorContains(t, o.Warning, "exited with code 1")
+	events := unreleasedEvents(rec)
+	assert.Equal(t, len(events), 1, "%+v", events)
+	assert.Equal(t, events[0].Value, "port-1")
+	value, held := holderValue(t, f, r, "port")
+	assert.Assert(t, held, "the stored holder survives")
+	assert.Equal(t, value, "port-1")
+}
+
+// reporterFunc reports each event to the func it is.
+type reporterFunc func(Event)
+
+func (f reporterFunc) Report(ev Event) { f(ev) }
+
+func TestDownRetriesOnceEveryStopHasReturned(t *testing.T) {
+	f := newFakeCmdman()
+	rec := &commandPhaseReporter{}
+	firstStopped := make(chan struct{})
+	var once sync.Once
+	s := f.service(reporterFunc(func(ev Event) {
+		rec.Report(ev)
+		if ev.Command == "web-1" && ev.Phase == PhaseStopped {
+			once.Do(func() { close(firstStopped) })
+		}
+	}))
+	nc := stepCommand("web", 2, portHook(OnErrorContinue))
+	r1 := acquireReplicaPort(t, f, s, nc, 1, model.EventTypeRunning)
+	r2 := acquireReplicaPort(t, f, s, nc, 2, model.EventTypeRunning)
+	release1 := ExecCommandName(r1.Name, "port", LifecycleStopPost)
+	release2 := ExecCommandName(r2.Name, "port", LifecycleStopPost)
+	// Replica 2 shares the resource of replica 1, as two containers attached to
+	// one network do, so its release works only once replica 2 has stopped.
+	var released []bool
+	f.run = func(name string, _ cmdman.CreateRequest) fakeRun {
+		if name != release1 {
+			return fakeRun{exit: new(0)}
+		}
+		ok := rec.reached("web-2", PhaseStopped)
+		released = append(released, ok)
+		if !ok {
+			return fakeRun{exit: new(1)}
+		}
+		return fakeRun{exit: new(0)}
+	}
+	// Replica 2 is still in its stop_post when the stop of replica 1 returns.
+	f.started = func(name string) {
+		if name != release2 {
+			return
+		}
+		select {
+		case <-firstStopped:
+		case <-time.After(10 * time.Second):
+			t.Error("the stop of replica 1 never returned")
+		}
+	}
+
+	res, err := s.Down(t.Context(), storedSelection(), DownOption{})
+
+	assert.NilError(t, err)
+	assert.DeepEqual(t, released, []bool{false, true})
+	assert.Equal(t, len(res.Releases), 0, "%+v", res.Releases)
+	calls := f.callLog()
+	var runs []int
+	for i, call := range calls {
+		if call == "create "+release1 {
+			runs = append(runs, i)
+		}
+	}
+	stopped2 := slices.Index(calls, "remove "+release2)
+	assert.Equal(t, len(runs), 2, "%v", calls)
+	assert.Assert(t, runs[0] < stopped2 && stopped2 < runs[1], "%v", calls)
+	_, held := holderValue(t, f, r1, "port")
 	assert.Assert(t, !held)
 }
 
@@ -129,6 +335,7 @@ func TestDownRetryKeepsTheReplicaAFailedStopHookKept(t *testing.T) {
 	assert.ErrorContains(t, errs[0], `hook "port" stop_post`)
 	assert.ErrorContains(t, removeOutcomes(res)["web"], "kept after a failed stop hook")
 	assert.ErrorContains(t, removeOutcomes(res)["web"], `hook "port" stop_post`)
+	assert.Assert(t, errors.Is(removeOutcomes(res)["web"], ErrReplicaKept))
 	assert.DeepEqual(t, lifecycleTrace(f, r.Name), []string{
 		"port.start_pre", "stop", "port.stop_post", "port.stop_post",
 	})
@@ -368,4 +575,43 @@ func TestRetryReleasesRunsNothingWhenTheReplicasCannotBeListed(t *testing.T) {
 	left := rec.failures()
 	assert.Equal(t, len(left), 1)
 	assert.Assert(t, !left[0].retried)
+}
+
+func TestRetryReleasesRunsNothingOnceCancelled(t *testing.T) {
+	f := newFakeCmdman()
+	s := f.service(nil)
+	nc := stepCommand("web", 1, portHook(OnErrorContinue))
+	r := acquirePort(t, f, s, nc, model.EventTypeExited)
+	stored, ok := f.get(HolderName(r.Name, "port"))
+	assert.Assert(t, ok)
+	holder, err := decodeHolder(stored)
+	assert.NilError(t, err)
+	lists := 0
+	f.listErr = func(cmdman.ListRequest) error {
+		lists++
+		return nil
+	}
+	firstErr := errors.New("first run failed")
+	rec := &releaseRecorder{}
+	rec.record(failedRelease{
+		holder:  holder,
+		display: "web",
+		err:     firstErr,
+		onError: OnErrorContinue,
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	s.retryReleases(ctx, rec, storedSelection(), false)
+
+	assert.Equal(t, lists, 0, "the replicas are not even listed")
+	assert.Equal(t, execCreated(f, ExecCommandName(r.Name, "port", LifecycleStopPost)), 0)
+	left := rec.failures()
+	assert.Equal(t, len(left), 1, "the failure is still reported")
+	assert.Equal(t, left[0].err, firstErr)
+	assert.Equal(t, left[0].onError, OnErrorContinue)
+	assert.Assert(t, !left[0].retried)
+	value, held := holderValue(t, f, r, "port")
+	assert.Assert(t, held)
+	assert.Equal(t, value, "port-1")
 }

@@ -9,10 +9,10 @@ import (
 
 // failedRelease is one run of a release event that failed.
 type failedRelease struct {
-	// holder is the holder of the resource as it was before the run, enough to
-	// run the release again. A resource that had no holder gets one built from
-	// the run, with an empty value, and a holder that stores no release gets
-	// the release of the run.
+	// holder is the holder of the resource as it was before the run. A run that
+	// found no holder, or one it could not look up or decode, gets one built
+	// from the run, with the value the run got. A holder that stores no release
+	// gets the release, directory and environment of the run.
 	holder resourceHolder
 	// display is the name the progress events of the run gave the replica.
 	display string
@@ -24,6 +24,11 @@ type failedRelease struct {
 	// retried reports that the release ran once more after this failure and
 	// failed again. err and onError are then those of that last run.
 	retried bool
+	// reportOnly reports that holder was built from the run and copies no
+	// stored holder. Down reports such a release and never runs it again. A run
+	// from holder would release a value it may not know, and its success would
+	// drop whatever holder is stored.
+	reportOnly bool
 }
 
 // fails reports whether the failure fails the operation that ran it.

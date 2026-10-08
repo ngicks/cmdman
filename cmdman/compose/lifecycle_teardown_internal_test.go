@@ -598,6 +598,7 @@ func TestDownRemovePostFailureKeepsHolderForTheNextDown(t *testing.T) {
 	assert.Assert(t, !execLeft, "the exec commands of a removed replica go with it")
 	assert.Equal(t, len(res.Releases), 1, "the failed release is listed: %+v", res.Releases)
 	assert.Equal(t, res.Releases[0].Holder, HolderName(r.Name, "scratch"))
+	assert.Equal(t, res.Releases[0].Command, "web")
 	assert.Equal(t, res.Releases[0].Resource, "scratch")
 	assert.Equal(t, res.Releases[0].Value, "/tmp/web")
 	assert.ErrorContains(t, res.Releases[0].Err, `value "/tmp/web"`)
@@ -621,6 +622,7 @@ func TestDownRemovePostFailureKeepsHolderForTheNextDown(t *testing.T) {
 	assert.NilError(t, err)
 	assert.DeepEqual(t, res.Releases, []ReleaseOutcome{{
 		Holder:   HolderName(r.Name, "scratch"),
+		Command:  "web",
 		Resource: "scratch",
 		Value:    "/tmp/web",
 	}})

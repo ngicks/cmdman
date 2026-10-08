@@ -66,6 +66,7 @@ func TestDownReportsEveryFailedRelease(t *testing.T) {
 			assert.Equal(t, len(res.Releases), 1, "%+v", res.Releases)
 			o := res.Releases[0]
 			assert.Equal(t, o.Holder, HolderName(r.Name, "port"))
+			assert.Equal(t, o.Command, "web")
 			assert.Equal(t, o.Resource, "port")
 			assert.Equal(t, o.Value, "port-1")
 			assert.Assert(t, o.Retried)
@@ -132,6 +133,7 @@ func TestRunLifecycleEventRecordsFailedRelease(t *testing.T) {
 			assert.Equal(t, failed[0].display, "web")
 			assert.Equal(t, failed[0].onError, onError)
 			assert.Equal(t, failed[0].fails(), onError == OnErrorFail)
+			assert.Assert(t, !failed[0].reportOnly, "the record copies the stored holder")
 			assert.ErrorContains(t, failed[0].err, `value "/tmp/scratch.1"`)
 			_, held := holderValue(t, f, r, "scratch")
 			assert.Equal(t, held, onError != OnErrorIgnore,
@@ -154,6 +156,7 @@ func TestRunLifecycleEventRecordsReleaseWithoutHolder(t *testing.T) {
 	assert.NilError(t, err)
 	failed := rec.failures()
 	assert.Equal(t, len(failed), 1)
+	assert.Assert(t, failed[0].reportOnly, "no stored holder backs the record")
 	h := failed[0].holder
 	assert.Equal(t, h.name(), HolderName(r.Name, "scratch"))
 	assert.Equal(t, h.Ref, r.resourceRef("scratch"))
@@ -291,6 +294,7 @@ func TestAddUnreleasedListsEachResourceOnce(t *testing.T) {
 	} {
 		o := got[i+1]
 		assert.Equal(t, o.Holder, want.holder.name())
+		assert.Equal(t, o.Command, "web")
 		assert.Equal(t, o.Resource, want.holder.Ref.Key)
 		assert.Equal(t, o.Value, want.holder.Value)
 		assert.Equal(t, o.Err, want.err)

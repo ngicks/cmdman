@@ -742,7 +742,9 @@ func TestComposeHooksDownReportsUnreleasedResources(t *testing.T) {
 			down := compose("down", "--progress", tc.progress)
 			var stdout string
 			if tc.wantFail {
-				res := down.ExpectFail(ctx, t, "compose down operation(s) failed")
+				// The failed release fails the stop, keeps web and stays
+				// unreleased. Down counts it once.
+				res := down.ExpectFail(ctx, t, ": 1 compose down operation(s) failed")
 				if status := exitStatusOf(t, res.Err); status != 1 {
 					t.Errorf("down exited %d, want 1", status)
 				}
@@ -895,8 +897,9 @@ commands:
 	env.waitForState(ctx, replicaID(ctx, t, env, wd, project, "web", 1), "running",
 		defaultTimeout)
 
+	// The failed stop hook fails the stop and keeps web. Down counts it once.
 	res := compose("down", "--progress", "json").ExpectFail(ctx, t,
-		"compose down operation(s) failed")
+		": 1 compose down operation(s) failed")
 
 	if status := exitStatusOf(t, res.Err); status != 1 {
 		t.Errorf("down exited %d, want 1", status)

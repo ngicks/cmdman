@@ -76,10 +76,13 @@ only when the replica has verifiably stopped: its state is `exited`, or
 `failed` with the end of its run recorded by its monitor. A replica whose
 monitor died does not count as stopped, and neither does a replica that still
 runs or a replica that is gone. Such a replica may still use the resource, so
-its release does not run again. A release that works on the retry drops the
-value, and down reports no failure for it. A release that fails again reports
-the failure of the retry. The retry runs no other hook. A replica that a failed
-stop hook keeps stays kept, and down still exits non-zero.
+its release does not run again. The retry runs from the stored value as the
+first run read it. A release whose first run found no stored value, or failed
+to look it up or to read all of it, does not run again. A release that works on
+the retry drops the value, and down reports no failure for it. A release that
+fails again reports the failure of the retry. The retry runs no other hook. A
+replica that a failed stop hook keeps stays kept, and down still exits
+non-zero.
 
 With no command names, down then releases the resources that removed replicas
 left behind. Down runs the release event stored with the value of these
@@ -96,7 +99,11 @@ runs in the directory and environment stored with the value, with
 
 A release that worked drops the value. A `remove_post` release and each of
 these stored releases run after the retry, and down runs each of them at most
-once. The next down retries a release that failed in the hooks of a replica. A value that has no release event, such as one stored by
+once. Three kinds of failed release wait for the next down: a release that
+still fails after its retry, a `stop_pre` or `stop_post` release that down did
+not retry, and a `remove_pre` or `remove_post` release. A failed release under
+`on_error: ignore` has already dropped the value and leaves nothing for the
+next down. A value that has no release event, such as one stored by
 `compose resource set` alone, stays. These releases need no compose file, so
 `cmdman compose -p NAME down` retries the releases of a project whose file is
 gone.

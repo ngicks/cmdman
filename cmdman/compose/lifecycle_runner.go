@@ -170,7 +170,7 @@ func (s *Service) runHookAs(
 ) (warning, err error) {
 	r := run.replica
 	ev := run.event
-	exit, held, err := s.execHook(ctx, run, h, exec)
+	exit, held, value, err := s.execHook(ctx, run, h, exec)
 	if err == nil {
 		s.reportHook(run, PhaseHookSucceeded, nil, exit)
 		return nil, nil
@@ -181,29 +181,29 @@ func (s *Service) runHookAs(
 		if ctx.Err() != nil {
 			onError = OnErrorFail
 		}
-		record := resourceHolder{
-			Ref:   r.resourceRef(h.Resource),
-			Owner: r.Name,
-			Dir:   r.Dir,
-			Env:   slices.Clone(run.env),
-		}
+		record := resourceHolder{Ref: r.resourceRef(h.Resource), Owner: r.Name, Value: value}
 		if held != nil {
 			record = *held
 		}
 		if record.Release == nil {
-			// A holder stored by compose resource set alone has no release, and
-			// the record has to be enough to run this one again.
+			// A holder stored by compose resource set alone keeps no release, nor
+			// the directory and environment of one. The record takes those of
+			// this run, so a retry runs as this run did and replaces its exec
+			// command.
 			record.Release = &resourceRelease{
 				Event:   ev,
 				Args:    slices.Clone(exec.Args),
 				OnError: exec.OnError.resolved(),
 			}
+			record.Dir = r.Dir
+			record.Env = slices.Clone(run.env)
 		}
 		releaseRecorderFrom(ctx).record(failedRelease{
-			holder:  record,
-			display: r.Display,
-			err:     err,
-			onError: onError,
+			holder:     record,
+			display:    r.Display,
+			err:        err,
+			onError:    onError,
+			reportOnly: held == nil,
 		})
 	}
 	if ctx.Err() != nil {
@@ -242,15 +242,17 @@ func (s *Service) runHookAs(
 // The failure of a release names the value it was to release, which the
 // holder keeps unless on_error is ignore. held is the holder of the resource h
 // declares as it was before the run, or nil when there is none or it cannot be
-// read. A run that carries the holder takes it and its value from there.
+// looked up or decoded. value is the stored value the run got, read off the
+// holder's label even when the rest of the holder cannot be decoded, and empty
+// when the lookup failed and nothing ran. A run that carries the holder takes it
+// and its value from there.
 func (s *Service) execHook(
 	ctx context.Context,
 	run hookRun,
 	h LifecycleHook,
 	exec LifecycleExec,
-) (exit *int, held *resourceHolder, err error) {
+) (exit *int, held *resourceHolder, value string, err error) {
 	r := run.replica
-	var value string
 	switch {
 	case h.Resource == "":
 	case run.held != nil:
@@ -259,7 +261,7 @@ func (s *Service) execHook(
 	default:
 		holder, err := s.findHolder(ctx, r.resourceRef(h.Resource))
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, "", err
 		}
 		if holder != nil && holder.ConfigJSON != nil {
 			value = holder.ConfigJSON.Labels[LabelResourceValue]
@@ -272,7 +274,7 @@ func (s *Service) execHook(
 	if err != nil && h.Resource != "" && !run.event.acquires() {
 		err = fmt.Errorf("release resource %q (value %q): %w", h.Resource, value, err)
 	}
-	return exit, held, err
+	return exit, held, value, err
 }
 
 // execHookValue is [Service.execHook] once value, the stored value of the

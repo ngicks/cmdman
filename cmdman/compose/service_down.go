@@ -3,6 +3,7 @@ package compose
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -48,8 +49,15 @@ type DownResult struct {
 // RemoveOutcome records the result of removing a single compose command.
 type RemoveOutcome struct {
 	Command string
-	Err     error
+	// Err is the failure of the removal. For a replica kept after a failed stop
+	// hook, Err wraps [ErrReplicaKept] and that failure, which the StopOutcome of
+	// the replica carries too.
+	Err error
 }
+
+// ErrReplicaKept marks the RemoveOutcome of a replica that down did not remove
+// because a stop hook of the replica failed.
+var ErrReplicaKept = errors.New("kept after a failed stop hook")
 
 // ReleaseOutcome records the result of a release of one resource that down
 // ran: the stored release of a resource whose replica is gone, or a release
@@ -59,6 +67,11 @@ type ReleaseOutcome struct {
 	// Holder is the cmdman command name of the resource holder. It is empty
 	// when the holders could not be listed: Err is that failure.
 	Holder string
+	// Command names the replica the resource is held for, as the StopOutcome
+	// and RemoveOutcome of the replica name it. A release that ran in the
+	// hooks of the replica and fails the down has also failed the stop or the
+	// removal of the replica.
+	Command string
 	// Resource and Value are the key and the stored value of the resource.
 	Resource string
 	Value    string
@@ -122,12 +135,16 @@ type ReleaseOutcome struct {
 // the holder as the failed run found it, and opts.Force applies to it as to
 // every other release. A replica that is created, starting or running, one
 // whose monitor died unexpectedly, and one that is gone may still have its
-// workload running, so its release does not run again. A release that works on
-// the retry drops the holder and leaves no ReleaseOutcome. Nothing else runs
-// again: a replica that a failed stop hook keeps stays kept, and the hooks
-// after the failed one do not run. The remove_post releases and the stored
-// releases above run after that point, and one that fails waits for the next
-// down. No release runs more than twice in one down.
+// workload running, so its release does not run again. A failed run that found
+// no holder, or one it could not look up or decode, does not run again either.
+// A release that works on the retry drops the holder and leaves no
+// ReleaseOutcome. Nothing else runs again: a replica that a failed stop hook
+// keeps stays kept, and the hooks after the failed one do not run. The remove
+// hooks and the stored releases above run after that point. No release runs
+// more than twice in one down. A release that still fails after its retry, one
+// Down did not retry, and a failed remove_pre or remove_post release wait for
+// the next down. A failed release under on_error ignore has already dropped the
+// value and leaves nothing for the next down.
 //
 // Every release Down runs and that fails, unless its retry works, becomes a
 // ReleaseOutcome under the on_error of its last run, and is reported as a
@@ -296,6 +313,7 @@ func (s *Service) releaseStranded(
 			}
 			outcomes[i] = ReleaseOutcome{
 				Holder:   h.name(),
+				Command:  h.replica().Display,
 				Resource: h.Ref.Key,
 				Value:    h.Value,
 				Err:      err,
@@ -313,7 +331,8 @@ func (s *Service) releaseStranded(
 // runs it from the holder recorded with the failure, under force. The replicas
 // are those of selection as they are listed now, so Down calls it after every
 // stop has returned. A release whose replica is not listed, or may still run,
-// is not run again: its workload may still use the resource.
+// is not run again: its workload may still use the resource. Nor is a release
+// recorded without a copy of its stored holder ([failedRelease.reportOnly]).
 //
 // A release that works now leaves rec. One that fails again goes back to rec
 // with the failure of that run and is marked retried. The runs report to a
@@ -369,7 +388,7 @@ func (s *Service) retryFailures(
 	cleared := make([]bool, len(failed))
 	var eg errgroup.Group
 	for i := range failed {
-		if !stopped[failed[i].holder.Owner] {
+		if failed[i].reportOnly || !stopped[failed[i].holder.Owner] {
 			continue
 		}
 		eg.Go(func() error {
@@ -429,7 +448,7 @@ func (s *Service) addUnreleased(
 		}
 	}
 	// A holder recorded more than once is reported as its last record has it.
-	display := make(map[string]string, len(failed))
+	seen := make(map[string]bool, len(failed))
 	var order []string
 	for _, f := range failed {
 		name := f.holder.name()
@@ -440,7 +459,7 @@ func (s *Service) addUnreleased(
 			outcomes = append(outcomes, ReleaseOutcome{Holder: name})
 		}
 		o := &outcomes[i]
-		o.Resource, o.Value = f.holder.Ref.Key, f.holder.Value
+		o.Command, o.Resource, o.Value = f.display, f.holder.Ref.Key, f.holder.Value
 		o.Retried = f.retried
 		o.Err, o.Warning = nil, nil
 		if f.fails() {
@@ -448,15 +467,15 @@ func (s *Service) addUnreleased(
 		} else {
 			o.Warning = f.err
 		}
-		if _, ok := display[name]; !ok {
+		if !seen[name] {
+			seen[name] = true
 			order = append(order, name)
 		}
-		display[name] = f.display
 	}
 	for _, name := range order {
 		o := outcomes[at[name]]
 		s.reportEvent(Event{
-			Command:  display[name],
+			Command:  o.Command,
 			Phase:    PhaseUnreleased,
 			Err:      cmp.Or(o.Err, o.Warning),
 			Resource: o.Resource,
@@ -579,7 +598,7 @@ func removeAllConcurrent(
 			outcome := RemoveOutcome{Command: name}
 			if kept := td.keptBy(id); kept != nil {
 				outcome.Err = fmt.Errorf(
-					"remove command %q (%s): kept after a failed stop hook: %w", name, id, kept)
+					"remove command %q (%s): %w: %w", name, id, ErrReplicaKept, kept)
 				s.report(name, PhaseSkipped, outcome.Err, nil)
 			} else {
 				s.report(name, PhaseRemoving, nil, nil)
