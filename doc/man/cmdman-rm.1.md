@@ -19,7 +19,8 @@ combination of both.
 Starting and running commands are rejected by default. Forced removal stops
 such a command first, the way [cmdman-stop(1)](./cmdman-stop.1.md) does with
 its defaults. cmdman sends the command's stop signal to its process group, waits
-up to 10 seconds, then sends `SIGKILL`. The monitor sweeps the processes the
+up to the command's stored stop timeout, or 10 seconds when it has none, then
+sends `SIGKILL`. The monitor sweeps the processes the
 command left in its session, as [cmdman(1)](./cmdman.1.md) describes, and cmdman
 removes the command once it has stopped.
 

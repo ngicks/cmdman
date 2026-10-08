@@ -7,14 +7,15 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] stop [--progress MODE] [--scale N] [COMMAND...]
+cmdman compose [selection flags] stop [--progress MODE] [--scale N] [--timeout DURATION]
+    [COMMAND...]
 ```
 
 ## Description
 
 Gracefully stops selected running commands using each stored command's stop
-signal and timeout behavior. Stored definitions remain available for a later
-`compose start`.
+signal and stop timeout. `--timeout` overrides the stop timeout. Stored
+definitions remain available for a later `compose start`.
 
 Naming a command also selects all recursive dependents, and stopping proceeds
 in reverse dependency order. With no names, all declared project commands are
@@ -46,6 +47,11 @@ Uses the compose selection flags documented in
   see [Progress Output](./cmdman-compose.5.md#progress-output).
 - `--scale N`: stop only replica N (1-based) of exactly one COMMAND. N must name
   an existing replica. Its recursive dependents are still stopped in full.
+- `-t, --timeout DURATION`: time each replica's stop waits after the stop
+  signal before it sends `SIGKILL`. Give integer seconds or a Go duration such
+  as `1m30s`. The value must be positive. When omitted, each replica waits its
+  stored `stop_grace_period`, or 10 seconds when the command declares none. A
+  rejected value stops no replica and runs no hook.
 
 ## See Also
 

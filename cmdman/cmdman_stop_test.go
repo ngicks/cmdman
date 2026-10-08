@@ -1,6 +1,7 @@
 package cmdman
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -108,7 +109,7 @@ func TestServiceStopWithMonitorGoneRecordsDeath(t *testing.T) {
 	defer svc.Close()
 	results, err := svc.Stop(t.Context(), StopRequest{
 		Targets: []string{id},
-		Timeout: time.Second,
+		Timeout: new(time.Second),
 	})
 	assert.NilError(t, err)
 	assert.Equal(t, len(results), 1)
@@ -118,6 +119,132 @@ func TestServiceStopWithMonitorGoneRecordsDeath(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, state, model.EventTypeFailed)
 	assert.Equal(t, stateJSON.Error, "monitor died unexpectedly")
+}
+
+func TestStopTimeout(t *testing.T) {
+	stored := model.Duration(2 * time.Second)
+	for _, tc := range []struct {
+		name     string
+		override *time.Duration
+		stored   *model.Duration
+		want     time.Duration
+	}{
+		{
+			name:     "explicit over stored",
+			override: new(5 * time.Second),
+			stored:   &stored,
+			want:     5 * time.Second,
+		},
+		{name: "explicit without stored", override: new(time.Second), want: time.Second},
+		{name: "stored", stored: &stored, want: 2 * time.Second},
+		{name: "default", want: 10 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &model.CommandConfig{StopTimeout: tc.stored}
+			assert.Equal(t, stopTimeout(tc.override, cfg), tc.want)
+		})
+	}
+}
+
+// Stop and a forced rm hand the monitor the timeout the stop resolved for the
+// command, so the monitor escalates to SIGKILL at the same deadline.
+func TestServiceStopSendsResolvedTimeout(t *testing.T) {
+	const id = "stop-timeout"
+	stored := model.Duration(2 * time.Second)
+	for _, tc := range []struct {
+		name    string
+		remove  bool
+		stored  *model.Duration
+		timeout *time.Duration
+		want    time.Duration
+	}{
+		{name: "stop explicit", stored: &stored, timeout: new(5 * time.Second), want: 5 * time.Second},
+		{name: "stop stored", stored: &stored, want: 2 * time.Second},
+		{name: "stop default", want: 10 * time.Second},
+		{name: "rm stored", remove: true, stored: &stored, want: 2 * time.Second},
+		{name: "rm default", remove: true, want: 10 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			appCfg := testConfig(t, t.TempDir())
+			st := openStopTestStore(t, appCfg)
+			fake := &stopMonitor{st: st, id: id}
+			assert.NilError(t, st.InsertCommandConfig(id, "", &model.CommandConfig{
+				StopTimeout: tc.stored,
+			}))
+			assert.NilError(
+				t,
+				st.InsertCommandState(id, model.EventTypeRunning, &model.CommandState{
+					SocketPath: serveFakeMonitor(t, fake),
+				}),
+			)
+
+			svc := NewService(appCfg)
+			defer svc.Close()
+			var targetErr error
+			if tc.remove {
+				results, err := svc.Remove(t.Context(), RemoveRequest{
+					Targets: []string{id},
+					Force:   true,
+				})
+				assert.NilError(t, err)
+				assert.Equal(t, len(results), 1)
+				targetErr = results[0].Err
+			} else {
+				results, err := svc.Stop(t.Context(), StopRequest{
+					Targets: []string{id},
+					Timeout: tc.timeout,
+				})
+				assert.NilError(t, err)
+				assert.Equal(t, len(results), 1)
+				targetErr = results[0].Err
+			}
+			assert.NilError(t, targetErr)
+			assert.DeepEqual(t, fake.receivedTimeouts(), []time.Duration{tc.want})
+		})
+	}
+}
+
+// An explicit timeout that is not positive fails stop and restart before they
+// touch any target.
+func TestServiceStopRejectsNonPositiveTimeout(t *testing.T) {
+	const id = "stop-bad-timeout"
+	for _, timeout := range []time.Duration{0, -3 * time.Second} {
+		for _, op := range []struct {
+			name string
+			call func(svc *Service, ctx context.Context) error
+		}{
+			{name: "stop", call: func(svc *Service, ctx context.Context) error {
+				_, err := svc.Stop(ctx, StopRequest{Targets: []string{id}, Timeout: &timeout})
+				return err
+			}},
+			{name: "restart", call: func(svc *Service, ctx context.Context) error {
+				_, err := svc.Restart(ctx, RestartRequest{Targets: []string{id}, Timeout: &timeout})
+				return err
+			}},
+		} {
+			t.Run(op.name+"/"+timeout.String(), func(t *testing.T) {
+				appCfg := testConfig(t, t.TempDir())
+				st := openStopTestStore(t, appCfg)
+				fake := &stopMonitor{st: st, id: id}
+				assert.NilError(t, st.InsertCommandConfig(id, "", &model.CommandConfig{}))
+				assert.NilError(
+					t,
+					st.InsertCommandState(id, model.EventTypeRunning, &model.CommandState{
+						SocketPath: serveFakeMonitor(t, fake),
+					}),
+				)
+
+				svc := NewService(appCfg)
+				defer svc.Close()
+				err := op.call(svc, t.Context())
+				assert.ErrorContains(t, err, "stop timeout must be positive")
+				assert.Equal(t, len(fake.received()), 0)
+				state, _, _, err := st.GetCommandState(id)
+				assert.NilError(t, err)
+				assert.Equal(t, state, model.EventTypeRunning)
+			})
+		}
+	}
 }
 
 func openStopTestStore(t *testing.T, appCfg CmdmanConfig) *store.Store {

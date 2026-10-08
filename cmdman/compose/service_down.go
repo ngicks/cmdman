@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -25,6 +26,10 @@ type DownOption struct {
 	// decoded is stopped and removed without them, with a warning. The stored
 	// releases a whole-project down runs are forced the same way.
 	Force bool
+	// Timeout is how long the stop of each replica waits after the stop signal
+	// before it sends SIGKILL. Nil waits each replica's stored stop timeout. A
+	// non-positive value fails the down before any replica is stopped.
+	Timeout *time.Duration
 }
 
 // DownResult is the aggregated result of a compose down operation.
@@ -99,6 +104,9 @@ func (s *Service) Down(
 	selection ProjectSelection,
 	opts DownOption,
 ) (*DownResult, error) {
+	if err := checkStopTimeout(opts.Timeout); err != nil {
+		return nil, err
+	}
 	for _, t := range opts.Targets {
 		if t.ScaleIndex != 0 {
 			return nil, fmt.Errorf(
@@ -139,7 +147,7 @@ func (s *Service) Down(
 	}
 
 	result := &DownResult{}
-	td := &teardown{force: opts.Force}
+	td := &teardown{force: opts.Force, timeout: opts.Timeout}
 	selected := targets.filter(allEntries)
 	if len(selected) > 0 {
 		var removeTargets []cmdmanEntry

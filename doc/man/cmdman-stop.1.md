@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```text
-cmdman stop [--signal SIGNAL] [--timeout SECONDS] [--ignore-errors] ID|NAME...
+cmdman stop [--signal SIGNAL] [--timeout DURATION] [--ignore-errors] ID|NAME...
 ```
 
 ## Description
@@ -16,7 +16,7 @@ Sends a termination signal to each selected command's process group and waits
 for shutdown. If the command does not stop before the timeout, cmdman sends
 `SIGKILL`.
 
-`--timeout` is the only escalation to `SIGKILL`. It also applies to survivors of
+The timeout is the only escalation to `SIGKILL`. It also applies to survivors of
 a wrapper script that exited early. The monitor sends `SIGKILL` at the same
 deadline on its own. An interrupted `cmdman stop` therefore still ends the
 command. A signal to the process group cannot reach a survivor that runs in a
@@ -38,8 +38,12 @@ written to stderr.
 
 - `-s, --signal SIGNAL`: signal to send before waiting. When omitted, the
   command's stored stop signal is used.
-- `-t, --timeout SECONDS`: seconds to wait before sending `SIGKILL`. Defaults
-  to 10.
+- `-t, --timeout DURATION`: time to wait after the stop signal before sending
+  `SIGKILL`. Give integer seconds or a Go duration such as `1m30s`. The value
+  must be positive. When omitted, each command waits the stop timeout stored
+  with it by `--stop-timeout` of [cmdman-create(1)](./cmdman-create.1.md) or
+  `stop_grace_period` of [cmdman-compose(5)](./cmdman-compose.5.md). A command
+  with no stored stop timeout waits 10 seconds.
 - `--ignore-errors`: exit 0 even when some targets failed. Failures are still
   printed.
 
@@ -48,6 +52,7 @@ written to stderr.
 ```sh
 cmdman stop api worker
 cmdman stop --signal HUP --timeout 30 server
+cmdman stop --timeout 1m30s db
 ```
 
 ## Exit Status
@@ -60,8 +65,9 @@ cmdman stop --signal HUP --timeout 30 server
   exit into `0`.
 
 Errors that abort the whole call keep their non-zero exit under
-`--ignore-errors`. An unknown target, an unparsable `--signal` value, and a
-store that cannot be opened are such errors.
+`--ignore-errors`. An unknown target, an unparsable `--signal` value, an
+unparsable or non-positive `--timeout` value, and a store that cannot be opened
+are such errors. A rejected `--signal` or `--timeout` value stops no command.
 
 ## See Also
 

@@ -7,7 +7,8 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] restart [--progress MODE] [--scale N] [COMMAND...]
+cmdman compose [selection flags] restart [--progress MODE] [--scale N] [--timeout DURATION]
+    [COMMAND...]
 ```
 
 ## Description
@@ -48,6 +49,11 @@ Uses the compose selection flags documented in
   see [Progress Output](./cmdman-compose.5.md#progress-output).
 - `--scale N`: restart only replica N (1-based) of exactly one COMMAND. N must
   name an existing replica.
+- `-t, --timeout DURATION`: time each replica's stop waits after the stop
+  signal before it sends `SIGKILL`. Give integer seconds or a Go duration such
+  as `1m30s`. The value must be positive. When omitted, each replica waits its
+  stored `stop_grace_period`, or 10 seconds when the command declares none. A
+  rejected value restarts no replica and runs no hook.
 
 ## See Also
 

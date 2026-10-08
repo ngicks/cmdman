@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -18,6 +19,10 @@ type StopOption struct {
 	// are stopped too, every replica of them. A replica index must name a stored
 	// replica.
 	Targets []Target
+	// Timeout is how long the stop of each replica waits after the stop signal
+	// before it sends SIGKILL. Nil waits each replica's stored stop timeout. A
+	// non-positive value fails the stop before any replica is stopped.
+	Timeout *time.Duration
 }
 
 // StopResult is the aggregated result of a compose stop operation.
@@ -56,6 +61,9 @@ func (s *Service) Stop(
 	selection ProjectSelection,
 	opts StopOption,
 ) (*StopResult, error) {
+	if err := checkStopTimeout(opts.Timeout); err != nil {
+		return nil, err
+	}
 	entries, err := s.svc.List(ctx, cmdman.ListRequest{
 		AllStates: true,
 		Labels:    projectLabels(selection.WorkDir, selection.Project),
@@ -79,8 +87,9 @@ func (s *Service) Stop(
 	}
 
 	var stops []StopOutcome
+	td := &teardown{timeout: opts.Timeout}
 	if selection.Spec != nil {
-		stops, err = s.reconcileStop(ctx, *selection.Spec, targets, &teardown{})
+		stops, err = s.reconcileStop(ctx, *selection.Spec, targets, td)
 		if err != nil {
 			return nil, err
 		}
@@ -94,7 +103,7 @@ func (s *Service) Stop(
 				"compose stop: stored dependency graph is ambiguous; pass -f or --project-name",
 			)
 		}
-		stops, err = s.reconcileStop(ctx, spec, targets, &teardown{})
+		stops, err = s.reconcileStop(ctx, spec, targets, td)
 		if err != nil {
 			return nil, err
 		}
@@ -147,6 +156,16 @@ func stopAllConcurrent(
 	}
 	_ = eg.Wait()
 	return outcomes
+}
+
+// checkStopTimeout rejects an explicit stop timeout that is not positive. cmdman
+// would refuse each stop with it, but only after the stop_pre hooks of the
+// replica had run.
+func checkStopTimeout(timeout *time.Duration) error {
+	if timeout != nil && *timeout <= 0 {
+		return fmt.Errorf("stop timeout must be positive: %s", *timeout)
+	}
+	return nil
 }
 
 // firstStopErr returns the first per-target error carried by stop results, nil

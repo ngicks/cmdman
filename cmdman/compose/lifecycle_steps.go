@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/model"
@@ -98,19 +99,21 @@ func (s *Service) startReplica(
 }
 
 // stopWithHooks runs stop_pre of hooks for r, stops the replica id and waits
-// for it to terminate, then runs stop_post. hookFailed reports that err is the
-// failure of a hook rather than of the stop: the replica still runs after a
-// failed stop_pre and has stopped after a failed stop_post.
+// for it to terminate, then runs stop_post. The stop waits timeout before
+// SIGKILL, nil for the replica's stored stop timeout. hookFailed reports that
+// err is the failure of a hook rather than of the stop: the replica still runs
+// after a failed stop_pre and has stopped after a failed stop_post.
 func (s *Service) stopWithHooks(
 	ctx context.Context,
 	r hookReplica,
 	hooks []LifecycleHook,
 	id string,
+	timeout *time.Duration,
 ) (hookFailed bool, err error) {
 	if _, err := s.runLifecycleEvent(ctx, r, hooks, LifecycleStopPre); err != nil {
 		return true, err
 	}
-	if err := s.stopForRecreate(ctx, id); err != nil {
+	if err := s.stopForRecreate(ctx, id, timeout); err != nil {
 		return false, err
 	}
 	if _, err := s.runLifecycleEvent(ctx, r, hooks, LifecycleStopPost); err != nil {
@@ -264,27 +267,32 @@ func (s *Service) teardownHooks(
 }
 
 // stopReplica stops the live replica e inside the stop hooks stored on it, as
-// [Service.teardownHooks] says for force. hookFailed reports as
-// [Service.stopWithHooks] does. It also reports stored hooks that
-// [Service.teardownHooks] refuses; e keeps running then.
+// [Service.teardownHooks] says for force. The stop waits timeout as
+// [Service.stopWithHooks] does. hookFailed reports as [Service.stopWithHooks]
+// does. It also reports stored hooks that [Service.teardownHooks] refuses; e
+// keeps running then.
 func (s *Service) stopReplica(
 	ctx context.Context,
 	e cmdmanEntry,
 	force bool,
+	timeout *time.Duration,
 ) (hookFailed bool, err error) {
 	r, hooks, err := s.teardownHooks(ctx, e, force, "stop")
 	if err != nil {
 		return true, err
 	}
-	return s.stopWithHooks(ctx, r, hooks, e.ID)
+	return s.stopWithHooks(ctx, r, hooks, e.ID, timeout)
 }
 
-// teardown is what the replicas one compose stop or down tears down share. It
-// is safe for concurrent use.
+// teardown is what the replicas one compose stop, down or restart stops share.
+// It is safe for concurrent use.
 type teardown struct {
 	// force lets every hook failure pass as on_error continue, and tears a
 	// replica whose stored hooks cannot be decoded down without them.
 	force bool
+	// timeout is how long every stop waits before SIGKILL. Nil waits each
+	// replica's stored stop timeout.
+	timeout *time.Duration
 
 	mu sync.Mutex
 	// kept maps the ID of every replica a failed stop hook keeps from being
@@ -342,7 +350,7 @@ func (t *teardown) releaseLeft(h resourceHolder) bool {
 // failed stop alone does not, as down removes such a replica by force.
 func (s *Service) teardownStop(ctx context.Context, t *teardown, e cmdmanEntry) error {
 	t.markStopped(e.Name)
-	hookFailed, err := s.stopReplica(ctx, e, t.force)
+	hookFailed, err := s.stopReplica(ctx, e, t.force, t.timeout)
 	if hookFailed {
 		t.mu.Lock()
 		if t.kept == nil {

@@ -7,13 +7,16 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] down [--progress MODE] [--force] [COMMAND...]
+cmdman compose [selection flags] down [--progress MODE] [--force] [--timeout DURATION]
+    [COMMAND...]
 ```
 
 ## Description
 
 Stops selected commands, waits for the stop phase, then removes their stored
-records concurrently. It is the destructive counterpart to `compose stop`.
+records concurrently. It is the destructive counterpart to `compose stop`. Each
+stop uses the stored stop signal and stop timeout of its replica.
+`--timeout` overrides the stop timeout.
 
 With no command names, down removes the entire selected project, including
 orphans that share its `(workdir, project)` labels. Running orphans are stopped
@@ -95,6 +98,12 @@ Uses the compose selection flags documented in
   `hook-warning` record that names no hook. A stored release that fails keeps
   its value with a warning. `--force` has no `-f` short form: `-f` is
   `--file`.
+- `-t, --timeout DURATION`: time each replica's stop waits after the stop
+  signal before it sends `SIGKILL`. Give integer seconds or a Go duration such
+  as `1m30s`. The value must be positive. When omitted, each replica waits its
+  stored `stop_grace_period`, or 10 seconds when the command declares none. A
+  replica whose stop failed is removed by force, and that removal waits the
+  stored value. A rejected value stops and removes no replica and runs no hook.
 
 ## See Also
 

@@ -11,6 +11,7 @@ func composeDownCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagProgress string
 		flagForce    bool
+		flagTimeout  string
 	)
 
 	cmd := &cobra.Command{
@@ -25,7 +26,7 @@ of a command; to remove replicas, scale the command down with
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeDown(cmd, rf, cf, args, flagProgress, flagForce)
+			return runComposeDown(cmd, rf, cf, args, flagProgress, flagForce, flagTimeout)
 		},
 	}
 
@@ -35,6 +36,7 @@ of a command; to remove replicas, scale the command down with
 	cmd.Flags().BoolVar(&flagForce, "force", false,
 		"Treat every hook that fails under on_error fail as on_error continue, and tear"+
 			" down a replica with undecodable stored hooks without running them")
+	addStopTimeoutFlag(cmd, &flagTimeout)
 
 	parent.AddCommand(cmd)
 }
@@ -46,7 +48,13 @@ func runComposeDown(
 	commandNames []string,
 	progress string,
 	force bool,
+	timeoutValue string,
 ) error {
+	timeout, err := stopTimeoutFlag(cmd, timeoutValue)
+	if err != nil {
+		return err
+	}
+
 	selection, err := compose.LoadOrProject(cf.normalizeOpts())
 	if err != nil {
 		return err
@@ -68,6 +76,7 @@ func runComposeDown(
 		cmd.Context(), selection, compose.DownOption{
 			Targets: compose.TargetsOf(commandNames...),
 			Force:   force,
+			Timeout: timeout,
 		})
 	if err != nil {
 		return err

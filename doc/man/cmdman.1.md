@@ -58,7 +58,7 @@ The stop already delivered the configured stop signal to the whole process
 group once. A leftover of a wrapper shell that exited first is usually the
 process that carries out the stop. Podman waiting for its container is one
 example. The monitor only reaps the leftovers and waits for them. `SIGKILL`
-comes from the stop's `--timeout` alone. The client sends `SIGKILL` when the
+comes from the stop's timeout alone. The client sends `SIGKILL` when the
 timeout expires, and the monitor escalates at the same deadline on its own. An
 interrupted `cmdman stop` therefore still ends the command. A signal to the
 process group cannot reach a survivor that runs in a process group of its own
@@ -70,8 +70,10 @@ cannot enumerate the survivors, sends nothing after the stop's `SIGKILL`, and
 reports no count. A stop that arrives while a natural-exit sweep is in progress
 ends that sweep's own signalling at once.
 
-The stop's `--timeout` is the single setting for how long a stop waits before
-`SIGKILL`. It also covers the survivors of a wrapper that exited early. A stop
+The stop's timeout is the single setting for how long a stop waits before
+`SIGKILL`. The stop's `--timeout` sets it. Without `--timeout`, the stop waits
+the stop timeout stored with the command, or 10 seconds when it has none. The
+timeout also covers the survivors of a wrapper that exited early. A stop
 adds no grace period of its own. A wrapper script does not need `exec` to stop
 correctly. Using `exec` in a wrapper script remains good hygiene.
 

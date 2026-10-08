@@ -14,7 +14,8 @@ import (
 type RestartRequest struct {
 	Targets []string
 	Signal  string
-	Timeout time.Duration
+	// Timeout is [StopRequest.Timeout] for the stop phase.
+	Timeout *time.Duration
 }
 
 type RestartResult struct {
@@ -23,6 +24,9 @@ type RestartResult struct {
 }
 
 func (s *Service) Restart(ctx context.Context, req RestartRequest) ([]RestartResult, error) {
+	if err := checkStopTimeout(req.Timeout); err != nil {
+		return nil, err
+	}
 	st, err := s.openStore(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
@@ -32,15 +36,11 @@ func (s *Service) Restart(ctx context.Context, req RestartRequest) ([]RestartRes
 		return nil, err
 	}
 
-	timeout := req.Timeout
-	if timeout <= 0 {
-		timeout = defaultStopTimeout
-	}
 	results := make([]RestartResult, 0, len(ids))
 	for _, id := range ids {
 		results = append(results, RestartResult{
 			ID:  id,
-			Err: s.restart(ctx, st, id, req.Signal, timeout),
+			Err: s.restart(ctx, st, id, req.Signal, req.Timeout),
 		})
 	}
 	return results, nil
@@ -51,14 +51,14 @@ func (s *Service) restart(
 	st *store.Store,
 	id string,
 	signalOverride string,
-	timeout time.Duration,
+	timeoutOverride *time.Duration,
 ) error {
 	state, _, _, err := st.GetCommandState(id)
 	if err != nil {
 		return fmt.Errorf("get command state: %w", err)
 	}
 	if state == model.EventTypeStarting || state == model.EventTypeRunning {
-		if err := s.stop(ctx, st, id, signalOverride, timeout); err != nil {
+		if err := s.stop(ctx, st, id, signalOverride, timeoutOverride); err != nil {
 			return fmt.Errorf("stop: %w", err)
 		}
 	}

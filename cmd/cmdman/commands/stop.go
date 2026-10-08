@@ -1,8 +1,6 @@
 package commands
 
 import (
-	"time"
-
 	"github.com/spf13/cobra"
 
 	"github.com/ngicks/cmdman/cmdman"
@@ -12,7 +10,7 @@ import (
 func stopCmd(parent *cobra.Command, rf *rootFlags) {
 	var (
 		flagSignal       string
-		flagTimeout      int
+		flagTimeout      string
 		flagIgnoreErrors bool
 	)
 
@@ -28,7 +26,7 @@ func stopCmd(parent *cobra.Command, rf *rootFlags) {
 
 	cmd.Flags().
 		StringVarP(&flagSignal, "signal", "s", "", "Signal to send before waiting for shutdown")
-	cmd.Flags().IntVarP(&flagTimeout, "timeout", "t", 10, "Seconds to wait before sending SIGKILL")
+	addStopTimeoutFlag(cmd, &flagTimeout)
 	cmd.Flags().BoolVar(&flagIgnoreErrors, "ignore-errors", false,
 		"Exit 0 even when some targets failed; failures are still printed")
 	_ = cmd.RegisterFlagCompletionFunc("signal", signalCompletions)
@@ -41,13 +39,17 @@ func runStop(
 	args []string,
 	rf *rootFlags,
 	sigName string,
-	timeoutSeconds int,
+	timeoutValue string,
 	ignoreErrors bool,
 ) error {
 	if sigName != "" {
 		if _, _, err := hrstr.ParseSignal(sigName); err != nil {
 			return err
 		}
+	}
+	timeout, err := stopTimeoutFlag(cmd, timeoutValue)
+	if err != nil {
+		return err
 	}
 
 	svc, err := cmdmanService(cmd, rf)
@@ -59,7 +61,7 @@ func runStop(
 	results, err := svc.Stop(cmd.Context(), cmdman.StopRequest{
 		Targets: args,
 		Signal:  sigName,
-		Timeout: time.Duration(timeoutSeconds) * time.Second,
+		Timeout: timeout,
 	})
 	if err != nil {
 		return err

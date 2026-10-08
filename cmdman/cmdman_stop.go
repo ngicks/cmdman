@@ -16,14 +16,18 @@ import (
 )
 
 // defaultStopTimeout is how long a stop waits for the command to go down before
-// it escalates to SIGKILL.
+// it escalates to SIGKILL, when neither the caller nor the command's stored
+// config sets a timeout.
 const defaultStopTimeout = 10 * time.Second
 
 // StopRequest defines a stop operation across explicit targets and/or labels.
 type StopRequest struct {
 	Targets []string
 	Signal  string
-	Timeout time.Duration
+	// Timeout is how long each stop waits after the stop signal before it sends
+	// SIGKILL. Nil waits each target's stored stop timeout, else 10 seconds. A
+	// non-positive value fails the call before any target is stopped.
+	Timeout *time.Duration
 }
 
 type StopResult struct {
@@ -32,6 +36,9 @@ type StopResult struct {
 }
 
 func (s *Service) Stop(ctx context.Context, req StopRequest) ([]StopResult, error) {
+	if err := checkStopTimeout(req.Timeout); err != nil {
+		return nil, err
+	}
 	st, err := s.openStore(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
@@ -41,31 +48,48 @@ func (s *Service) Stop(ctx context.Context, req StopRequest) ([]StopResult, erro
 		return nil, err
 	}
 
-	timeout := req.Timeout
-	if timeout <= 0 {
-		timeout = defaultStopTimeout
-	}
 	results := make([]StopResult, 0, len(ids))
 	for _, id := range ids {
 		results = append(results, StopResult{
 			ID:  id,
-			Err: s.stop(ctx, st, id, req.Signal, timeout),
+			Err: s.stop(ctx, st, id, req.Signal, req.Timeout),
 		})
 	}
 	return results, nil
 }
 
-// stop stops id through its monitor, escalating to SIGKILL after timeout. A
-// monitor that does not answer is taken for dead: stop marks the command failed
-// and reports no error.
+// checkStopTimeout rejects an explicit stop timeout that is not positive.
+func checkStopTimeout(timeout *time.Duration) error {
+	if timeout != nil && *timeout <= 0 {
+		return fmt.Errorf("stop timeout must be positive: %s", *timeout)
+	}
+	return nil
+}
+
+// stopTimeout returns how long a stop of the command cfg describes waits before
+// SIGKILL: override when set, else the command's stored stop timeout, else
+// defaultStopTimeout.
+func stopTimeout(override *time.Duration, cfg *model.CommandConfig) time.Duration {
+	if override != nil {
+		return *override
+	}
+	if cfg.StopTimeout != nil && *cfg.StopTimeout > 0 {
+		return time.Duration(*cfg.StopTimeout)
+	}
+	return defaultStopTimeout
+}
+
+// stop stops id through its monitor, escalating to SIGKILL after the timeout
+// [stopTimeout] resolves from timeoutOverride. A monitor that does not answer
+// is taken for dead: stop marks the command failed and reports no error.
 func (s *Service) stop(
 	ctx context.Context,
 	st *store.Store,
 	id string,
 	signalOverride string,
-	timeout time.Duration,
+	timeoutOverride *time.Duration,
 ) error {
-	_, err := s.stopReportingUnreachable(ctx, st, id, signalOverride, timeout)
+	_, err := s.stopReportingUnreachable(ctx, st, id, signalOverride, timeoutOverride)
 	return err
 }
 
@@ -77,7 +101,7 @@ func (s *Service) stopReportingUnreachable(
 	st *store.Store,
 	id string,
 	signalOverride string,
-	timeout time.Duration,
+	timeoutOverride *time.Duration,
 ) (unreachable bool, err error) {
 	state, _, _, err := st.GetCommandState(id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -94,6 +118,7 @@ func (s *Service) stopReportingUnreachable(
 	if err != nil {
 		return false, fmt.Errorf("get command config: %w", err)
 	}
+	timeout := stopTimeout(timeoutOverride, cfg)
 
 	effective := cfg.StopSignal
 	if signalOverride != "" {

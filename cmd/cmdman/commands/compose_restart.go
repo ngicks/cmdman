@@ -11,6 +11,7 @@ func composeRestartCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagProgress string
 		flagScale    int
+		flagTimeout  string
 	)
 
 	cmd := &cobra.Command{
@@ -19,12 +20,13 @@ func composeRestartCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 		Args:              scaleArgs(cobra.ArbitraryArgs, &flagScale),
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeRestart(cmd, rf, cf, args, flagScale, flagProgress)
+			return runComposeRestart(cmd, rf, cf, args, flagScale, flagProgress, flagTimeout)
 		},
 	}
 
 	cmd.Flags().StringVar(&flagProgress, "progress", "auto", cli.ProgressFlagUsage)
 	addScaleFlag(cmd, &flagScale)
+	addStopTimeoutFlag(cmd, &flagTimeout)
 	_ = cmd.RegisterFlagCompletionFunc("progress", progressCompletions)
 
 	parent.AddCommand(cmd)
@@ -37,7 +39,13 @@ func runComposeRestart(
 	commandNames []string,
 	scale int,
 	progress string,
+	timeoutValue string,
 ) error {
+	timeout, err := stopTimeoutFlag(cmd, timeoutValue)
+	if err != nil {
+		return err
+	}
+
 	selection, err := compose.LoadOrProject(cf.normalizeOpts())
 	if err != nil {
 		return err
@@ -58,6 +66,7 @@ func runComposeRestart(
 	result, err := compose.NewService(svc, compose.WithReporter(prog)).Restart(
 		cmd.Context(), selection, compose.RestartOption{
 			Targets: composeTargets(commandNames, scale),
+			Timeout: timeout,
 		})
 	if err != nil {
 		return err
