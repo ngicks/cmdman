@@ -97,9 +97,22 @@ type FakeBackend struct {
 	ComposeUpErr    error                 // error returned by ComposeUp (open failure)
 	ComposeUpStream *FakeComposeUpStream
 
-	ComposeDowns       []DownCall       // calls taken by ComposeDown
-	ComposeDownSummary core.DownSummary // summary returned by ComposeDown
-	ComposeDownErr     error            // error returned by ComposeDown
+	// ComposeDowns are the targets LaunchComposeDown was called with, and
+	// ComposeDownLaunchErr the error it returns. A launch answers with the job
+	// DownJobs holds for the target, or a running job named after the project.
+	ComposeDowns         []DownCall
+	ComposeDownLaunchErr error
+	// DownJobs is the latest compose down job of each project, which
+	// FindComposeDown answers with; DownFinds are the targets it was asked about.
+	DownJobs  map[core.DownTarget]core.DownJob
+	DownFinds []DownCall
+	// ComposeDownProgress are the running summaries every followed job reports,
+	// and ComposeDownSummary and ComposeDownErr the end it reports after them.
+	// DownFollowed are the jobs FollowComposeDown was asked to follow.
+	ComposeDownProgress []core.DownSummary
+	ComposeDownSummary  core.DownSummary
+	ComposeDownErr      error
+	DownFollowed        []core.DownJob
 
 	LaunchLocs       []core.LaunchLocation // locations returned by ListLaunchTargets
 	LaunchErr        error                 // error returned by ListLaunchTargets
@@ -158,14 +171,18 @@ type SummonCall struct {
 }
 
 // DownCall is one recorded teardown call — [FakeBackend.MuxDown]'s or
-// [FakeBackend.ComposeDown]'s. Both name their project the same way, so both
-// record the same three fields: the name plus the compose file and work
-// directory that complete it — a call that dropped one would still look right
-// against the name alone.
+// [FakeBackend.LaunchComposeDown]'s, and the lookup [FakeBackend.FindComposeDown]
+// makes. All of them name their project the same way, so they record the same
+// three fields: the name plus the compose file and work directory that complete
+// it — a call that dropped one would still look right against the name alone.
 type DownCall struct {
 	Project string
 	Path    string
 	Workdir string
+}
+
+func downCall(t core.DownTarget) DownCall {
+	return DownCall{Project: t.Project, Path: t.Path, Workdir: t.WorkDir}
 }
 
 var _ core.Backend = (*FakeBackend)(nil)
@@ -379,16 +396,51 @@ func (f *FakeBackend) ComposeUp(
 	return s, nil
 }
 
-func (f *FakeBackend) ComposeDown(
+func (f *FakeBackend) LaunchComposeDown(
 	_ context.Context,
-	projectName, composeFile, workDir string,
-) (core.DownSummary, error) {
-	f.ComposeDowns = append(f.ComposeDowns, DownCall{
-		Project: projectName,
-		Path:    composeFile,
-		Workdir: workDir,
-	})
-	return f.ComposeDownSummary, f.ComposeDownErr
+	target core.DownTarget,
+) (core.DownJob, error) {
+	f.ComposeDowns = append(f.ComposeDowns, downCall(target))
+	if f.ComposeDownLaunchErr != nil {
+		return core.DownJob{}, f.ComposeDownLaunchErr
+	}
+	if job, ok := f.DownJobs[target]; ok {
+		return job, nil
+	}
+	return core.DownJob{ID: target.Project + ".down"}, nil
+}
+
+func (f *FakeBackend) FindComposeDown(
+	_ context.Context,
+	target core.DownTarget,
+) (core.DownJob, bool, error) {
+	f.DownFinds = append(f.DownFinds, downCall(target))
+	job, ok := f.DownJobs[target]
+	return job, ok, nil
+}
+
+// FollowComposeDown hands out a stream that reports ComposeDownProgress and then
+// the end. A job found Finished reports its end alone, as a real one does: it
+// has nothing running left to report.
+func (f *FakeBackend) FollowComposeDown(
+	_ context.Context,
+	job core.DownJob,
+) (core.DownStream, error) {
+	f.DownFollowed = append(f.DownFollowed, job)
+	progress := f.ComposeDownProgress
+	if job.Finished {
+		progress = nil
+	}
+	s := &FakeDownStream{
+		Ch:      make(chan core.DownSummary, len(progress)),
+		Summary: f.ComposeDownSummary,
+		OpErr:   f.ComposeDownErr,
+	}
+	for _, p := range progress {
+		s.Ch <- p
+	}
+	close(s.Ch)
+	return s, nil
 }
 
 func (f *FakeBackend) ListLaunchTargets(context.Context) ([]core.LaunchLocation, error) {
@@ -580,6 +632,24 @@ func (s *FakeComposeUpStream) Close() error {
 		s.Closed = true
 		close(s.Ch)
 	}
+	return nil
+}
+
+// FakeDownStream is a compose down job's stream with every report loaded up
+// front: Ch holds the running summaries and is already closed, so a reader
+// that drains it reaches the end Summary and OpErr report.
+type FakeDownStream struct {
+	Ch      chan core.DownSummary
+	Summary core.DownSummary
+	// OpErr is the end's error; the accessor owns the name Err.
+	OpErr  error
+	Closed bool
+}
+
+func (s *FakeDownStream) Summaries() <-chan core.DownSummary { return s.Ch }
+func (s *FakeDownStream) Result() (core.DownSummary, error)  { return s.Summary, s.OpErr }
+func (s *FakeDownStream) Close() error {
+	s.Closed = true
 	return nil
 }
 

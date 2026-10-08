@@ -17,7 +17,10 @@ type (
 
 	ProjectManagerInfo = core.ProjectManagerInfo
 	ServiceScaleInfo   = core.ServiceScaleInfo
+	DownTarget         = core.DownTarget
 	DownSummary        = core.DownSummary
+	DownJob            = core.DownJob
+	DownStream         = core.DownStream
 
 	EventSignal        = core.EventSignal
 	EventStream        = core.EventStream

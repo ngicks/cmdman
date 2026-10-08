@@ -149,9 +149,9 @@ type ServiceScaleInfo struct {
 }
 
 // DownSummary is what a compose teardown did: how many of the project's
-// commands its stop phase covered and how many its remove phase removed. A
-// command that was already exited counts as stopped — the phases report what
-// they completed, not state transitions they caused.
+// commands its stop phase stopped and how many its remove phase removed. A
+// command that had already exited is not stopped by the teardown, so it counts
+// as removed and not as stopped.
 //
 // Stopped and Removed count the commands the teardown got through, so they stay
 // meaningful next to a non-nil error: a teardown that failed on one command
@@ -164,11 +164,38 @@ type ServiceScaleInfo struct {
 // release ran under. Only a failure under on_error fail fails the teardown, but
 // a resource that on_error continue or ignore let pass is still left behind
 // for the user to clean up.
+//
+// Running marks the summary of a teardown that is still under way: the counts
+// are what it has got through so far.
 type DownSummary struct {
 	Stopped     int
 	Removed     int
 	ForceKilled int
 	Unreleased  int
+	Running     bool
+}
+
+// DownJob is a project's compose down run as a supervised command of its own,
+// so the teardown outlives the widget that asked for it. ID is that command's
+// id.
+//
+// Finished reports that the job's run was already over when the job was
+// launched or found: what it reports is then an end that came before the
+// caller asked, which a listing the caller loaded may already show.
+type DownJob struct {
+	ID       string
+	Finished bool
+}
+
+// DownStream delivers what a compose down job has done while it runs. Each
+// value on Summaries is the running total so far, and a consumer slower than
+// the job sees only the latest one. The channel closes once the job's run is
+// over, and Result then reports the teardown's final summary and the failure
+// its exit status stands for.
+type DownStream interface {
+	Summaries() <-chan DownSummary
+	Result() (DownSummary, error)
+	Close() error
 }
 
 // Backend abstracts the cmdman/compose services the TUI talks to. It exists so
@@ -312,15 +339,25 @@ type Backend interface {
 	// finishes (its channel closes), at which point Err reports the
 	// operation-level error.
 	ComposeUp(ctx context.Context, projectName, composeFile string) (ComposeUpStream, error)
-	// ComposeDown stops and removes the project's supervised commands and reports
-	// what it did (see DownSummary). The project is named the way CycleMux names
-	// it, except that no mux: section is required: a project that never had a
-	// dashboard is torn down like any other. It is destructive — every command of
-	// the project goes away, not only the ones on screen — so widgets gate it
-	// behind a confirm.
-	ComposeDown(
-		ctx context.Context, projectName, composeFile, workDir string,
-	) (DownSummary, error)
+	// LaunchComposeDown starts the job that stops and removes the project's
+	// supervised commands and closes its multiplexer windows (see DownJob), or
+	// finds the job that already answers for it: one still running, or one that
+	// finished while the request waited for it. It returns once the job is
+	// running or over, and FollowComposeDown reports what it does.
+	//
+	// The project is named the way CycleMux names it, except that no mux: section
+	// is required: a project that never had a dashboard is torn down like any
+	// other. It is destructive — every command of the project goes away, not only
+	// the ones on screen — so widgets gate it behind a confirm.
+	LaunchComposeDown(ctx context.Context, target DownTarget) (DownJob, error)
+	// FindComposeDown finds the latest compose down job of the project, running
+	// or finished, for a widget that opens on it. ok is false when the project
+	// has none.
+	FindComposeDown(ctx context.Context, target DownTarget) (job DownJob, ok bool, err error)
+	// FollowComposeDown reads what a compose down job does, from its start, until
+	// its run is over (see DownStream). A job that is already over is reported
+	// all the same.
+	FollowComposeDown(ctx context.Context, job DownJob) (DownStream, error)
 
 	// ListLaunchTargets returns the launcher's merged list: compose history,
 	// the ListProjects merge, and the projects whose mux window is currently

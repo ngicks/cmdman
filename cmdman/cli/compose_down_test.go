@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -14,6 +15,18 @@ import (
 	"github.com/ngicks/cmdman/pkg/muxctl"
 	"github.com/ngicks/go-common/contextkey"
 )
+
+// muxDownRecorder stands in for [mux.Down] so a teardown can be watched without
+// a multiplexer server to run it against.
+type muxDownRecorder struct {
+	calls []mux.DownOptions
+	err   error
+}
+
+func (r *muxDownRecorder) down(_ context.Context, opts mux.DownOptions) error {
+	r.calls = append(r.calls, opts)
+	return r.err
+}
 
 func TestCloseProjectWindowsClosesByIdentityOnTheDeclaredDriver(t *testing.T) {
 	selection := compose.ProjectSelection{

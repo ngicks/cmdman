@@ -71,6 +71,11 @@ type Model struct {
 	// The question is drawn from it rather than written into note, which a
 	// reload's own line would replace while the next key still answered it.
 	pendingDown core.DownTarget
+	// downs are the compose teardowns under way that the panel follows, and
+	// downLooked says the last teardown of the loaded project has been asked for,
+	// which happens once, when the first load lands.
+	downs      core.DownFollows
+	downLooked bool
 
 	quitting bool
 }
@@ -106,7 +111,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		return m.clamp(), nil
 	case managerLoadedMsg:
-		return m.onLoaded(msg), nil
+		return m.onLoaded(msg)
 	case scaleSetMsg:
 		return m.onScaleSet(msg)
 	case scaleCycledMsg:
@@ -117,8 +122,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onLayoutCycled(msg)
 	case core.MuxDownMsg:
 		return m.onTornDown(msg.Status(), msg.Err)
+	case core.ComposeDownProgressMsg:
+		// The teardown is the action in flight for as long as it runs, so the
+		// actions wait for it as they wait for any other.
+		m.downs = m.downs.Progress(msg)
+		m.pending = msg.Status()
+		return m, msg.Next()
 	case core.ComposeDownMsg:
-		return m.onTornDown(msg.Status(), msg.Err)
+		return m.onComposeDown(msg)
 	case tea.KeyMsg:
 		return m.onKey(msg)
 	}
@@ -131,19 +142,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // (D4's probe trail); one that fails after the view was already drawn is a
 // footer failure instead — the rows on screen are still the last thing the
 // backend actually said.
-func (m Model) onLoaded(msg managerLoadedMsg) Model {
+//
+// The first load that lands also asks for the project's last compose teardown,
+// so the panel opens saying how it went, or how it is going.
+func (m Model) onLoaded(msg managerLoadedMsg) (tea.Model, tea.Cmd) {
 	m.loading = false
 	if msg.err != nil {
 		if m.loaded {
 			m.errMsg = "reload: " + msg.err.Error()
-			return m
+			return m, nil
 		}
 		m.loadErr = msg.err.Error()
-		return m
+		return m, nil
 	}
 	m.loaded, m.loadErr = true, ""
 	m.info = msg.info
-	return m.clamp()
+	m = m.clamp()
+	if m.downLooked {
+		return m, nil
+	}
+	m.downLooked = true
+	target, ok := m.loadedTarget()
+	if !ok {
+		return m, nil
+	}
+	return m, core.LastComposeDownCmd(m.bgCtx(), m.backend, target)
 }
 
 // onScaleSet, onScaleCycled, onLayoutApplied and onLayoutCycled share one
@@ -190,6 +213,22 @@ func (m Model) onTornDown(text string, err error) (tea.Model, tea.Cmd) {
 		return m.failed(text), nil
 	}
 	return m.done(text)
+}
+
+// onComposeDown takes the end of a compose teardown. One that was over before
+// the panel opened is said and nothing more: the load already shows what it
+// left behind, and whatever is in flight is not its own.
+func (m Model) onComposeDown(msg core.ComposeDownMsg) (tea.Model, tea.Cmd) {
+	m.downs = m.downs.Done(msg.Target)
+	if !msg.Earlier {
+		return m.onTornDown(msg.Status(), msg.Err)
+	}
+	if msg.Err != nil {
+		m.errMsg = msg.Status()
+	} else {
+		m.note = msg.Status()
+	}
+	return m, nil
 }
 
 func (m Model) failed(text string) Model {
@@ -284,10 +323,17 @@ func (m Model) muxDown() (tea.Model, tea.Cmd) {
 // confirmComposeDown is `D`: it asks on the status line instead of tearing the
 // project down where it stands. Compose down takes away every command of the
 // project, the ones no row here shows included, so it is not a keystroke to
-// make by accident.
+// make by accident. A project whose teardown is already under way gets no
+// question: the line says how far that teardown has got instead. The teardown
+// the panel follows is its action in flight, which already keeps `D` from
+// getting here; this is for one it was not following when that action ended.
 func (m Model) confirmComposeDown() (tea.Model, tea.Cmd) {
 	target, ok := m.downTarget()
 	if !ok {
+		return m, nil
+	}
+	if status, running := m.downs.Status(target); running {
+		m.note = status
 		return m, nil
 	}
 	m.pendingDown = target
@@ -315,8 +361,17 @@ func (m Model) answerComposeDown(key string) (tea.Model, tea.Cmd) {
 // teardown would reach a project of the panel's own directory instead of the
 // one on screen.
 func (m *Model) downTarget() (core.DownTarget, bool) {
-	if m.info.Project == "" {
+	target, ok := m.loadedTarget()
+	if !ok {
 		m.note = "no project to tear down"
+	}
+	return target, ok
+}
+
+// loadedTarget is the project downTarget names, without a word for a load that
+// named none.
+func (m Model) loadedTarget() (core.DownTarget, bool) {
+	if m.info.Project == "" {
 		return core.DownTarget{}, false
 	}
 	return core.DownTarget{

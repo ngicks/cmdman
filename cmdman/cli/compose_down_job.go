@@ -95,10 +95,11 @@ func composeDownJobRequest(
 	cfg cmdman.CmdmanConfig,
 	opts ComposeDownJobOptions,
 ) (cmdman.CreateRequest, error) {
-	workDir, err := filepath.Abs(opts.WorkDir)
+	selection, err := composeDownJobSelection(opts)
 	if err != nil {
-		return cmdman.CreateRequest{}, fmt.Errorf("compose down job: resolve work dir: %w", err)
+		return cmdman.CreateRequest{}, err
 	}
+	workDir := selection.WorkDir
 
 	verbArgv := []string{"compose", "--workdir", workDir}
 	if opts.Project != "" {
@@ -113,7 +114,6 @@ func composeDownJobRequest(
 		return cmdman.CreateRequest{}, fmt.Errorf("compose down job: %w", err)
 	}
 
-	selection := compose.ProjectSelection{WorkDir: workDir, Project: opts.Project}
 	return cmdman.CreateRequest{
 		Name:          composeDownJobName(selection),
 		Dir:           workDir,
@@ -130,11 +130,47 @@ func composeDownJobRequest(
 	}, nil
 }
 
+// composeDownJobSelection is the project opts names, with its work directory
+// made absolute.
+func composeDownJobSelection(opts ComposeDownJobOptions) (compose.ProjectSelection, error) {
+	workDir, err := filepath.Abs(opts.WorkDir)
+	if err != nil {
+		return compose.ProjectSelection{}, fmt.Errorf(
+			"compose down job: resolve work dir: %w", err,
+		)
+	}
+	return compose.ProjectSelection{WorkDir: workDir, Project: opts.Project}, nil
+}
+
 // composeDownJobName names the down job of selection's project. The project
 // identity tells projects apart by work directory as well as by name, and the
 // ".down" suffix cannot end a replica's name, which ends in the replica's index.
 func composeDownJobName(selection compose.ProjectSelection) string {
 	return selection.ProjectIdentity() + ".down"
+}
+
+// findComposeDownJob finds the down job of the project opts names: the one
+// running, or the last one to have run, since a job is not removed when it
+// ends. ok is false when the project has none. opts.File and opts.Env are not
+// read.
+func findComposeDownJob(
+	ctx context.Context,
+	svc *cmdman.Service,
+	opts ComposeDownJobOptions,
+) (job ComposeDownJob, ok bool, err error) {
+	selection, err := composeDownJobSelection(opts)
+	if err != nil {
+		return ComposeDownJob{}, false, err
+	}
+	name := composeDownJobName(selection)
+	entry, err := findCommandByName(ctx, svc, name)
+	if err != nil {
+		return ComposeDownJob{}, false, fmt.Errorf("look up compose down job %q: %w", name, err)
+	}
+	if entry == nil {
+		return ComposeDownJob{}, false, nil
+	}
+	return composeDownJobOf(*entry), true, nil
 }
 
 // launchComposeDownJob is [LaunchComposeDownJob] for the job req describes, as

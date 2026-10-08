@@ -83,12 +83,20 @@ it in any terminal or pane. Each widget is its own subcommand.
   teardown with it. (`cmdman compose mux down` on a command line restores every
   window either way.) `D` stops and removes the commands themselves: it asks
   `compose down <project>? y/n` on the hint line first, `y` goes ahead and any
-  other key takes the question back, and what the teardown did — `stopped N,
-  removed M`, plus `force-killed K` when K of those stops had to end their
-  command with `SIGKILL`, plus `unreleased U` when the releases of U resources
-  failed — is reported there when it ends; a `D` that got
-  through every command takes the project's windows down too, on the same terms
-  as `d`.
+  other key takes the question back. The teardown runs as a cmdman command of
+  its own, `cmdman compose down --close-windows`, so it runs to its end even when
+  the widget that asked for it goes away; the dashboard does not list that
+  command. While it runs the hint line reads `compose down <project>: running…
+  stopped N`, and `D` on the same project shows that line again instead of
+  asking. What the teardown did — `stopped N, removed M`, plus `force-killed K`
+  when K of those stops had to end their command with `SIGKILL`, plus
+  `unreleased U` when the releases of U resources failed — is reported there
+  when it ends; a command that had already exited counts as removed but not as
+  stopped. A `D` that got through every command takes the project's windows down
+  too, on the same terms as `d`. A widget opens on the last teardown of its
+  project, running or over: the switcher on the project selected when it
+  starts, the launcher on the project `S` would launch, and the project manager
+  on its own project.
   The widget also stands where the active project stands: each time that mark
   resolves it moves itself into the project's directory, so the pane's own
   path — and any multiplexer binding keyed on it — follows the project the

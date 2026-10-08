@@ -80,6 +80,17 @@ type Model struct {
 	// the screen while the next key still answered it would take the commands of
 	// a project nobody was looking at.
 	pendingDown core.DownTarget
+	// downNote is what the last compose teardown said, under way or over. It is
+	// kept apart from status for the reason pendingDown is: a teardown's commands
+	// going away, and the job that ran it exiting, are lifecycle events, and the
+	// listing each one triggers would clear the line that reports them. A key
+	// press clears it.
+	downNote string
+	// downs are the compose teardowns under way that the switcher follows, and
+	// downLooked says the last teardown of the project selected at open has been
+	// asked for, which happens once, when the first project listing lands.
+	downs      core.DownFollows
+	downLooked bool
 
 	// activeIdentity is the mux ownership stamp of the project the caller is
 	// sitting in (D3), "" when no probe answered — which is when the active mark
@@ -179,7 +190,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.projs, m.status = msg.Infos, ""
-		return m.rebuild(), nil
+		return m.rebuild().lookUpLastDown()
 	case core.ActiveIdentityLoadedMsg:
 		// A probe that did not answer clears the stamp rather than keeping the
 		// last one: the window the caller sits in is what the mark claims, and a
@@ -218,8 +229,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case core.MuxDownMsg:
 		m.status = msg.Status()
 		return m, nil
+	case core.ComposeDownProgressMsg:
+		m.downs = m.downs.Progress(msg)
+		m.status, m.downNote = "", msg.Status()
+		return m, msg.Next()
 	case core.ComposeDownMsg:
-		m.status = msg.Status()
+		m.downs = m.downs.Done(msg.Target)
+		m.status, m.downNote = "", msg.Status()
 		return m, nil
 	case tea.MouseWheelMsg:
 		return m.wheel(msg), nil
@@ -379,6 +395,7 @@ func applyRuntime(groups []core.ProjectGroup, runtime map[string]core.RuntimeSta
 // question: the key answers it and nothing else, so a q that meant "no" cannot
 // quit the widget on the way.
 func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m.downNote = ""
 	if m.pendingDown.Project != "" {
 		return m.answerComposeDown(msg.String())
 	}
@@ -517,10 +534,15 @@ func (m Model) muxDownSelected() (tea.Model, tea.Cmd) {
 // confirmComposeDown is `D`: it puts the question on the hint line instead of
 // tearing the project down where it stands. Compose down takes away every
 // command of the project, the ones the cursor is not on included, so it is not
-// a keystroke to make by accident.
+// a keystroke to make by accident. A project whose teardown is already under way
+// gets no question: the line says how far that teardown has got instead.
 func (m Model) confirmComposeDown() (tea.Model, tea.Cmd) {
 	target, ok := m.downTarget()
 	if !ok {
+		return m, nil
+	}
+	if status, running := m.downs.Status(target); running {
+		m.status, m.downNote = "", status
 		return m, nil
 	}
 	m.pendingDown = target
@@ -548,15 +570,39 @@ func (m Model) answerComposeDown(key string) (tea.Model, tea.Cmd) {
 // has nothing to hand them; its directory travels along because a compose file
 // names a project only together with the directory it stands in.
 func (m *Model) downTarget() (core.DownTarget, bool) {
-	g, ok := m.selectedGroup()
-	if !ok {
+	if _, ok := m.selectedGroup(); !ok {
 		return core.DownTarget{}, false
 	}
-	if g.Name == "" {
+	target, ok := m.selectedTarget()
+	if !ok {
 		m.status = "no project to tear down here"
+	}
+	return target, ok
+}
+
+// selectedTarget is the project downTarget names, without a word for a group
+// that has no name.
+func (m Model) selectedTarget() (core.DownTarget, bool) {
+	g, ok := m.selectedGroup()
+	if !ok || g.Name == "" {
 		return core.DownTarget{}, false
 	}
 	return core.DownTarget{Project: g.Name, Path: g.Path, WorkDir: g.Workdir}, true
+}
+
+// lookUpLastDown asks once for the last compose teardown of the project
+// selected when the switcher opened, so it opens saying how that went, or how
+// it is going.
+func (m Model) lookUpLastDown() (tea.Model, tea.Cmd) {
+	if m.downLooked {
+		return m, nil
+	}
+	m.downLooked = true
+	target, ok := m.selectedTarget()
+	if !ok {
+		return m, nil
+	}
+	return m, core.LastComposeDownCmd(m.bgCtx(), m.backend, target)
 }
 
 // onProjectManagerSummoned reports a summon, the way onProjectSwitched reports
