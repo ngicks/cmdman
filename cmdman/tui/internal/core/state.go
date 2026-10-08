@@ -18,6 +18,9 @@ type CommandRow struct {
 	LogDriver logdriver.LogDriver
 	Tty       bool   // command runs under a pseudo-terminal (preview predicate)
 	Pending   string // pending action label; empty when no action is in flight
+	// ForceKilled carries CommandInfo.ForceKilled: the stop that ended the
+	// latest run resorted to SIGKILL.
+	ForceKilled bool
 
 	// ScaleIndex and ScaleCount are the command's replica identity (see
 	// CommandInfo), carried through so every listing can badge a replica with
@@ -105,6 +108,8 @@ func GroupFromInfos(infos []CommandInfo) []ProjectGroup {
 			ExitCode:  ci.ExitCode,
 			LogDriver: ci.LogDriver,
 			Tty:       ci.Tty,
+
+			ForceKilled: ci.ForceKilled,
 
 			ScaleIndex: ci.ScaleIndex,
 			ScaleCount: ci.ScaleCount,

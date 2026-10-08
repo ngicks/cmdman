@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"time"
 
 	"github.com/ngicks/cmdman/cmdman/config"
@@ -37,11 +38,16 @@ type CreateRequest struct {
 	// resolved (host env import + Env overrides). Use it for context the command
 	// should always see (e.g. compose scale index) without it counting toward
 	// the command's configured environment for drift purposes.
-	AppendEnv       []string
-	Labels          map[string]string
-	RestartPolicy   model.RestartPolicy
-	MaxRetries      int
-	StopSignal      string
+	AppendEnv     []string
+	Labels        map[string]string
+	RestartPolicy model.RestartPolicy
+	MaxRetries    int
+	StopSignal    string
+	// StopTimeout is how long a stop waits after the stop signal before it
+	// sends SIGKILL. Zero leaves it unset; a negative value is rejected.
+	StopTimeout time.Duration
+	// StopCommand is an argv run before the stop signal. Empty leaves it unset.
+	StopCommand     []string
 	AutoRemove      bool
 	Tty             bool
 	ScrollbackBytes int
@@ -174,6 +180,18 @@ func (s *Service) buildCommandConfig(req CreateRequest) *model.CommandConfig {
 		annotations = map[string]string{store.AnnotationAutoRemove: "true"}
 	}
 
+	// A negative timeout is kept so ValidateCreate rejects it instead of it
+	// silently falling back to the default.
+	var stopTimeout *model.Duration
+	if req.StopTimeout != 0 {
+		d := model.Duration(req.StopTimeout)
+		stopTimeout = &d
+	}
+	var stopCommand *model.StopCommand
+	if len(req.StopCommand) > 0 {
+		stopCommand = &model.StopCommand{Args: slices.Clone(req.StopCommand)}
+	}
+
 	return &model.CommandConfig{
 		Argv:            append([]string(nil), req.Argv...),
 		Dir:             dir,
@@ -182,6 +200,8 @@ func (s *Service) buildCommandConfig(req CreateRequest) *model.CommandConfig {
 		RestartPolicy:   restartPolicy,
 		MaxRetries:      req.MaxRetries,
 		StopSignal:      stopSignal,
+		StopTimeout:     stopTimeout,
+		StopCommand:     stopCommand,
 		Tty:             req.Tty,
 		ScrollbackBytes: scrollbackBytes,
 		LogDriver:       logDriver,

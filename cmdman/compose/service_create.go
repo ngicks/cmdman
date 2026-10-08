@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/model"
@@ -201,7 +202,8 @@ func (s *Service) executeAction(
 				"state", existing.State,
 			)
 			s.report(disp, PhaseStopping, nil, nil)
-			if _, err := s.stopWithHooks(ctx, old, oldHooks, existing.ID); err != nil {
+			_, forceKilled, err := s.stopWithHooks(ctx, old, oldHooks, existing.ID, nil)
+			if err != nil {
 				werr := fmt.Errorf(
 					"stop command %q (%s) for recreate: %w",
 					disp,
@@ -211,7 +213,7 @@ func (s *Service) executeAction(
 				s.report(disp, PhaseError, werr, nil)
 				return ActionOutcome{Command: disp, Action: "recreate", Err: werr}, nil
 			}
-			s.report(disp, PhaseStopped, nil, nil)
+			s.reportStopped(disp, nil, forceKilled)
 		}
 
 		s.report(disp, PhaseRecreating, nil, nil)
@@ -328,7 +330,7 @@ func (s *Service) handleExcessReplicas(
 		// Stop a live replica before removal so its monitor is not yanked.
 		live := e.State == model.EventTypeRunning || e.State == model.EventTypeStarting
 		if live {
-			if _, err := s.stopWithHooks(ctx, r, hooks, e.ID); err != nil {
+			if _, _, err := s.stopWithHooks(ctx, r, hooks, e.ID, nil); err != nil {
 				werr := fmt.Errorf("stop excess replica %q (%s): %w", disp, e.ID, err)
 				s.report(disp, PhaseError, werr, nil)
 				outcomes = append(outcomes, ActionOutcome{
@@ -365,15 +367,24 @@ func (s *Service) handleExcessReplicas(
 
 // stopForRecreate stops a running command and waits for it to terminate so its
 // store entry can be safely removed and recreated. It honors the command's
-// configured stop signal and the default stop timeout (SIGTERM, then SIGKILL on
-// timeout). The first error — from the call itself or any per-target result — is
-// returned so the caller can abort the recreate.
-func (s *Service) stopForRecreate(ctx context.Context, id string) error {
-	results, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{id}})
+// configured stop signal, and sends SIGKILL once timeout passes, nil for the
+// command's stored stop timeout. The first error — from the call itself or any
+// per-target result — is returned so the caller can abort the recreate.
+// forceKilled reports that the stop ran out the grace period and ended the
+// command with SIGKILL.
+func (s *Service) stopForRecreate(
+	ctx context.Context,
+	id string,
+	timeout *time.Duration,
+) (forceKilled bool, err error) {
+	results, err := s.svc.Stop(ctx, cmdman.StopRequest{Targets: []string{id}, Timeout: timeout})
 	if err != nil {
-		return err
+		return false, err
 	}
-	return firstStopErr(results)
+	for _, r := range results {
+		forceKilled = forceKilled || r.ForceKilled
+	}
+	return forceKilled, firstStopErr(results)
 }
 
 // buildCreateRequest constructs a cmdman.CreateRequest for one replica of a
@@ -407,6 +418,8 @@ func buildCreateRequest(
 		RestartPolicy:   nc.RestartPolicy,
 		MaxRetries:      nc.MaxRetries,
 		StopSignal:      nc.StopSignal,
+		StopTimeout:     nc.StopGracePeriod,
+		StopCommand:     nc.Stop,
 		Tty:             nc.Tty,
 		ScrollbackBytes: nc.ScrollbackBytes,
 		LogDriver:       nc.LogDriver,

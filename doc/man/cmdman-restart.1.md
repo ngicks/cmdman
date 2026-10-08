@@ -7,7 +7,7 @@
 ## Synopsis
 
 ```text
-cmdman restart [--signal SIGNAL] [--timeout SECONDS] [--ignore-errors] ID|NAME...
+cmdman restart [--signal SIGNAL] [--timeout DURATION] [--ignore-errors] ID|NAME...
 ```
 
 ## Description
@@ -16,16 +16,24 @@ Performs an explicit stop followed by a start using the existing stored command
 definition. It does not reread executable configuration or a compose file.
 Use `cmdman compose up` to reconcile changed compose configuration.
 
-The stop phase follows the same signal, timeout, process-group, and forced-kill
-rules as `cmdman stop`. Targets are processed independently and per-target
-failures are reported on stderr.
+The stop phase follows the same signal, timeout, stop command, process-group,
+and `SIGKILL` rules as `cmdman stop`. The monitor records a forced kill as
+[cmdman-stop(1)](./cmdman-stop.1.md) describes. `cmdman restart` writes no
+stderr line for a forced kill. The next start resets `force_killed` in the
+command's state. The event log still holds the forced kill, as
+[cmdman-events(1)](./cmdman-events.1.md) describes. Targets are processed
+independently and per-target failures are reported on stderr.
 
 ## Options
 
 - `-s, --signal SIGNAL`: signal to send during the stop phase. When omitted,
   each command's stored stop signal is used.
-- `-t, --timeout SECONDS`: seconds to wait before sending `SIGKILL`. Defaults
-  to 10.
+- `-t, --timeout DURATION`: time to wait after the stop signal before sending
+  `SIGKILL`. Give integer seconds or a Go duration such as `1m30s`. The value
+  must be positive. A command with a stop command runs it first for at most the
+  same time, so its stop can take up to twice the timeout before `SIGKILL`.
+  When omitted, each command waits the stop timeout stored with it, or
+  10 seconds when it has none, as in [cmdman-stop(1)](./cmdman-stop.1.md).
 - `--ignore-errors`: exit 0 even when some targets failed. Failures are still
   printed.
 
@@ -39,8 +47,9 @@ failures are reported on stderr.
   exit into `0`.
 
 Errors that abort the whole call keep their non-zero exit under
-`--ignore-errors`. An unknown target, an unparsable `--signal` value, and a
-store that cannot be opened are such errors.
+`--ignore-errors`. An unknown target, an unparsable `--signal` value, an
+unparsable or non-positive `--timeout` value, and a store that cannot be opened
+are such errors. A rejected `--signal` or `--timeout` value restarts no command.
 
 ## See Also
 

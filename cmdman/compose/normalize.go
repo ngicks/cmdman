@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/compose-spec/compose-go/v2/dotenv"
@@ -278,6 +279,24 @@ func Normalize(
 			}
 		}
 
+		var stopGracePeriod time.Duration
+		if cmd.StopGracePeriod != "" {
+			stopGracePeriod, err = hrstr.ParseTimeout(cmd.StopGracePeriod)
+			if err != nil {
+				return ComposeSpec{}, fmt.Errorf(
+					"command %q: invalid stop_grace_period %q: %w",
+					name,
+					cmd.StopGracePeriod,
+					err,
+				)
+			}
+		}
+
+		stop, err := normalizeStop(ctx, project, name, cmd.Stop, finalLookup)
+		if err != nil {
+			return ComposeSpec{}, fmt.Errorf("command %q: %w", name, err)
+		}
+
 		nc := Command{
 			Name:            name,
 			Dir:             cmdDir,
@@ -289,6 +308,8 @@ func Normalize(
 			RestartPolicy:   restartPolicy,
 			MaxRetries:      maxRetries,
 			StopSignal:      cmd.StopSignal,
+			StopGracePeriod: stopGracePeriod,
+			Stop:            stop,
 			Tty:             cmd.Tty,
 			ScrollbackBytes: cmd.ScrollbackBytes,
 			LogDriver:       logdriver.LogDriver(cmd.LogDriver),
@@ -676,6 +697,40 @@ func normalizeLifecycleHooks(
 		return nil, err
 	}
 	return hooks, nil
+}
+
+// normalizeStop interpolates a command's stop: argv with lookup, the lookup the
+// command's own args use. It returns nil when stop: is absent. A stop: without
+// args is an error: passed on, the empty argv would reach Service.Create as an
+// unset stop command and the author's stop: would silently do nothing.
+func normalizeStop(
+	ctx context.Context,
+	project, cmdName string,
+	raw *RawStopCommand,
+	lookup template.Mapping,
+) ([]string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	warnUnknownFields(
+		ctx,
+		raw.Unknown,
+		"compose: ignoring unrecognized stop field",
+		"project", project,
+		"command", cmdName,
+	)
+	if len(raw.Args) == 0 {
+		return nil, errors.New("stop: args is empty")
+	}
+	args := make([]string, len(raw.Args))
+	for i, arg := range raw.Args {
+		v, err := template.Substitute(arg, lookup)
+		if err != nil {
+			return nil, fmt.Errorf("stop: args[%d] interpolation: %w", i, err)
+		}
+		args[i] = v
+	}
+	return args, nil
 }
 
 // validateRuntimeFields rejects compose-author mistakes that would otherwise

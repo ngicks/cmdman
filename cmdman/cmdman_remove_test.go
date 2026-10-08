@@ -23,16 +23,18 @@ import (
 	"gotest.tools/v3/assert"
 )
 
-// stopMonitor answers Stop like a monitor would: it records the signal and
-// flips the command to exited, or fails the stop when stopErr is set.
+// stopMonitor answers Stop like a monitor would: it records the signal and the
+// timeout and flips the command to exited, or fails the stop when stopErr is
+// set.
 type stopMonitor struct {
 	cmdmanv1pb.UnimplementedCommandMonitorServiceServer
 	st      *store.Store
 	id      string
 	stopErr error
 
-	mu      sync.Mutex
-	signals []int32
+	mu       sync.Mutex
+	signals  []int32
+	timeouts []time.Duration
 }
 
 func (f *stopMonitor) Stop(
@@ -41,6 +43,7 @@ func (f *stopMonitor) Stop(
 ) (*cmdmanv1pb.StopResponse, error) {
 	f.mu.Lock()
 	f.signals = append(f.signals, req.Signal)
+	f.timeouts = append(f.timeouts, req.GetTimeout().AsDuration())
 	f.mu.Unlock()
 	if f.stopErr != nil {
 		return nil, f.stopErr
@@ -57,6 +60,12 @@ func (f *stopMonitor) received() []int32 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]int32(nil), f.signals...)
+}
+
+func (f *stopMonitor) receivedTimeouts() []time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]time.Duration(nil), f.timeouts...)
 }
 
 // startMonitorStandIn starts a process that stands in for the monitor rm may

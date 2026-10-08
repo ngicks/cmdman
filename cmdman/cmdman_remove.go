@@ -100,7 +100,7 @@ func (s *Service) stopForRemoval(
 	id string,
 	monitorPID int,
 ) error {
-	unreachable, err := s.stopReportingUnreachable(ctx, st, id, "", defaultStopTimeout)
+	unreachable, _, err := s.stopReportingUnreachable(ctx, st, id, "", nil)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return fmt.Errorf("stop: %w", ctxErr)
 	}

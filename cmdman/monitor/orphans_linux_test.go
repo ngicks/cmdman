@@ -30,6 +30,7 @@ const (
 	sweepHelperDetachedEnv = "CMDMAN_TEST_SWEEP_DETACHED_PID"
 	sweepHelperOrphanEnv   = "CMDMAN_TEST_SWEEP_ORPHAN_PID"
 	sweepHelperOwnGroupEnv = "CMDMAN_TEST_SWEEP_OWN_GROUP_PID"
+	sweepHelperWrapEnv     = "CMDMAN_TEST_SWEEP_WRAPPED_CHILD_PID"
 )
 
 // A command can leave processes behind. One stays in the command's own session
@@ -279,13 +280,18 @@ func TestParseProcIDs(t *testing.T) {
 // their pids and exits without waiting for either, which is what leaves them
 // for the monitor to deal with. Starting them from here rather than from a
 // shell keeps the tests off setsid(1), which is not everywhere.
+//
+// With sweepHelperWrapEnv set it stays up instead, as a wrapper of a child that
+// outlives it (see wrapTermIgnoringChild).
 func TestSweepHelperProcess(t *testing.T) {
 	var (
 		detachedPidPath = os.Getenv(sweepHelperDetachedEnv)
 		orphanPidPath   = os.Getenv(sweepHelperOrphanEnv)
 		ownGroupPidPath = os.Getenv(sweepHelperOwnGroupEnv)
+		wrappedPidPath  = os.Getenv(sweepHelperWrapEnv)
 	)
-	if detachedPidPath == "" && orphanPidPath == "" && ownGroupPidPath == "" {
+	if detachedPidPath == "" && orphanPidPath == "" && ownGroupPidPath == "" &&
+		wrappedPidPath == "" {
 		t.Skip("helper process: runs only as the command of a sweep test")
 	}
 	if detachedPidPath != "" {
@@ -297,6 +303,35 @@ func TestSweepHelperProcess(t *testing.T) {
 	if ownGroupPidPath != "" {
 		startSurvivor(t, ownGroupPidPath, survivorOwnGroup)
 	}
+	if wrappedPidPath != "" {
+		wrapTermIgnoringChild(t, wrappedPidPath)
+	}
+}
+
+// wrapTermIgnoringChild keeps the helper up as a wrapper that dies of SIGTERM
+// while its child does not. The child stays in the command's session but leads
+// a process group of its own, and ignores SIGTERM. The helper writes the
+// child's pid to pidPath once the child's trap is in place and then waits. A
+// Go program dies of SIGTERM by default, so a stop signal to the command's
+// group ends the helper and leaves the child behind.
+//
+// The child sets its own trap rather than inherit an ignored SIGTERM the way
+// startSurvivor arranges it: signal.Reset does not undo signal.Ignore, and the
+// helper must stay killable by SIGTERM.
+func wrapTermIgnoringChild(t *testing.T, pidPath string) {
+	t.Helper()
+	trapped := pidPath + ".trapped"
+	child := exec.Command(
+		"/bin/sh", "-c", `trap "" TERM; : >"$1"; exec sleep 300`, "sh", trapped)
+	child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	assert.NilError(t, child.Start())
+	waitUntil(t, 10*time.Second, func() bool {
+		_, err := os.Stat(trapped)
+		return err == nil
+	}, "the child never set its trap")
+	assert.NilError(
+		t, os.WriteFile(pidPath, []byte(strconv.Itoa(child.Process.Pid)), 0o600))
+	time.Sleep(5 * time.Minute)
 }
 
 // survivorMode says where in the command's process tree a survivor sits.

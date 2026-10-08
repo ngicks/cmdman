@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -19,6 +20,10 @@ type RestartOption struct {
 	// replicas. Empty targets the whole project. A replica index must name a
 	// stored replica.
 	Targets []Target
+	// Timeout is how long the stop of each replica waits after the stop signal
+	// before it sends SIGKILL. Nil waits each replica's stored stop timeout. A
+	// non-positive value fails the restart before any replica is stopped.
+	Timeout *time.Duration
 }
 
 // RestartResult is the aggregated result of a compose restart operation.
@@ -40,7 +45,8 @@ type RestartOutcome struct {
 // per replica it restarted.
 //
 // When Spec is loaded:
-//   - Stop phase: reverse DAG order (dependents before dependencies), concurrent within each layer.
+//   - Stop phase: reverse DAG order (dependents before dependencies), concurrent within each layer
+//     up to the parallel limit of s ([WithParallelLimit]).
 //   - Start phase: forward DAG order (matching up), concurrent within each layer.
 //   - Orphans (project-labeled commands absent from YAML) are skipped with a warning,
 //     consistent with create/up convergence semantics.
@@ -54,6 +60,9 @@ func (s *Service) Restart(
 	selection ProjectSelection,
 	opts RestartOption,
 ) (*RestartResult, error) {
+	if err := checkStopTimeout(opts.Timeout); err != nil {
+		return nil, err
+	}
 	entries, err := s.svc.List(ctx, cmdman.ListRequest{
 		AllStates: true,
 		Labels:    projectLabels(selection.WorkDir, selection.Project),
@@ -77,8 +86,9 @@ func (s *Service) Restart(
 		return &RestartResult{}, nil
 	}
 
+	td := s.newTeardown(false, opts.Timeout)
 	if selection.Spec != nil {
-		return s.restartWithSpec(ctx, selection, entries, targets, hooksFromSpec)
+		return s.restartWithSpec(ctx, selection, entries, targets, hooksFromSpec, td)
 	}
 	spec, ok, err := reconstructProjectFromMeta(selection, entries)
 	if err != nil {
@@ -90,23 +100,24 @@ func (s *Service) Restart(
 		)
 	}
 	selection.Spec = &spec
-	return s.restartWithSpec(ctx, selection, entries, targets, hooksFromStored)
+	return s.restartWithSpec(ctx, selection, entries, targets, hooksFromStored, td)
 }
 
 // restartWithSpec restarts using DAG ordering (reverse stop, forward start). It
 // stops and starts exactly the replicas of entries, every stored replica of the
 // project, that targets selects, and reports one outcome per such replica.
 //
-// A live replica stops inside the stop hooks stored on it. Every replica starts
-// inside the start hooks src says to run for it. A hook that fails under
-// on_error fail ends the restart of its replica: one whose stop hooks failed is
-// not started.
+// A live replica stops inside the stop hooks stored on it, as td says. Every
+// replica starts inside the start hooks src says to run for it. A hook that
+// fails under on_error fail ends the restart of its replica: one whose stop
+// hooks failed is not started.
 func (s *Service) restartWithSpec(
 	ctx context.Context,
 	selection ProjectSelection,
 	entries []cmdmanEntry,
 	targets targetSet,
 	src hookSource,
+	td *teardown,
 ) (*RestartResult, error) {
 	layers, err := TopoLayers(selection.Spec.Commands)
 	if err != nil {
@@ -171,6 +182,7 @@ func (s *Service) restartWithSpec(
 			outByID,
 			held,
 			selection.Project,
+			td,
 		)
 	}
 
@@ -206,8 +218,8 @@ func (s *Service) restartWithSpec(
 
 // stopLayerRestartConcurrent stops a layer for the restart operation, recording
 // each replica's stop error into its outcome in outByID. Every replica
-// entriesByCommand holds for each command is stopped. A replica whose stop hooks
-// failed is added to held.
+// entriesByCommand holds for each command is stopped, as td says. A replica
+// whose stop hooks failed is added to held.
 func stopLayerRestartConcurrent(
 	ctx context.Context,
 	s *Service,
@@ -216,6 +228,7 @@ func stopLayerRestartConcurrent(
 	outByID map[string]*RestartOutcome,
 	held map[string]struct{},
 	project string,
+	td *teardown,
 ) {
 	var mu sync.Mutex
 	eg, _ := errgroup.WithContext(ctx)
@@ -223,7 +236,7 @@ func stopLayerRestartConcurrent(
 	for _, name := range layer {
 		for _, e := range entriesByCommand[name] {
 			eg.Go(func() error {
-				startable, stopErr := s.restartStop(ctx, e)
+				startable, stopErr := s.restartStop(ctx, td, e)
 				if stopErr != nil {
 					contextkey.ValueSlogLoggerDefault(ctx).Warn("compose restart: stop failed",
 						"project", project,
@@ -246,16 +259,26 @@ func stopLayerRestartConcurrent(
 }
 
 // restartStop stops the replica e for a restart. A live replica stops inside
-// the stop hooks stored on it. Any other replica counts as stopped already:
-// cmdman cannot stop one that never started, which has no monitor, and one
-// that ended has nothing left to stop. startable reports whether the restart
-// of e goes on to its start. A failed stop hook ends the restart of e. A
-// failed stop alone leaves the start to be tried.
-func (s *Service) restartStop(ctx context.Context, e cmdmanEntry) (startable bool, err error) {
+// the stop hooks stored on it, as td says for force and timeout, holding a stop
+// permit of td throughout. Any other replica counts as stopped already: cmdman
+// cannot stop one that never started, which has no monitor, and one that ended
+// has nothing left to stop. startable reports whether the restart of e goes on
+// to its start. A failed stop hook ends the restart of e. A failed stop alone
+// leaves the start to be tried, and so does a failed wait for the permit.
+func (s *Service) restartStop(
+	ctx context.Context,
+	td *teardown,
+	e cmdmanEntry,
+) (startable bool, err error) {
 	if e.State != model.EventTypeRunning && e.State != model.EventTypeStarting {
 		return true, nil
 	}
-	hookFailed, err := s.stopReplica(ctx, e, false)
+	release, err := td.acquireStop(ctx)
+	if err != nil {
+		return true, err
+	}
+	defer release()
+	hookFailed, _, err := s.stopReplica(ctx, e, td.force, td.timeout)
 	return !hookFailed, err
 }
 

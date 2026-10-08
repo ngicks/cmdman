@@ -2,6 +2,7 @@ package compose
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/mux"
@@ -43,8 +44,10 @@ type CanonicalCommand struct {
 	// omitted so the canonical document round-trips back to true.
 	InjectEnv       *bool                     `yaml:"inject_env,omitempty" json:"inject_env,omitzero"` //nolint:lll // dual yaml+json snake_case tags exceed the line limit
 	Labels          map[string]string         `yaml:"labels,omitempty" json:"labels,omitzero"`
-	RestartPolicy   string                    `yaml:"restart_policy,omitempty" json:"restart_policy,omitzero"` //nolint:lll // dual yaml+json snake_case tags exceed the line limit
-	StopSignal      string                    `yaml:"stop_signal,omitempty" json:"stop_signal,omitzero"`       //nolint:lll // dual yaml+json snake_case tags exceed the line limit
+	RestartPolicy   string                    `yaml:"restart_policy,omitempty" json:"restart_policy,omitzero"`       //nolint:lll // dual yaml+json snake_case tags exceed the line limit
+	StopSignal      string                    `yaml:"stop_signal,omitempty" json:"stop_signal,omitzero"`             //nolint:lll // dual yaml+json snake_case tags exceed the line limit
+	StopGracePeriod string                    `yaml:"stop_grace_period,omitempty" json:"stop_grace_period,omitzero"` //nolint:lll // dual yaml+json snake_case tags exceed the line limit
+	Stop            []string                  `yaml:"stop,omitempty" json:"stop,omitzero"`
 	Tty             bool                      `yaml:"tty,omitempty" json:"tty,omitzero"`
 	ScrollbackBytes int                       `yaml:"scrollback_bytes,omitempty" json:"scrollback_bytes,omitzero"` //nolint:lll // dual yaml+json snake_case tags exceed the line limit
 	LogDriver       string                    `yaml:"log_driver,omitempty" json:"log_driver,omitzero"`
@@ -128,6 +131,8 @@ func canonicalCommand(c Command) CanonicalCommand {
 		Labels:          c.Labels,
 		RestartPolicy:   canonicalRestartPolicy(c.RestartPolicy, c.MaxRetries),
 		StopSignal:      c.StopSignal,
+		StopGracePeriod: canonicalStopGracePeriod(c.StopGracePeriod),
+		Stop:            c.Stop,
 		Tty:             c.Tty,
 		ScrollbackBytes: c.ScrollbackBytes,
 		LogDriver:       string(c.LogDriver),
@@ -175,6 +180,15 @@ func canonicalScale(scale int) int {
 		return 0
 	}
 	return scale
+}
+
+// canonicalStopGracePeriod renders the grace period as a Go duration string, and
+// an unset (zero) period as empty so the field is omitted.
+func canonicalStopGracePeriod(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	return d.String()
 }
 
 // canonicalRestartPolicy recomposes the restart_policy string that normalization

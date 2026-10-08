@@ -11,6 +11,7 @@ func composeStopCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 	var (
 		flagProgress string
 		flagScale    int
+		flagTimeout  string
 	)
 
 	cmd := &cobra.Command{
@@ -19,12 +20,13 @@ func composeStopCmd(parent *cobra.Command, rf *rootFlags, cf *composeFlags) {
 		Args:              scaleArgs(cobra.ArbitraryArgs, &flagScale),
 		ValidArgsFunction: completeComposeCommands(rf, cf),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runComposeStop(cmd, rf, cf, args, flagScale, flagProgress)
+			return runComposeStop(cmd, rf, cf, args, flagScale, flagProgress, flagTimeout)
 		},
 	}
 
 	cmd.Flags().StringVar(&flagProgress, "progress", "auto", cli.ProgressFlagUsage)
 	addScaleFlag(cmd, &flagScale)
+	addStopTimeoutFlag(cmd, &flagTimeout)
 	_ = cmd.RegisterFlagCompletionFunc("progress", progressCompletions)
 
 	parent.AddCommand(cmd)
@@ -37,7 +39,17 @@ func runComposeStop(
 	commandNames []string,
 	scale int,
 	progress string,
+	timeoutValue string,
 ) error {
+	timeout, err := stopTimeoutFlag(cmd, timeoutValue)
+	if err != nil {
+		return err
+	}
+	parallel, err := composeParallelOption(cmd, cf)
+	if err != nil {
+		return err
+	}
+
 	selection, err := compose.LoadOrProject(cf.normalizeOpts())
 	if err != nil {
 		return err
@@ -55,9 +67,10 @@ func runComposeStop(
 	}
 	defer prog.Close()
 
-	result, err := compose.NewService(svc, compose.WithReporter(prog)).Stop(
+	result, err := compose.NewService(svc, compose.WithReporter(prog), parallel).Stop(
 		cmd.Context(), selection, compose.StopOption{
 			Targets: composeTargets(commandNames, scale),
+			Timeout: timeout,
 		})
 	if err != nil {
 		return err

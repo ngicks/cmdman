@@ -281,10 +281,12 @@ func (s *Service) reconcileStop(
 }
 
 // stopAction stops the replicas a vertex covers, each inside its own stop
-// hooks and all at once. Only a replica with a live monitor (starting/running)
-// is stopped; created/exited/failed are already terminal and a stop on them
-// would only return monitor-connect errors, so they are no-ops. The action
-// fails with the first failure among the replicas.
+// hooks and all at once as far as the stop permits of td allow. The permits are
+// shared by every vertex of the walk, so reconcileWalkLimit bounds the commands
+// acting at once and td bounds their replica stops. Only a replica with a live
+// monitor (starting/running) is stopped; created/exited/failed are already
+// terminal and a stop on them would only return monitor-connect errors, so they
+// are no-ops. The action fails with the first failure among the replicas.
 func (s *Service) stopAction(
 	ctx context.Context,
 	v *graphVertex,
@@ -306,12 +308,15 @@ func (s *Service) stopAction(
 	// Report and stop each live replica by its scale index so the trace lists
 	// every replica being stopped rather than one command line.
 	errs := make([]error, len(live))
+	forced := make([]bool, len(live))
 	var eg errgroup.Group
 	for i, in := range live {
 		disp := instanceDisplayName(*cmd, in.ScaleIndex)
 		s.report(disp, PhaseStopping, nil, nil)
 		eg.Go(func() error {
-			if err := s.teardownStop(ctx, td, in.Entry); err != nil {
+			forceKilled, err := s.teardownStop(ctx, td, in.Entry)
+			forced[i] = forceKilled
+			if err != nil {
 				contextkey.ValueSlogLoggerDefault(ctx).WarnContext(ctx, "compose: stop failed",
 					"project", project,
 					"command", cmd.Name,
@@ -322,17 +327,22 @@ func (s *Service) stopAction(
 				s.report(disp, PhaseError, errs[i], nil)
 				return nil
 			}
-			s.report(disp, PhaseStopped, nil, snap.ExitCode)
+			s.reportStopped(disp, snap.ExitCode, forceKilled)
 			return nil
 		})
 	}
 	_ = eg.Wait()
+	forceKilled := slices.Contains(forced, true)
 	for _, err := range errs {
 		if err != nil {
-			return actionResult{State: snap.State, Err: err}
+			return actionResult{State: snap.State, Err: err, ForceKilled: forceKilled}
 		}
 	}
-	return actionResult{State: model.EventTypeExited, ExitCode: snap.ExitCode}
+	return actionResult{
+		State:       model.EventTypeExited,
+		ExitCode:    snap.ExitCode,
+		ForceKilled: forceKilled,
+	}
 }
 
 // snapshotCommands builds the pre-reconciliation command snapshot for a project.

@@ -369,6 +369,9 @@ func downSummary(result *compose.DownResult) tui.DownSummary {
 	for _, s := range result.Stops {
 		if s.Err == nil {
 			summary.Stopped++
+			if s.ForceKilled {
+				summary.ForceKilled++
+			}
 		}
 	}
 	for _, r := range result.Removes {

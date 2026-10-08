@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -25,6 +26,10 @@ type DownOption struct {
 	// decoded is stopped and removed without them, with a warning. The stored
 	// releases a whole-project down runs are forced the same way.
 	Force bool
+	// Timeout is how long the stop of each replica waits after the stop signal
+	// before it sends SIGKILL. Nil waits each replica's stored stop timeout. A
+	// non-positive value fails the down before any replica is stopped.
+	Timeout *time.Duration
 }
 
 // DownResult is the aggregated result of a compose down operation.
@@ -55,8 +60,9 @@ type ReleaseOutcome struct {
 // Down stops and then removes project-labeled commands.
 //
 // Stop phase: same ordering as Stop (reverse-dependency up walk). Every live
-// replica stops inside the stop hooks stored on it. Remove phase: fully
-// concurrent after all stops complete. Every replica is removed inside the
+// replica stops inside the stop hooks stored on it, at most the parallel limit
+// of s ([WithParallelLimit]) of them at once, orphans included. Remove phase:
+// fully concurrent after all stops complete. Every replica is removed inside the
 // remove hooks stored on it, and the exec commands its failed hooks left for
 // inspection are removed with it.
 //
@@ -99,6 +105,9 @@ func (s *Service) Down(
 	selection ProjectSelection,
 	opts DownOption,
 ) (*DownResult, error) {
+	if err := checkStopTimeout(opts.Timeout); err != nil {
+		return nil, err
+	}
 	for _, t := range opts.Targets {
 		if t.ScaleIndex != 0 {
 			return nil, fmt.Errorf(
@@ -139,7 +148,7 @@ func (s *Service) Down(
 	}
 
 	result := &DownResult{}
-	td := &teardown{force: opts.Force}
+	td := s.newTeardown(opts.Force, opts.Timeout)
 	selected := targets.filter(allEntries)
 	if len(selected) > 0 {
 		var removeTargets []cmdmanEntry

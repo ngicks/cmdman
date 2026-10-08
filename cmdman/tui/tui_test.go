@@ -1035,6 +1035,48 @@ func TestCommandRowPayloadForDeadRows(t *testing.T) {
 	}
 }
 
+// TestCommandRowMarksForcedKill is the word a row adds after the exit state of
+// a run whose stop resorted to SIGKILL, and only while the row shows that exit
+// state.
+func TestCommandRowMarksForcedKill(t *testing.T) {
+	code := -1
+	for _, tc := range []struct {
+		name string
+		c    core.CommandRow
+		want bool
+	}{
+		{
+			name: "an exited run",
+			c:    core.CommandRow{State: model.EventTypeExited, ExitCode: &code, ForceKilled: true},
+			want: true,
+		},
+		{
+			name: "a failed run",
+			c:    core.CommandRow{State: model.EventTypeFailed, ForceKilled: true},
+			want: true,
+		},
+		{
+			name: "a run the stop signal ended",
+			c:    core.CommandRow{State: model.EventTypeExited, ExitCode: &code},
+		},
+		{
+			name: "an action in flight",
+			c: core.CommandRow{
+				State: model.EventTypeExited, ExitCode: &code, ForceKilled: true,
+				Pending: "starting",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.c.ID, tc.c.Name = "1", "web"
+			line := rowLine(t, rowSeed(tc.c), "web", 80)
+			if got := strings.Contains(line, rowSep+forceKilledMark); got != tc.want {
+				t.Errorf("row carries %q: %v, want %v: %q", forceKilledMark, got, tc.want, line)
+			}
+		})
+	}
+}
+
 // TestCommandRowKeepsDetailWithoutTheStatusWord is what survived the status word
 // the row no longer spends a column on: the name's color says what the command
 // reported, so the row keeps only the words the command chose itself — its title

@@ -14,15 +14,21 @@ import (
 type RestartRequest struct {
 	Targets []string
 	Signal  string
-	Timeout time.Duration
+	// Timeout is [StopRequest.Timeout] for the stop phase.
+	Timeout *time.Duration
 }
 
 type RestartResult struct {
 	ID  string
 	Err error
+	// ForceKilled is [StopResult.ForceKilled] for the stop phase.
+	ForceKilled bool
 }
 
 func (s *Service) Restart(ctx context.Context, req RestartRequest) ([]RestartResult, error) {
+	if err := checkStopTimeout(req.Timeout); err != nil {
+		return nil, err
+	}
 	st, err := s.openStore(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
@@ -32,16 +38,10 @@ func (s *Service) Restart(ctx context.Context, req RestartRequest) ([]RestartRes
 		return nil, err
 	}
 
-	timeout := req.Timeout
-	if timeout <= 0 {
-		timeout = defaultStopTimeout
-	}
 	results := make([]RestartResult, 0, len(ids))
 	for _, id := range ids {
-		results = append(results, RestartResult{
-			ID:  id,
-			Err: s.restart(ctx, st, id, req.Signal, timeout),
-		})
+		forceKilled, err := s.restart(ctx, st, id, req.Signal, req.Timeout)
+		results = append(results, RestartResult{ID: id, Err: err, ForceKilled: forceKilled})
 	}
 	return results, nil
 }
@@ -51,19 +51,20 @@ func (s *Service) restart(
 	st *store.Store,
 	id string,
 	signalOverride string,
-	timeout time.Duration,
-) error {
+	timeoutOverride *time.Duration,
+) (forceKilled bool, err error) {
 	state, _, _, err := st.GetCommandState(id)
 	if err != nil {
-		return fmt.Errorf("get command state: %w", err)
+		return false, fmt.Errorf("get command state: %w", err)
 	}
 	if state == model.EventTypeStarting || state == model.EventTypeRunning {
-		if err := s.stop(ctx, st, id, signalOverride, timeout); err != nil {
-			return fmt.Errorf("stop: %w", err)
+		forceKilled, err = s.stop(ctx, st, id, signalOverride, timeoutOverride)
+		if err != nil {
+			return forceKilled, fmt.Errorf("stop: %w", err)
 		}
 	}
 	if err := s.Start(ctx, id); err != nil {
-		return fmt.Errorf("start: %w", err)
+		return forceKilled, fmt.Errorf("start: %w", err)
 	}
-	return nil
+	return forceKilled, nil
 }

@@ -67,12 +67,25 @@ type Monitor struct {
 	// stopDeadline is the SIGKILL a stop with a timeout has scheduled. The run
 	// disarms it where it gives runPgid up, so a deadline that outlives its run
 	// never lands on a pid handed out again.
+	//
+	// stopSeq is the run's stop sequence, nil for a command without a stop
+	// command. The run publishes it with the handles and gives it up with
+	// runPgid, once a sequence a stop began has finished: the signal that
+	// follows the stop command is aimed at runPgid and may arm stopDeadline.
+	//
+	// gracefulStop is set by a stop with a signal other than SIGKILL that lands
+	// during the run, and the run resets it as it begins. A SIGKILL stop that
+	// finds it set is the escalation of that stop rather than a SIGKILL asked
+	// for in its own right. The run end reads it the same way for the SIGKILL it
+	// carries on by pid (see noteSurvivorKilled).
 	procMu       sync.Mutex
 	ptmx         *os.File
 	stdin        io.WriteCloser
 	cmd          *exec.Cmd
 	runPgid      int
 	stopDeadline *time.Timer
+	stopSeq      *stopSequence
+	gracefulStop bool
 	// stdinWriteMu serializes the stdin writes themselves, so two clients
 	// writing at once never interleave bytes inside a chunk.
 	stdinWriteMu sync.Mutex
@@ -119,11 +132,25 @@ type Monitor struct {
 	// sweepFn terminates the processes a finished run left in the command's own
 	// session and reports how many outlived the sweep, or sweepHandedOver once
 	// stopRequested reports a stop. awaitFn waits those processes out while a
-	// stop is in progress and reports how many it left alive. They are fields
-	// so a test can drive the giving-up paths without a process that genuinely
-	// refuses to die, and see what either sends. nil runs the default.
+	// stop is in progress and reports how many it left alive. Once killed
+	// reports the stop's SIGKILL, it carries that SIGKILL on by pid to survivors
+	// outside the process group and calls reached each time one reaches a
+	// process. They are fields so a test can drive the giving-up paths without a
+	// process that genuinely refuses to die, and see what either sends. nil runs
+	// the default.
 	sweepFn func(ctx context.Context, logger *slog.Logger, pgid int, stopRequested func() bool) int
-	awaitFn func(ctx context.Context, logger *slog.Logger, pgid int, killed func() bool) int
+	awaitFn func(
+		ctx context.Context,
+		logger *slog.Logger,
+		pgid int,
+		killed func() bool,
+		reached func(),
+	) int
+	// stopSignalFn sends the stop signal that a stop sequence follows its stop
+	// command with to the run's process group. It is a field so a test can see
+	// whether the sequence sent one at all. nil sends it with
+	// signalProcessGroup.
+	stopSignalFn func(pgid int, sig syscall.Signal) error
 
 	// stopRequested is set by a stop to prevent restarts. Nothing clears it: the
 	// loop ends on the first run end that sees it, and the monitor exits with it.
@@ -133,6 +160,14 @@ type Monitor struct {
 	// what lets the run end finish that SIGKILL for what the process group could
 	// not reach. Like stopRequested it is never cleared.
 	stopKilled atomic.Bool
+	// forceKilled is set once a graceful stop of the run ran out its grace
+	// period and the SIGKILL that followed reached the run: the deadline the
+	// stop armed, or the client's own SIGKILL once its wait was over. That
+	// SIGKILL reaches the run through the process group, or by pid where the run
+	// end carries it on to a survivor outside the group. A SIGKILL asked for in
+	// its own right leaves it alone. It is only ever set under procMu, and the
+	// run resets it as it begins.
+	forceKilled atomic.Bool
 }
 
 func newMonitor(
@@ -400,8 +435,9 @@ func isMonitorActiveState(state model.EventType) bool {
 
 func (m *Monitor) setRunning() {
 	m.stateJSON.StartedAt = time.Now().UTC().Format(time.RFC3339)
-	// runOnce already cleared the previous run's anomalies and warnings at its
-	// top, ahead of any setup that could fail, so nothing to reset here.
+	// runOnce already cleared the previous run's anomalies, warnings and forced
+	// kill at its top, ahead of any setup that could fail, so nothing to reset
+	// here.
 	// Append the event before flipping the DB state so observers polling
 	// state cannot see "running" without the corresponding event on disk.
 	m.emitEvent(model.Event{
@@ -435,6 +471,7 @@ func (m *Monitor) setExited(exitCode int) {
 		Attrs:    m.runAnomalyAttrs(),
 	})
 	m.stateJSON.Warnings = m.runAnomalyWarnings()
+	m.stateJSON.ForceKilled = m.forceKilled.Load()
 	_ = m.store.UpdateCommandState(m.ID, model.EventTypeExited, &exitCode, m.stateJSON)
 	m.publishStateChange(model.EventTypeExited, exitCode)
 	m.stateChangeBridge.Close()
@@ -452,6 +489,7 @@ func (m *Monitor) setFailed(errMsg string) {
 		Attrs: m.runAnomalyAttrs(),
 	})
 	m.stateJSON.Warnings = m.runAnomalyWarnings()
+	m.stateJSON.ForceKilled = m.forceKilled.Load()
 	_ = m.store.UpdateCommandState(m.ID, model.EventTypeFailed, nil, m.stateJSON)
 	m.publishStateChange(model.EventTypeFailed, 0)
 	m.stateChangeBridge.Close()
@@ -544,6 +582,12 @@ func (m *Monitor) SignalProcess(sig syscall.Signal) error {
 	m.procMu.Lock()
 	cmd, pgid := m.cmd, m.runPgid
 	m.procMu.Unlock()
+	return signalRun(cmd, pgid, sig)
+}
+
+// signalRun sends sig to the process group of a run whose child is cmd and
+// whose group is pgid, as read from the run's handles.
+func signalRun(cmd *exec.Cmd, pgid int, sig syscall.Signal) error {
 	if cmd != nil && cmd.Process != nil {
 		return signalProcessGroup(cmd.Process.Pid, sig)
 	}
@@ -556,6 +600,60 @@ func (m *Monitor) SignalProcess(sig syscall.Signal) error {
 		return signalProcessGroup(pgid, sig)
 	}
 	return errNoRunningProcess
+}
+
+// forceKill sends the SIGKILL that follows a graceful stop which ran out its
+// grace period, and latches forceKilled once that SIGKILL reached the run. The
+// event saying so is appended by whichever SIGKILL latched first, so a client
+// escalating at the same deadline as the monitor adds nothing.
+//
+// The process group can have nobody left for it: a wrapper that died of the
+// stop signal leaves only what moved into a process group of its own. The run
+// end carries the SIGKILL on to those by pid, and noteSurvivorKilled latches
+// for it instead.
+//
+// procMu is held across the signal and the latch. The run gives its process
+// group up under procMu and only then reads the latch, so a SIGKILL racing the
+// end of the run either reached it and shows in what the run reports, or found
+// nothing left to reach.
+func (m *Monitor) forceKill() error {
+	m.procMu.Lock()
+	err := signalRun(m.cmd, m.runPgid, syscall.SIGKILL)
+	first := err == nil && m.forceKilled.CompareAndSwap(false, true)
+	m.procMu.Unlock()
+	if first {
+		m.emitForcedKill()
+	}
+	return err
+}
+
+// noteSurvivorKilled is what the run end's await calls each time the SIGKILL it
+// carries on by pid reaches a survivor outside the command's process group.
+// That SIGKILL is the stop's own, so it is a forced kill exactly when the stop's
+// SIGKILL was the escalation of a graceful stop of the run, and it latches the
+// way forceKill does: once per run, with the one event. The await runs on the
+// run's own goroutine ahead of the run end that reads the latch, so a latch
+// from here is never missed.
+func (m *Monitor) noteSurvivorKilled() {
+	m.procMu.Lock()
+	first := m.gracefulStop && m.forceKilled.CompareAndSwap(false, true)
+	m.procMu.Unlock()
+	if first {
+		m.emitForcedKill()
+	}
+}
+
+// emitForcedKill appends the event that records a forced kill of the run.
+func (m *Monitor) emitForcedKill() {
+	m.emitEvent(model.Event{
+		Time: time.Now().UTC(),
+		Type: model.EventTypeStopped,
+		ID:   m.ID,
+		Attrs: map[string]string{
+			"signal": strconv.Itoa(int(syscall.SIGKILL)),
+			"reason": "timeout",
+		},
+	})
 }
 
 // StopProcess sends a signal to the running command and prevents restart.
@@ -575,6 +673,17 @@ func (m *Monitor) SignalProcess(sig syscall.Signal) error {
 // good. Each stop replaces the deadline an earlier one scheduled. The deadline
 // is armed before sig goes out, so a command that dies of sig at once cannot
 // finish its run ahead of the arming and leave the deadline to outlive it.
+//
+// A run whose command has a stop command stops differently, unless sig is
+// SIGKILL: the stop begins the run's stop sequence and returns without waiting
+// for it. The sequence runs the stop command, bounded by timeout, and only
+// then sends sig and arms the deadline (see stopSequence). A graceful stop
+// that finds the sequence begun changes nothing. SIGKILL takes the path above
+// at once in every stage and kills a stop command that is still running.
+//
+// A SIGKILL that lands while a graceful stop of the run is in progress is that
+// stop's escalation, the client's own once its wait is over, and is recorded as
+// a forced kill the way the deadline's is (see forceKill).
 func (m *Monitor) StopProcess(sig syscall.Signal, timeout time.Duration) error {
 	m.stopRequested.Store(true)
 	// Latched ahead of the signal for the same reason as the deadline below: a
@@ -584,6 +693,16 @@ func (m *Monitor) StopProcess(sig syscall.Signal, timeout time.Duration) error {
 	}
 
 	m.procMu.Lock()
+	escalating := sig == syscall.SIGKILL && m.gracefulStop
+	if sig != syscall.SIGKILL {
+		m.gracefulStop = true
+	}
+	seq := m.stopSeq
+	if seq != nil && sig != syscall.SIGKILL {
+		m.beginStopSequence(seq, sig, timeout)
+		m.procMu.Unlock()
+		return nil
+	}
 	if m.stopDeadline != nil {
 		m.stopDeadline.Stop()
 		m.stopDeadline = nil
@@ -593,7 +712,18 @@ func (m *Monitor) StopProcess(sig syscall.Signal, timeout time.Duration) error {
 	}
 	m.procMu.Unlock()
 
-	err := m.SignalProcess(sig)
+	if seq != nil {
+		// Only SIGKILL gets here with a sequence, and it does not wait for a stop
+		// command still running.
+		seq.cancel()
+	}
+
+	var err error
+	if escalating {
+		err = m.forceKill()
+	} else {
+		err = m.SignalProcess(sig)
+	}
 	if errors.Is(err, errNoRunningProcess) || errors.Is(err, syscall.ESRCH) {
 		return nil
 	}
@@ -602,10 +732,11 @@ func (m *Monitor) StopProcess(sig syscall.Signal, timeout time.Duration) error {
 
 // escalateStop is what a stop's deadline runs: SIGKILL to whatever the command
 // still has, live child or leftovers alike. Nothing left to signal means the
-// stop already worked.
+// stop already worked. Only a graceful stop arms a deadline, so a SIGKILL that
+// reached anything is a forced kill.
 func (m *Monitor) escalateStop() {
 	m.stopKilled.Store(true)
-	err := m.SignalProcess(syscall.SIGKILL)
+	err := m.forceKill()
 	if err == nil || errors.Is(err, errNoRunningProcess) || errors.Is(err, syscall.ESRCH) {
 		return
 	}

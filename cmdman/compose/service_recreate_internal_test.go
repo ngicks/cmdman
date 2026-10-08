@@ -89,6 +89,48 @@ func TestExecuteActionRecreateStopsRunningCommand(t *testing.T) {
 	}
 }
 
+// The stop ahead of a recreate reports a forced kill on its stopped event, the
+// one place the trace shows that stop, before the remove takes the command's
+// state away.
+func TestExecuteActionRecreateReportsForcedKill(t *testing.T) {
+	rep := &commandPhaseReporter{}
+	svc := &Service{
+		reporter: rep,
+		svc: testCmdmanSvc{
+			stop: func(_ context.Context, req cmdman.StopRequest) ([]cmdman.StopResult, error) {
+				return []cmdman.StopResult{{ID: req.Targets[0], ForceKilled: true}}, nil
+			},
+			remove: func(_ context.Context, req cmdman.RemoveRequest) ([]cmdman.RemoveResult, error) {
+				return []cmdman.RemoveResult{{ID: req.Targets[0]}}, nil
+			},
+			create: func(context.Context, cmdman.CreateRequest) (*cmdman.CreateResult, error) {
+				return nil, nil
+			},
+		},
+	}
+
+	outcome, err := svc.executeAction(
+		context.Background(),
+		reconcileSpec(reconcileCmd("alpha")),
+		CommandAction{
+			Kind:    ActionRecreate,
+			Desired: reconcileCmd("alpha"),
+			Existing: &store.CommandEntry{
+				ID:         "id-alpha",
+				State:      model.EventTypeRunning,
+				ConfigJSON: &model.CommandConfig{},
+			},
+			DesiredHash: "h2",
+		},
+	)
+	if err != nil || outcome.Err != nil {
+		t.Fatalf("recreate failed: %v / %v", err, outcome.Err)
+	}
+	if got, ok := stoppedForceKilled(rep, "alpha"); !ok || !got {
+		t.Fatalf("alpha stopped event ForceKilled = %v (reported %v), want true", got, ok)
+	}
+}
+
 // TestExecuteActionRecreateStopFailureAbortsRecreate verifies the safety
 // invariant: when stopping a running command fails, the recreate is aborted
 // before the remove so the still-running command is never removed out from

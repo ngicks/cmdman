@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // workdirHash returns the first 12 hex characters of sha256(canonicalWorkDir).
@@ -85,6 +86,10 @@ func stripScaleIndexSuffix(instanceName string, scaleIndex int) string {
 //   - ComposeFile, Project (compose metadata, not runtime)
 //   - GeneratedName (derived from WorkDir+Project+Command)
 //   - reserved compose labels (added at plan time)
+//
+// Fields added after the format was first used are omitted when unset
+// (stop_grace_period, stop), so a command that sets none of them keeps the hash
+// it had before they existed and is not recreated.
 type hashCanonical struct {
 	Name            string            `json:"name"`
 	Args            []string          `json:"args"`
@@ -95,6 +100,8 @@ type hashCanonical struct {
 	RestartPolicy   string            `json:"restart_policy"`
 	MaxRetries      int               `json:"max_retries,omitzero"`
 	StopSignal      string            `json:"stop_signal"`
+	StopGracePeriod time.Duration     `json:"stop_grace_period,omitzero"`
+	Stop            []string          `json:"stop,omitzero"`
 	Tty             bool              `json:"tty"`
 	ScrollbackBytes int               `json:"scrollback_bytes"`
 	LogDriver       string            `json:"log_driver"`
@@ -164,6 +171,11 @@ func Hash(cmd Command) (string, error) {
 		}
 	}
 
+	var stop []string
+	if len(cmd.Stop) > 0 {
+		stop = cmd.Stop
+	}
+
 	envCopy := make([]string, len(cmd.Env))
 	copy(envCopy, cmd.Env)
 	slices.Sort(envCopy)
@@ -178,6 +190,8 @@ func Hash(cmd Command) (string, error) {
 		RestartPolicy:   string(cmd.RestartPolicy),
 		MaxRetries:      cmd.MaxRetries,
 		StopSignal:      cmd.StopSignal,
+		StopGracePeriod: cmd.StopGracePeriod,
+		Stop:            stop,
 		Tty:             cmd.Tty,
 		ScrollbackBytes: cmd.ScrollbackBytes,
 		LogDriver:       string(cmd.LogDriver),

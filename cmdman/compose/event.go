@@ -100,6 +100,10 @@ type Event struct {
 	// ExitCode is the observed exit code when known (set on PhaseExited and on
 	// the phases that end a hook run).
 	ExitCode *int
+	// ForceKilled is set on PhaseStopped when the stop ran out the replica's
+	// grace period and ended it with SIGKILL. A process that left the replica's
+	// session may have survived it.
+	ForceKilled bool
 
 	// ScaleIndex is the 1-based scale index of the replica, set on hook events.
 	ScaleIndex int
@@ -134,10 +138,26 @@ func WithReporter(r Reporter) ServiceOption {
 // report emits a single event to the installed reporter, if any. It is safe to
 // call when no reporter is configured.
 func (s *Service) report(command string, phase Phase, err error, exit *int) {
+	s.reportEvent(Event{Command: command, Phase: phase, Err: err, ExitCode: exit})
+}
+
+// reportStopped emits PhaseStopped for command, saying whether its stop
+// force-killed it.
+func (s *Service) reportStopped(command string, exit *int, forceKilled bool) {
+	s.reportEvent(Event{
+		Command:     command,
+		Phase:       PhaseStopped,
+		ExitCode:    exit,
+		ForceKilled: forceKilled,
+	})
+}
+
+// reportEvent emits ev to the installed reporter, if any.
+func (s *Service) reportEvent(ev Event) {
 	if s.reporter == nil {
 		return
 	}
-	s.reporter.Report(Event{Command: command, Phase: phase, Err: err, ExitCode: exit})
+	s.reporter.Report(ev)
 }
 
 // reportReplicas emits phase for each replica of cmd whose 1-based scale index

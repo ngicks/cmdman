@@ -7,20 +7,25 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] stop [--progress MODE] [--scale N] [COMMAND...]
+cmdman compose [selection flags] stop [--progress MODE] [--scale N] [--timeout DURATION]
+    [COMMAND...]
 ```
 
 ## Description
 
 Gracefully stops selected running commands using each stored command's stop
-signal and timeout behavior. Stored definitions remain available for a later
-`compose start`.
+command, stop signal, and stop timeout. `--timeout` overrides the stop timeout.
+Stored definitions remain available for a later `compose start`.
 
 Naming a command also selects all recursive dependents, and stopping proceeds
 in reverse dependency order. With no names, all declared project commands are
 stopped. Orphans are not part of the declared graph and are not stopped by this
 operation. When no compose file is loaded, dependency order is reconstructed
 from stored compose labels.
+
+Stop stops at most `--parallel` replicas at once. The default is 4. The limit
+counts the stops of one invocation. Several invocations may run at once. Each
+of them stops up to the limit.
 
 Failures are aggregated rather than cancelling the remaining stops. cmdman
 reports a command it could not stop as an error and exits non-zero with the
@@ -32,6 +37,17 @@ that is already stopped runs no hooks. A hook that fails under
 `on_error: fail` fails the stop of its command. The replica keeps running after
 a failed `stop_pre` and stays stopped after a failed `stop_post`. See
 [Lifecycle Hooks](./cmdman-compose.5.md#lifecycle-hooks).
+
+A replica that the `SIGKILL` after the timeout ends counts as force-killed. The
+progress output marks it on the replica's `stopped` record. In `json` mode
+that record sets `forceKilled` to `true`. In `tty` mode a warning line follows
+the replica's `Stopped` line:
+
+```text
+! force-killed after the grace period; detached processes may survive
+```
+
+A forced kill does not fail the stop.
 
 ## Selection Flags
 
@@ -46,6 +62,16 @@ Uses the compose selection flags documented in
   see [Progress Output](./cmdman-compose.5.md#progress-output).
 - `--scale N`: stop only replica N (1-based) of exactly one COMMAND. N must name
   an existing replica. Its recursive dependents are still stopped in full.
+- `-t, --timeout DURATION`: time each replica's stop waits after the stop
+  signal before it sends `SIGKILL`. Give integer seconds or a Go duration such
+  as `1m30s`. The value must be positive. When omitted, each replica waits its
+  stored `stop_grace_period`, or 10 seconds when the command declares none. A
+  replica with a `stop` command runs it first for at most the same time, so its
+  stop can take up to twice the timeout before `SIGKILL`. A rejected value
+  stops no replica and runs no hook.
+- `--parallel N`: stop at most N replicas at once, or every replica at once
+  with `-1`. `CMDMAN_COMPOSE_PARALLEL_LIMIT` sets the limit when the flag is not
+  given. See [cmdman-compose(1)](./cmdman-compose.1.md#options).
 
 ## See Also
 

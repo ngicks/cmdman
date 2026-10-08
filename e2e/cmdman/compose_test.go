@@ -19,12 +19,13 @@ import (
 // on a non-terminal stdout. Each object reports a command's state transition and
 // (on a terminal phase) its result.
 type progressEvent struct {
-	Op       string `json:"op"`
-	Command  string `json:"command"`
-	Phase    string `json:"phase"`
-	Terminal bool   `json:"terminal"`
-	ExitCode *int   `json:"exitCode"`
-	Error    string `json:"error"`
+	Op          string `json:"op"`
+	Command     string `json:"command"`
+	Phase       string `json:"phase"`
+	Terminal    bool   `json:"terminal"`
+	ExitCode    *int   `json:"exitCode"`
+	Error       string `json:"error"`
+	ForceKilled bool   `json:"forceKilled"`
 }
 
 // parseProgress parses the JSONL state trace from a compose lifecycle command's

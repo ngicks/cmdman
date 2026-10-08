@@ -57,6 +57,25 @@ Two process roles per command:
   session on both paths) and a `cmd.Cancel` hook that signals the whole **process group**. Hooks
   keep `Setpgid` and stay in the monitor's session. Output fans out to: ring buffer
   (scrollback) + log-driver file + a broadcaster (live streams).
+- Stop (`Monitor.StopProcess`; from `cmdman stop` / `restart` / `rm --force`, the stop phase of
+  compose stop / down / restart / recreate, and the TUI). The grace is `-t` when given, else
+  `CommandConfig.StopTimeout` (`create --stop-timeout`, compose `stop_grace_period`), else 10 s
+  (`stopTimeout` in `cmdman/cmdman_stop.go`). A command without a stop command gets the stop
+  signal at once and SIGKILL one grace later. A command with `CommandConfig.StopCommand` (compose
+  `stop:`) stops in two stages (`stopSequence` in `monitor/stop_command.go`): the monitor runs
+  the stop command in the command's dir with the hook env plus `CMDMAN_MAIN_PID`, output
+  discarded, bounded by the grace; kills and reaps the stop command's pgid; sends the stop signal
+  only when the run's pgid still has members; and arms SIGKILL one more grace later. Such a stop
+  takes up to 2x the grace, and the client waits 2x (`stopWait`). The first graceful stop begins
+  the sequence and a later one leaves it be; a SIGKILL stop skips the stop command or kills it.
+- Forced kill (`Monitor.forceKill`): the SIGKILL that follows a graceful stop (the monitor's
+  deadline or the client's escalation) latches `forceKilled` when it reaches the run, and so does
+  the in-stop await's SIGKILL by pid to a survivor in its own pgid (`noteSurvivorKilled`) while a
+  graceful stop is in progress; a SIGKILL asked for in its own right latches nothing. The first latch appends one `stopped` event with
+  `signal=9 reason=timeout`. The run end then records the `force_killed` anomaly and sets
+  `CommandState.ForceKilled` (reset on the next start). `StopResult.ForceKilled` feeds the
+  `cmdman stop` stderr line; compose `stopped` progress records carry `forceKilled` (stop, down,
+  recreate; restart and scale-down emit no `stopped` record); the TUI marks the row.
 - Run end: the monitor is a subreaper (Linux). When the child exits, it handles what the run left
   in the command's session before the state flips. A process that made a session of its own (a
   detached daemon such as a shared multiplexer server) is always left alone.
@@ -64,19 +83,20 @@ Two process roles per command:
     session is empty; bounded at 10 s. Linux signals by pid only and never the process group.
     Other platforms (no subreaper, no `/proc`) probe the process group, SIGTERM it once when the
     probe finds a member, and SIGKILL it at the grace.
-  - Stop (`cmdman stop`, `compose stop` / `down`, TUI): the sweep sends no signal on any platform.
-    The stop already signalled the whole group once, and a leftover of a wrapper that died first
-    usually carries out the stop (podman waiting for its container). The monitor only reaps and
-    waits. SIGKILL comes from `--timeout` alone: the client sends it at the timeout, and the
-    monitor escalates at the same deadline itself. An interrupted stop therefore still ends the
-    command. After that SIGKILL the monitor kills each survivor in its own pgid inside the
-    session; whatever is alive 10 s later becomes `survivors_unreaped`. On platforms other than
-    Linux the monitor cannot enumerate survivors, sends nothing after that SIGKILL, and reports no
-    count. A stop during a natural-exit sweep ends that sweep's signalling at once. `--timeout`
-    is the single stop knob; wrappers do not need `exec`.
+  - Stop: the sweep sends no signal on any platform. The stop already signalled whatever was left
+    in the group, and a leftover of a wrapper that died first usually carries out the stop (podman
+    waiting for its container). The monitor only reaps and waits. SIGKILL comes from the grace
+    alone: the monitor escalates itself one grace after the stop signal, and the client sends its
+    own when its wait runs out. An interrupted stop therefore still ends the command. After that
+    SIGKILL the monitor kills each survivor in its own pgid inside the session; whatever is alive
+    10 s later becomes `survivors_unreaped`. On platforms other than Linux the monitor cannot
+    enumerate survivors, sends nothing after that SIGKILL, and reports no count. A stop during a
+    natural-exit sweep ends that sweep's signalling at once. The grace is the single stop knob;
+    wrappers do not need `exec`.
   - The output readers (pty or monitor-owned pipes) are detached after a bounded drain wait rather
-    than joined, so `cmd.Wait` returns at reap time on both paths. Both anomalies surface as event
-    attrs and `CommandState.Warnings`.
+    than joined, so `cmd.Wait` returns at reap time on both paths. Three anomalies
+    (`reader_detached`, `survivors_unreaped`, `force_killed`) surface as event attrs and
+    `CommandState.Warnings`.
 - Shutdown: SIGTERM → ctx cancel → signal child's process group → `grpcServer.GracefulStop()`
   → `wg.Wait()`.
 
@@ -137,7 +157,8 @@ cmdman/                    Core "usecase" package — the Service
   logdriver/               structured log Writer/Reader; k8sfile/ = podman k8s-file format
   model/                   domain types: CommandConfig, CommandState, EventType, RestartPolicy
   monitor/                 Monitor: mon*.go = spawn/double-fork, run loop, gRPC server, cleanup;
-                           broadcaster.go ringbuffer.go hooks.go; *_posix.go = detach / pgid
+                           broadcaster.go ringbuffer.go hooks.go; stop_command.go = stop
+                           sequence; *_posix.go = detach / pgid
   mux/                     cmdman's YAML layer: resolves command names → muxctl spec → Run
   store/                   SQLite config/state/exit-history store + migration/ chain
   tui/                     bubbletea Model/Update/View dashboard (functional)
@@ -165,7 +186,11 @@ Root carries the persistent flags `--config`, `--data-dir`, `--runtime-dir`.
 `config` prints the resolved configuration (indented JSON, or `--format` template).
 `status` has `get` / `set` / `delete` subcommands.
 `compose` subcommands mirror the verbs plus `up down config ps scale mux resource`; `resource`
-has `get` / `set` / `unset` subcommands. Most listing/inspect
+has `get` / `set` / `unset` subcommands. `stop`, `restart`, and `compose stop` / `down` /
+`restart` take `-t, --timeout DURATION` (integer seconds or a Go duration, positive; unset =
+each command's stored stop timeout, else 10 s); `create` / `run` store one with
+`--stop-timeout`. The compose group carries a persistent `--parallel N` (default 4, `-1`
+unlimited, per invocation) that only `stop` / `down` / `restart` read. Most listing/inspect
 commands support `--format` Go templates: the generic helpers live in `internal/templateutil`
 (`FuncMap`), and `cli/template.go` copies that map and adds its own entries on top.
 
@@ -200,6 +225,9 @@ commands support `--format` Go templates: the generic helpers live in `internal/
     Resolution: `--config` → `$CMDMAN_CONF` → `<user config dir>/cmdman/config.json`.
   - Env layer (caarlos0/env, `CMDMAN_` prefix): only `CMDMAN_DATA_DIR` / `CMDMAN_RUNTIME_DIR`;
     every other field is file-only.
+  - `CMDMAN_COMPOSE_PARALLEL_LIMIT` is no config field. The compose CLI wiring
+    (`cmd/cmdman/commands/zz_compose_parallel_flag.go`) reads it with `os.LookupEnv` when
+    `--parallel` is unset and hands the value to `compose.WithParallelLimit`.
   - `Config.ConfigPath` carries the `--config` value as provenance so a process that re-execs the
     binary (the monitor, the TUI popup child) can forward `--config` — a child inherits the
     environment but not the flags.

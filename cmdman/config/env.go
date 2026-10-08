@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/ngicks/cmdman/cmdman/model"
@@ -16,6 +17,10 @@ const (
 	// ENV_CMDMAN_HOOK_BODY carries a notification's message. It is empty for
 	// every other event.
 	ENV_CMDMAN_HOOK_BODY = "CMDMAN_HOOK_BODY"
+	// ENV_CMDMAN_MAIN_PID carries the pid of the supervised command's own
+	// process to its stop command. It is empty when that process has already
+	// exited.
+	ENV_CMDMAN_MAIN_PID = "CMDMAN_MAIN_PID"
 )
 
 // HookEventEnv is the event data a hook process receives. Fields the event does
@@ -52,6 +57,26 @@ func WithHookEventEnv(env []string, ev HookEventEnv) []string {
 		ENV_CMDMAN_HOOK_TITLE+"="+ev.Title,
 		ENV_CMDMAN_HOOK_BODY+"="+ev.Body,
 	)
+}
+
+// WithStopCommandEnv strips any caller-supplied CMDMAN_MAIN_PID from env and
+// appends the one naming mainPID, left empty when mainPID is not positive. The
+// caller passes an env that already went through [WithCommandContextEnv], so a
+// stop command carries the same ENV_CMDMAN_* command context a hook does.
+func WithStopCommandEnv(env []string, mainPID int) []string {
+	prefix := ENV_CMDMAN_MAIN_PID + "="
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	value := ""
+	if mainPID > 0 {
+		value = strconv.Itoa(mainPID)
+	}
+	return append(out, prefix+value)
 }
 
 // WithCommandContextEnv strips any caller-supplied ENV_CMDMAN_* variables from

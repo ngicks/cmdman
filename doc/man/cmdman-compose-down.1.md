@@ -7,13 +7,21 @@
 ## Synopsis
 
 ```text
-cmdman compose [selection flags] down [--progress MODE] [--force] [COMMAND...]
+cmdman compose [selection flags] down [--progress MODE] [--force] [--timeout DURATION]
+    [COMMAND...]
 ```
 
 ## Description
 
 Stops selected commands, waits for the stop phase, then removes their stored
-records concurrently. It is the destructive counterpart to `compose stop`.
+records concurrently. It is the destructive counterpart to `compose stop`. Each
+stop uses the stored stop command, stop signal, and stop timeout of its
+replica. `--timeout` overrides the stop timeout.
+
+Down stops at most `--parallel` replicas at once. The default is 4. The limit
+covers the declared commands and the orphans of a whole-project teardown. It
+counts the stops of one down. Downs of several projects may run at once. Each
+of them stops up to the limit. The limit does not apply to removal.
 
 With no command names, down removes the entire selected project, including
 orphans that share its `(workdir, project)` labels. Running orphans are stopped
@@ -48,6 +56,18 @@ decoding error and runs no hook for that replica.
 
 A replica whose stop fails for any other reason is removed by force. Down exits
 non-zero when it keeps a replica.
+
+A replica that the `SIGKILL` after the timeout ends counts as force-killed.
+Down reads that from the stop before it removes the replica. The progress
+output marks it on the replica's `stopped` record. In `json` mode that record
+sets `forceKilled` to `true`. In `tty` mode a warning line follows the
+replica's `Stopped` line:
+
+```text
+! force-killed after the grace period; detached processes may survive
+```
+
+A forced kill does not fail the down.
 
 With no command names, down then releases the resources that removed replicas
 left behind. Down runs the release event stored with the value of these
@@ -95,6 +115,17 @@ Uses the compose selection flags documented in
   `hook-warning` record that names no hook. A stored release that fails keeps
   its value with a warning. `--force` has no `-f` short form: `-f` is
   `--file`.
+- `-t, --timeout DURATION`: time each replica's stop waits after the stop
+  signal before it sends `SIGKILL`. Give integer seconds or a Go duration such
+  as `1m30s`. The value must be positive. When omitted, each replica waits its
+  stored `stop_grace_period`, or 10 seconds when the command declares none. A
+  replica with a `stop` command runs it first for at most the same time, so its
+  stop can take up to twice the timeout before `SIGKILL`. A replica whose stop
+  failed is removed by force, and that removal waits the stored value. A
+  rejected value stops and removes no replica and runs no hook.
+- `--parallel N`: stop at most N replicas at once, or every replica at once
+  with `-1`. `CMDMAN_COMPOSE_PARALLEL_LIMIT` sets the limit when the flag is not
+  given. See [cmdman-compose(1)](./cmdman-compose.1.md#options).
 
 ## See Also
 

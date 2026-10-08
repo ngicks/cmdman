@@ -66,6 +66,15 @@ func anomalySurvivorsUnreaped(n int) runAnomaly {
 	}
 }
 
+// anomalyForceKilled reports a graceful stop that ran out its grace period and
+// ended the run with SIGKILL. A process that left the command's session is out
+// of that SIGKILL's reach, which is why the warning says it may still run.
+var anomalyForceKilled = runAnomaly{
+	attr: "force_killed",
+	msg: "the stop signal did not end the command within its grace period; " +
+		"resorted to SIGKILL; detached processes may survive",
+}
+
 // noteRunAnomaly records an anomaly of the run being torn down.
 func (m *Monitor) noteRunAnomaly(a runAnomaly) {
 	m.runAnomalies = append(m.runAnomalies, a)
@@ -268,6 +277,14 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	// previous run's anomalies.
 	m.runAnomalies = nil
 	m.stateJSON.Warnings = nil
+	m.stateJSON.ForceKilled = false
+	// A graceful stop that landed before this run began is no stop of this run,
+	// so a SIGKILL stop that follows it is no escalation here. A forced kill
+	// belongs to the run that recorded it.
+	m.procMu.Lock()
+	m.gracefulStop = false
+	m.forceKilled.Store(false)
+	m.procMu.Unlock()
 
 	cmd, err := m.wireUpCmd(ctx)
 	if err != nil {
@@ -277,11 +294,13 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	// Hook config is re-resolved per run, like the command config it comes
 	// from. Hooks always get this monitor's context, even when the command
 	// itself opted out of it: a hook reports on the command it is attached to,
-	// not on whatever supervises the monitor.
+	// not on whatever supervises the monitor. The stop command gets the same
+	// directory and environment for the same reason.
+	hookEnv := config.WithCommandContextEnv(m.cfg.Env, m.Config, m.ID, m.cfg.CommandDir)
 	m.hooks.configure(
 		model.HookLayers{Command: m.cfg.Hooks, Global: m.Config.DefaultHooks},
 		m.cfg.Dir,
-		config.WithCommandContextEnv(m.cfg.Env, m.Config, m.ID, m.cfg.CommandDir),
+		hookEnv,
 	)
 
 	logWriter, err := m.openLogWriter(ctx)
@@ -335,10 +354,12 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	// group everything it spawns starts out in.
 	pgid := cmd.Process.Pid
 
+	seq := m.startStopSequence(ctx, m.cfg.StopCommand, m.cfg.Dir, hookEnv)
+
 	// The handles belong to this run and only exist between these two sections,
 	// which is what the RPC-facing readers hold procMu to observe.
 	m.procMu.Lock()
-	m.ptmx, m.stdin, m.cmd, m.runPgid = ptmx, stdin, cmd, pgid
+	m.ptmx, m.stdin, m.cmd, m.runPgid, m.stopSeq = ptmx, stdin, cmd, pgid, seq
 	m.procMu.Unlock()
 
 	m.setRunning()
@@ -353,17 +374,27 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 
 	waitFn()
 
+	m.finishStopSequence(ctx, seq)
+
 	// The group id is given up only here: until the sweep and the drain above
 	// are done the run still has processes a stop can be aimed at, and refusing
 	// a signal in that window is what kept an escalation from ever reaching
-	// them.
+	// them. The stop sequence goes with it, which is why the run has let it
+	// finish first: its signal and its deadline are aimed at this group.
 	m.procMu.Lock()
 	m.runPgid = 0
+	m.stopSeq = nil
 	if m.stopDeadline != nil {
 		m.stopDeadline.Stop()
 		m.stopDeadline = nil
 	}
+	// Read in the same section that gives the group up: a forced kill latches
+	// under procMu, so nothing can latch for this run past this point.
+	forceKilled := m.forceKilled.Load()
 	m.procMu.Unlock()
+	if forceKilled {
+		m.noteRunAnomaly(anomalyForceKilled)
+	}
 
 	// Runtime state dies with the run (D13). Clearing it here rather than only
 	// when the next run gets this far is what keeps a dead run's title, bell or
@@ -446,7 +477,7 @@ func (m *Monitor) sweepSurvivors(ctx context.Context, pgid int) {
 		// The await runs on the run's own context and has no bound of its own:
 		// how long the stop may take is the stop's call, and the stop's SIGKILL -
 		// its deadline's or the client's - is what ends the wait.
-		unreaped = await(ctx, logger, pgid, m.stopKilled.Load)
+		unreaped = await(ctx, logger, pgid, m.stopKilled.Load, m.noteSurvivorKilled)
 		if ctx.Err() != nil && !m.stopKilled.Load() {
 			// The monitor is shutting down before the stop's SIGKILL went out, so
 			// nothing is left to see the stop through, and what the command left

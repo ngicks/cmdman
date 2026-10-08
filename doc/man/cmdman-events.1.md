@@ -27,15 +27,29 @@ An event carries an optional `attrs` map of string values. The map is absent
 when the event has nothing extra to report.
 
 - `signal`: the signal number. It appears on `stopped` and `signaled` events.
+- `reason`: the literal `timeout`. It appears on a `stopped` event that the
+  monitor records when a stop runs out its timeout and the `SIGKILL` that
+  follows reaches the command. That event carries `signal` 9. The monitor
+  records at most one such event per run, whether its own deadline or the
+  `SIGKILL` of `cmdman stop` came first. The `stopped` event of the stop
+  request itself carries no `reason`. `cmdman signal` records no such event.
+  Neither does a stop with `--signal SIGKILL`, unless an earlier stop of the
+  run is still waiting out its timeout.
 - `restart_count`: the decimal restart counter. It appears on the `starting`
   event of a restart, never on the first start.
 
-Two attributes describe an anomaly at the end of a run. They appear on the
+Three attributes describe an anomaly at the end of a run. They appear on the
 run's terminal `exited` or `failed` event and are absent when nothing went
-wrong. Neither anomaly stops the run from ending. The monitor log carries the
-same warning, and [`cmdman inspect`](./cmdman-inspect.1.md) lists it under the
+wrong. No anomaly stops the run from ending. The monitor log carries the
+same warning for the output reader and the survivors, and
+[`cmdman inspect`](./cmdman-inspect.1.md) lists every anomaly under the
 command's `warnings`.
 
+- `force_killed`: the literal `true`. A stop ran out its timeout and ended the
+  run with `SIGKILL`. The `stopped` event with `reason` `timeout` records the
+  same `SIGKILL`. A process that started a session of its own is out of reach
+  of that `SIGKILL` and may still run. `cmdman inspect` also shows
+  `force_killed` as `true` in the command's state.
 - `reader_detached`: the literal `true`. The monitor's output reader was still
   blocked one second after the survivor sweep finished. A leftover process that
   kept the terminal or the output pipe open is the usual cause. Trailing output

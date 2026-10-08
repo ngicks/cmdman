@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
@@ -259,6 +260,75 @@ func TestTTYReporterRepaintHasNoTrailingNewline(t *testing.T) {
 	}
 	if !strings.HasSuffix(buf.String(), "\n") {
 		t.Fatalf("output should end with a newline after Close:\n%q", buf.String())
+	}
+}
+
+func TestJSONReporterReportsForcedKill(t *testing.T) {
+	var buf bytes.Buffer
+	r := newJSONReporter(&buf, "down")
+
+	r.Report(compose.Event{Command: "api", Phase: compose.PhaseStopped, ForceKilled: true})
+	r.Report(compose.Event{Command: "worker", Phase: compose.PhaseStopped})
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	lines := splitNonEmptyLines(buf.String())
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 JSONL lines, got %d:\n%s", len(lines), buf.String())
+	}
+	if !strings.Contains(lines[0], `"forceKilled":true`) {
+		t.Errorf("api line does not say it was force-killed: %s", lines[0])
+	}
+	if strings.Contains(lines[1], "forceKilled") {
+		t.Errorf("worker line mentions a forced kill: %s", lines[1])
+	}
+}
+
+// A force-killed stop gets a warning row right below its stopped line, and the
+// repaint counts that row like any other, so the block still repaints in place.
+func TestTTYReporterWarnsOfForcedKill(t *testing.T) {
+	var buf bytes.Buffer
+	r := newTTYReporter(&buf)
+
+	r.Report(compose.Event{Command: "api", Phase: compose.PhaseStopping})
+	r.Report(compose.Event{Command: "api", Phase: compose.PhaseStopped, ForceKilled: true})
+	r.Report(compose.Event{Command: "worker", Phase: compose.PhaseStopped})
+	r.Report(compose.Event{Command: "api", Phase: compose.PhaseRemoving})
+	r.Report(compose.Event{Command: "api", Phase: compose.PhaseRemoved})
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	final := lastFrame(buf.String())
+	rows := strings.Split(strings.TrimSuffix(final, "\n"), "\n")
+	if len(rows) != 4 {
+		t.Fatalf("expected 4 rows (api stopped, its warning, api removed, worker), got %d:\n%q",
+			len(rows), final)
+	}
+	if !strings.Contains(rows[0], "Stopped") || !strings.Contains(rows[1], forceKilledNote) {
+		t.Errorf("the warning does not follow api's stopped line:\n%q", final)
+	}
+	if got := strings.Count(final, forceKilledNote); got != 1 {
+		t.Errorf("the warning shows %d times, want once:\n%q", got, final)
+	}
+	// The cursor-up that opens the final frame climbs every row of the previous
+	// one, the warning row included.
+	if !strings.Contains(buf.String(), "\x1b[3A") {
+		t.Errorf("no repaint climbed the 4-row block:\n%q", buf.String())
+	}
+}
+
+func TestPrintStopForceKilled(t *testing.T) {
+	var buf bytes.Buffer
+	PrintStopForceKilled(&buf, []cmdman.StopResult{
+		{ID: "id-a", ForceKilled: true},
+		{ID: "id-b"},
+		{ID: "id-c", Err: errors.New("boom")},
+	})
+	want := "stop id-a: " + forceKilledNote + "\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("PrintStopForceKilled wrote %q, want %q", got, want)
 	}
 }
 

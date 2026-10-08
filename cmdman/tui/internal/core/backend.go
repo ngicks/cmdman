@@ -22,6 +22,9 @@ type CommandInfo struct {
 	// pane uses it (with State) to decide between the vt terminal-view and the
 	// sanitized log fallback.
 	Tty bool
+	// ForceKilled reports that the stop that ended the command's latest run
+	// ran out its grace period and resorted to SIGKILL.
+	ForceKilled bool
 
 	// ScaleIndex and ScaleCount are the command's replica identity within its
 	// compose command: its 1-based index among the replicas, and the replica
@@ -153,9 +156,13 @@ type ServiceScaleInfo struct {
 // The counts are of the commands the teardown got through, so they stay
 // meaningful next to a non-nil error: a teardown that failed on one command
 // still tore the others down, and the widget has both halves to report.
+//
+// ForceKilled counts the stopped commands whose stop ran out its grace period
+// and resorted to SIGKILL.
 type DownSummary struct {
-	Stopped int
-	Removed int
+	Stopped     int
+	Removed     int
+	ForceKilled int
 }
 
 // Backend abstracts the cmdman/compose services the TUI talks to. It exists so

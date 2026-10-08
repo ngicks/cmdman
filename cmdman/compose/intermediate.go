@@ -321,7 +321,8 @@ func (s *Service) stopLiveIntermediate(ctx context.Context, e cmdmanEntry) error
 	if e.State != model.EventTypeRunning && e.State != model.EventTypeStarting {
 		return nil
 	}
-	return s.stopForRecreate(ctx, e.ID)
+	_, err := s.stopForRecreate(ctx, e.ID, nil)
+	return err
 }
 
 // clearStaleExecs stops and removes the exec commands an earlier run of the

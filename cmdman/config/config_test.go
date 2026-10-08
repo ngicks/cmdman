@@ -329,6 +329,26 @@ func TestConfigSubDirs(t *testing.T) {
 	})
 }
 
+func TestWithStopCommandEnv(t *testing.T) {
+	base := []string{
+		"PATH=/bin",
+		ENV_CMDMAN_CMD_ID + "=cmd-1",
+		// A command that exported its own CMDMAN_MAIN_PID must not be able to
+		// point its stop command at another process.
+		ENV_CMDMAN_MAIN_PID + "=1",
+	}
+	assert.DeepEqual(t, WithStopCommandEnv(base, 4242), []string{
+		"PATH=/bin",
+		ENV_CMDMAN_CMD_ID + "=cmd-1",
+		ENV_CMDMAN_MAIN_PID + "=4242",
+	})
+	assert.DeepEqual(t, WithStopCommandEnv(base, 0), []string{
+		"PATH=/bin",
+		ENV_CMDMAN_CMD_ID + "=cmd-1",
+		ENV_CMDMAN_MAIN_PID + "=",
+	})
+}
+
 func TestWithHookEventEnv(t *testing.T) {
 	env := WithHookEventEnv(
 		[]string{

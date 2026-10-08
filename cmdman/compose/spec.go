@@ -5,6 +5,7 @@ package compose
 import (
 	"fmt"
 	"iter"
+	"time"
 
 	"go.yaml.in/yaml/v4"
 
@@ -98,6 +99,8 @@ type RawCommand struct {
 	Labels          map[string]string    `yaml:"labels" json:"labels"`
 	RestartPolicy   string               `yaml:"restart_policy" json:"restart_policy"`
 	StopSignal      string               `yaml:"stop_signal" json:"stop_signal"`
+	StopGracePeriod string               `yaml:"stop_grace_period" json:"stop_grace_period"`
+	Stop            *RawStopCommand      `yaml:"stop" json:"stop"`
 	Tty             bool                 `yaml:"tty" json:"tty"`
 	ScrollbackBytes int                  `yaml:"scrollback_bytes" json:"scrollback_bytes"`
 	LogDriver       string               `yaml:"log_driver" json:"log_driver"`
@@ -189,6 +192,40 @@ func (e *RawLifecycleExec) UnmarshalYAML(node *yaml.Node) error {
 	}
 }
 
+// RawStopCommand is the raw YAML shape of a command's stop: field. In YAML it
+// is either an argv list or a mapping with args; see
+// [RawStopCommand.UnmarshalYAML].
+type RawStopCommand struct {
+	Args []string `yaml:"args" json:"args"`
+	// Unknown captures unrecognized keys of the mapping form so Normalize can
+	// warn about them.
+	Unknown map[string]any `yaml:",inline" json:"-"`
+}
+
+// UnmarshalYAML accepts either a sequence, read as the argv list, or a mapping
+// with the [RawStopCommand] fields.
+func (s *RawStopCommand) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.SequenceNode:
+		var args []string
+		if err := node.Decode(&args); err != nil {
+			return err
+		}
+		*s = RawStopCommand{Args: args}
+		return nil
+	case yaml.MappingNode:
+		type rawStop RawStopCommand
+		var r rawStop
+		if err := node.Decode(&r); err != nil {
+			return err
+		}
+		*s = RawStopCommand(r)
+		return nil
+	default:
+		return fmt.Errorf("line %d: stop must be an argv list or a mapping with args", node.Line)
+	}
+}
+
 // EnvFileSpec describes an env file to load for a command.
 type EnvFileSpec struct {
 	Path     string `yaml:"path" json:"path"`
@@ -259,8 +296,12 @@ type Command struct {
 	RestartPolicy model.RestartPolicy
 	// MaxRetries is the on-failure restart cap parsed from restart_policy
 	// ("on-failure:N"). Zero means unlimited.
-	MaxRetries      int
-	StopSignal      string
+	MaxRetries int
+	StopSignal string
+	// StopGracePeriod is the parsed stop_grace_period. Zero means unset.
+	StopGracePeriod time.Duration
+	// Stop is the stop: argv with its args interpolated. Nil means unset.
+	Stop            []string
 	Tty             bool
 	ScrollbackBytes int
 	LogDriver       logdriver.LogDriver

@@ -72,6 +72,33 @@ func TestCommandInfosIncludesStandalone(t *testing.T) {
 	}
 }
 
+func TestCommandInfosForceKilled(t *testing.T) {
+	got := commandInfos([]store.CommandEntry{
+		{
+			ID:         "killed",
+			State:      model.EventTypeExited,
+			ConfigJSON: &model.CommandConfig{},
+			StateJSON:  &model.CommandState{ForceKilled: true},
+		},
+		{
+			ID:         "stopped",
+			State:      model.EventTypeExited,
+			ConfigJSON: &model.CommandConfig{},
+			StateJSON:  &model.CommandState{},
+		},
+		{ID: "no-state", State: model.EventTypeCreated, ConfigJSON: &model.CommandConfig{}},
+	})
+	want := map[string]bool{"killed": true, "stopped": false, "no-state": false}
+	for _, c := range got {
+		if c.ForceKilled != want[c.ID] {
+			t.Errorf("%s: ForceKilled = %v, want %v", c.ID, c.ForceKilled, want[c.ID])
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d infos, want %d", len(got), len(want))
+	}
+}
+
 func TestCommandInfosScale(t *testing.T) {
 	composeEntry := func(id string, labels map[string]string) store.CommandEntry {
 		labels[compose.LabelProject] = "api-stack"

@@ -10,6 +10,7 @@ type composeFlags struct {
 	File        string
 	ProjectName string
 	WorkDir     string
+	Parallel    int
 }
 
 func (cf *composeFlags) normalizeOpts() compose.NormalizeOpts {
@@ -46,6 +47,7 @@ func composeCmd(parent *cobra.Command, rf *rootFlags) {
 		"Project name (overrides YAML name:)",
 	)
 	pf.StringVarP(&flags.WorkDir, "workdir", "w", "", "Override the effective work directory")
+	addComposeParallelFlag(pf, &flags.Parallel)
 	_ = cmd.RegisterFlagCompletionFunc("file", completeComposeFile)
 
 	composeCreateCmd(cmd, rf, &flags)

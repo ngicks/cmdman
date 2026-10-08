@@ -63,10 +63,12 @@ func TestMonitorStopAwaitSendsNoSignal(t *testing.T) {
 		logger *slog.Logger,
 		pgid int,
 		killed func() bool,
+		reached func(),
 	) int {
 		close(awaiting)
 		opts := defaultSweepOptions()
 		opts.kill = rec.kill
+		opts.reached = reached
 		return awaitRunSurvivorsWith(ctx, logger, pgid, killed, opts)
 	}
 
@@ -140,10 +142,12 @@ func TestMonitorStopKillReachesSurvivorInItsOwnGroup(t *testing.T) {
 		logger *slog.Logger,
 		pgid int,
 		killed func() bool,
+		reached func(),
 	) int {
 		close(awaiting)
 		opts := defaultSweepOptions()
 		opts.kill = rec.kill
+		opts.reached = reached
 		return awaitRunSurvivorsWith(ctx, logger, pgid, killed, opts)
 	}
 
@@ -272,12 +276,14 @@ func TestMonitorRunReportsSurvivorsTheStopKillCouldNotReap(t *testing.T) {
 		logger *slog.Logger,
 		pgid int,
 		killed func() bool,
+		reached func(),
 	) int {
 		close(awaiting)
 		return awaitRunSurvivorsWith(ctx, logger, pgid, killed, sweepOptions{
-			grace: 50 * time.Millisecond,
-			bound: bound,
-			kill:  func(int, syscall.Signal) error { return nil },
+			grace:   50 * time.Millisecond,
+			bound:   bound,
+			kill:    func(int, syscall.Signal) error { return nil },
+			reached: reached,
 		})
 	}
 
@@ -389,7 +395,7 @@ func TestMonitorShutdownAfterStopKillKeepsAwaitCount(t *testing.T) {
 	}
 	const unreaped = 3
 	var sawKill bool
-	m.awaitFn = func(_ context.Context, _ *slog.Logger, _ int, killed func() bool) int {
+	m.awaitFn = func(_ context.Context, _ *slog.Logger, _ int, killed func() bool, _ func()) int {
 		sawKill = killed()
 		return unreaped
 	}
@@ -467,11 +473,13 @@ func TestMonitorStopDuringSweepHandsOver(t *testing.T) {
 		logger *slog.Logger,
 		pgid int,
 		killed func() bool,
+		reached func(),
 	) int {
 		awaitAt = time.Now()
 		close(awaiting)
 		opts := defaultSweepOptions()
 		opts.kill = awaitRec.kill
+		opts.reached = reached
 		return awaitRunSurvivorsWith(ctx, logger, pgid, killed, opts)
 	}
 
@@ -514,7 +522,9 @@ func TestMonitorStopDuringSweepHandsOver(t *testing.T) {
 	)
 	assert.Assert(t, len(awaitRec.calls()) == 0, "the await signalled: %v", awaitRec.calls())
 	assert.Assert(t, survivorGone(t, survivor), "the stop's SIGKILL did not end the leftover")
-	assert.Assert(t, len(m.runAnomalies) == 0, "the run reported %v", m.runAnomalies)
+	// The SIGKILL escalated the stop that landed during the sweep, so the run
+	// reports it was force-killed, and nothing beyond that.
+	assert.DeepEqual(t, m.runAnomalyAttrs(), map[string]string{"force_killed": "true"})
 }
 
 // killCall is one signal a sweep or an await sent.

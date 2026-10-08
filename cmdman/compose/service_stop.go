@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -18,6 +19,10 @@ type StopOption struct {
 	// are stopped too, every replica of them. A replica index must name a stored
 	// replica.
 	Targets []Target
+	// Timeout is how long the stop of each replica waits after the stop signal
+	// before it sends SIGKILL. Nil waits each replica's stored stop timeout. A
+	// non-positive value fails the stop before any replica is stopped.
+	Timeout *time.Duration
 }
 
 // StopResult is the aggregated result of a compose stop operation.
@@ -29,6 +34,9 @@ type StopResult struct {
 type StopOutcome struct {
 	Command string
 	Err     error
+	// ForceKilled reports that the stop of at least one replica of Command ran
+	// out its grace period and ended the replica with SIGKILL.
+	ForceKilled bool
 }
 
 // Stop stops project-labeled commands.
@@ -45,7 +53,8 @@ type StopOutcome struct {
 //
 // Each live replica stops inside the stop hooks stored on it: stop_pre, the
 // stop, then stop_post. A stop_pre that fails under on_error fail leaves its
-// replica running, and either failing hook fails the command's outcome.
+// replica running, and either failing hook fails the command's outcome. At most
+// the parallel limit of s ([WithParallelLimit]) of these stops run at once.
 //
 // An empty resolved target set is not an error: the caller should emit a
 // structured-log event and return nil.
@@ -56,6 +65,9 @@ func (s *Service) Stop(
 	selection ProjectSelection,
 	opts StopOption,
 ) (*StopResult, error) {
+	if err := checkStopTimeout(opts.Timeout); err != nil {
+		return nil, err
+	}
 	entries, err := s.svc.List(ctx, cmdman.ListRequest{
 		AllStates: true,
 		Labels:    projectLabels(selection.WorkDir, selection.Project),
@@ -79,8 +91,9 @@ func (s *Service) Stop(
 	}
 
 	var stops []StopOutcome
+	td := s.newTeardown(false, opts.Timeout)
 	if selection.Spec != nil {
-		stops, err = s.reconcileStop(ctx, *selection.Spec, targets, &teardown{})
+		stops, err = s.reconcileStop(ctx, *selection.Spec, targets, td)
 		if err != nil {
 			return nil, err
 		}
@@ -94,7 +107,7 @@ func (s *Service) Stop(
 				"compose stop: stored dependency graph is ambiguous; pass -f or --project-name",
 			)
 		}
-		stops, err = s.reconcileStop(ctx, spec, targets, &teardown{})
+		stops, err = s.reconcileStop(ctx, spec, targets, td)
 		if err != nil {
 			return nil, err
 		}
@@ -103,8 +116,9 @@ func (s *Service) Stop(
 	return &StopResult{Stops: stops}, nil
 }
 
-// stopAllConcurrent stops all entries concurrently, each inside the stop hooks
-// stored on it as td says, and returns outcomes.
+// stopAllConcurrent stops all entries concurrently, as far as the stop permits
+// of td allow, each inside the stop hooks stored on it as td says, and returns
+// outcomes.
 func stopAllConcurrent(
 	ctx context.Context,
 	s *Service,
@@ -125,8 +139,8 @@ func stopAllConcurrent(
 		id := entry.ID
 		eg.Go(func() error {
 			s.report(name, PhaseStopping, nil, nil)
-			err := s.teardownStop(ctx, td, entry)
-			outcome := StopOutcome{Command: name}
+			forceKilled, err := s.teardownStop(ctx, td, entry)
+			outcome := StopOutcome{Command: name, ForceKilled: forceKilled}
 			if err != nil {
 				outcome.Err = fmt.Errorf("stop command %q (%s): %w", name, id, err)
 				contextkey.ValueSlogLoggerDefault(ctx).Warn("compose stop: stop failed",
@@ -137,7 +151,7 @@ func stopAllConcurrent(
 				)
 				s.report(name, PhaseError, outcome.Err, nil)
 			} else {
-				s.report(name, PhaseStopped, nil, nil)
+				s.reportStopped(name, nil, forceKilled)
 			}
 			mu.Lock()
 			outcomes = append(outcomes, outcome)
@@ -147,6 +161,16 @@ func stopAllConcurrent(
 	}
 	_ = eg.Wait()
 	return outcomes
+}
+
+// checkStopTimeout rejects an explicit stop timeout that is not positive. cmdman
+// would refuse each stop with it, but only after the stop_pre hooks of the
+// replica had run.
+func checkStopTimeout(timeout *time.Duration) error {
+	if timeout != nil && *timeout <= 0 {
+		return fmt.Errorf("stop timeout must be positive: %s", *timeout)
+	}
+	return nil
 }
 
 // firstStopErr returns the first per-target error carried by stop results, nil
