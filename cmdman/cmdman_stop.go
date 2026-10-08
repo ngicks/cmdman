@@ -25,8 +25,9 @@ type StopRequest struct {
 	Targets []string
 	Signal  string
 	// Timeout is how long each stop waits after the stop signal before it sends
-	// SIGKILL. Nil waits each target's stored stop timeout, else 10 seconds. A
-	// non-positive value fails the call before any target is stopped.
+	// SIGKILL. A target with a stop command first gives the stop command up to
+	// the same time. Nil waits each target's stored stop timeout, else 10
+	// seconds. A non-positive value fails the call before any target is stopped.
 	Timeout *time.Duration
 }
 
@@ -168,11 +169,15 @@ func (s *Service) stopReportingUnreachable(
 		return false, false, err
 	}
 
-	// The monitor escalates to SIGKILL on its own at the same deadline. This
-	// SIGKILL stays anyway: a duplicate SIGKILL is harmless, and sending it here
-	// keeps the wait below and its error reporting on the client's own clock.
-	// A SIGKILL sent ahead of the monitor's would cut a stop command short, so
-	// the client waits out the same two grace periods the monitor does.
+	// The monitor escalates to SIGKILL on its own one timeout after the stop
+	// signal. Without a stop command that is the end of this wait. With one, the
+	// stop signal waits for the stop command, which runs for at most one timeout,
+	// so the monitor's SIGKILL lands by about the end of this wait of two
+	// timeouts, and earlier when the stop command finished early. This SIGKILL
+	// stays anyway: a duplicate SIGKILL is harmless, and sending it here keeps
+	// the wait below and its error reporting on the client's own clock. A SIGKILL
+	// sent any earlier would cut a stop command short, so the client waits out
+	// both timeouts the monitor may take.
 	killSig, _, _ := hrstr.ParseSignal("SIGKILL")
 	if err := s.sendStop(ctx, st, id, killSig, 0); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -224,8 +229,8 @@ func stopWait(timeout time.Duration, cfg *model.CommandConfig) time.Duration {
 
 // settleUnreachableMonitor decides what a monitor the stop could not reach
 // means. The state read before the connect can be stale by then: the command
-// may have exited on its own in between, and the monitor escalates a stop at
-// the same deadline as the client, so the run its SIGKILL ends often takes the
+// may have exited on its own in between, and the monitor escalates a stop by
+// about the client's own deadline, so the run its SIGKILL ends often takes the
 // monitor down before the client's own SIGKILL connects. The monitor records
 // the terminal state before it closes its socket, so the state is read again
 // here, and a terminal state or a removed command is a stop that succeeded.

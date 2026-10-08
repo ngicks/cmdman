@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"syscall"
@@ -163,6 +164,164 @@ func TestMonitorEscalationWithNothingLeftRecordsNothing(t *testing.T) {
 	assertNoForcedKill(t, m)
 }
 
+// A wrapper that exits on the stop signal can leave a child behind that leads a
+// process group of its own inside the command's session and ignores that
+// signal. The stop's SIGKILL to the command's group then finds nobody, and the
+// run end carries it on to the child by pid. When that SIGKILL escalates a
+// graceful stop, the run records the forced kill once, the same as when the
+// group still had a member. A SIGKILL asked for in its own right records
+// nothing, however it reaches the child.
+func TestMonitorEscalationReachingOnlyAChildInItsOwnGroup(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// escalation says the stop's SIGKILL follows a graceful stop of the run.
+		escalation bool
+		// stop stops the command. awaiting is closed once the wrapper is gone and
+		// the run waits its child out.
+		stop func(t *testing.T, m *Monitor, awaiting <-chan struct{})
+	}{
+		{
+			name:       "deadline",
+			escalation: true,
+			stop: func(t *testing.T, m *Monitor, _ <-chan struct{}) {
+				assert.NilError(t, m.StopProcess(syscall.SIGTERM, time.Second))
+			},
+		},
+		{
+			name:       "client escalation",
+			escalation: true,
+			stop: func(t *testing.T, m *Monitor, awaiting <-chan struct{}) {
+				assert.NilError(t, m.StopProcess(syscall.SIGTERM, 0))
+				awaitClosed(t, awaiting, "the stop signal never ended the wrapper")
+				assert.NilError(t, m.StopProcess(syscall.SIGKILL, 0))
+			},
+		},
+		{
+			name: "explicit SIGKILL",
+			stop: func(t *testing.T, m *Monitor, _ <-chan struct{}) {
+				assert.NilError(t, m.StopProcess(syscall.SIGKILL, 0))
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The child is reparented here once the wrapper exits, which is what
+			// lets the run end find it.
+			becomeSubreaperForTest(t)
+
+			dir := t.TempDir()
+			childPidPath := filepath.Join(dir, "child.pid")
+			t.Cleanup(func() { killSurvivor(t, childPidPath) })
+			m, _, _ := newSurvivorMonitor(t, dir, "test-monitor-force-kill-own-group", []string{
+				sweepHelperWrapEnv + "=" + childPidPath,
+			})
+
+			rec := &killRecorder{deliver: true}
+			awaiting := make(chan struct{})
+			// Read once the run is over, which orders it after the write.
+			var killedOnEntry bool
+			m.awaitFn = func(
+				ctx context.Context,
+				logger *slog.Logger,
+				pgid int,
+				killed func() bool,
+				reached func(),
+			) int {
+				killedOnEntry = killed()
+				close(awaiting)
+				opts := defaultSweepOptions()
+				opts.kill = rec.kill
+				opts.reached = reached
+				return awaitRunSurvivorsWith(ctx, logger, pgid, killed, opts)
+			}
+
+			done := startRun(t, m)
+			wrapper := awaitCommandReady(t, m, childPidPath)
+			child := waitPidFile(t, childPidPath)
+			stat, found := procStatOf(t, child)
+			assert.Assert(t, found && stat.state != "Z", "the child was gone before the stop")
+			assert.Equal(t, stat.pgrp, child, "the child does not lead a group of its own")
+			assert.Equal(t, stat.session, wrapper, "the child left the command's session")
+
+			tc.stop(t, m, awaiting)
+			m.setExited(awaitRun(t, done, 30*time.Second))
+
+			if tc.escalation {
+				// The wrapper was the only member of the command's group, so a
+				// SIGKILL that went out after the run reached its await found the
+				// group empty.
+				assert.Assert(
+					t,
+					!killedOnEntry,
+					"the stop's SIGKILL went out while the wrapper could still take it",
+				)
+			}
+			assert.Assert(
+				t,
+				slices.Equal(rec.calls(), []killCall{{pid: child, sig: syscall.SIGKILL}}),
+				"the run end did not kill the child by its pid alone: %v",
+				rec.calls(),
+			)
+			assert.Assert(t, survivorGone(t, child), "the child outlived the run")
+			if tc.escalation {
+				assertForcedKillRecorded(t, m)
+			} else {
+				assertNoForcedKill(t, m)
+			}
+		})
+	}
+}
+
+// A forced kill belongs to the run it ended. The next run starts with none of
+// it: the run before's graceful stop is no stop of this run, so a SIGKILL stop
+// of it is asked for in its own right, and the run reports no forced kill.
+func TestMonitorForcedKillDoesNotCarryOverToTheNextRun(t *testing.T) {
+	dir := t.TempDir()
+	readyPath := filepath.Join(dir, "ready")
+	m := newShellMonitor(
+		t, dir, "test-monitor-force-kill-next-run", termIgnoringScript, readyPath)
+
+	done := startRun(t, m)
+	awaitCommandReady(t, m, readyPath)
+	assert.NilError(t, m.StopProcess(syscall.SIGTERM, 300*time.Millisecond))
+	assert.Equal(t, awaitRun(t, done, 10*time.Second), -1)
+	m.setExited(-1)
+	assertForcedKillRecorded(t, m)
+
+	assert.NilError(t, os.Remove(readyPath))
+	done = startRun(t, m)
+	awaitCommandReady(t, m, readyPath)
+
+	// The state the run persists as it begins has dropped the first run's
+	// forced kill.
+	waitUntil(t, 10*time.Second, func() bool {
+		state, _, _, err := m.store.GetCommandState(m.ID)
+		return err == nil && state == model.EventTypeRunning
+	}, "the second run never reported running")
+	_, _, running, err := m.store.GetCommandState(m.ID)
+	assert.NilError(t, err)
+	assert.Assert(t, !running.ForceKilled, "the second run began force-killed")
+	assert.Assert(t, !m.forceKilled.Load(), "the second run began with the forced kill latched")
+	m.procMu.Lock()
+	graceful := m.gracefulStop
+	m.procMu.Unlock()
+	assert.Assert(t, !graceful, "the second run began with the first run's graceful stop")
+
+	assert.NilError(t, m.StopProcess(syscall.SIGKILL, 0))
+	assert.Equal(t, awaitRun(t, done, 10*time.Second), -1)
+	m.setExited(-1)
+
+	path := eventLogPath(t, m)
+	forced := forcedKillEvents(t, path)
+	assert.Equal(t, len(forced), 1, "forced-kill events: %v", forced)
+	exited := lastEventOfType(t, path, model.EventTypeExited)
+	_, ok := exited.Attrs["force_killed"]
+	assert.Assert(t, !ok, "the second run's exited event says force_killed: %v", exited.Attrs)
+	_, _, stateJSON, err := m.store.GetCommandState(m.ID)
+	assert.NilError(t, err)
+	assert.Assert(t, !stateJSON.ForceKilled, "the second run's state says it was force-killed")
+	assert.Assert(t, len(stateJSON.Warnings) == 0, "the second run warns: %v", stateJSON.Warnings)
+}
+
 // holdAwait holds the run of m at the end of a stopped run, once the child is
 // reaped and while the run still keeps its process group, until release is
 // called. awaiting is closed once the run gets there. A test that fails first
@@ -171,7 +330,7 @@ func holdAwait(t *testing.T, m *Monitor) (awaiting <-chan struct{}, release func
 	t.Helper()
 	reached := make(chan struct{})
 	released := make(chan struct{})
-	m.awaitFn = func(context.Context, *slog.Logger, int, func() bool) int {
+	m.awaitFn = func(context.Context, *slog.Logger, int, func() bool, func()) int {
 		close(reached)
 		<-released
 		return 0

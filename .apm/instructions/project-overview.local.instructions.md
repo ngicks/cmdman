@@ -69,8 +69,9 @@ Two process roles per command:
   takes up to 2x the grace, and the client waits 2x (`stopWait`). The first graceful stop begins
   the sequence and a later one leaves it be; a SIGKILL stop skips the stop command or kills it.
 - Forced kill (`Monitor.forceKill`): the SIGKILL that follows a graceful stop (the monitor's
-  deadline or the client's escalation) latches `forceKilled` when it reaches the run; a SIGKILL
-  asked for in its own right latches nothing. The first latch appends one `stopped` event with
+  deadline or the client's escalation) latches `forceKilled` when it reaches the run, and so does
+  the in-stop await's SIGKILL by pid to a survivor in its own pgid (`noteSurvivorKilled`) while a
+  graceful stop is in progress; a SIGKILL asked for in its own right latches nothing. The first latch appends one `stopped` event with
   `signal=9 reason=timeout`. The run end then records the `force_killed` anomaly and sets
   `CommandState.ForceKilled` (reset on the next start). `StopResult.ForceKilled` feeds the
   `cmdman stop` stderr line; compose `stopped` progress records carry `forceKilled` (stop, down,

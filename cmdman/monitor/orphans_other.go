@@ -122,12 +122,14 @@ func sweepRunSurvivorsWith(
 }
 
 // awaitRunSurvivors waits out the process group the command led while a stop of
-// that command is in progress, with the options the monitor runs with.
+// that command is in progress, with the options the monitor runs with. This
+// build carries no SIGKILL on by pid, so it never calls reached.
 func awaitRunSurvivors(
 	ctx context.Context,
 	logger *slog.Logger,
 	pgid int,
 	killed func() bool,
+	reached func(),
 ) int {
 	return awaitRunSurvivorsWith(ctx, logger, pgid, killed, defaultSweepOptions())
 }

@@ -211,6 +211,51 @@ func TestMonitorStopCommandKilledAtGrace(t *testing.T) {
 	assert.Assert(t, survivorGone(t, child), "what the stop command started outlived it")
 }
 
+// A stop command that cannot be started or that fails holds nothing up: the
+// stop signal follows at once, not once the grace period is over.
+func TestMonitorStopSignalFollowsFailedStopCommandAtOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// missing replaces the stop command with a program that does not exist.
+		missing bool
+		record  string
+	}{
+		{name: "cannot start", missing: true, record: "TERM\n"},
+		{name: "exits non-zero", record: "stop\nTERM\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			files := newStopFiles(dir)
+			m := newStopCommandMonitor(
+				t, dir, "test-monitor-stop-command-fails",
+				trappingChildScript,
+				`echo stop >>"$1"; exit 3`,
+				files,
+			)
+			if tc.missing {
+				m.cfg.StopCommand = &model.StopCommand{
+					Args: []string{filepath.Join(dir, "no-such-program")},
+				}
+			}
+
+			done := startRun(t, m)
+			awaitCommandReady(t, m, files.ready)
+
+			// The run is given far less than the grace period to end, so a stop
+			// signal that waited for it fails the wait.
+			stopWithin(t, m, syscall.SIGTERM, time.Minute)
+			assert.Equal(t, awaitRun(t, done, 10*time.Second), 0)
+
+			assert.Equal(t, readRecord(t, files.record), tc.record)
+			assert.Assert(
+				t,
+				armedStopDeadline(m) == nil,
+				"the run ended with the deadline still armed",
+			)
+		})
+	}
+}
+
 // SIGKILL does not wait for a stop command: it goes out at once, the stop
 // command is killed, and no stop signal follows.
 func TestMonitorStopKillDuringStopCommand(t *testing.T) {

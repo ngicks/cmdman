@@ -716,9 +716,12 @@ func (*SignalResponse) Descriptor() ([]byte, []int) {
 type StopRequest struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Signal int32                  `protobuf:"varint,1,opt,name=signal,proto3" json:"signal,omitempty"` // e.g. 15 for SIGTERM
-	// timeout is how long the monitor waits after delivering signal before it
-	// escalates to SIGKILL on its own. Unset or zero means the monitor never
-	// escalates and the client is the only escalation.
+	// timeout is the stop's grace period. For a command with a stored stop
+	// command it first bounds the stop command, and signal follows once the stop
+	// command is over. It then bounds the wait after signal: once it expires the
+	// monitor escalates to SIGKILL on its own. Unset or zero means the monitor
+	// never escalates and the client is the only escalation. A stop command then
+	// gets a bound of the monitor's own.
 	Timeout       *durationpb.Duration `protobuf:"bytes,2,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

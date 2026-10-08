@@ -34,9 +34,13 @@ A command with a stop command stops in three steps. The `stop` key of
 
 Such a stop waits up to twice the timeout before `SIGKILL`. The monitor carries
 out every step on its own clock, so an interrupted `cmdman stop` keeps the same
-schedule. A second stop does not start the sequence over. A stop with
-`--signal SIGKILL` skips the stop command, kills a stop command that is still
-running, and sends `SIGKILL` at once.
+schedule. A second stop does not start the sequence over, and its timeout does
+not change the schedule of the first. The second `cmdman stop` still escalates
+on its own timeout: it waits twice that timeout and then sends `SIGKILL`. That
+`SIGKILL` ends the command and kills a stop command that is still running. The
+command then counts as force-killed. A stop with `--signal SIGKILL` skips
+the stop command, kills a stop command that is still running, and sends
+`SIGKILL` at once.
 
 The timeout is the only escalation to `SIGKILL`. It also applies to survivors of
 a wrapper script that exited early. The monitor sends `SIGKILL` on its own once

@@ -43,6 +43,9 @@ type sweepOptions struct {
 	// sweep checks it before every signal it would send and hands over once it
 	// reports true. nil never reports a stop.
 	stopRequested func() bool
+	// reached is called each time the await's SIGKILL by pid reaches a process.
+	// nil reports nothing.
+	reached func()
 }
 
 func defaultSweepOptions() sweepOptions {
@@ -51,6 +54,12 @@ func defaultSweepOptions() sweepOptions {
 
 func (o sweepOptions) stopping() bool {
 	return o.stopRequested != nil && o.stopRequested()
+}
+
+func (o sweepOptions) report() {
+	if o.reached != nil {
+		o.reached()
+	}
 }
 
 // sweepRunSurvivors terminates and reaps the processes the finished run left in
@@ -138,14 +147,18 @@ func sweepRunSurvivorsWith(
 
 // awaitRunSurvivors waits out what the finished run left in the command's own
 // session while a stop of that command is in progress, with the options the
-// monitor runs with.
+// monitor runs with. reached is called each time the stop's SIGKILL, carried on
+// by pid, reaches a survivor.
 func awaitRunSurvivors(
 	ctx context.Context,
 	logger *slog.Logger,
 	pgid int,
 	killed func() bool,
+	reached func(),
 ) int {
-	return awaitRunSurvivorsWith(ctx, logger, pgid, killed, defaultSweepOptions())
+	opts := defaultSweepOptions()
+	opts.reached = reached
+	return awaitRunSurvivorsWith(ctx, logger, pgid, killed, opts)
 }
 
 // awaitRunSurvivorsWith reaps what the run left in the command's own session as
@@ -208,6 +221,10 @@ func awaitRunSurvivorsWith(
 // monitor, which is why the scan is repeated until the session is empty or
 // opts.bound runs out.
 //
+// Every SIGKILL by pid that reaches a process goes to opts.reached. The group
+// may have had nobody left for the stop's own SIGKILL, and then this one is
+// what ends the run's survivors.
+//
 // The bound is its own and ignores ctx's cancellation: a monitor shutting down
 // still has to finish the kill it already committed to, and a process in an
 // uninterruptible wait ignores SIGKILL, so the run has to end regardless.
@@ -233,7 +250,9 @@ func completeStopKill(
 			return len(alive)
 		}
 		for _, pid := range outsideGroup(alive, pgid) {
-			_ = opts.kill(pid, syscall.SIGKILL)
+			if opts.kill(pid, syscall.SIGKILL) == nil {
+				opts.report()
+			}
 		}
 		alive = waitGone(ctx, alive, opts.grace)
 		if len(alive) > 0 && ctx.Err() != nil {

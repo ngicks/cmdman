@@ -477,7 +477,7 @@ func (m *Monitor) sweepSurvivors(ctx context.Context, pgid int) {
 		// The await runs on the run's own context and has no bound of its own:
 		// how long the stop may take is the stop's call, and the stop's SIGKILL -
 		// its deadline's or the client's - is what ends the wait.
-		unreaped = await(ctx, logger, pgid, m.stopKilled.Load)
+		unreaped = await(ctx, logger, pgid, m.stopKilled.Load, m.noteSurvivorKilled)
 		if ctx.Err() != nil && !m.stopKilled.Load() {
 			// The monitor is shutting down before the stop's SIGKILL went out, so
 			// nothing is left to see the stop through, and what the command left
