@@ -8,7 +8,7 @@
 
 ```text
 cmdman compose [selection flags] down [--progress MODE] [--force] [--timeout DURATION]
-    [COMMAND...]
+    [--close-windows] [COMMAND...]
 ```
 
 ## Description
@@ -154,8 +154,21 @@ Uses the compose selection flags documented in
 - `--parallel N`: stop at most N replicas at once, or every replica at once
   with `-1`. `CMDMAN_COMPOSE_PARALLEL_LIMIT` sets the limit when the flag is not
   given. See [cmdman-compose(1)](./cmdman-compose.1.md#options).
+- `--close-windows`: close the multiplexer windows of the project after the
+  down. Down finds the windows by the identity of the project, so it also
+  closes the bare shell window that a landing opened for a project without a
+  `mux:` section. A project with a `mux:` section has its windows looked up
+  through the driver of that section. Down closes only the windows that cmdman
+  created. It restores two windows instead of closing them: a window that
+  `compose mux up` took over from the user, and the window of the pane that
+  runs this command. `$TMUX_PANE` names that pane. Down closes no
+  window when it exits non-zero, for example after a failed `stop_pre` keeps a
+  replica. A window that fails to close produces a warning on standard error,
+  and down still exits zero. `--close-windows` needs a whole-project down and
+  rejects command names. The other commands of the project keep running after
+  a targeted down, and their windows still show them.
 
 ## See Also
 
 [cmdman-compose-stop(1)](./cmdman-compose-stop.1.md), [cmdman-compose-create(1)](./cmdman-compose-create.1.md),
-[cmdman-compose-resource(1)](./cmdman-compose-resource.1.md)
+[cmdman-compose-resource(1)](./cmdman-compose-resource.1.md), [cmdman-compose-mux(1)](./cmdman-compose-mux.1.md)

@@ -11,7 +11,6 @@ import (
 	"github.com/ngicks/cmdman/cmdman/compose"
 	"github.com/ngicks/cmdman/cmdman/mux"
 	"github.com/ngicks/cmdman/cmdman/tui"
-	"github.com/ngicks/go-common/contextkey"
 )
 
 // ListProjects merges store-known project counts with never-run projects found
@@ -261,11 +260,6 @@ type composeDownSvc interface {
 	) (*compose.DownResult, error)
 }
 
-// muxTeardown removes a project's multiplexer windows — [mux.Down] as the down
-// action calls it, taken as a value so the call can be observed without a
-// multiplexer server to make it against.
-type muxTeardown func(context.Context, mux.DownOptions) error
-
 // ComposeDown stops and removes the project's commands, wrapping
 // compose.Service.Down — the whole-project teardown `cmdman compose down`
 // performs, orphans of the project included.
@@ -280,7 +274,7 @@ type muxTeardown func(context.Context, mux.DownOptions) error
 // caller has both halves to report.
 //
 // A teardown that got all the way through takes the project's multiplexer
-// windows with it (see removeProjectWindows): what would be left is a window of
+// windows with it (see closeProjectWindows): what would be left is a window of
 // dead panes still claiming the project is running.
 func (b *serviceBackend) ComposeDown(
 	ctx context.Context, projectName, composeFile, workDir string,
@@ -317,48 +311,10 @@ func (b *serviceBackend) composeDown(
 		// again and gets all the way through.
 		return summary, downErr
 	}
-	removeProjectWindows(ctx, selection, muxDown)
+	// The summary has nowhere to say a window would not close, so the warning
+	// goes to the log alone.
+	closeProjectWindows(ctx, selection, muxDown, io.Discard)
 	return summary, nil
-}
-
-// removeProjectWindows takes the project's multiplexer windows down after a
-// teardown that removed every command: their panes view commands that no longer
-// exist, and the ownership stamp they carry would report the project as running
-// the next time the launcher lists it.
-//
-// It is the teardown the TUI asks for, not the one `cmdman compose down` does:
-// a window that closes underneath a command line is a surprise, while the TUI
-// issued the gesture that emptied it.
-//
-// The windows are found by the project's identity alone, which is why this goes
-// to mux directly rather than through the compose mux verbs: a project with no
-// mux: section has no dashboard but does have the bare shell window its landing
-// synthesized, under that same identity, and the compose verbs are only for a
-// project that declares the section. Only a declared section has a driver to
-// name; without one the driver is left to autodetect.
-//
-// Failing to remove a window is not the down failing: the commands are gone
-// either way, and the summary the caller reports is about them. There is
-// nowhere in that summary to say so, so it is said in the log.
-func removeProjectWindows(
-	ctx context.Context,
-	selection compose.ProjectSelection,
-	muxDown muxTeardown,
-) {
-	opts := mux.DownOptions{
-		Identity:    selection.ProjectIdentity(),
-		KillCreated: true,
-		Stdout:      io.Discard,
-	}
-	if selection.Spec != nil && selection.Spec.Mux != nil {
-		opts.Driver = selection.Spec.Mux.Driver
-	}
-	if err := muxDown(ctx, opts); err != nil {
-		contextkey.ValueSlogLoggerDefault(ctx).WarnContext(
-			ctx, "compose down: remove project window",
-			"project", selection.Project, "workdir", selection.WorkDir, "error", err,
-		)
-	}
 }
 
 // downSummary counts what a teardown got through: the stop and remove outcomes
