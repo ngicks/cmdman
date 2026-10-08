@@ -521,13 +521,61 @@ func TestCleanStaleEntrySkipsProbeError(t *testing.T) {
 	ctx := contextkey.WithSlogLogger(context.Background(), logger)
 
 	// The probe error is logged and the entry is skipped, not aborted...
-	assert.NilError(t, cleanStaleEntry(ctx, st, cfg, id, model.EventTypeRunning, stateJSON, cmdCfg))
+	assert.NilError(t, cleanStaleEntry(ctx, st, cfg, id, model.EventTypeRunning, cmdCfg))
 	assert.Assert(t, strings.Contains(logBuf.String(), "probe monitor liveness failed"))
 
 	// ...and the entry is left running rather than being marked failed.
 	state, _, _, err := st.GetCommandState(id)
 	assert.NilError(t, err)
 	assert.Equal(t, state, model.EventTypeRunning)
+}
+
+// A monitor that recorded the end of its run and exited after the caller read
+// the state keeps that end; one that died short of recording it is marked dead.
+func TestCleanStaleEntryRereadsStateAfterProbe(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		stored    model.EventType
+		wantState model.EventType
+		wantError string
+	}{
+		{name: "exited", stored: model.EventTypeExited, wantState: model.EventTypeExited},
+		{
+			name:      "running",
+			stored:    model.EventTypeRunning,
+			wantState: model.EventTypeFailed,
+			wantError: monitorDiedError,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := testStore(t)
+			cfg := testConfig(t, t.TempDir())
+
+			const id = "reread"
+			cmdCfg := &model.CommandConfig{
+				Argv:            []string{"/bin/true"},
+				Dir:             "/tmp",
+				Env:             testEnv(),
+				RestartPolicy:   model.RestartPolicyNo,
+				ScrollbackBytes: store.DefaultScrollbackBytes,
+				LogDriver:       model.DefaultLogDriver,
+				CommandDir:      t.TempDir(),
+			}
+			assert.NilError(t, st.InsertCommandConfig(id, "", cmdCfg))
+			assert.NilError(t, st.InsertCommandState(id, tc.stored, &model.CommandState{
+				StartedAt: "2026-01-02T03:04:05Z",
+			}))
+
+			assert.NilError(t, cleanStaleEntry(
+				t.Context(), st, cfg, id, model.EventTypeRunning, cmdCfg,
+			))
+
+			state, _, stateJSON, err := st.GetCommandState(id)
+			assert.NilError(t, err)
+			assert.Equal(t, state, tc.wantState)
+			assert.Equal(t, stateJSON.Error, tc.wantError)
+		})
+	}
 }
 
 func TestMonitorSubscribeCapturesOffsetAndLiveRecordsUnderLock(t *testing.T) {

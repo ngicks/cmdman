@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -28,7 +29,6 @@ func CleanStaleEntries(ctx context.Context, st *cmdstore.Store, cfg config.Confi
 			cfg,
 			e.ID,
 			e.State,
-			e.StateJSON,
 			e.ConfigJSON,
 		); err != nil {
 			return err
@@ -43,7 +43,6 @@ func cleanStaleEntry(
 	cfg config.Config,
 	id string,
 	state model.EventType,
-	stateJSON *model.CommandState,
 	configJSON *model.CommandConfig,
 ) error {
 	if !isStaleCheckState(state) {
@@ -62,6 +61,20 @@ func cleanStaleEntry(
 		return nil
 	}
 	if !stale {
+		return nil
+	}
+
+	// The monitor records the end of the run before it lets go of the lock, so
+	// a monitor that exited cleanly between the caller's read and the probe also
+	// reads as stale. Only the state read after the probe tells the two apart.
+	state, _, stateJSON, err := st.GetCommandState(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get command state: %w", err)
+	}
+	if !isStaleCheckState(state) {
 		return nil
 	}
 
