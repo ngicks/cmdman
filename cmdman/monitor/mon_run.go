@@ -277,11 +277,13 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	// Hook config is re-resolved per run, like the command config it comes
 	// from. Hooks always get this monitor's context, even when the command
 	// itself opted out of it: a hook reports on the command it is attached to,
-	// not on whatever supervises the monitor.
+	// not on whatever supervises the monitor. The stop command gets the same
+	// directory and environment for the same reason.
+	hookEnv := config.WithCommandContextEnv(m.cfg.Env, m.Config, m.ID, m.cfg.CommandDir)
 	m.hooks.configure(
 		model.HookLayers{Command: m.cfg.Hooks, Global: m.Config.DefaultHooks},
 		m.cfg.Dir,
-		config.WithCommandContextEnv(m.cfg.Env, m.Config, m.ID, m.cfg.CommandDir),
+		hookEnv,
 	)
 
 	logWriter, err := m.openLogWriter(ctx)
@@ -335,10 +337,12 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	// group everything it spawns starts out in.
 	pgid := cmd.Process.Pid
 
+	seq := m.startStopSequence(ctx, m.cfg.StopCommand, m.cfg.Dir, hookEnv)
+
 	// The handles belong to this run and only exist between these two sections,
 	// which is what the RPC-facing readers hold procMu to observe.
 	m.procMu.Lock()
-	m.ptmx, m.stdin, m.cmd, m.runPgid = ptmx, stdin, cmd, pgid
+	m.ptmx, m.stdin, m.cmd, m.runPgid, m.stopSeq = ptmx, stdin, cmd, pgid, seq
 	m.procMu.Unlock()
 
 	m.setRunning()
@@ -353,12 +357,16 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 
 	waitFn()
 
+	m.finishStopSequence(ctx, seq)
+
 	// The group id is given up only here: until the sweep and the drain above
 	// are done the run still has processes a stop can be aimed at, and refusing
 	// a signal in that window is what kept an escalation from ever reaching
-	// them.
+	// them. The stop sequence goes with it, which is why the run has let it
+	// finish first: its signal and its deadline are aimed at this group.
 	m.procMu.Lock()
 	m.runPgid = 0
+	m.stopSeq = nil
 	if m.stopDeadline != nil {
 		m.stopDeadline.Stop()
 		m.stopDeadline = nil

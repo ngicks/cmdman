@@ -79,10 +79,17 @@ Absolute paths are cleaned and used as-is.
 - `restart_policy`: `no`, `always`, `on-failure`, or `on-failure:N`.
 - `stop_signal`: signal used by `cmdman stop` when no signal override is given.
 - `stop_grace_period`: time a stop waits after the stop signal before it sends
-  `SIGKILL`. Give integer seconds or a Go duration such as `1m30s`. The value
-  must be positive.
+  `SIGKILL`. It also bounds the `stop` command. Give integer seconds or a Go
+  duration such as `1m30s`. The value must be positive.
 - `stop`: argv run before the stop signal is sent. Write it as an argv list or
-  as a mapping with `args`. The args are interpolated like `args`.
+  as a mapping with `args`. The args are interpolated like `args`. A stop runs
+  this command first, for at most `stop_grace_period`, in the command's `dir`.
+  `CMDMAN_MAIN_PID` in its environment holds the pid of the command's own
+  process; see [Environment](#environment). Once the stop command exits or
+  runs out its time, cmdman kills its process group. cmdman then sends the stop
+  signal when anything in the command's process group is still running, and
+  `SIGKILL` one more `stop_grace_period` later.
+  [cmdman-stop(1)](./cmdman-stop.1.md) describes the sequence.
 - `tty`: whether the command runs behind a PTY.
 - `scrollback_bytes`: scrollback buffer size in bytes. Must be non-negative.
 - `log_driver`: `k8s-file` or `none`.
@@ -138,6 +145,21 @@ Each replica of a command also receives these variables:
 
 Injected variables are applied after `env`, so they override an `env` entry of
 the same name. They are injected even when `inject_env` is `false`.
+
+The `stop` command runs with the environment of its command. cmdman sets
+`CMDMAN_DATA_DIR`, `CMDMAN_RUNTIME_DIR`, `CMDMAN_CMD_DATA_DIR`, and
+`CMDMAN_CMD_ID` for the command even when `inject_env` is `false`, and adds
+this variable:
+
+- `CMDMAN_MAIN_PID`: the pid of the command's own process. It is empty when
+  that process has already exited.
+
+cmdman interpolates `stop` args when it loads the compose file, so write `$$`
+to pass a `$` through to the shell:
+
+```yaml
+stop: [sh, -c, 'kill -INT "$$CMDMAN_MAIN_PID"']
+```
 
 Environment values are layered per command:
 

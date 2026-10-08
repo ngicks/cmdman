@@ -18,6 +18,7 @@ const (
 	ENV_CMDMAN_HOOK_EVENT   = config.ENV_CMDMAN_HOOK_EVENT
 	ENV_CMDMAN_HOOK_TITLE   = config.ENV_CMDMAN_HOOK_TITLE
 	ENV_CMDMAN_HOOK_BODY    = config.ENV_CMDMAN_HOOK_BODY
+	ENV_CMDMAN_MAIN_PID     = config.ENV_CMDMAN_MAIN_PID
 )
 
 // ComposeConfigDir is re-exported from cmdman/config; see

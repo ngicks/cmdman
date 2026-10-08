@@ -3,9 +3,12 @@
 package monitor
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 )
@@ -61,4 +64,41 @@ func signalProcessGroup(pid int, sig syscall.Signal) error {
 		return nil
 	}
 	return syscall.Kill(-pid, sig)
+}
+
+// reapProcessGroup reaps the members of the process group pgid that are the
+// monitor's children until the group is empty or ctx is done. The caller has
+// killed the group already, so what is left of it is on its way out. A member
+// whose parent is another member is reparented here once that parent is gone
+// (or to init, which reaps it, where the monitor is no subreaper), so the
+// group is polled rather than waited on once.
+//
+// Every wait names the group: waiting on any child would take the exit status
+// of the supervised command or of a hook out from under the exec.Cmd waiting
+// for it.
+func reapProcessGroup(ctx context.Context, pgid int) {
+	if pgid <= 0 {
+		return
+	}
+	tick := time.NewTicker(sweepPoll)
+	defer tick.Stop()
+	for {
+		for {
+			var ws syscall.WaitStatus
+			wpid, err := syscall.Wait4(-pgid, &ws, syscall.WNOHANG, nil)
+			if err != nil || wpid <= 0 {
+				break
+			}
+		}
+		// A member is counted until it is reaped, so an empty group means
+		// nothing of it is left to wait on.
+		if errors.Is(signalProcessGroup(pgid, 0), syscall.ESRCH) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
 }

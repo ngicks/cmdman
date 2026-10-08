@@ -79,9 +79,10 @@ func stopTimeout(override *time.Duration, cfg *model.CommandConfig) time.Duratio
 	return defaultStopTimeout
 }
 
-// stop stops id through its monitor, escalating to SIGKILL after the timeout
-// [stopTimeout] resolves from timeoutOverride. A monitor that does not answer
-// is taken for dead: stop marks the command failed and reports no error.
+// stop stops id through its monitor, escalating to SIGKILL after the wait
+// [stopWait] derives from the timeout [stopTimeout] resolves from
+// timeoutOverride. A monitor that does not answer is taken for dead: stop marks
+// the command failed and reports no error.
 func (s *Service) stop(
 	ctx context.Context,
 	st *store.Store,
@@ -119,6 +120,7 @@ func (s *Service) stopReportingUnreachable(
 		return false, fmt.Errorf("get command config: %w", err)
 	}
 	timeout := stopTimeout(timeoutOverride, cfg)
+	wait := stopWait(timeout, cfg)
 
 	effective := cfg.StopSignal
 	if signalOverride != "" {
@@ -149,7 +151,7 @@ func (s *Service) stopReportingUnreachable(
 		}
 		return false, err
 	}
-	if err := waitForStopped(ctx, st, id, timeout); err == nil {
+	if err := waitForStopped(ctx, st, id, wait); err == nil {
 		return false, nil
 	} else if !errors.Is(err, context.DeadlineExceeded) {
 		return false, err
@@ -158,6 +160,8 @@ func (s *Service) stopReportingUnreachable(
 	// The monitor escalates to SIGKILL on its own at the same deadline. This
 	// SIGKILL stays anyway: a duplicate SIGKILL is harmless, and sending it here
 	// keeps the wait below and its error reporting on the client's own clock.
+	// A SIGKILL sent ahead of the monitor's would cut a stop command short, so
+	// the client waits out the same two grace periods the monitor does.
 	killSig, _, _ := hrstr.ParseSignal("SIGKILL")
 	if err := s.sendStop(ctx, st, id, killSig, 0); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -175,10 +179,22 @@ func (s *Service) stopReportingUnreachable(
 		}
 		return false, killErr
 	}
-	if err := waitForStopped(ctx, st, id, timeout); err != nil {
+	if err := waitForStopped(ctx, st, id, wait); err != nil {
 		return false, fmt.Errorf("timeout waiting for stop after SIGKILL: %w", err)
 	}
 	return false, nil
+}
+
+// stopWait returns how long a stop of the command cfg describes waits for the
+// command to go down at each of its two waits, given the stop's timeout. The
+// monitor runs a stored stop command for up to timeout before it sends the stop
+// signal and arms its own SIGKILL for timeout later, so such a command gets
+// twice the timeout.
+func stopWait(timeout time.Duration, cfg *model.CommandConfig) time.Duration {
+	if cfg.StopCommand != nil {
+		return 2 * timeout
+	}
+	return timeout
 }
 
 // settleUnreachableMonitor decides what a monitor the stop could not reach

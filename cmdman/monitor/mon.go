@@ -67,12 +67,18 @@ type Monitor struct {
 	// stopDeadline is the SIGKILL a stop with a timeout has scheduled. The run
 	// disarms it where it gives runPgid up, so a deadline that outlives its run
 	// never lands on a pid handed out again.
+	//
+	// stopSeq is the run's stop sequence, nil for a command without a stop
+	// command. The run publishes it with the handles and gives it up with
+	// runPgid, once a sequence a stop began has finished: the signal that
+	// follows the stop command is aimed at runPgid and may arm stopDeadline.
 	procMu       sync.Mutex
 	ptmx         *os.File
 	stdin        io.WriteCloser
 	cmd          *exec.Cmd
 	runPgid      int
 	stopDeadline *time.Timer
+	stopSeq      *stopSequence
 	// stdinWriteMu serializes the stdin writes themselves, so two clients
 	// writing at once never interleave bytes inside a chunk.
 	stdinWriteMu sync.Mutex
@@ -124,6 +130,11 @@ type Monitor struct {
 	// refuses to die, and see what either sends. nil runs the default.
 	sweepFn func(ctx context.Context, logger *slog.Logger, pgid int, stopRequested func() bool) int
 	awaitFn func(ctx context.Context, logger *slog.Logger, pgid int, killed func() bool) int
+	// stopSignalFn sends the stop signal that a stop sequence follows its stop
+	// command with to the run's process group. It is a field so a test can see
+	// whether the sequence sent one at all. nil sends it with
+	// signalProcessGroup.
+	stopSignalFn func(pgid int, sig syscall.Signal) error
 
 	// stopRequested is set by a stop to prevent restarts. Nothing clears it: the
 	// loop ends on the first run end that sees it, and the monitor exits with it.
@@ -575,6 +586,13 @@ func (m *Monitor) SignalProcess(sig syscall.Signal) error {
 // good. Each stop replaces the deadline an earlier one scheduled. The deadline
 // is armed before sig goes out, so a command that dies of sig at once cannot
 // finish its run ahead of the arming and leave the deadline to outlive it.
+//
+// A run whose command has a stop command stops differently, unless sig is
+// SIGKILL: the stop begins the run's stop sequence and returns without waiting
+// for it. The sequence runs the stop command, bounded by timeout, and only
+// then sends sig and arms the deadline (see stopSequence). A graceful stop
+// that finds the sequence begun changes nothing. SIGKILL takes the path above
+// at once in every stage and kills a stop command that is still running.
 func (m *Monitor) StopProcess(sig syscall.Signal, timeout time.Duration) error {
 	m.stopRequested.Store(true)
 	// Latched ahead of the signal for the same reason as the deadline below: a
@@ -584,6 +602,12 @@ func (m *Monitor) StopProcess(sig syscall.Signal, timeout time.Duration) error {
 	}
 
 	m.procMu.Lock()
+	seq := m.stopSeq
+	if seq != nil && sig != syscall.SIGKILL {
+		m.beginStopSequence(seq, sig, timeout)
+		m.procMu.Unlock()
+		return nil
+	}
 	if m.stopDeadline != nil {
 		m.stopDeadline.Stop()
 		m.stopDeadline = nil
@@ -592,6 +616,12 @@ func (m *Monitor) StopProcess(sig syscall.Signal, timeout time.Duration) error {
 		m.stopDeadline = time.AfterFunc(timeout, m.escalateStop)
 	}
 	m.procMu.Unlock()
+
+	if seq != nil {
+		// Only SIGKILL gets here with a sequence, and it does not wait for a stop
+		// command still running.
+		seq.cancel()
+	}
 
 	err := m.SignalProcess(sig)
 	if errors.Is(err, errNoRunningProcess) || errors.Is(err, syscall.ESRCH) {

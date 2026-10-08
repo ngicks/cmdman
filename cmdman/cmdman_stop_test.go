@@ -4,11 +4,15 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"gotest.tools/v3/assert"
 
+	cmdmanv1pb "github.com/ngicks/cmdman/api/gen/proto/go/cmdman/v1"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/store"
 )
@@ -202,6 +206,101 @@ func TestServiceStopSendsResolvedTimeout(t *testing.T) {
 			assert.DeepEqual(t, fake.receivedTimeouts(), []time.Duration{tc.want})
 		})
 	}
+}
+
+func TestStopWait(t *testing.T) {
+	const timeout = 3 * time.Second
+	assert.Equal(t, stopWait(timeout, &model.CommandConfig{}), timeout)
+	assert.Equal(
+		t,
+		stopWait(timeout, &model.CommandConfig{
+			StopCommand: &model.StopCommand{Args: []string{"true"}},
+		}),
+		2*timeout,
+	)
+}
+
+// sigkillOnlyMonitor answers Stop like a monitor whose command outlives every
+// signal but SIGKILL: it records when each stop arrived and flips the command
+// to exited on SIGKILL only.
+type sigkillOnlyMonitor struct {
+	cmdmanv1pb.UnimplementedCommandMonitorServiceServer
+	st *store.Store
+	id string
+
+	mu    sync.Mutex
+	stops []receivedStop
+}
+
+type receivedStop struct {
+	at      time.Time
+	signal  int32
+	timeout time.Duration
+}
+
+func (f *sigkillOnlyMonitor) Stop(
+	_ context.Context,
+	req *cmdmanv1pb.StopRequest,
+) (*cmdmanv1pb.StopResponse, error) {
+	f.mu.Lock()
+	f.stops = append(f.stops, receivedStop{
+		at:      time.Now(),
+		signal:  req.Signal,
+		timeout: req.GetTimeout().AsDuration(),
+	})
+	f.mu.Unlock()
+	if syscall.Signal(req.Signal) != syscall.SIGKILL {
+		return &cmdmanv1pb.StopResponse{}, nil
+	}
+	exitCode := 137
+	err := f.st.UpdateCommandState(f.id, model.EventTypeExited, &exitCode, &model.CommandState{})
+	if err != nil {
+		return nil, err
+	}
+	return &cmdmanv1pb.StopResponse{}, nil
+}
+
+func (f *sigkillOnlyMonitor) received() []receivedStop {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.stops)
+}
+
+// The monitor runs a stored stop command for up to the timeout before the stop
+// signal goes out, so the client holds its own SIGKILL back for two timeouts.
+// The monitor is still handed the timeout itself.
+func TestServiceStopWaitsTwiceTheTimeoutForAStopCommand(t *testing.T) {
+	const (
+		id      = "stop-command-wait"
+		timeout = 300 * time.Millisecond
+	)
+	appCfg := testConfig(t, t.TempDir())
+	st := openStopTestStore(t, appCfg)
+	fake := &sigkillOnlyMonitor{st: st, id: id}
+	assert.NilError(t, st.InsertCommandConfig(id, "", &model.CommandConfig{
+		StopCommand: &model.StopCommand{Args: []string{"true"}},
+	}))
+	assert.NilError(t, st.InsertCommandState(id, model.EventTypeRunning, &model.CommandState{
+		SocketPath: serveFakeMonitor(t, fake),
+	}))
+
+	svc := NewService(appCfg)
+	defer svc.Close()
+	results, err := svc.Stop(t.Context(), StopRequest{
+		Targets: []string{id},
+		Timeout: new(timeout),
+	})
+	assert.NilError(t, err)
+	assert.Equal(t, len(results), 1)
+	assert.NilError(t, results[0].Err)
+
+	stops := fake.received()
+	assert.Equal(t, len(stops), 2, "stops received: %v", stops)
+	assert.Equal(t, syscall.Signal(stops[0].signal), syscall.SIGTERM)
+	assert.Equal(t, stops[0].timeout, timeout)
+	assert.Equal(t, syscall.Signal(stops[1].signal), syscall.SIGKILL)
+	gap := stops[1].at.Sub(stops[0].at)
+	assert.Assert(t, gap >= 2*timeout, "the client sent SIGKILL %s after the stop", gap)
 }
 
 // An explicit timeout that is not positive fails stop and restart before they
