@@ -162,6 +162,12 @@ func (s *Service) settleUnreachableMonitor(
 	if err != nil {
 		return errors.Join(retErr, fmt.Errorf("get command state: %w", err))
 	}
+	if monitor.DiedUnexpectedly(stateJSON) {
+		// Stale cleanup got here first. Its failed state records the monitor's
+		// death, not the end of the run, so whatever ignored the stop's signal may
+		// still be running.
+		return retErr
+	}
 	if state == model.EventTypeExited || state == model.EventTypeFailed {
 		return nil
 	}

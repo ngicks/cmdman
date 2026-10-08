@@ -17,20 +17,29 @@ import (
 // is a stop that succeeded, and the stored state stays as the monitor left it.
 // A command the store still reports as live had its monitor die on the way:
 // the death is recorded on top of the stored state, and the caller's error
-// comes back, nil included.
+// comes back, nil included. A death stale cleanup already recorded is no end of
+// the run either, so the caller's error comes back and the state stays.
 func TestSettleUnreachableMonitor(t *testing.T) {
 	const startedAt = "2026-01-02T03:04:05Z"
 	for _, tc := range []struct {
 		name string
 		// state is what the store holds for the command. Empty leaves the
 		// command out of the store.
-		state      model.EventType
+		state model.EventType
+		// stateError is the Error the stored state carries.
+		stateError string
 		monitorDie bool
 	}{
 		{name: "removed"},
 		{name: "exited", state: model.EventTypeExited},
 		{name: "failed", state: model.EventTypeFailed},
 		{name: "running", state: model.EventTypeRunning, monitorDie: true},
+		{
+			name:       "died",
+			state:      model.EventTypeFailed,
+			stateError: "monitor died unexpectedly",
+			monitorDie: true,
+		},
 	} {
 		for _, rc := range []struct {
 			name   string
@@ -51,6 +60,7 @@ func TestSettleUnreachableMonitor(t *testing.T) {
 					assert.NilError(t, st.InsertCommandConfig(id, "", cfg))
 					assert.NilError(t, st.InsertCommandState(id, tc.state, &model.CommandState{
 						StartedAt: startedAt,
+						Error:     tc.stateError,
 					}))
 				}
 
@@ -73,7 +83,7 @@ func TestSettleUnreachableMonitor(t *testing.T) {
 					assert.Equal(t, stateJSON.Error, "monitor died unexpectedly")
 				} else {
 					assert.Equal(t, state, tc.state)
-					assert.Equal(t, stateJSON.Error, "")
+					assert.Equal(t, stateJSON.Error, tc.stateError)
 				}
 			})
 		}
