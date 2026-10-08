@@ -84,6 +84,48 @@ func startMonitorStandIn(t *testing.T) (int, <-chan *os.ProcessState) {
 	return cmd.Process.Pid, exited
 }
 
+// A create that died between its config row and its state row leaves a record
+// with no state. It still holds its name, so it has to be removable.
+func TestServiceRemoveRecordWithoutState(t *testing.T) {
+	const id = "config-only"
+
+	dir := t.TempDir()
+	appCfg := testConfig(t, dir)
+	dbPath, err := appCfg.DBPath()
+	assert.NilError(t, err)
+	st, err := store.OpenStore(t.Context(), dbPath, true)
+	assert.NilError(t, err)
+	t.Cleanup(func() { st.Close() })
+
+	commandDir, err := appCfg.CommandDir(id)
+	assert.NilError(t, err)
+	cfg := &model.CommandConfig{
+		Argv:            []string{"true"},
+		Dir:             dir,
+		Env:             testEnv(),
+		RestartPolicy:   model.RestartPolicyNo,
+		ScrollbackBytes: 4096,
+		LogDriver:       model.DefaultLogDriver,
+		CommandDir:      commandDir,
+	}
+	assert.NilError(t, st.InsertCommandConfig(id, id, cfg))
+	assert.NilError(t, store.WriteCommandConfig(commandDir, cfg))
+
+	svc := NewService(appCfg)
+	defer svc.Close()
+
+	// No monitor ever ran for the record, so no force is needed to remove it.
+	results, err := svc.Remove(t.Context(), RemoveRequest{Targets: []string{id}})
+	assert.NilError(t, err)
+	assert.Equal(t, len(results), 1)
+	assert.NilError(t, results[0].Err)
+
+	_, err = st.ResolveIDByName(id)
+	assert.Assert(t, errors.Is(err, sql.ErrNoRows), "name still held: %v", err)
+	_, err = os.Stat(commandDir)
+	assert.Assert(t, errors.Is(err, fs.ErrNotExist), "command dir still present: %v", err)
+}
+
 func TestServiceRemoveForce(t *testing.T) {
 	const id = "force-rm"
 

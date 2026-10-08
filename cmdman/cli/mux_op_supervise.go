@@ -201,18 +201,27 @@ func muxOpLogPath(cfg cmdman.CmdmanConfig, logName string) (string, error) {
 }
 
 // muxOpArgv builds the worker's command line: this binary, re-run with the
-// arguments the user typed.
+// arguments the user typed (see [selfArgv]).
+func muxOpArgv(cfg cmdman.CmdmanConfig, verbArgv []string) ([]string, error) {
+	argv, err := selfArgv(cfg, verbArgv)
+	if err != nil {
+		return nil, fmt.Errorf("mux op: %w", err)
+	}
+	return argv, nil
+}
+
+// selfArgv builds a command line that re-runs this binary with verbArgv.
 //
 // The resolved data and runtime dirs — and the config file, when one was named
-// — are passed ahead of them the same way the monitor passes them to its own
-// re-exec: a child inherits the environment but not the flags, so without them
-// the worker would resolve its own store and its own file-only settings. The
-// user's own copies of those flags come after and win, which resolves to the
+// — are passed ahead of verbArgv the same way the monitor passes them to its
+// own re-exec: a child inherits the environment but not the flags, so without
+// them the child would resolve its own store and its own file-only settings.
+// Copies of those flags in verbArgv come after and win, which resolves to the
 // same values, since that is where the config being forwarded came from.
-func muxOpArgv(cfg cmdman.CmdmanConfig, verbArgv []string) ([]string, error) {
+func selfArgv(cfg cmdman.CmdmanConfig, verbArgv []string) ([]string, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return nil, fmt.Errorf("mux op: locate cmdman binary: %w", err)
+		return nil, fmt.Errorf("locate cmdman binary: %w", err)
 	}
 	argv := []string{
 		exe,

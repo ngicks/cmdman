@@ -6,6 +6,7 @@ package monitor
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -313,6 +314,18 @@ func (m *Monitor) init() (err error) {
 		func() error { return flock.Unlock(f) },
 		func() error { return os.Remove(pidPath) },
 	)
+
+	// A record removed while this monitor was on its way up belongs to a command
+	// nobody wants to run any more, and the state writes below would go nowhere: an
+	// update of a missing row succeeds without touching anything. The check sits
+	// behind the lock so that a remover holding the lock across its removal (see
+	// HoldPIDLock) has either finished or kept this monitor out.
+	if _, _, _, err := m.store.GetCommandState(m.ID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("command %q no longer exists", m.ID)
+		}
+		return fmt.Errorf("get command state: %w", err)
+	}
 
 	if err := m.store.UpdateCommandState(
 		m.ID,

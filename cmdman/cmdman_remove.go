@@ -2,6 +2,8 @@ package cmdman
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"syscall"
@@ -54,7 +56,13 @@ func (s *Service) Remove(ctx context.Context, req RemoveRequest) ([]RemoveResult
 
 func (s *Service) rmOne(ctx context.Context, st *store.Store, id string, force bool) error {
 	state, _, stateJSON, err := st.GetCommandState(id)
-	if err != nil {
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		// A create that died between writing the config row and the state row
+		// leaves a record with no state. Starting reads the state first, so no
+		// monitor ever ran for it, and there is nothing to stop.
+		state, stateJSON = model.EventTypeCreated, &model.CommandState{}
+	case err != nil:
 		return err
 	}
 

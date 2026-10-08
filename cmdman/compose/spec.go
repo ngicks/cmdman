@@ -41,6 +41,26 @@ const (
 	LabelVersionValue = "1"
 )
 
+// Labels of a compose job: the cmdman command that runs a compose verb for one
+// project in the background, so the verb outlives whatever asked for it.
+//
+// A job never carries [LabelProject] or [LabelWorkdir], by which every compose
+// verb selects the commands of a project, so no verb mistakes it for a replica,
+// least of all the down it runs. It names its project with [LabelJobProject]
+// and [LabelJobWorkdir] instead.
+const (
+	// LabelJob is the compose verb the job runs, such as [JobDown].
+	LabelJob = "cmdman.compose.job"
+	// LabelJobWorkdir is the canonical work directory of the project the job
+	// acts on.
+	LabelJobWorkdir = "cmdman.compose.job.workdir"
+	// LabelJobProject is the name of that project.
+	LabelJobProject = "cmdman.compose.job.project"
+)
+
+// JobDown is the [LabelJob] value of a job running `cmdman compose down`.
+const JobDown = "down"
+
 // AfterCondition is the dependency condition for a command's after spec.
 type AfterCondition string
 
