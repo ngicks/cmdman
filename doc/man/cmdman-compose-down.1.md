@@ -15,8 +15,8 @@ cmdman compose [selection flags] down [--progress MODE] [--force] [--timeout DUR
 
 Stops selected commands, waits for the stop phase, then removes their stored
 records concurrently. It is the destructive counterpart to `compose stop`. Each
-stop uses the stored stop signal and stop timeout of its replica.
-`--timeout` overrides the stop timeout.
+stop uses the stored stop command, stop signal, and stop timeout of its
+replica. `--timeout` overrides the stop timeout.
 
 Down stops at most `--parallel` replicas at once. The default is 4. The limit
 covers the declared commands and the orphans of a whole-project teardown. It
@@ -119,8 +119,10 @@ Uses the compose selection flags documented in
   signal before it sends `SIGKILL`. Give integer seconds or a Go duration such
   as `1m30s`. The value must be positive. When omitted, each replica waits its
   stored `stop_grace_period`, or 10 seconds when the command declares none. A
-  replica whose stop failed is removed by force, and that removal waits the
-  stored value. A rejected value stops and removes no replica and runs no hook.
+  replica with a `stop` command runs it first for at most the same time, so its
+  stop can take up to twice the timeout before `SIGKILL`. A replica whose stop
+  failed is removed by force, and that removal waits the stored value. A
+  rejected value stops and removes no replica and runs no hook.
 - `--parallel N`: stop at most N replicas at once, or every replica at once
   with `-1`. `CMDMAN_COMPOSE_PARALLEL_LIMIT` sets the limit when the flag is not
   given. See [cmdman-compose(1)](./cmdman-compose.1.md#options).

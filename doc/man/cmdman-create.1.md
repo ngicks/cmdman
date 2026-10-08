@@ -54,7 +54,12 @@ creates the command as usual.
 - `--stop-signal SIGNAL`: default signal used by `stop`.
 - `--stop-timeout DURATION`: time a stop waits after the stop signal before it
   sends `SIGKILL`. Give integer seconds or a Go duration such as `1m30s`. The
-  value must be positive. An unset timeout means 10 seconds.
+  value must be positive. An unset timeout means 10 seconds. `--timeout` of
+  [cmdman-stop(1)](./cmdman-stop.1.md) and
+  [cmdman-restart(1)](./cmdman-restart.1.md) overrides it for one call. A
+  command with a stop command runs it first for at most the same time, so its
+  stop can take up to twice the timeout before `SIGKILL`. Only the `stop` key
+  of [cmdman-compose(5)](./cmdman-compose.5.md) sets a stop command.
 - `-t, --tty`: allocate a PTY; required for `attach` and `send-keys`.
 - `--rm`: remove the command record after its terminal exit.
 - `--scrollback-bytes N`: in-memory output replay limit for attaching clients.

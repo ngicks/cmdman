@@ -14,8 +14,9 @@ cmdman inspect [--format FORMAT] ID|NAME
 
 Displays the persisted command definition together with current runtime state
 and exit history. This is the authoritative way to verify the exact argv,
-working directory, stored environment, labels, restart policy, monitor state,
-socket path, and recorded exits used by cmdman.
+working directory, stored environment, labels, restart policy, stop signal,
+stop timeout, stop command, monitor state, socket path, and recorded exits used
+by cmdman.
 
 The runtime state a live monitor serves carries `Cwd` beside the title, the
 reported status and the bell: the working directory the command reports for
@@ -24,12 +25,22 @@ was seeded with. It answers where the command stands now rather than where its
 definition says it starts, and is empty when nothing reported parsed as a path.
 
 The state also carries `warnings`, a list of messages about anomalies at the
-end of the latest run. `output reader still blocked after 1s` reports a reader
-of the command's output that had not finished one second after the survivor
-sweep finished.
-`<n> survivor(s) still alive after sweep bound` reports processes the monitor
-could not reap. The list is absent until an anomaly occurs, and the next start
-resets it.
+end of the latest run:
+
+- `output reader still blocked after 1s` reports a reader of the command's
+  output that had not finished one second after the survivor sweep finished.
+- `<n> survivor(s) still alive after sweep bound` reports processes the monitor
+  could not reap.
+- `the stop signal did not end the command within its grace period; resorted
+  to SIGKILL; detached processes may survive` reports a stop that ran out its
+  timeout and ended the run with `SIGKILL`.
+
+The list is absent until an anomaly occurs, and the next start resets it.
+
+The state sets `force_killed` to `true` when a stop ended the latest run with
+the `SIGKILL` that follows its timeout. The field is absent otherwise, and the
+next start resets it. [cmdman-events(1)](./cmdman-events.1.md) describes the
+event attributes that record the same anomalies.
 
 Inspection does not require the command to be running.
 

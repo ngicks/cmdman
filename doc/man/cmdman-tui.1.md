@@ -26,6 +26,10 @@ title it sets, the status it reports and the bell it rings reach the screen as
 they happen, while commands appearing and disappearing follow cmdman's event
 log.
 
+The dashboard's command list marks a command whose latest run a stop ended
+with the `SIGKILL` that follows its timeout. The row shows `force-killed` after
+the exit state. [cmdman-stop(1)](./cmdman-stop.1.md) describes the forced kill.
+
 The TUI can also be launched in a multiplexer popup. Driver inference uses the
 current environment; v1 implements tmux only. The popup launcher and child
 communicate over an internal IPC endpoint.
@@ -80,9 +84,11 @@ it in any terminal or pane. Each widget is its own subcommand.
   window either way.) `D` stops and removes the commands themselves: it asks
   `compose down <project>? y/n` on the hint line first, `y` goes ahead and any
   other key takes the question back, and what the teardown did — `stopped N,
-  removed M` — is reported there when it ends; a `D` that got through every
-  command takes the project's windows down too, on the same terms as `d`. The
-  widget also stands where the active project stands: each time that mark
+  removed M`, plus `force-killed K` when K of those stops had to end their
+  command with `SIGKILL` — is reported there when it ends; a `D` that got
+  through every command takes the project's windows down too, on the same terms
+  as `d`.
+  The widget also stands where the active project stands: each time that mark
   resolves it moves itself into the project's directory, so the pane's own
   path — and any multiplexer binding keyed on it — follows the project the
   window is showing rather than wherever the widget was started from.

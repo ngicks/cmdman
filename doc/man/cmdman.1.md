@@ -52,30 +52,45 @@ probe finds a member, and sends it `SIGKILL` after the 2 second grace period. A
 restart therefore never stacks a run's in-session leftovers on top of the new
 run.
 
-After a stop, the sweep sends no signal of its own on any platform. A stop comes
-from `cmdman stop`, `cmdman compose stop`, `cmdman compose down`, or the TUI.
-The stop already delivered the configured stop signal to the whole process
-group once. A leftover of a wrapper shell that exited first is usually the
+A stop comes from `cmdman stop`, `cmdman restart`, `cmdman rm --force`, the
+stop phase of a compose verb, or the TUI. The `stop` key of
+[cmdman-compose(5)](./cmdman-compose.5.md) sets a stop command. When the
+command has a stop command, the monitor runs it first, for at most the stop's
+timeout. The monitor then sends the configured stop signal to the command's
+process group when anything in that group still runs, and sends `SIGKILL` one
+timeout later. A command without a stop command gets the stop signal at once.
+[cmdman-stop(1)](./cmdman-stop.1.md) describes the sequence.
+
+After a stop, the sweep sends no signal of its own on any platform. The stop
+already delivered the configured stop signal to whatever was left in the
+process group. A leftover of a wrapper shell that exited first is usually the
 process that carries out the stop. Podman waiting for its container is one
 example. The monitor only reaps the leftovers and waits for them. `SIGKILL`
-comes from the stop's timeout alone. The client sends `SIGKILL` when the
-timeout expires, and the monitor escalates at the same deadline on its own. An
-interrupted `cmdman stop` therefore still ends the command. A signal to the
-process group cannot reach a survivor that runs in a process group of its own
-inside the command's session. After the `SIGKILL` went out, the monitor sends
-`SIGKILL` to each such survivor. The monitor reports the processes still alive
-10 seconds after that `SIGKILL` as `survivors_unreaped` on the `exited` event
-and as a warning in the command state. On platforms other than Linux the monitor
-cannot enumerate the survivors, sends nothing after the stop's `SIGKILL`, and
-reports no count. A stop that arrives while a natural-exit sweep is in progress
-ends that sweep's own signalling at once.
+comes from the stop's timeout alone. The monitor sends it on its own once the
+timeout after the stop signal expires. The client sends one too when its own
+wait runs out. An interrupted `cmdman stop` therefore still ends the command.
+A signal to the process group cannot reach a survivor that runs in a process
+group of its own inside the command's session. After the `SIGKILL` went out,
+the monitor sends `SIGKILL` to each such survivor. The monitor reports the
+processes still alive 10 seconds after that `SIGKILL` as `survivors_unreaped` on
+the `exited` event and as a warning in the command state. On platforms other
+than Linux the monitor cannot enumerate the survivors, sends nothing after the
+stop's `SIGKILL`, and reports no count. A stop that arrives while a natural-exit
+sweep is in progress ends that sweep's own signalling at once.
 
 The stop's timeout is the single setting for how long a stop waits before
 `SIGKILL`. The stop's `--timeout` sets it. Without `--timeout`, the stop waits
-the stop timeout stored with the command, or 10 seconds when it has none. The
-timeout also covers the survivors of a wrapper that exited early. A stop
-adds no grace period of its own. A wrapper script does not need `exec` to stop
-correctly. Using `exec` in a wrapper script remains good hygiene.
+the stop timeout stored with the command, or 10 seconds when it has none. A
+command with a stop command spends up to one timeout on the stop command and up
+to one more after the stop signal, so its stop can take up to twice the timeout
+before `SIGKILL`. The timeout also covers the survivors of a wrapper that
+exited early. A stop adds no other grace period. A wrapper script does not need
+`exec` to stop correctly. Using `exec` in a wrapper script remains good hygiene.
+
+A stop that runs out its timeout and ends the command with the `SIGKILL` that
+follows records a forced kill. The event log, the command state, the stderr of
+`cmdman stop`, the `stopped` records of the compose progress output, and the TUI
+show it. [cmdman-stop(1)](./cmdman-stop.1.md) describes the record.
 
 ## Reported Status
 

@@ -50,7 +50,6 @@ command's `warnings`.
   same `SIGKILL`. A process that started a session of its own is out of reach
   of that `SIGKILL` and may still run. `cmdman inspect` also shows
   `force_killed` as `true` in the command's state.
-
 - `reader_detached`: the literal `true`. The monitor's output reader was still
   blocked one second after the survivor sweep finished. A leftover process that
   kept the terminal or the output pipe open is the usual cause. Trailing output

@@ -14,8 +14,8 @@ cmdman compose [selection flags] stop [--progress MODE] [--scale N] [--timeout D
 ## Description
 
 Gracefully stops selected running commands using each stored command's stop
-signal and stop timeout. `--timeout` overrides the stop timeout. Stored
-definitions remain available for a later `compose start`.
+command, stop signal, and stop timeout. `--timeout` overrides the stop timeout.
+Stored definitions remain available for a later `compose start`.
 
 Naming a command also selects all recursive dependents, and stopping proceeds
 in reverse dependency order. With no names, all declared project commands are
@@ -66,7 +66,9 @@ Uses the compose selection flags documented in
   signal before it sends `SIGKILL`. Give integer seconds or a Go duration such
   as `1m30s`. The value must be positive. When omitted, each replica waits its
   stored `stop_grace_period`, or 10 seconds when the command declares none. A
-  rejected value stops no replica and runs no hook.
+  replica with a `stop` command runs it first for at most the same time, so its
+  stop can take up to twice the timeout before `SIGKILL`. A rejected value
+  stops no replica and runs no hook.
 - `--parallel N`: stop at most N replicas at once, or every replica at once
   with `-1`. `CMDMAN_COMPOSE_PARALLEL_LIMIT` sets the limit when the flag is not
   given. See [cmdman-compose(1)](./cmdman-compose.1.md#options).

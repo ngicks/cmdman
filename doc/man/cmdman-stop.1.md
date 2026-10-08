@@ -34,20 +34,20 @@ A command with a stop command stops in three steps. The `stop` key of
 
 Such a stop waits up to twice the timeout before `SIGKILL`. The monitor carries
 out every step on its own clock, so an interrupted `cmdman stop` keeps the same
-schedule. A second stop while a stop is in progress changes nothing. A stop with `--signal SIGKILL` skips the
-stop command, kills a stop command that is still running, and sends `SIGKILL`
-at once.
+schedule. A second stop does not start the sequence over. A stop with
+`--signal SIGKILL` skips the stop command, kills a stop command that is still
+running, and sends `SIGKILL` at once.
 
 The timeout is the only escalation to `SIGKILL`. It also applies to survivors of
-a wrapper script that exited early. The monitor sends `SIGKILL` at the same
-deadline on its own. An interrupted `cmdman stop` therefore still ends the
-command. A signal to the process group cannot reach a survivor that runs in a
-process group of its own inside the command's session. After the `SIGKILL` went
-out, the monitor sends `SIGKILL` to each such survivor. The monitor reports the
-processes still alive 10 seconds after that `SIGKILL` as `survivors_unreaped` on
-the `exited` event and as a warning in the command state. On platforms other
-than Linux the monitor cannot enumerate the survivors, sends nothing after the
-stop's `SIGKILL`, and reports no count.
+a wrapper script that exited early. The monitor sends `SIGKILL` on its own once
+the timeout after the stop signal expires. An interrupted `cmdman stop`
+therefore still ends the command. A signal to the process group cannot reach a
+survivor that runs in a process group of its own inside the command's session.
+After the `SIGKILL` went out, the monitor sends `SIGKILL` to each such survivor.
+The monitor reports the processes still alive 10 seconds after that `SIGKILL`
+as `survivors_unreaped` on the `exited` event and as a warning in the command
+state. On platforms other than Linux the monitor cannot enumerate the
+survivors, sends nothing after the stop's `SIGKILL`, and reports no count.
 [cmdman-events(1)](./cmdman-events.1.md) describes the `survivors_unreaped`
 attribute.
 
@@ -74,9 +74,11 @@ written to stderr.
 - `-s, --signal SIGNAL`: signal to send before waiting. When omitted, the
   command's stored stop signal is used.
 - `-t, --timeout DURATION`: time to wait after the stop signal before sending
-  `SIGKILL`. It also bounds the stop command of a command that has one. Give
-  integer seconds or a Go duration such as `1m30s`. The value must be positive. When omitted, each command waits the stop timeout stored
-  with it by `--stop-timeout` of [cmdman-create(1)](./cmdman-create.1.md) or
+  `SIGKILL`. Give integer seconds or a Go duration such as `1m30s`. The value
+  must be positive. A command with a stop command runs it first for at most the
+  same time, so its stop can take up to twice the timeout before `SIGKILL`.
+  When omitted, each command waits the stop timeout stored with it by
+  `--stop-timeout` of [cmdman-create(1)](./cmdman-create.1.md) or
   `stop_grace_period` of [cmdman-compose(5)](./cmdman-compose.5.md). A command
   with no stored stop timeout waits 10 seconds.
 - `--ignore-errors`: exit 0 even when some targets failed. Failures are still

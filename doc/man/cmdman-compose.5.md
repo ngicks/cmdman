@@ -28,6 +28,7 @@ commands:
       role: api
     restart_policy: on-failure:5
     stop_signal: SIGTERM
+    stop_grace_period: 30s
     tty: false
     scrollback_bytes: 1048576
     log_driver: k8s-file
@@ -79,8 +80,12 @@ Absolute paths are cleaned and used as-is.
 - `restart_policy`: `no`, `always`, `on-failure`, or `on-failure:N`.
 - `stop_signal`: signal used by `cmdman stop` when no signal override is given.
 - `stop_grace_period`: time a stop waits after the stop signal before it sends
-  `SIGKILL`. It also bounds the `stop` command. Give integer seconds or a Go
-  duration such as `1m30s`. The value must be positive.
+  `SIGKILL`. Give integer seconds or a Go duration such as `1m30s`. The value
+  must be positive. A stop waits 10 seconds when the key is absent. The
+  `--timeout` option of `cmdman stop`, `cmdman restart`, `compose stop`,
+  `compose down`, and `compose restart` overrides it for one invocation. The
+  grace period also bounds the `stop` command, so the stop of a command with
+  `stop` can take up to twice the grace period before `SIGKILL`.
 - `stop`: argv run before the stop signal is sent. Write it as an argv list or
   as a mapping with `args`. The args are interpolated like `args`. A stop runs
   this command first, for at most `stop_grace_period`, in the command's `dir`.
@@ -535,6 +540,21 @@ The record that ends a run carries `exitCode` when the hook exited, and
 `hook`, `lifecycle`, `exec`, or `scaleIndex`. That record belongs to the
 replica itself. Down could not decode the hooks stored on the replica and tore
 the replica down without them. Its `error` holds the decoding error.
+
+A `stopped` record of a replica sets `forceKilled` to `true` when the stop ran
+out the grace period and ended the replica with `SIGKILL`. In `tty` mode a
+warning line follows the replica's `Stopped` line:
+
+```text
+! force-killed after the grace period; detached processes may survive
+```
+
+`compose stop`, `compose down`, and the recreate of a changed replica in
+`compose create`, `compose up`, and `compose scale` write `stopped` records.
+`compose restart` and the removal of a surplus replica write none, so their
+progress output does not mark a forced kill. A forced kill does not fail the
+verb. [cmdman-events(1)](./cmdman-events.1.md) describes the events that record
+it in every case.
 
 `compose create` and `compose restart` write one result line per outcome to
 standard output after their progress output. The other verbs write only
