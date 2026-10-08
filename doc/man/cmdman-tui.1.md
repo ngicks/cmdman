@@ -85,7 +85,8 @@ it in any terminal or pane. Each widget is its own subcommand.
   `compose down <project>? y/n` on the hint line first, `y` goes ahead and any
   other key takes the question back, and what the teardown did — `stopped N,
   removed M`, plus `force-killed K` when K of those stops had to end their
-  command with `SIGKILL` — is reported there when it ends; a `D` that got
+  command with `SIGKILL`, plus `unreleased U` when the releases of U resources
+  failed — is reported there when it ends; a `D` that got
   through every command takes the project's windows down too, on the same terms
   as `d`.
   The widget also stands where the active project stands: each time that mark

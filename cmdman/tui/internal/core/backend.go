@@ -153,16 +153,22 @@ type ServiceScaleInfo struct {
 // command that was already exited counts as stopped — the phases report what
 // they completed, not state transitions they caused.
 //
-// The counts are of the commands the teardown got through, so they stay
+// Stopped and Removed count the commands the teardown got through, so they stay
 // meaningful next to a non-nil error: a teardown that failed on one command
 // still tore the others down, and the widget has both halves to report.
 //
 // ForceKilled counts the stopped commands whose stop ran out its grace period
 // and resorted to SIGKILL.
+//
+// Unreleased counts the resources whose release failed, whatever on_error the
+// release ran under. Only a failure under on_error fail fails the teardown, but
+// a resource that on_error continue or ignore let pass is still left behind
+// for the user to clean up.
 type DownSummary struct {
 	Stopped     int
 	Removed     int
 	ForceKilled int
+	Unreleased  int
 }
 
 // Backend abstracts the cmdman/compose services the TUI talks to. It exists so

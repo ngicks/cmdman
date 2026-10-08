@@ -543,6 +543,30 @@ The record that ends a run carries `exitCode` when the hook exited, and
 replica itself. Down could not decode the hooks stored on the replica and tore
 the replica down without them. Its `error` holds the decoding error.
 
+`compose down` writes an `unreleased` record for each resource whose release
+failed, after the rest of its progress output. It writes one whatever `on_error`
+the release ran under, and writes none for a resource whose release worked on
+the retry. The record sets `command` to the replica the resource is held for
+and sets no `hook`, `lifecycle`, `exec`, or `scaleIndex`. It carries these
+fields:
+
+- `resource`: the resource key.
+- `value`: the stored value of the resource. The field is left out when the
+  value is empty.
+- `error`: the error of the last run of the release.
+- `retried`: `true` when down ran the release a second time and the retry
+  failed too. The field is left out otherwise.
+
+In `tty` mode each unreleased resource gets a line of its own:
+
+```text
+! <replica>: resource <key> (<value>) not released: <error>
+```
+
+The `on_error` of the release decides whether down fails.
+[cmdman-compose-down(1)](./cmdman-compose-down.1.md) describes the releases
+down runs and the retry.
+
 A `stopped` record of a replica sets `forceKilled` to `true` when the stop ran
 out the grace period and ended the replica with `SIGKILL`. In `tty` mode a
 warning line follows the replica's `Stopped` line:

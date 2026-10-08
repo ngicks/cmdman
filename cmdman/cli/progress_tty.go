@@ -97,6 +97,14 @@ func (r *ttyReporter) Report(ev compose.Event) {
 	case len(steps) == 0:
 		r.order = append(r.order, name)
 		r.lines[name] = []progressEntry{entry}
+	case ev.Hook != "" && ev.Phase == compose.PhaseHookRunning &&
+		steps[len(steps)-1].phase.Failed():
+		// A run of a hook reports nothing after its end, so a hook-running after
+		// a failure is a later run of the same hook, such as the retry of a
+		// failed release. Its outcome is no idempotent report that could mask
+		// the failure, so it opens a step of its own as it would after a
+		// success. A release that still fails has an unreleased line of its own.
+		r.lines[name] = append(steps, entry)
 	case steps[len(steps)-1].phase.Failed():
 		// A failure is sticky: once a step has failed during this operation, keep
 		// that failure (its kind and detail) as the command's terminal outcome

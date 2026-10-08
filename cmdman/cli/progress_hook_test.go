@@ -201,6 +201,55 @@ func TestTTYReporterKeepsHookStepsOnTheHookLine(t *testing.T) {
 	}
 }
 
+func TestTTYReporterShowsALaterRunAfterAFailedRun(t *testing.T) {
+	var buf bytes.Buffer
+	r := newTTYReporter(&buf)
+
+	release := func(phase compose.Phase) compose.Event {
+		ev := hookEvent(phase)
+		ev.Lifecycle = compose.LifecycleStopPre
+		ev.Exec = "abc-proj-web-2.hook.scratch.stop_pre"
+		return ev
+	}
+	failed := release(compose.PhaseHookFailed)
+	failed.Err = errors.New("release resource scratch: exited with code 3")
+	succeeded := release(compose.PhaseHookSucceeded)
+	exit := 0
+	succeeded.ExitCode = &exit
+	r.Report(release(compose.PhaseHookRunning))
+	r.Report(failed)
+	// The retry of the release runs the same hook event again and works.
+	r.Report(release(compose.PhaseHookRunning))
+	r.Report(succeeded)
+
+	r.mu.Lock()
+	hook := r.lines["web-2 hook scratch.stop_pre"]
+	inProgress := r.hasInProgress()
+	r.mu.Unlock()
+	if len(hook) != 2 || hook[0].phase != compose.PhaseHookFailed ||
+		hook[1].phase != compose.PhaseHookSucceeded {
+		t.Fatalf("want the failed run and the run that worked on the hook line: %+v", hook)
+	}
+	if inProgress {
+		t.Fatal("a later run that ended should leave no line in progress")
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	rows := splitNonEmptyLines(lastFrame(buf.String()))
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows (one per run), got %d:\n%q", len(rows), rows)
+	}
+	if !strings.Contains(rows[0], "Hook-failed") ||
+		!strings.Contains(rows[0], "exited with code 3") {
+		t.Errorf("the first row should keep the failure: %q", rows[0])
+	}
+	if !strings.Contains(rows[1], "Hook-succeeded") || !strings.Contains(rows[1], "(exit 0)") {
+		t.Errorf("the second row should show the run that worked: %q", rows[1])
+	}
+}
+
 func TestJSONReporterEmitsHookIgnored(t *testing.T) {
 	var buf bytes.Buffer
 	r := newJSONReporter(&buf, "down")
