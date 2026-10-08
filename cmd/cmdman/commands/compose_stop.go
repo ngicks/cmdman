@@ -45,6 +45,10 @@ func runComposeStop(
 	if err != nil {
 		return err
 	}
+	parallel, err := composeParallelOption(cmd, cf)
+	if err != nil {
+		return err
+	}
 
 	selection, err := compose.LoadOrProject(cf.normalizeOpts())
 	if err != nil {
@@ -63,7 +67,7 @@ func runComposeStop(
 	}
 	defer prog.Close()
 
-	result, err := compose.NewService(svc, compose.WithReporter(prog)).Stop(
+	result, err := compose.NewService(svc, compose.WithReporter(prog), parallel).Stop(
 		cmd.Context(), selection, compose.StopOption{
 			Targets: composeTargets(commandNames, scale),
 			Timeout: timeout,

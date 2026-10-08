@@ -30,6 +30,22 @@ lifecycle operations can reconstruct dependency order without loading the file.
 A different compose file cannot silently take ownership of the same
 `(workdir, project)` pair. Use a different project name to resolve a collision.
 
+## Options
+
+- `--parallel N`: stop at most N replicas at once in `stop`, `down`, and
+  `restart`. `-1` removes the limit. The default is 4. A replica holds its slot
+  from its `stop_pre` hook through its `stop_post` hook. The limit counts the
+  stops of one invocation. Several invocations may run at once. Each of them
+  stops up to N replicas. `0` and values below `-1` fail the invocation before
+  any replica stops. Every compose subcommand accepts the flag. Only `stop`,
+  `down`, and `restart` read it.
+
+## Environment
+
+- `CMDMAN_COMPOSE_PARALLEL_LIMIT`: the limit that applies when `--parallel` is
+  not given. It takes the same values as `--parallel`. An explicit `--parallel`
+  overrides it.
+
 ## Compose File
 
 The compose file format is documented in
@@ -83,6 +99,7 @@ Dependency edges control start and stop ordering. Start includes recursive
 dependencies of named commands and observes `after.condition`. Stop/down of a
 named command includes recursive dependents and uses reverse dependency order.
 Independent work runs concurrently and failures are aggregated where possible.
+`--parallel` bounds how many replicas stop at once.
 
 ## Commands
 

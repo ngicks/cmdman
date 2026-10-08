@@ -57,6 +57,9 @@ type Service struct {
 	// shows (V9). nil is the "no service behind the frame verbs" value; see
 	// [WithFrameSvc] for who sets it and what a def costs when nobody did.
 	frameSvc mux.FrameSvc
+	// parallelLimit bounds how many replicas one stop, down or restart stops at
+	// a time. Below 1 is unbounded (see [WithParallelLimit]).
+	parallelLimit int
 }
 
 // NewService constructs a compose.Service from an existing cmdman.Service.

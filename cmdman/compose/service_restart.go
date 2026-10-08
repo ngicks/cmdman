@@ -45,7 +45,8 @@ type RestartOutcome struct {
 // per replica it restarted.
 //
 // When Spec is loaded:
-//   - Stop phase: reverse DAG order (dependents before dependencies), concurrent within each layer.
+//   - Stop phase: reverse DAG order (dependents before dependencies), concurrent within each layer
+//     up to the parallel limit of s ([WithParallelLimit]).
 //   - Start phase: forward DAG order (matching up), concurrent within each layer.
 //   - Orphans (project-labeled commands absent from YAML) are skipped with a warning,
 //     consistent with create/up convergence semantics.
@@ -85,7 +86,7 @@ func (s *Service) Restart(
 		return &RestartResult{}, nil
 	}
 
-	td := &teardown{timeout: opts.Timeout}
+	td := s.newTeardown(false, opts.Timeout)
 	if selection.Spec != nil {
 		return s.restartWithSpec(ctx, selection, entries, targets, hooksFromSpec, td)
 	}
@@ -258,11 +259,12 @@ func stopLayerRestartConcurrent(
 }
 
 // restartStop stops the replica e for a restart. A live replica stops inside
-// the stop hooks stored on it, as td says for force and timeout. Any other
-// replica counts as stopped already: cmdman cannot stop one that never started,
-// which has no monitor, and one that ended has nothing left to stop. startable
-// reports whether the restart of e goes on to its start. A failed stop hook
-// ends the restart of e. A failed stop alone leaves the start to be tried.
+// the stop hooks stored on it, as td says for force and timeout, holding a stop
+// permit of td throughout. Any other replica counts as stopped already: cmdman
+// cannot stop one that never started, which has no monitor, and one that ended
+// has nothing left to stop. startable reports whether the restart of e goes on
+// to its start. A failed stop hook ends the restart of e. A failed stop alone
+// leaves the start to be tried, and so does a failed wait for the permit.
 func (s *Service) restartStop(
 	ctx context.Context,
 	td *teardown,
@@ -271,6 +273,11 @@ func (s *Service) restartStop(
 	if e.State != model.EventTypeRunning && e.State != model.EventTypeStarting {
 		return true, nil
 	}
+	release, err := td.acquireStop(ctx)
+	if err != nil {
+		return true, err
+	}
+	defer release()
 	hookFailed, _, err := s.stopReplica(ctx, e, td.force, td.timeout)
 	return !hookFailed, err
 }

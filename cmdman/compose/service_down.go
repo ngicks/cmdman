@@ -60,8 +60,9 @@ type ReleaseOutcome struct {
 // Down stops and then removes project-labeled commands.
 //
 // Stop phase: same ordering as Stop (reverse-dependency up walk). Every live
-// replica stops inside the stop hooks stored on it. Remove phase: fully
-// concurrent after all stops complete. Every replica is removed inside the
+// replica stops inside the stop hooks stored on it, at most the parallel limit
+// of s ([WithParallelLimit]) of them at once, orphans included. Remove phase:
+// fully concurrent after all stops complete. Every replica is removed inside the
 // remove hooks stored on it, and the exec commands its failed hooks left for
 // inspection are removed with it.
 //
@@ -147,7 +148,7 @@ func (s *Service) Down(
 	}
 
 	result := &DownResult{}
-	td := &teardown{force: opts.Force, timeout: opts.Timeout}
+	td := s.newTeardown(opts.Force, opts.Timeout)
 	selected := targets.filter(allEntries)
 	if len(selected) > 0 {
 		var removeTargets []cmdmanEntry

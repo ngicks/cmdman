@@ -21,6 +21,11 @@ forward dependency order; work within each layer is concurrent. Orphans are
 skipped. When no compose file is loaded, dependency order is reconstructed from
 stored compose labels.
 
+The stop phase stops at most `--parallel` replicas at once. The default is 4.
+The limit counts the stops of one invocation. Several invocations may run at
+once. Each of them stops up to the limit. The limit does not apply to the
+start phase.
+
 The operation reports outcomes per replica. It writes its progress output
 first and then one result line per replica it restarted. A replica of a scaled
 command is labeled `<command>-<index>`, and the replica of an unscaled command
@@ -54,6 +59,9 @@ Uses the compose selection flags documented in
   as `1m30s`. The value must be positive. When omitted, each replica waits its
   stored `stop_grace_period`, or 10 seconds when the command declares none. A
   rejected value restarts no replica and runs no hook.
+- `--parallel N`: stop at most N replicas at once, or every replica at once
+  with `-1`. `CMDMAN_COMPOSE_PARALLEL_LIMIT` sets the limit when the flag is not
+  given. See [cmdman-compose(1)](./cmdman-compose.1.md#options).
 
 ## See Also
 

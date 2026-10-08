@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/semaphore"
+
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/go-common/contextkey"
@@ -287,6 +289,25 @@ func (s *Service) stopReplica(
 	return s.stopWithHooks(ctx, r, hooks, e.ID, timeout)
 }
 
+// WithParallelLimit bounds the replica stops of one compose stop, down or
+// restart to n at a time. Each such operation keeps its own count, so two
+// operations running at once may stop up to 2n replicas together. A limit below
+// 1 stops every replica at once, as a Service built without the option does.
+// Starts are not bounded.
+func WithParallelLimit(n int) ServiceOption {
+	return func(s *Service) { s.parallelLimit = n }
+}
+
+// newTeardown returns the teardown of one compose stop, down or restart, with
+// stop permits of its own sized to the parallel limit of s.
+func (s *Service) newTeardown(force bool, timeout *time.Duration) *teardown {
+	td := &teardown{force: force, timeout: timeout}
+	if s.parallelLimit > 0 {
+		td.stops = semaphore.NewWeighted(int64(s.parallelLimit))
+	}
+	return td
+}
+
 // teardown is what the replicas one compose stop, down or restart stops share.
 // It is safe for concurrent use.
 type teardown struct {
@@ -296,6 +317,9 @@ type teardown struct {
 	// timeout is how long every stop waits before SIGKILL. Nil waits each
 	// replica's stored stop timeout.
 	timeout *time.Duration
+	// stops holds a permit for each replica stop that may run at once. Nil
+	// leaves the stops unbounded.
+	stops *semaphore.Weighted
 
 	mu sync.Mutex
 	// kept maps the ID of every replica a failed stop hook keeps from being
@@ -305,6 +329,20 @@ type teardown struct {
 	stopped map[string]bool
 	// removed holds the name of every replica t removed.
 	removed map[string]bool
+}
+
+// acquireStop waits for a stop permit of t and returns the func that gives it
+// back. A stop holds its permit from its stop_pre through its stop_post and
+// waits on no other permit meanwhile, so the permits cannot deadlock. A ctx
+// that ends during the wait fails it with the ctx error.
+func (t *teardown) acquireStop(ctx context.Context) (release func(), err error) {
+	if t.stops == nil {
+		return func() {}, nil
+	}
+	if err := t.stops.Acquire(ctx, 1); err != nil {
+		return nil, fmt.Errorf("wait for a stop slot: %w", err)
+	}
+	return func() { t.stops.Release(1) }, nil
 }
 
 // keptBy returns the stop hook failure that keeps the replica id, or nil.
@@ -349,15 +387,22 @@ func (t *teardown) releaseLeft(h resourceHolder) bool {
 }
 
 // teardownStop stops the live replica e for t inside the stop hooks stored on
-// it. A failed stop hook keeps e from the removal that follows in a down; a
-// failed stop alone does not, as down removes such a replica by force.
-// forceKilled reports as [Service.stopWithHooks] does. It is read off the stop
-// itself, ahead of any removal that would take the replica's state with it.
+// it, holding a stop permit of t throughout. A failed stop hook keeps e from the
+// removal that follows in a down; a failed stop alone does not, as down removes
+// such a replica by force. A wait for the permit that fails counts as a failed
+// stop, and e runs no stop hook. forceKilled reports as [Service.stopWithHooks]
+// does. It is read off the stop itself, ahead of any removal that would take
+// the replica's state with it.
 func (s *Service) teardownStop(
 	ctx context.Context,
 	t *teardown,
 	e cmdmanEntry,
 ) (forceKilled bool, err error) {
+	release, err := t.acquireStop(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer release()
 	t.markStopped(e.Name)
 	hookFailed, forceKilled, err := s.stopReplica(ctx, e, t.force, t.timeout)
 	if hookFailed {

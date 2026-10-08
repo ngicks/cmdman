@@ -45,6 +45,10 @@ func runComposeRestart(
 	if err != nil {
 		return err
 	}
+	parallel, err := composeParallelOption(cmd, cf)
+	if err != nil {
+		return err
+	}
 
 	selection, err := compose.LoadOrProject(cf.normalizeOpts())
 	if err != nil {
@@ -63,7 +67,7 @@ func runComposeRestart(
 	}
 	defer prog.Close()
 
-	result, err := compose.NewService(svc, compose.WithReporter(prog)).Restart(
+	result, err := compose.NewService(svc, compose.WithReporter(prog), parallel).Restart(
 		cmd.Context(), selection, compose.RestartOption{
 			Targets: composeTargets(commandNames, scale),
 			Timeout: timeout,

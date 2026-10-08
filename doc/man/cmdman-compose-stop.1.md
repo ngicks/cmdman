@@ -23,6 +23,10 @@ stopped. Orphans are not part of the declared graph and are not stopped by this
 operation. When no compose file is loaded, dependency order is reconstructed
 from stored compose labels.
 
+Stop stops at most `--parallel` replicas at once. The default is 4. The limit
+counts the stops of one invocation. Several invocations may run at once. Each
+of them stops up to the limit.
+
 Failures are aggregated rather than cancelling the remaining stops. cmdman
 reports a command it could not stop as an error and exits non-zero with the
 summary `error: <n> compose stop operation(s) failed`.
@@ -63,6 +67,9 @@ Uses the compose selection flags documented in
   as `1m30s`. The value must be positive. When omitted, each replica waits its
   stored `stop_grace_period`, or 10 seconds when the command declares none. A
   rejected value stops no replica and runs no hook.
+- `--parallel N`: stop at most N replicas at once, or every replica at once
+  with `-1`. `CMDMAN_COMPOSE_PARALLEL_LIMIT` sets the limit when the flag is not
+  given. See [cmdman-compose(1)](./cmdman-compose.1.md#options).
 
 ## See Also
 

@@ -54,6 +54,10 @@ func runComposeDown(
 	if err != nil {
 		return err
 	}
+	parallel, err := composeParallelOption(cmd, cf)
+	if err != nil {
+		return err
+	}
 
 	selection, err := compose.LoadOrProject(cf.normalizeOpts())
 	if err != nil {
@@ -72,7 +76,7 @@ func runComposeDown(
 	}
 	defer prog.Close()
 
-	result, err := compose.NewService(svc, compose.WithReporter(prog)).Down(
+	result, err := compose.NewService(svc, compose.WithReporter(prog), parallel).Down(
 		cmd.Context(), selection, compose.DownOption{
 			Targets: compose.TargetsOf(commandNames...),
 			Force:   force,

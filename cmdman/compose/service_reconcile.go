@@ -281,10 +281,12 @@ func (s *Service) reconcileStop(
 }
 
 // stopAction stops the replicas a vertex covers, each inside its own stop
-// hooks and all at once. Only a replica with a live monitor (starting/running)
-// is stopped; created/exited/failed are already terminal and a stop on them
-// would only return monitor-connect errors, so they are no-ops. The action
-// fails with the first failure among the replicas.
+// hooks and all at once as far as the stop permits of td allow. The permits are
+// shared by every vertex of the walk, so reconcileWalkLimit bounds the commands
+// acting at once and td bounds their replica stops. Only a replica with a live
+// monitor (starting/running) is stopped; created/exited/failed are already
+// terminal and a stop on them would only return monitor-connect errors, so they
+// are no-ops. The action fails with the first failure among the replicas.
 func (s *Service) stopAction(
 	ctx context.Context,
 	v *graphVertex,

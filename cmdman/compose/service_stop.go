@@ -53,7 +53,8 @@ type StopOutcome struct {
 //
 // Each live replica stops inside the stop hooks stored on it: stop_pre, the
 // stop, then stop_post. A stop_pre that fails under on_error fail leaves its
-// replica running, and either failing hook fails the command's outcome.
+// replica running, and either failing hook fails the command's outcome. At most
+// the parallel limit of s ([WithParallelLimit]) of these stops run at once.
 //
 // An empty resolved target set is not an error: the caller should emit a
 // structured-log event and return nil.
@@ -90,7 +91,7 @@ func (s *Service) Stop(
 	}
 
 	var stops []StopOutcome
-	td := &teardown{timeout: opts.Timeout}
+	td := s.newTeardown(false, opts.Timeout)
 	if selection.Spec != nil {
 		stops, err = s.reconcileStop(ctx, *selection.Spec, targets, td)
 		if err != nil {
@@ -115,8 +116,9 @@ func (s *Service) Stop(
 	return &StopResult{Stops: stops}, nil
 }
 
-// stopAllConcurrent stops all entries concurrently, each inside the stop hooks
-// stored on it as td says, and returns outcomes.
+// stopAllConcurrent stops all entries concurrently, as far as the stop permits
+// of td allow, each inside the stop hooks stored on it as td says, and returns
+// outcomes.
 func stopAllConcurrent(
 	ctx context.Context,
 	s *Service,
