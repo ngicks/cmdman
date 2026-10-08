@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -104,7 +105,8 @@ func (quietReporter) Close() error         { return nil }
 // result (exit code / error). A hook event also names the hook run it belongs
 // to, and a hook-output event carries one line of the hook's output. A stopped
 // event says whether the stop ran out the grace period and ended the command
-// with SIGKILL.
+// with SIGKILL. An unreleased event names the resource left unreleased, its
+// value, and whether its release was retried.
 type progressLine struct {
 	Op          string `json:"op"`
 	Command     string `json:"command"`
@@ -119,6 +121,9 @@ type progressLine struct {
 	Exec        string `json:"exec,omitzero"`
 	Stream      string `json:"stream,omitzero"`
 	Line        string `json:"line,omitzero"`
+	Resource    string `json:"resource,omitzero"`
+	Value       string `json:"value,omitzero"`
+	Retried     bool   `json:"retried,omitzero"`
 }
 
 // jsonReporter writes one JSON object per event, newline-delimited (JSONL).
@@ -146,6 +151,9 @@ func (r *jsonReporter) Report(ev compose.Event) {
 		Exec:        ev.Exec,
 		Stream:      string(ev.Stream),
 		Line:        ev.Line,
+		Resource:    ev.Resource,
+		Value:       ev.Value,
+		Retried:     ev.Retried,
 	}
 	if ev.Err != nil {
 		line.Error = ev.Err.Error()
@@ -217,21 +225,40 @@ func StopResultErr(stops []compose.StopOutcome) error {
 }
 
 // DownResultErr returns a combined error when any stop, remove or release
-// failed.
+// failed, and counts each failure once. A release whose failure is only a
+// warning, which on_error continue or ignore made of it, does not count: the
+// progress reporter has shown it.
+//
+// A failed stop hook shows up in up to three outcomes. It fails the stop, keeps
+// the replica from its removal, and fails the release it ran. Only the stop
+// counts it. A removal kept after a failed stop hook does not count. A failed
+// release of a replica whose stop or removal failed does not count either. Such
+// a release ran in the hooks of the replica, and its failure failed that stop
+// or removal. Every outcome that failed still leaves the error non-nil.
 func DownResultErr(result *compose.DownResult) error {
 	var errs []error
+	failed := map[string]bool{}
 	for _, s := range result.Stops {
 		if s.Err != nil {
 			errs = append(errs, s.Err)
+			failed[s.Command] = true
 		}
 	}
+	// A stop outcome may name a whole command rather than the replica, so a
+	// kept removal is not matched to its own stop. Any failed stop stands in
+	// for it, and without one the kept removal counts itself.
+	stopFailed := len(errs) > 0
 	for _, r := range result.Removes {
-		if r.Err != nil {
+		if r.Err == nil {
+			continue
+		}
+		failed[r.Command] = true
+		if !stopFailed || !errors.Is(r.Err, compose.ErrReplicaKept) {
 			errs = append(errs, r.Err)
 		}
 	}
 	for _, r := range result.Releases {
-		if r.Err != nil {
+		if r.Err != nil && (r.Command == "" || !failed[r.Command]) {
 			errs = append(errs, r.Err)
 		}
 	}

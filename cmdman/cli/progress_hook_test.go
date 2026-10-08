@@ -201,6 +201,55 @@ func TestTTYReporterKeepsHookStepsOnTheHookLine(t *testing.T) {
 	}
 }
 
+func TestTTYReporterShowsALaterRunAfterAFailedRun(t *testing.T) {
+	var buf bytes.Buffer
+	r := newTTYReporter(&buf)
+
+	release := func(phase compose.Phase) compose.Event {
+		ev := hookEvent(phase)
+		ev.Lifecycle = compose.LifecycleStopPre
+		ev.Exec = "abc-proj-web-2.hook.scratch.stop_pre"
+		return ev
+	}
+	failed := release(compose.PhaseHookFailed)
+	failed.Err = errors.New("release resource scratch: exited with code 3")
+	succeeded := release(compose.PhaseHookSucceeded)
+	exit := 0
+	succeeded.ExitCode = &exit
+	r.Report(release(compose.PhaseHookRunning))
+	r.Report(failed)
+	// The retry of the release runs the same hook event again and works.
+	r.Report(release(compose.PhaseHookRunning))
+	r.Report(succeeded)
+
+	r.mu.Lock()
+	hook := r.lines["web-2 hook scratch.stop_pre"]
+	inProgress := r.hasInProgress()
+	r.mu.Unlock()
+	if len(hook) != 2 || hook[0].phase != compose.PhaseHookFailed ||
+		hook[1].phase != compose.PhaseHookSucceeded {
+		t.Fatalf("want the failed run and the run that worked on the hook line: %+v", hook)
+	}
+	if inProgress {
+		t.Fatal("a later run that ended should leave no line in progress")
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	rows := splitNonEmptyLines(lastFrame(buf.String()))
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows (one per run), got %d:\n%q", len(rows), rows)
+	}
+	if !strings.Contains(rows[0], "Hook-failed") ||
+		!strings.Contains(rows[0], "exited with code 3") {
+		t.Errorf("the first row should keep the failure: %q", rows[0])
+	}
+	if !strings.Contains(rows[1], "Hook-succeeded") || !strings.Contains(rows[1], "(exit 0)") {
+		t.Errorf("the second row should show the run that worked: %q", rows[1])
+	}
+}
+
 func TestJSONReporterEmitsHookIgnored(t *testing.T) {
 	var buf bytes.Buffer
 	r := newJSONReporter(&buf, "down")
@@ -222,6 +271,90 @@ func TestJSONReporterEmitsHookIgnored(t *testing.T) {
 	}
 }
 
+// unreleasedEvent reports resource key of web-2, valued value, as unreleased.
+func unreleasedEvent(key, value, msg string) compose.Event {
+	return compose.Event{
+		Command:  "web-2",
+		Phase:    compose.PhaseUnreleased,
+		Err:      errors.New(msg),
+		Resource: key,
+		Value:    value,
+	}
+}
+
+func TestJSONReporterEmitsUnreleased(t *testing.T) {
+	var buf bytes.Buffer
+	r := newJSONReporter(&buf, "down")
+
+	retried := unreleasedEvent("net", "net-1", "network is in use")
+	retried.Retried = true
+	r.Report(unreleasedEvent("port", "port-2", "port is in use"))
+	r.Report(retried)
+	r.Report(compose.Event{Command: "web-2", Phase: compose.PhaseRemoved})
+
+	lines := splitNonEmptyLines(buf.String())
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 JSONL lines, got %d:\n%s", len(lines), buf.String())
+	}
+	var port, net progressLine
+	if err := json.Unmarshal([]byte(lines[0]), &port); err != nil {
+		t.Fatalf("invalid JSON line %q: %v", lines[0], err)
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &net); err != nil {
+		t.Fatalf("invalid JSON line %q: %v", lines[1], err)
+	}
+	if port.Op != "down" || port.Command != "web-2" || port.Phase != "unreleased" ||
+		!port.Terminal || port.Resource != "port" || port.Value != "port-2" ||
+		port.Error != "port is in use" || port.Retried {
+		t.Errorf("unreleased line wrong: %+v", port)
+	}
+	if !net.Retried || net.Resource != "net" {
+		t.Errorf("retried unreleased line wrong: %+v", net)
+	}
+	for _, field := range []string{`"resource"`, `"value"`, `"retried"`} {
+		if strings.Contains(lines[2], field) {
+			t.Errorf("a replica event should omit %s: %s", field, lines[2])
+		}
+	}
+}
+
+func TestTTYReporterGivesEachUnreleasedResourceALine(t *testing.T) {
+	var buf bytes.Buffer
+	r := newTTYReporter(&buf)
+
+	removeFailed := compose.Event{
+		Command: "web-2",
+		Phase:   compose.PhaseError,
+		Err:     errors.New("remove failed"),
+	}
+	r.Report(compose.Event{Command: "web-2", Phase: compose.PhaseRemoving})
+	r.Report(removeFailed)
+	r.Report(unreleasedEvent("port", "port-2", "port is in use\nsecond line"))
+	r.Report(unreleasedEvent("net", "net-1", "network is in use"))
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	final := lastFrame(buf.String())
+	rows := splitNonEmptyLines(final)
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 rows (web-2 and one per resource), got %d:\n%q", len(rows), final)
+	}
+	// The marker may be wrapped in color codes; the text after it is plain.
+	for i, want := range []string{
+		" web-2: resource port (port-2) not released: port is in use",
+		" web-2: resource net (net-1) not released: network is in use",
+	} {
+		row := rows[i+1]
+		if !strings.Contains(row, "!") || !strings.HasSuffix(row, want) {
+			t.Errorf("row %d = %q, want the ! marker and %q", i+1, row, want)
+		}
+	}
+	if strings.Contains(final, "second line") {
+		t.Errorf("an unreleased line should show the first line of the error only:\n%q", final)
+	}
+}
+
 func TestProgressMarkerHookPhases(t *testing.T) {
 	cases := map[compose.Phase]string{
 		compose.PhaseHookSucceeded: "✔",
@@ -229,6 +362,7 @@ func TestProgressMarkerHookPhases(t *testing.T) {
 		compose.PhaseHookWarning:   "!",
 		compose.PhaseHookIgnored:   "-",
 		compose.PhaseHookRunning:   spinnerFrames[0],
+		compose.PhaseUnreleased:    "!",
 	}
 	for phase, want := range cases {
 		if got := progressMarker(phase, 0); !strings.Contains(got, want) {

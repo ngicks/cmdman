@@ -26,6 +26,9 @@ type progressEvent struct {
 	ExitCode    *int   `json:"exitCode"`
 	Error       string `json:"error"`
 	ForceKilled bool   `json:"forceKilled"`
+	Resource    string `json:"resource"`
+	Value       string `json:"value"`
+	Retried     bool   `json:"retried"`
 }
 
 // parseProgress parses the JSONL state trace from a compose lifecycle command's

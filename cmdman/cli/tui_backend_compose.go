@@ -361,9 +361,11 @@ func removeProjectWindows(
 	}
 }
 
-// downSummary counts what a teardown got through: the outcomes carrying no
-// error. Counting the failed ones too would report a command as removed in the
-// same breath as the failure to remove it.
+// downSummary counts what a teardown got through: the stop and remove outcomes
+// carrying no error. Counting the failed ones too would report a command as
+// removed in the same breath as the failure to remove it. It also counts the
+// releases that failed, as a warning or as an error, each of which left its
+// resource unreleased.
 func downSummary(result *compose.DownResult) tui.DownSummary {
 	var summary tui.DownSummary
 	for _, s := range result.Stops {
@@ -377,6 +379,13 @@ func downSummary(result *compose.DownResult) tui.DownSummary {
 	for _, r := range result.Removes {
 		if r.Err == nil {
 			summary.Removed++
+		}
+	}
+	for _, r := range result.Releases {
+		// An outcome without a holder is a failure to list the holders, not a
+		// resource left unreleased.
+		if r.Holder != "" && (r.Err != nil || r.Warning != nil) {
+			summary.Unreleased++
 		}
 	}
 	return summary

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -419,6 +420,85 @@ func TestResultErrHelpers(t *testing.T) {
 	}
 	if err := DownResultErr(released); err == nil {
 		t.Errorf("down with a failed release should return an error")
+	}
+	warned := &compose.DownResult{
+		Releases: []compose.ReleaseOutcome{{Holder: "web.res.scratch", Warning: boom}},
+	}
+	if err := DownResultErr(warned); err != nil {
+		t.Errorf("a release that failed with only a warning should not fail the down, got %v", err)
+	}
+}
+
+func TestDownResultErrCountsEachFailureOnce(t *testing.T) {
+	boom := errors.New("boom")
+	kept := fmt.Errorf("remove command: %w: %w", compose.ErrReplicaKept, boom)
+	cases := map[string]struct {
+		result compose.DownResult
+		want   string
+	}{
+		"failed stop_post release": {
+			result: compose.DownResult{
+				Stops:   []compose.StopOutcome{{Command: "web", Err: boom}},
+				Removes: []compose.RemoveOutcome{{Command: "web", Err: kept}},
+				Releases: []compose.ReleaseOutcome{
+					{Holder: "web.res.port", Command: "web", Err: boom},
+				},
+			},
+			want: "1 compose down operation(s) failed",
+		},
+		"failed stop_post release of one of two replicas": {
+			result: compose.DownResult{
+				Stops: []compose.StopOutcome{{Command: "web", Err: boom}},
+				Removes: []compose.RemoveOutcome{
+					{Command: "web-1", Err: kept},
+					{Command: "web-2"},
+				},
+				Releases: []compose.ReleaseOutcome{
+					{Holder: "web-1.res.port", Command: "web-1", Err: boom},
+				},
+			},
+			want: "1 compose down operation(s) failed",
+		},
+		"failed remove_post release": {
+			result: compose.DownResult{
+				Stops:   []compose.StopOutcome{{Command: "web"}},
+				Removes: []compose.RemoveOutcome{{Command: "web", Err: boom}},
+				Releases: []compose.ReleaseOutcome{
+					{Holder: "web.res.scratch", Command: "web", Err: boom},
+				},
+			},
+			want: "1 compose down operation(s) failed",
+		},
+		"failed stored release beside a failed stop": {
+			result: compose.DownResult{
+				Stops: []compose.StopOutcome{{Command: "web", Err: boom}},
+				Releases: []compose.ReleaseOutcome{
+					{Holder: "db.res.volume", Command: "db", Err: boom},
+				},
+			},
+			want: "2 compose down operation(s) failed",
+		},
+		"holders not listed beside a failed removal": {
+			result: compose.DownResult{
+				Removes:  []compose.RemoveOutcome{{Command: "web", Err: boom}},
+				Releases: []compose.ReleaseOutcome{{Err: boom}},
+			},
+			want: "2 compose down operation(s) failed",
+		},
+		"kept removal without a failed stop": {
+			result: compose.DownResult{
+				Removes: []compose.RemoveOutcome{{Command: "web", Err: kept}},
+			},
+			want: "1 compose down operation(s) failed",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := DownResultErr(&tc.result)
+			if err == nil || err.Error() != tc.want {
+				t.Errorf("DownResultErr = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 

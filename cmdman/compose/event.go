@@ -68,6 +68,15 @@ const (
 	PhaseHookWarning   Phase = "hook-warning"
 	PhaseHookIgnored   Phase = "hook-ignored"
 	PhaseHookOutput    Phase = "hook-output"
+
+	// Terminal (end of down). PhaseUnreleased reports one resource whose
+	// release failed and that is still not released when down ends, whatever
+	// on_error the release ran under. [Event.Command] is the replica the
+	// resource is held for, and [Event.Resource], [Event.Value],
+	// [Event.Retried] and [Event.Err] say which resource and why. It fails the
+	// down only when the release ran under on_error fail, which the hook-failed
+	// event of the release already reports.
+	PhaseUnreleased Phase = "unreleased"
 )
 
 // Terminal reports whether p is a terminal phase (a result rather than work in
@@ -117,6 +126,13 @@ type Event struct {
 	// Stream and Line carry one line of the hook's output on PhaseHookOutput.
 	Stream logdriver.Stream
 	Line   string
+
+	// Resource and Value are the key and the stored value of the resource a
+	// PhaseUnreleased event reports. Retried reports that down ran its release
+	// again after the first failure.
+	Resource string
+	Value    string
+	Retried  bool
 }
 
 // Reporter receives lifecycle progress events for a single compose operation.

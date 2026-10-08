@@ -69,6 +69,21 @@ replica's `Stopped` line:
 
 A forced kill does not fail the down.
 
+A `stop_pre` or `stop_post` release can fail because its replica has not fully
+gone down yet. Down therefore runs each release that failed in the stop hooks
+once more. The retry comes after every stop and before any removal. It runs
+only when the replica has verifiably stopped: its state is `exited`, or
+`failed` with the end of its run recorded by its monitor. A replica whose
+monitor died does not count as stopped, and neither does a replica that still
+runs or a replica that is gone. Such a replica may still use the resource, so
+its release does not run again. The retry runs from the stored value as the
+first run read it. A release whose first run found no stored value, or failed
+to look it up or to read all of it, does not run again. A release that works on
+the retry drops the value, and down reports no failure for it. A release that
+fails again reports the failure of the retry. The retry runs no other hook. A
+replica that a failed stop hook keeps stays kept, and down still exits
+non-zero.
+
 With no command names, down then releases the resources that removed replicas
 left behind. Down runs the release event stored with the value of these
 resources:
@@ -80,18 +95,30 @@ resources:
 
 Down runs these releases after the remove hooks of every replica. Each release
 runs in the directory and environment stored with the value, with
-`CMDMAN_COMPOSE_RESOURCE_KEY` and `CMDMAN_COMPOSE_RESOURCE_VALUE` set. The
-`on_error` of the release applies:
+`CMDMAN_COMPOSE_RESOURCE_KEY` and `CMDMAN_COMPOSE_RESOURCE_VALUE` set.
+
+A release that worked drops the value. A `remove_post` release and each of
+these stored releases run after the retry, and down runs each of them at most
+once. Three kinds of failed release wait for the next down: a release that
+still fails after its retry, a `stop_pre` or `stop_post` release that down did
+not retry, and a `remove_pre` or `remove_post` release. A failed release under
+`on_error: ignore` has already dropped the value and leaves nothing for the
+next down. A value that has no release event, such as one stored by
+`compose resource set` alone, stays. These releases need no compose file, so
+`cmdman compose -p NAME down` retries the releases of a project whose file is
+gone.
+
+Down lists every resource whose release failed as unreleased, whatever
+`on_error` the release ran under. A resource whose release worked on the retry
+is not listed. A release that failed again on its retry reports the error of
+the retry. Each unreleased resource gets a record of its own in the progress
+output, with its key, its value, and the error. See
+[Progress Output](./cmdman-compose.5.md#progress-output). The `on_error` of the
+release decides the exit status and what happens to the value:
 
 - `fail`: a failed release keeps the value, and down exits non-zero.
 - `continue`: a failed release keeps the value with a warning.
 - `ignore`: the value is dropped whether the release worked or not.
-
-A release that worked drops the value. Down runs each release at most once.
-The next down retries a release that failed in the hooks of a replica. A value
-that has no release event, such as one stored by `compose resource set` alone,
-stays. These releases need no compose file, so `cmdman compose -p NAME down`
-retries the releases of a project whose file is gone.
 
 When down cannot list the resources of the project, it reports the failure as a
 failed release and exits non-zero. Down still reports the stop and remove
@@ -106,8 +133,9 @@ Uses the compose selection flags documented in
 ## Options
 
 - `--progress auto|tty|json|quiet`: progress output mode. `auto` chooses TTY
-  output on terminals and JSON otherwise. Hook runs have records of their own;
-  see [Progress Output](./cmdman-compose.5.md#progress-output).
+  output on terminals and JSON otherwise. Hook runs and unreleased resources
+  have records of their own; see
+  [Progress Output](./cmdman-compose.5.md#progress-output).
 - `--force`: treat every hook that fails under `on_error: fail` as
   `on_error: continue`. Down reports the failure as a warning and stops and
   removes the replica anyway. A replica whose stored hooks down cannot decode

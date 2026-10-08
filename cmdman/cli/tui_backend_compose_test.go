@@ -352,6 +352,24 @@ func TestDownSummaryCountsForcedKills(t *testing.T) {
 	}
 }
 
+// The summary counts every release that failed, as an error or as a warning,
+// and leaves out one that worked.
+func TestDownSummaryCountsUnreleasedResources(t *testing.T) {
+	got := downSummary(&compose.DownResult{
+		Stops:   []compose.StopOutcome{{Command: "a"}},
+		Removes: []compose.RemoveOutcome{{Command: "a"}},
+		Releases: []compose.ReleaseOutcome{
+			{Holder: "a.res.net", Resource: "net", Err: errors.New("network is in use")},
+			{Holder: "a.res.port", Resource: "port", Warning: errors.New("port is in use")},
+			{Holder: "gone.res.dir", Resource: "dir"},
+		},
+	})
+	want := tui.DownSummary{Stopped: 1, Removed: 1, Unreleased: 2}
+	if got != want {
+		t.Errorf("summary = %+v, want %+v", got, want)
+	}
+}
+
 // TestComposeDownKeepsWindowsOnPartialTeardown covers the half-done teardown:
 // a command that would not go away leaves the window something to show, so the
 // window is left alone and the failure is what comes back.

@@ -596,8 +596,14 @@ func TestDownRemovePostFailureKeepsHolderForTheNextDown(t *testing.T) {
 	assert.ErrorContains(t, removeOutcomes(res)["web"], `value "/tmp/web"`)
 	_, execLeft := f.get(release)
 	assert.Assert(t, !execLeft, "the exec commands of a removed replica go with it")
-	assert.Equal(t, len(res.Releases), 0, "a release that failed in this down waits for the next")
-	assert.Equal(t, execCreated(f, release), 1)
+	assert.Equal(t, len(res.Releases), 1, "the failed release is listed: %+v", res.Releases)
+	assert.Equal(t, res.Releases[0].Holder, HolderName(r.Name, "scratch"))
+	assert.Equal(t, res.Releases[0].Command, "web")
+	assert.Equal(t, res.Releases[0].Resource, "scratch")
+	assert.Equal(t, res.Releases[0].Value, "/tmp/web")
+	assert.ErrorContains(t, res.Releases[0].Err, `value "/tmp/web"`)
+	assert.NilError(t, res.Releases[0].Warning)
+	assert.Equal(t, execCreated(f, release), 1, "a failed release waits for the next down")
 	_, replicaLeft := f.get(r.Name)
 	assert.Assert(t, !replicaLeft)
 	value, held := holderValue(t, f, r, "scratch")
@@ -614,7 +620,12 @@ func TestDownRemovePostFailureKeepsHolderForTheNextDown(t *testing.T) {
 	res, err = s.Down(t.Context(), storedSelection(), DownOption{})
 
 	assert.NilError(t, err)
-	assert.DeepEqual(t, res.Releases, []ReleaseOutcome{{Holder: HolderName(r.Name, "scratch")}})
+	assert.DeepEqual(t, res.Releases, []ReleaseOutcome{{
+		Holder:   HolderName(r.Name, "scratch"),
+		Command:  "web",
+		Resource: "scratch",
+		Value:    "/tmp/web",
+	}})
 	got, _ := envValue(releaseEnv, ENV_CMDMAN_COMPOSE_RESOURCE_VALUE)
 	assert.Equal(t, got, "/tmp/web")
 	_, held = holderValue(t, f, r, "scratch")
@@ -736,8 +747,8 @@ func TestDownReleasesStopResourceOfReplicaItDidNotStop(t *testing.T) {
 	}
 }
 
-func TestDownRunsTheReleaseOfAReplicaOnce(t *testing.T) {
-	t.Run("a release the stop ran waits for the next down", func(t *testing.T) {
+func TestDownLeavesFailedReleasesOfAReplicaToTheNextDown(t *testing.T) {
+	t.Run("a release the stop and its retry ran", func(t *testing.T) {
 		f := newFakeCmdman()
 		s := f.service(nil)
 		nc := stepCommand("web", 1, portHook(OnErrorContinue))
@@ -749,8 +760,11 @@ func TestDownRunsTheReleaseOfAReplicaOnce(t *testing.T) {
 
 		assert.NilError(t, err)
 		assert.NilError(t, removeOutcomes(res)["web"])
-		assert.Equal(t, len(res.Releases), 0)
-		assert.Equal(t, execCreated(f, release), 1)
+		assert.Equal(t, len(res.Releases), 1, "the failed release is listed: %+v", res.Releases)
+		assert.NilError(t, res.Releases[0].Err)
+		assert.ErrorContains(t, res.Releases[0].Warning, `value "port-1"`)
+		assert.Assert(t, res.Releases[0].Retried)
+		assert.Equal(t, execCreated(f, release), 2, "the stop ran it, and the retry once more")
 		_, replicaLeft := f.get(r.Name)
 		assert.Assert(t, !replicaLeft)
 		_, held := holderValue(t, f, r, "port")
@@ -933,14 +947,15 @@ func putStrandedHolder(f *fakeCmdman, onError OnError) resourceHolder {
 
 func TestDownRetriesStrandedRelease(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		onError    OnError
-		force      bool
-		exit       int
-		wantErr    string
-		wantHeld   bool
-		wantPhase  Phase
-		wantExecOK bool
+		name        string
+		onError     OnError
+		force       bool
+		exit        int
+		wantErr     string
+		wantWarning bool
+		wantHeld    bool
+		wantPhase   Phase
+		wantExecOK  bool
 	}{
 		{name: "success", exit: 0, wantPhase: PhaseHookSucceeded},
 		{
@@ -952,27 +967,30 @@ func TestDownRetriesStrandedRelease(t *testing.T) {
 			wantExecOK: true,
 		},
 		{
-			name:       "continue keeps the holder with a warning",
-			onError:    OnErrorContinue,
-			exit:       1,
-			wantHeld:   true,
-			wantPhase:  PhaseHookWarning,
-			wantExecOK: true,
+			name:        "continue keeps the holder with a warning",
+			onError:     OnErrorContinue,
+			exit:        1,
+			wantWarning: true,
+			wantHeld:    true,
+			wantPhase:   PhaseHookWarning,
+			wantExecOK:  true,
 		},
 		{
-			name:       "ignore drops the holder",
-			onError:    OnErrorIgnore,
-			exit:       1,
-			wantPhase:  PhaseHookIgnored,
-			wantExecOK: true,
+			name:        "ignore drops the holder",
+			onError:     OnErrorIgnore,
+			exit:        1,
+			wantWarning: true,
+			wantPhase:   PhaseHookIgnored,
+			wantExecOK:  true,
 		},
 		{
-			name:       "force turns fail into continue",
-			force:      true,
-			exit:       1,
-			wantHeld:   true,
-			wantPhase:  PhaseHookWarning,
-			wantExecOK: true,
+			name:        "force turns fail into continue",
+			force:       true,
+			exit:        1,
+			wantWarning: true,
+			wantHeld:    true,
+			wantPhase:   PhaseHookWarning,
+			wantExecOK:  true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -992,12 +1010,30 @@ func TestDownRetriesStrandedRelease(t *testing.T) {
 				t.Context(), storedSelection(), DownOption{Force: tc.force})
 
 			assert.NilError(t, err)
-			assert.Equal(t, len(res.Releases), 1)
-			assert.Equal(t, res.Releases[0].Holder, h.name())
+			assert.Equal(t, len(res.Releases), 1, "a resource appears once: %+v", res.Releases)
+			o := res.Releases[0]
+			assert.Equal(t, o.Holder, h.name())
+			assert.Equal(t, o.Resource, "scratch")
+			assert.Equal(t, o.Value, "/tmp/scratch")
 			if tc.wantErr == "" {
-				assert.NilError(t, res.Releases[0].Err)
+				assert.NilError(t, o.Err)
 			} else {
-				assert.ErrorContains(t, res.Releases[0].Err, tc.wantErr)
+				assert.ErrorContains(t, o.Err, tc.wantErr)
+			}
+			if tc.wantWarning {
+				assert.ErrorContains(t, o.Warning, `value "/tmp/scratch"`)
+			} else {
+				assert.NilError(t, o.Warning)
+			}
+			unreleased := unreleasedEvents(rec)
+			if tc.exit == 0 {
+				assert.Equal(t, len(unreleased), 0)
+			} else {
+				assert.Equal(t, len(unreleased), 1, "one event per resource: %+v", unreleased)
+				assert.Equal(t, unreleased[0].Command, "web-1")
+				assert.Equal(t, unreleased[0].Resource, "scratch")
+				assert.Equal(t, unreleased[0].Value, "/tmp/scratch")
+				assert.ErrorContains(t, unreleased[0].Err, "exited with code 1")
 			}
 			assert.Equal(t, got.Dir, "/wd/web")
 			assert.DeepEqual(t, got.Argv, []string{"rm", "-rf"})
