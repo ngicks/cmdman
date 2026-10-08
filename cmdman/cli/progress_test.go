@@ -420,6 +420,12 @@ func TestResultErrHelpers(t *testing.T) {
 	if err := DownResultErr(released); err == nil {
 		t.Errorf("down with a failed release should return an error")
 	}
+	warned := &compose.DownResult{
+		Releases: []compose.ReleaseOutcome{{Holder: "web.res.scratch", Warning: boom}},
+	}
+	if err := DownResultErr(warned); err != nil {
+		t.Errorf("a release that failed with only a warning should not fail the down, got %v", err)
+	}
 }
 
 func splitNonEmptyLines(s string) []string {

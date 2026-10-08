@@ -681,3 +681,112 @@ commands:
 		})
 	}
 }
+
+// unreleasedYAML declares web with two resources acquired at start_pre whose
+// stop_post release fails: dropped under on_error ignore, exiting 4, then kept
+// under keptOnError, exiting 3.
+func unreleasedYAML(project, keptOnError string) string {
+	return fmt.Sprintf(`name: %s
+commands:
+  web:
+    args: [sleep, "300"]
+    hooks:
+      - name: dropped
+        resource: dropped
+        start_pre: [echo, dropped-value]
+        stop_post:
+          args: [sh, -c, "exit 4"]
+          on_error: ignore
+      - name: kept
+        resource: kept
+        start_pre: [echo, kept-value]
+        stop_post:
+          args: [sh, -c, "exit 3"]
+          on_error: %s
+`, project, keptOnError)
+}
+
+func TestComposeHooksDownReportsUnreleasedResources(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		keptOnError string
+		progress    string
+		wantFail    bool
+	}{
+		{keptOnError: "continue", progress: "json"},
+		{keptOnError: "continue", progress: "tty"},
+		{keptOnError: "fail", progress: "json", wantFail: true},
+	} {
+		t.Run(tc.keptOnError+"-"+tc.progress, func(t *testing.T) {
+			t.Parallel()
+			ctx := testContext(t)
+			env := newTestEnv(t)
+			wd := composeWorkdir(t)
+			project := "tc-hooks-unreleased-" + tc.keptOnError + "-" + tc.progress
+			composePath := writeComposeFile(t, wd, unreleasedYAML(project, tc.keptOnError))
+			t.Cleanup(func() {
+				ctx := context.Background()
+				cleanupProject(ctx, env, wd, project)
+				cleanupIntermediates(ctx, env, wd, project)
+			})
+			compose := func(args ...string) *Cmd {
+				return env.Cmd(append(
+					[]string{"compose", "--workdir", wd, "-f", composePath}, args...)...)
+			}
+
+			compose("up").Run(ctx, t)
+			env.waitForState(ctx, replicaID(ctx, t, env, wd, project, "web", 1), "running",
+				defaultTimeout)
+
+			down := compose("down", "--progress", tc.progress)
+			var stdout string
+			if tc.wantFail {
+				res := down.ExpectFail(ctx, t, "compose down operation(s) failed")
+				if status := exitStatusOf(t, res.Err); status != 1 {
+					t.Errorf("down exited %d, want 1", status)
+				}
+				stdout = res.Stdout
+			} else {
+				stdout = down.Run(ctx, t)
+			}
+
+			want := map[string]struct{ value, err string }{
+				"dropped": {"dropped-value", "exited with code 4"},
+				"kept":    {"kept-value", "exited with code 3"},
+			}
+			if tc.progress == "tty" {
+				for key, w := range want {
+					line := fmt.Sprintf("web: resource %s (%s) not released: ", key, w.value)
+					if !slices.ContainsFunc(strings.Split(stdout, "\n"), func(l string) bool {
+						return strings.Contains(l, line) && strings.Contains(l, w.err)
+					}) {
+						t.Errorf("no unreleased line %q with %q:\n%s", line, w.err, stdout)
+					}
+				}
+			} else {
+				var unreleased []progressEvent
+				for _, ev := range parseProgress(t, stdout) {
+					if ev.Phase == "unreleased" {
+						unreleased = append(unreleased, ev)
+					}
+				}
+				if len(unreleased) != len(want) {
+					t.Errorf("want one unreleased record per resource, got %d:\n%s",
+						len(unreleased), stdout)
+				}
+				for _, ev := range unreleased {
+					w, ok := want[ev.Resource]
+					if !ok || ev.Command != "web" || ev.Value != w.value || ev.Retried ||
+						!ev.Terminal || !strings.Contains(ev.Error, w.err) {
+						t.Errorf("unreleased record wrong: %+v\n%s", ev, stdout)
+					}
+				}
+			}
+
+			holders := resourceHolders(ctx, env, wd, project)
+			if len(holders) != 1 || !strings.HasSuffix(holders[0]["Name"].(string), ".res.kept") {
+				t.Errorf("only the holder of kept should be left, got %v", holders)
+			}
+		})
+	}
+}

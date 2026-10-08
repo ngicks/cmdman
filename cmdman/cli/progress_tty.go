@@ -60,10 +60,15 @@ func (r *ttyReporter) Report(ev compose.Event) {
 		return
 	}
 	// Each run of a hook event gets a line of its own, so its steps never
-	// refine or settle the steps of the replica it runs for.
+	// refine or settle the steps of the replica it runs for. So does each
+	// unreleased resource, which a failure on the replica's line would
+	// otherwise swallow.
 	name := ev.Command
-	if ev.Hook != "" {
+	switch {
+	case ev.Hook != "":
 		name = fmt.Sprintf("%s hook %s.%s", ev.Command, ev.Hook, ev.Lifecycle)
+	case ev.Phase == compose.PhaseUnreleased:
+		name = fmt.Sprintf("%s resource %s", ev.Command, ev.Resource)
 	}
 	steps := r.lines[name]
 	if ev.Phase == compose.PhaseHookOutput {
@@ -80,6 +85,13 @@ func (r *ttyReporter) Report(ev compose.Event) {
 		err:         errString(ev.Err),
 		exit:        ev.ExitCode,
 		forceKilled: ev.ForceKilled,
+	}
+	if ev.Phase == compose.PhaseUnreleased {
+		entry.unreleased = unreleasedResource{
+			owner: ev.Command,
+			key:   ev.Resource,
+			value: ev.Value,
+		}
 	}
 	switch {
 	case len(steps) == 0:
@@ -203,6 +215,14 @@ type progressEntry struct {
 	// forceKilled marks a stop that ran out the grace period and ended the
 	// command with SIGKILL.
 	forceKilled bool
+	// unreleased names the resource of a PhaseUnreleased line.
+	unreleased unreleasedResource
+}
+
+// unreleasedResource is a resource whose release failed: the replica it is
+// held for, its key and its value.
+type unreleasedResource struct {
+	owner, key, value string
 }
 
 // maxOutputRunes bounds the hook output shown on a progress line. A line that
@@ -229,6 +249,9 @@ var (
 // per line. It leaves the name to the status line above it for the same
 // reason.
 func renderProgressRows(name string, e progressEntry, frame int) []string {
+	if e.phase == compose.PhaseUnreleased {
+		return []string{renderUnreleasedLine(e)}
+	}
 	rows := []string{renderProgressLine(name, e, frame)}
 	if e.forceKilled {
 		rows = append(rows, "  "+styleWarn.Render("! "+forceKilledNote))
@@ -260,6 +283,13 @@ func renderProgressLine(name string, e progressEntry, frame int) string {
 	return b.String()
 }
 
+// renderUnreleasedLine renders the line of a resource whose release failed.
+func renderUnreleasedLine(e progressEntry) string {
+	u := e.unreleased
+	return fmt.Sprintf("%s %s: resource %s (%s) not released: %s",
+		progressMarker(e.phase, 0), u.owner, u.key, u.value, firstLine(e.err))
+}
+
 // outputSnippet returns s fit for one progress line: control characters, which
 // would move the cursor or restyle the line, dropped and the rest cut to
 // maxOutputRunes.
@@ -283,7 +313,7 @@ func outputSnippet(s string) string {
 //	running      ●  green                running
 //	completed    ✔  green                exited/stopped/removed
 //	skipped      ⊘  yellow               skipped
-//	warning      !  yellow               hook-warning
+//	warning      !  yellow               hook-warning/unreleased
 //	ignored      -  dim                  hook-ignored
 //	failed       ✘  red                  error/failed/hook-failed
 func progressMarker(p compose.Phase, frame int) string {
@@ -294,7 +324,7 @@ func progressMarker(p compose.Phase, frame int) string {
 		return styleErr.Render("✘")
 	case p == compose.PhaseSkipped:
 		return styleWarn.Render("⊘")
-	case p == compose.PhaseHookWarning:
+	case p == compose.PhaseHookWarning, p == compose.PhaseUnreleased:
 		return styleWarn.Render("!")
 	case p == compose.PhaseHookIgnored:
 		return styleDim.Render("-")

@@ -38,7 +38,9 @@ type DownResult struct {
 	Removes []RemoveOutcome
 	// Releases are the stored releases a whole-project down ran for the
 	// resources whose replica was already gone, and for the stop releases of
-	// the replicas it removed without stopping them.
+	// the replicas it removed without stopping them, followed by every other
+	// release the down ran that failed, whatever its on_error. A resource
+	// appears once.
 	Releases []ReleaseOutcome
 }
 
@@ -48,13 +50,26 @@ type RemoveOutcome struct {
 	Err     error
 }
 
-// ReleaseOutcome records the result of running the stored release of one
-// resource whose replica is gone.
+// ReleaseOutcome records the result of a release of one resource that down
+// ran: the stored release of a resource whose replica is gone, or a release
+// the hooks of a replica ran and that failed. A failed release leaves the
+// resource unreleased: Err or Warning carries the failure.
 type ReleaseOutcome struct {
 	// Holder is the cmdman command name of the resource holder. It is empty
 	// when the holders could not be listed: Err is that failure.
 	Holder string
-	Err    error
+	// Resource and Value are the key and the stored value of the resource.
+	Resource string
+	Value    string
+	// Err is a failure that fails the down: the release ran under on_error
+	// fail or was cancelled, and the holder keeps the value for the next down.
+	Err error
+	// Warning is a failure that does not fail the down: the release ran under
+	// on_error continue, and the holder keeps the value for the next down, or
+	// under on_error ignore, and the holder is gone.
+	Warning error
+	// Retried reports that down ran the release again after it failed.
+	Retried bool
 }
 
 // Down stops and then removes project-labeled commands.
@@ -99,6 +114,10 @@ type ReleaseOutcome struct {
 // returns no error for it, so the outcomes of the replicas already torn down
 // still reach the caller.
 //
+// Every release Down runs and that fails becomes a ReleaseOutcome, under
+// whatever on_error it ran, and is reported as a [PhaseUnreleased] event once
+// the teardown is over. Only one that ran under on_error fail sets Err.
+//
 // Per resolved-decision 21, failures are aggregated; every command is attempted.
 func (s *Service) Down(
 	ctx context.Context,
@@ -117,6 +136,8 @@ func (s *Service) Down(
 			)
 		}
 	}
+	rec := &releaseRecorder{}
+	ctx = withReleaseRecorder(ctx, rec)
 
 	allEntries, err := s.svc.List(ctx, cmdman.ListRequest{
 		AllStates: true,
@@ -182,6 +203,7 @@ func (s *Service) Down(
 	if len(targets) == 0 {
 		result.Releases = s.releaseStranded(ctx, selection, allEntries, td)
 	}
+	result.Releases = s.addUnreleased(result.Releases, rec.failures())
 
 	if len(selected) == 0 && len(result.Releases) == 0 {
 		contextkey.ValueSlogLoggerDefault(ctx).Warn("compose down: no commands found for project",
@@ -246,7 +268,7 @@ func (s *Service) releaseStranded(
 	var eg errgroup.Group
 	for i, h := range stranded {
 		eg.Go(func() error {
-			_, err := s.runRelease(ctx, h, td.force)
+			warning, err := s.runRelease(ctx, h, td.force)
 			if err != nil {
 				logger.WarnContext(ctx, "compose down: release failed",
 					"project", h.Ref.Project,
@@ -254,11 +276,69 @@ func (s *Service) releaseStranded(
 					"error", err,
 				)
 			}
-			outcomes[i] = ReleaseOutcome{Holder: h.name(), Err: err}
+			outcomes[i] = ReleaseOutcome{
+				Holder:   h.name(),
+				Resource: h.Ref.Key,
+				Value:    h.Value,
+				Err:      err,
+				Warning:  warning,
+			}
 			return nil
 		})
 	}
 	_ = eg.Wait()
+	return outcomes
+}
+
+// addUnreleased adds the releases in failed to outcomes and reports each as a
+// [PhaseUnreleased] event. A holder that already has an outcome keeps it, and
+// the record fills in its failure, so a resource appears once. A failure that
+// fails the down becomes Err, any other Warning.
+func (s *Service) addUnreleased(
+	outcomes []ReleaseOutcome,
+	failed []failedRelease,
+) []ReleaseOutcome {
+	at := make(map[string]int, len(outcomes)+len(failed))
+	for i, o := range outcomes {
+		if o.Holder != "" {
+			at[o.Holder] = i
+		}
+	}
+	// A holder recorded more than once is reported as its last record has it.
+	display := make(map[string]string, len(failed))
+	var order []string
+	for _, f := range failed {
+		name := f.holder.name()
+		i, ok := at[name]
+		if !ok {
+			i = len(outcomes)
+			at[name] = i
+			outcomes = append(outcomes, ReleaseOutcome{Holder: name})
+		}
+		o := &outcomes[i]
+		o.Resource, o.Value = f.holder.Ref.Key, f.holder.Value
+		o.Err, o.Warning = nil, nil
+		if f.fails() {
+			o.Err = f.err
+		} else {
+			o.Warning = f.err
+		}
+		if _, ok := display[name]; !ok {
+			order = append(order, name)
+		}
+		display[name] = f.display
+	}
+	for _, name := range order {
+		o := outcomes[at[name]]
+		s.reportEvent(Event{
+			Command:  display[name],
+			Phase:    PhaseUnreleased,
+			Err:      cmp.Or(o.Err, o.Warning),
+			Resource: o.Resource,
+			Value:    o.Value,
+			Retried:  o.Retried,
+		})
+	}
 	return outcomes
 }
 

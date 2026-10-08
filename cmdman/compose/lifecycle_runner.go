@@ -153,6 +153,9 @@ func (s *Service) runRelease(
 }
 
 // runHookAs is [Service.runHook] for the run described by run.
+//
+// The failure of a release event goes to the release recorder ctx carries,
+// whatever on_error says, along with the holder as it was before the run.
 func (s *Service) runHookAs(
 	ctx context.Context,
 	run hookRun,
@@ -161,12 +164,37 @@ func (s *Service) runHookAs(
 ) (warning, err error) {
 	r := run.replica
 	ev := run.event
-	exit, err := s.execHook(ctx, run, h, exec)
+	exit, held, err := s.execHook(ctx, run, h, exec)
 	if err == nil {
 		s.reportHook(run, PhaseHookSucceeded, nil, exit)
 		return nil, nil
 	}
 	err = fmt.Errorf("hook %q %s of %s: %w", h.Name, ev, r.Display, err)
+	if h.Resource != "" && !ev.acquires() {
+		onError := exec.OnError.resolved()
+		if ctx.Err() != nil {
+			onError = OnErrorFail
+		}
+		if held == nil {
+			held = &resourceHolder{
+				Ref:   r.resourceRef(h.Resource),
+				Owner: r.Name,
+				Release: &resourceRelease{
+					Event:   ev,
+					Args:    slices.Clone(exec.Args),
+					OnError: exec.OnError.resolved(),
+				},
+				Dir: r.Dir,
+				Env: slices.Clone(run.env),
+			}
+		}
+		releaseRecorderFrom(ctx).record(failedRelease{
+			holder:  *held,
+			display: r.Display,
+			err:     err,
+			onError: onError,
+		})
+	}
 	if ctx.Err() != nil {
 		s.reportHook(run, PhaseHookFailed, err, exit)
 		return nil, err
@@ -201,29 +229,34 @@ func (s *Service) runHookAs(
 // acquired or released. The exec command is removed when everything worked and
 // kept otherwise, so a failure can be read back with cmdman logs and inspect.
 // The failure of a release names the value it was to release, which the
-// holder keeps unless on_error is ignore.
+// holder keeps unless on_error is ignore. held is the holder of the resource h
+// declares as it was before the run, or nil when there is none or it cannot be
+// read.
 func (s *Service) execHook(
 	ctx context.Context,
 	run hookRun,
 	h LifecycleHook,
 	exec LifecycleExec,
-) (*int, error) {
+) (exit *int, held *resourceHolder, err error) {
 	r := run.replica
 	var value string
 	if h.Resource != "" {
 		holder, err := s.findHolder(ctx, r.resourceRef(h.Resource))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if holder != nil && holder.ConfigJSON != nil {
 			value = holder.ConfigJSON.Labels[LabelResourceValue]
+			if decoded, err := decodeHolder(*holder); err == nil {
+				held = &decoded
+			}
 		}
 	}
-	exit, err := s.execHookValue(ctx, run, h, exec, value)
+	exit, err = s.execHookValue(ctx, run, h, exec, value)
 	if err != nil && h.Resource != "" && !run.event.acquires() {
 		err = fmt.Errorf("release resource %q (value %q): %w", h.Resource, value, err)
 	}
-	return exit, err
+	return exit, held, err
 }
 
 // execHookValue is [Service.execHook] once value, the stored value of the

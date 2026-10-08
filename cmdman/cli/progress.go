@@ -104,7 +104,8 @@ func (quietReporter) Close() error         { return nil }
 // result (exit code / error). A hook event also names the hook run it belongs
 // to, and a hook-output event carries one line of the hook's output. A stopped
 // event says whether the stop ran out the grace period and ended the command
-// with SIGKILL.
+// with SIGKILL. An unreleased event names the resource left unreleased, its
+// value, and whether its release was retried.
 type progressLine struct {
 	Op          string `json:"op"`
 	Command     string `json:"command"`
@@ -119,6 +120,9 @@ type progressLine struct {
 	Exec        string `json:"exec,omitzero"`
 	Stream      string `json:"stream,omitzero"`
 	Line        string `json:"line,omitzero"`
+	Resource    string `json:"resource,omitzero"`
+	Value       string `json:"value,omitzero"`
+	Retried     bool   `json:"retried,omitzero"`
 }
 
 // jsonReporter writes one JSON object per event, newline-delimited (JSONL).
@@ -146,6 +150,9 @@ func (r *jsonReporter) Report(ev compose.Event) {
 		Exec:        ev.Exec,
 		Stream:      string(ev.Stream),
 		Line:        ev.Line,
+		Resource:    ev.Resource,
+		Value:       ev.Value,
+		Retried:     ev.Retried,
 	}
 	if ev.Err != nil {
 		line.Error = ev.Err.Error()
@@ -217,7 +224,8 @@ func StopResultErr(stops []compose.StopOutcome) error {
 }
 
 // DownResultErr returns a combined error when any stop, remove or release
-// failed.
+// failed. A release whose failure is only a warning, which on_error continue
+// or ignore made of it, does not count: the progress reporter has shown it.
 func DownResultErr(result *compose.DownResult) error {
 	var errs []error
 	for _, s := range result.Stops {
