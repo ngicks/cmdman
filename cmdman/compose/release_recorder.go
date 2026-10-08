@@ -11,7 +11,8 @@ import (
 type failedRelease struct {
 	// holder is the holder of the resource as it was before the run, enough to
 	// run the release again. A resource that had no holder gets one built from
-	// the run, with an empty value.
+	// the run, with an empty value, and a holder that stores no release gets
+	// the release of the run.
 	holder resourceHolder
 	// display is the name the progress events of the run gave the replica.
 	display string
@@ -20,6 +21,9 @@ type failedRelease struct {
 	// turned into continue by a forced teardown, or fail for a run that was
 	// cancelled, as a cancellation fails the run whatever on_error says.
 	onError OnError
+	// retried reports that the release ran once more after this failure and
+	// failed again. err and onError are then those of that last run.
+	retried bool
 }
 
 // fails reports whether the failure fails the operation that ran it.
@@ -66,8 +70,26 @@ func (r *releaseRecorder) failures() []failedRelease {
 	r.mu.Lock()
 	out := slices.Clone(r.failed)
 	r.mu.Unlock()
-	slices.SortStableFunc(out, func(a, b failedRelease) int {
+	sortFailures(out)
+	return out
+}
+
+// take returns what r recorded, ordered as [releaseRecorder.failures] orders
+// it, and forgets it.
+func (r *releaseRecorder) take() []failedRelease {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	out := r.failed
+	r.failed = nil
+	r.mu.Unlock()
+	sortFailures(out)
+	return out
+}
+
+func sortFailures(failed []failedRelease) {
+	slices.SortStableFunc(failed, func(a, b failedRelease) int {
 		return cmp.Compare(a.holder.name(), b.holder.name())
 	})
-	return out
 }

@@ -64,6 +64,9 @@ type hookRun struct {
 	exec    string
 	// env is the environment of the exec command, less the resource value.
 	env []string
+	// held is the holder of the resource the hook declares, as the caller read
+	// it. Nil has the run look the holder up.
+	held *resourceHolder
 }
 
 func (s *Service) reportHook(run hookRun, phase Phase, err error, exit *int) {
@@ -117,11 +120,13 @@ func (s *Service) runHook(
 	}, h, exec)
 }
 
-// runRelease runs the release stored in holder h, whose replica is gone, as
-// the release hook would have run: in the directory and environment h keeps
-// for it, with the resource key and value added. A failure is handled as
-// [Service.runHook] handles it under the on_error h stores, except that force
-// turns on_error fail into continue.
+// runRelease runs the release stored in holder h, whose replica is gone or has
+// stopped, as the release hook would have run: in the directory and
+// environment h keeps for it, with the resource key and the value h keeps
+// added. The value comes from h rather than from the stored holder, which a
+// release that failed under on_error ignore has already dropped. A failure is
+// handled as [Service.runHook] handles it under the on_error h stores, except
+// that force turns on_error fail into continue.
 func (s *Service) runRelease(
 	ctx context.Context,
 	h resourceHolder,
@@ -149,6 +154,7 @@ func (s *Service) runRelease(
 		event:   rel.Event,
 		exec:    ExecCommandName(r.Name, hook.Name, rel.Event),
 		env:     append(slices.Clone(h.Env), ENV_CMDMAN_COMPOSE_RESOURCE_KEY+"="+h.Ref.Key),
+		held:    &h,
 	}, hook, hook.Events[rel.Event])
 }
 
@@ -175,21 +181,26 @@ func (s *Service) runHookAs(
 		if ctx.Err() != nil {
 			onError = OnErrorFail
 		}
-		if held == nil {
-			held = &resourceHolder{
-				Ref:   r.resourceRef(h.Resource),
-				Owner: r.Name,
-				Release: &resourceRelease{
-					Event:   ev,
-					Args:    slices.Clone(exec.Args),
-					OnError: exec.OnError.resolved(),
-				},
-				Dir: r.Dir,
-				Env: slices.Clone(run.env),
+		record := resourceHolder{
+			Ref:   r.resourceRef(h.Resource),
+			Owner: r.Name,
+			Dir:   r.Dir,
+			Env:   slices.Clone(run.env),
+		}
+		if held != nil {
+			record = *held
+		}
+		if record.Release == nil {
+			// A holder stored by compose resource set alone has no release, and
+			// the record has to be enough to run this one again.
+			record.Release = &resourceRelease{
+				Event:   ev,
+				Args:    slices.Clone(exec.Args),
+				OnError: exec.OnError.resolved(),
 			}
 		}
 		releaseRecorderFrom(ctx).record(failedRelease{
-			holder:  *held,
+			holder:  record,
 			display: r.Display,
 			err:     err,
 			onError: onError,
@@ -231,7 +242,7 @@ func (s *Service) runHookAs(
 // The failure of a release names the value it was to release, which the
 // holder keeps unless on_error is ignore. held is the holder of the resource h
 // declares as it was before the run, or nil when there is none or it cannot be
-// read.
+// read. A run that carries the holder takes it and its value from there.
 func (s *Service) execHook(
 	ctx context.Context,
 	run hookRun,
@@ -240,7 +251,12 @@ func (s *Service) execHook(
 ) (exit *int, held *resourceHolder, err error) {
 	r := run.replica
 	var value string
-	if h.Resource != "" {
+	switch {
+	case h.Resource == "":
+	case run.held != nil:
+		held = run.held
+		value = held.Value
+	default:
 		holder, err := s.findHolder(ctx, r.resourceRef(h.Resource))
 		if err != nil {
 			return nil, nil, err

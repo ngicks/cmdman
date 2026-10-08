@@ -52,6 +52,10 @@ type fakeCmdman struct {
 	// stopErr fails the stop of the named command, leaving it as it is, when
 	// it returns non-nil.
 	stopErr func(name string) error
+	// monitorDied reports whether the stop of the named running command finds
+	// its monitor dead. Such a stop succeeds and leaves the command failed as
+	// stale cleanup marks it, with its run still going.
+	monitorDied func(name string) bool
 	// startErr fails the start of the named command, leaving it as it is,
 	// when it returns non-nil.
 	startErr func(name string) error
@@ -325,7 +329,12 @@ func (f *fakeCmdman) stop(_ context.Context, req cmdman.StopRequest) ([]cmdman.S
 			})
 			continue
 		}
-		if c.entry.State == model.EventTypeRunning {
+		switch {
+		case c.entry.State != model.EventTypeRunning:
+		case f.monitorDied != nil && f.monitorDied(c.entry.Name):
+			c.entry.State = model.EventTypeFailed
+			c.entry.StateJSON = &model.CommandState{Error: monitorDiedError}
+		default:
 			finishFake(c, new(143))
 		}
 		out = append(out, cmdman.StopResult{ID: c.entry.ID})

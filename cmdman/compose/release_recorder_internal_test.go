@@ -30,32 +30,45 @@ func unreleasedEvents(rec *commandPhaseReporter) []Event {
 
 func TestDownReportsEveryFailedRelease(t *testing.T) {
 	for _, tc := range []struct {
+		name     string
 		onError  OnError
+		force    bool
 		fails    bool
 		wantHeld bool
 		wantKept bool
 	}{
-		{onError: OnErrorFail, fails: true, wantHeld: true, wantKept: true},
-		{onError: OnErrorContinue, wantHeld: true},
-		{onError: OnErrorIgnore},
+		{name: "fail", onError: OnErrorFail, fails: true, wantHeld: true, wantKept: true},
+		{name: "fail forced", onError: OnErrorFail, force: true, wantHeld: true},
+		{name: "continue", onError: OnErrorContinue, wantHeld: true},
+		{name: "ignore", onError: OnErrorIgnore},
 	} {
-		t.Run(string(tc.onError), func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			f := newFakeCmdman()
 			rec := &commandPhaseReporter{}
 			s := f.service(rec)
 			nc := stepCommand("web", 1, portHook(tc.onError))
 			r := acquirePort(t, f, s, nc, model.EventTypeRunning)
-			failExecNamed(f, ExecCommandName(r.Name, "port", LifecycleStopPost))
+			release := ExecCommandName(r.Name, "port", LifecycleStopPost)
+			// The retry fails with a code of its own, which the outcome reports.
+			exit := 0
+			f.run = func(name string, _ cmdman.CreateRequest) fakeRun {
+				if name != release {
+					return fakeRun{exit: new(0)}
+				}
+				exit++
+				return fakeRun{exit: new(exit)}
+			}
 
-			res, err := s.Down(t.Context(), storedSelection(), DownOption{})
+			res, err := s.Down(t.Context(), storedSelection(), DownOption{Force: tc.force})
 
 			assert.NilError(t, err)
+			assert.Equal(t, execCreated(f, release), 2, "the stopped replica's release ran again")
 			assert.Equal(t, len(res.Releases), 1, "%+v", res.Releases)
 			o := res.Releases[0]
 			assert.Equal(t, o.Holder, HolderName(r.Name, "port"))
 			assert.Equal(t, o.Resource, "port")
 			assert.Equal(t, o.Value, "port-1")
-			assert.Assert(t, !o.Retried)
+			assert.Assert(t, o.Retried)
 			failure := o.Warning
 			if tc.fails {
 				failure = o.Err
@@ -64,7 +77,7 @@ func TestDownReportsEveryFailedRelease(t *testing.T) {
 				assert.NilError(t, o.Err)
 			}
 			assert.ErrorContains(t, failure, `hook "port" stop_post of web`)
-			assert.ErrorContains(t, failure, "exited with code 1")
+			assert.ErrorContains(t, failure, "exited with code 2")
 
 			events := unreleasedEvents(rec)
 			assert.Equal(t, len(events), 1, "%+v", events)
@@ -72,7 +85,7 @@ func TestDownReportsEveryFailedRelease(t *testing.T) {
 			assert.Equal(t, ev.Command, "web")
 			assert.Equal(t, ev.Resource, "port")
 			assert.Equal(t, ev.Value, "port-1")
-			assert.Assert(t, !ev.Retried)
+			assert.Assert(t, ev.Retried)
 			assert.Equal(t, ev.Err, failure)
 			assert.Assert(t, ev.Phase.Terminal())
 			assert.Assert(t, !ev.Phase.Failed())

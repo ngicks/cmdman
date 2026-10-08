@@ -11,6 +11,7 @@ import (
 
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/model"
+	"github.com/ngicks/cmdman/cmdman/monitor"
 	"github.com/ngicks/go-common/contextkey"
 )
 
@@ -39,8 +40,8 @@ type DownResult struct {
 	// Releases are the stored releases a whole-project down ran for the
 	// resources whose replica was already gone, and for the stop releases of
 	// the replicas it removed without stopping them, followed by every other
-	// release the down ran that failed, whatever its on_error. A resource
-	// appears once.
+	// release the down ran that failed and that no retry made work, whatever its
+	// on_error. A resource appears once.
 	Releases []ReleaseOutcome
 }
 
@@ -107,16 +108,31 @@ type ReleaseOutcome struct {
 // such as one whose command had exited on its own: the release stored with
 // each runs as the release hook would have, under the on_error stored with it,
 // and the holder goes once the release succeeds. These run after the remove
-// hooks of every replica. A release that the hooks of a replica ran in this
-// down and that failed waits for the next down. A holder that stores no release stays. This needs
-// no compose
-// file. A failure to list the holders becomes a failed ReleaseOutcome. Down
-// returns no error for it, so the outcomes of the replicas already torn down
-// still reach the caller.
+// hooks of every replica. A holder that stores no release stays. This needs no
+// compose file. A failure to list the holders becomes a failed ReleaseOutcome.
+// Down returns no error for it, so the outcomes of the replicas already torn
+// down still reach the caller.
 //
-// Every release Down runs and that fails becomes a ReleaseOutcome, under
-// whatever on_error it ran, and is reported as a [PhaseUnreleased] event once
-// the teardown is over. Only one that ran under on_error fail sets Err.
+// A stop_pre or stop_post release can fail just because its replica has not
+// fully gone down yet, such as a network rm while the container is still
+// attached. Once every stop has returned, and before any replica is removed,
+// Down therefore runs each release that failed in the stop hooks once more, when
+// the replica it is held for has verifiably stopped: the replica's stored state
+// is exited, or failed with an end its monitor recorded. The release runs from
+// the holder as the failed run found it, and opts.Force applies to it as to
+// every other release. A replica that is created, starting or running, one
+// whose monitor died unexpectedly, and one that is gone may still have its
+// workload running, so its release does not run again. A release that works on
+// the retry drops the holder and leaves no ReleaseOutcome. Nothing else runs
+// again: a replica that a failed stop hook keeps stays kept, and the hooks
+// after the failed one do not run. The remove_post releases and the stored
+// releases above run after that point, and one that fails waits for the next
+// down. No release runs more than twice in one down.
+//
+// Every release Down runs and that fails, unless its retry works, becomes a
+// ReleaseOutcome under the on_error of its last run, and is reported as a
+// [PhaseUnreleased] event once the teardown is over. Only one whose last run
+// was under on_error fail sets Err. Retried marks one that ran twice.
 //
 // Per resolved-decision 21, failures are aggregated; every command is attempted.
 func (s *Service) Down(
@@ -197,6 +213,7 @@ func (s *Service) Down(
 				ctx, s, runningEntries(selected), selection.Project, td)
 			removeTargets = selected
 		}
+		s.retryReleases(ctx, rec, selection, td.force)
 		result.Removes = removeAllConcurrent(ctx, s, removeTargets, selection.Project, td)
 	}
 
@@ -219,10 +236,11 @@ func (s *Service) Down(
 // replica is gone, unless td has run that release. Such a replica is either not
 // among replicas, the project's replicas as Down found them before tearing any
 // down, or one td removed without running the stop release of the resource
-// ([teardown.releaseLeft]). A release td ran and that failed waits for the next
-// down, so no release runs twice in one down. A holder that stores no release
-// is left alone, and so is one that cannot be read. A failure to list the
-// holders is the one outcome returned.
+// ([teardown.releaseLeft]). A release td ran is not run here: its one retry
+// came before the removals ([Service.retryReleases]), and one that still failed
+// waits for the next down. A holder that stores no release is left alone, and
+// so is one that cannot be read. A failure to list the holders is the one
+// outcome returned.
 func (s *Service) releaseStranded(
 	ctx context.Context,
 	selection ProjectSelection,
@@ -290,6 +308,112 @@ func (s *Service) releaseStranded(
 	return outcomes
 }
 
+// retryReleases runs once more every release rec recorded as failed whose
+// replica has verifiably stopped ([verifiedStopped]), as [Service.runRelease]
+// runs it from the holder recorded with the failure, under force. The replicas
+// are those of selection as they are listed now, so Down calls it after every
+// stop has returned. A release whose replica is not listed, or may still run,
+// is not run again: its workload may still use the resource.
+//
+// A release that works now leaves rec. One that fails again goes back to rec
+// with the failure of that run and is marked retried. The runs report to a
+// recorder of their own, so a retry is never retried. A holder recorded more
+// than once runs once, from its last record, which is all that
+// [Service.addUnreleased] reports of it anyway.
+func (s *Service) retryReleases(
+	ctx context.Context,
+	rec *releaseRecorder,
+	selection ProjectSelection,
+	force bool,
+) {
+	var failed []failedRelease
+	for _, f := range rec.take() {
+		if n := len(failed); n > 0 && failed[n-1].holder.name() == f.holder.name() {
+			failed[n-1] = f
+			continue
+		}
+		failed = append(failed, f)
+	}
+	for _, f := range s.retryFailures(ctx, failed, selection, force) {
+		rec.record(f)
+	}
+}
+
+// retryFailures is [Service.retryReleases] for failed, which names each holder
+// once. It returns the failures that are left. Nothing runs when ctx is done or
+// the replicas cannot be listed.
+func (s *Service) retryFailures(
+	ctx context.Context,
+	failed []failedRelease,
+	selection ProjectSelection,
+	force bool,
+) []failedRelease {
+	if len(failed) == 0 || ctx.Err() != nil {
+		return failed
+	}
+	entries, err := s.svc.List(ctx, cmdman.ListRequest{
+		AllStates: true,
+		Labels:    projectLabels(selection.WorkDir, selection.Project),
+	})
+	if err != nil {
+		contextkey.ValueSlogLoggerDefault(ctx).WarnContext(ctx,
+			"compose down: list replicas to retry failed releases",
+			"project", selection.Project, "workdir", selection.WorkDir, "error", err)
+		return failed
+	}
+	stopped := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		stopped[e.Name] = verifiedStopped(e)
+	}
+
+	cleared := make([]bool, len(failed))
+	var eg errgroup.Group
+	for i := range failed {
+		if !stopped[failed[i].holder.Owner] {
+			continue
+		}
+		eg.Go(func() error {
+			again := &releaseRecorder{}
+			_, err := s.runRelease(withReleaseRecorder(ctx, again), failed[i].holder, force)
+			retry := again.failures()
+			switch {
+			case len(retry) > 0:
+				last := retry[len(retry)-1]
+				failed[i].err, failed[i].onError = last.err, last.onError
+				failed[i].retried = true
+			case err == nil:
+				cleared[i] = true
+			default:
+				// The release did not run at all, so the failure stays as it was.
+			}
+			return nil
+		})
+	}
+	_ = eg.Wait()
+	left := failed[:0]
+	for i, f := range failed {
+		if !cleared[i] {
+			left = append(left, f)
+		}
+	}
+	return left
+}
+
+// verifiedStopped reports whether the run of the replica e is over for sure:
+// its state is exited, or failed with an end its monitor recorded. A failure
+// that only records the death of the monitor may have left the run going, and
+// a replica that is created, starting or running has not stopped.
+func verifiedStopped(e cmdmanEntry) bool {
+	switch e.State {
+	case model.EventTypeExited:
+		return true
+	case model.EventTypeFailed:
+		return !monitor.DiedUnexpectedly(e.StateJSON)
+	default:
+		return false
+	}
+}
+
 // addUnreleased adds the releases in failed to outcomes and reports each as a
 // [PhaseUnreleased] event. A holder that already has an outcome keeps it, and
 // the record fills in its failure, so a resource appears once. A failure that
@@ -317,6 +441,7 @@ func (s *Service) addUnreleased(
 		}
 		o := &outcomes[i]
 		o.Resource, o.Value = f.holder.Ref.Key, f.holder.Value
+		o.Retried = f.retried
 		o.Err, o.Warning = nil, nil
 		if f.fails() {
 			o.Err = f.err

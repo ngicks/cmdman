@@ -451,11 +451,13 @@ events in the order they run, with the step between them.
   running replica. It then runs `start_pre`, start, `start_post` for every
   replica. A replica whose stop hook failed is not started.
 - `compose down` runs `stop_pre`, stop, `stop_post` for every starting or
-  running replica. It then runs `remove_pre`, removal, `remove_post` for every
-  replica. After the remove hooks, down runs the stored `stop_pre` or
-  `stop_post` release of every replica it removed without stopping it.
-  [cmdman-compose-down(1)](./cmdman-compose-down.1.md) describes the stored
-  releases it runs.
+  running replica. A `stop_pre` or `stop_post` release that failed runs once
+  more after every stop when its replica has stopped. Down then runs
+  `remove_pre`, removal, `remove_post` for every replica. After the remove
+  hooks, down runs the stored `stop_pre` or `stop_post` release of every
+  replica it removed without stopping it.
+  [cmdman-compose-down(1)](./cmdman-compose-down.1.md) describes the retry and
+  the stored releases it runs.
 - `compose scale` runs the hooks of `compose up` for the commands it names.
 
 A replica that a verb leaves unchanged runs no hooks.

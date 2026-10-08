@@ -69,6 +69,18 @@ replica's `Stopped` line:
 
 A forced kill does not fail the down.
 
+A `stop_pre` or `stop_post` release can fail because its replica has not fully
+gone down yet. Down therefore runs each release that failed in the stop hooks
+once more. The retry comes after every stop and before any removal. It runs
+only when the replica has verifiably stopped: its state is `exited`, or
+`failed` with an end that its monitor recorded. A replica that still runs, a
+replica whose monitor died, and a replica that is gone may still use the
+resource. Their releases do not run again. A release that works on the retry
+drops the value, and down reports no failure for it. A release that fails again
+reports the failure of the retry. The retry runs no other hook. A replica that
+a failed stop hook keeps stays kept, and down still exits non-zero. Down does
+not retry a `remove_post` release. That release runs after the retry.
+
 With no command names, down then releases the resources that removed replicas
 left behind. Down runs the release event stored with the value of these
 resources:
@@ -87,11 +99,12 @@ runs in the directory and environment stored with the value, with
 - `continue`: a failed release keeps the value with a warning.
 - `ignore`: the value is dropped whether the release worked or not.
 
-A release that worked drops the value. Down runs each release at most once.
-The next down retries a release that failed in the hooks of a replica. A value
-that has no release event, such as one stored by `compose resource set` alone,
-stays. These releases need no compose file, so `cmdman compose -p NAME down`
-retries the releases of a project whose file is gone.
+A release that worked drops the value. Down runs each of these releases at most
+once. The next down retries a release that failed in the hooks of a replica. A
+value that has no release event, such as one stored by `compose resource set`
+alone, stays. These releases need no compose file, so
+`cmdman compose -p NAME down` retries the releases of a project whose file is
+gone.
 
 When down cannot list the resources of the project, it reports the failure as a
 failed release and exits non-zero. Down still reports the stop and remove

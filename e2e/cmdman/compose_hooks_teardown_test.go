@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -774,9 +775,10 @@ func TestComposeHooksDownReportsUnreleasedResources(t *testing.T) {
 					t.Errorf("want one unreleased record per resource, got %d:\n%s",
 						len(unreleased), stdout)
 				}
+				// web stopped, so down ran each release once more before it gave up.
 				for _, ev := range unreleased {
 					w, ok := want[ev.Resource]
-					if !ok || ev.Command != "web" || ev.Value != w.value || ev.Retried ||
+					if !ok || ev.Command != "web" || ev.Value != w.value || !ev.Retried ||
 						!ev.Terminal || !strings.Contains(ev.Error, w.err) {
 						t.Errorf("unreleased record wrong: %+v\n%s", ev, stdout)
 					}
@@ -788,5 +790,212 @@ func TestComposeHooksDownReportsUnreleasedResources(t *testing.T) {
 				t.Errorf("only the holder of kept should be left, got %v", holders)
 			}
 		})
+	}
+}
+
+// failFirstRunScript returns a shell script that appends a line to counter on
+// every run, so runCount reads the number of runs, and fails the first one only.
+func failFirstRunScript(counter string) string {
+	return fmt.Sprintf(`echo run >> %[1]s; [ "$$(grep -c . %[1]s)" -ge 2 ]`, shellQuote(counter))
+}
+
+// unreleasedRecords returns the unreleased records of a JSON progress trace.
+func unreleasedRecords(t *testing.T, stdout string) []progressEvent {
+	t.Helper()
+	var out []progressEvent
+	for _, ev := range parseProgress(t, stdout) {
+		if ev.Phase == "unreleased" {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+func TestComposeHooksDownRetriesStopReleaseOfStoppedReplica(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-hooks-stop-release-retry"
+	counter := filepath.Join(wd, "counter.txt")
+	composePath := writeComposeFile(t, wd, fmt.Sprintf(`name: %s
+commands:
+  web:
+    args: [sleep, "300"]
+    hooks:
+      - name: net
+        resource: net
+        start_pre: [echo, net-value]
+        stop_post:
+          args: [sh, -c, %q]
+          on_error: continue
+`, project, failFirstRunScript(counter)))
+	t.Cleanup(func() {
+		ctx := context.Background()
+		cleanupProject(ctx, env, wd, project)
+		cleanupIntermediates(ctx, env, wd, project)
+	})
+	compose := func(args ...string) *Cmd {
+		return env.Cmd(append([]string{"compose", "--workdir", wd, "-f", composePath}, args...)...)
+	}
+
+	compose("up").Run(ctx, t)
+	env.waitForState(ctx, replicaID(ctx, t, env, wd, project, "web", 1), "running",
+		defaultTimeout)
+
+	stdout := compose("down", "--progress", "json").Run(ctx, t)
+
+	if got := runCount(t, counter); got != 2 {
+		t.Errorf("the release ran %d times, want 2", got)
+	}
+	events := hookProgress(t, stdout)
+	for _, phase := range []string{"hook-warning", "hook-succeeded"} {
+		if !hasHookRecord(events, "web", "net", "stop_post", phase) {
+			t.Errorf("no %s record of the release:\n%s", phase, stdout)
+		}
+	}
+	if got := unreleasedRecords(t, stdout); len(got) != 0 {
+		t.Errorf("the retried release should leave nothing unreleased, got %+v", got)
+	}
+	if names := commandNames(ctx, t, env); len(names) != 0 {
+		t.Errorf("down should leave no command, holder or hook command behind: %q", names)
+	}
+}
+
+func TestComposeHooksDownRetryKeepsReplicaOfFailedStopHook(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-hooks-stop-release-retry-kept"
+	counter := filepath.Join(wd, "counter.txt")
+	marker := filepath.Join(wd, "marker.txt")
+	composePath := writeComposeFile(t, wd, fmt.Sprintf(`name: %s
+commands:
+  web:
+    args: [sleep, "300"]
+    hooks:
+      - name: net
+        resource: net
+        start_pre: [echo, net-value]
+        stop_post: [sh, -c, %q]
+      - name: mark
+        stop_post: [sh, -c, %q]
+`, project, failFirstRunScript(counter), "touch "+shellQuote(marker)))
+	t.Cleanup(func() {
+		ctx := context.Background()
+		cleanupProject(ctx, env, wd, project)
+		cleanupIntermediates(ctx, env, wd, project)
+	})
+	compose := func(args ...string) *Cmd {
+		return env.Cmd(append([]string{"compose", "--workdir", wd, "-f", composePath}, args...)...)
+	}
+
+	compose("up").Run(ctx, t)
+	env.waitForState(ctx, replicaID(ctx, t, env, wd, project, "web", 1), "running",
+		defaultTimeout)
+
+	res := compose("down", "--progress", "json").ExpectFail(ctx, t,
+		"compose down operation(s) failed")
+
+	if status := exitStatusOf(t, res.Err); status != 1 {
+		t.Errorf("down exited %d, want 1", status)
+	}
+	if got := runCount(t, counter); got != 2 {
+		t.Errorf("the release ran %d times, want 2", got)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the stop_post after the failed release should not run: %v", err)
+	}
+	hooks := hookProgress(t, res.Stdout)
+	if !hasHookRecord(hooks, "web", "net", "stop_post", "hook-succeeded") {
+		t.Errorf("the retry of the release should succeed:\n%s", res.Stdout)
+	}
+	if slices.ContainsFunc(hooks, func(ev hookProgressEvent) bool { return ev.Hook == "mark" }) {
+		t.Errorf("no record of mark should appear:\n%s", res.Stdout)
+	}
+	events := parseProgress(t, res.Stdout)
+	if !progressReached(events, "web", "skipped") ||
+		!progressErrorWith(events, "kept after a failed stop hook") {
+		t.Errorf("web should be reported kept:\n%s", res.Stdout)
+	}
+	if got := unreleasedRecords(t, res.Stdout); len(got) != 0 {
+		t.Errorf("the retried release should leave nothing unreleased, got %+v", got)
+	}
+	if holders := resourceHolders(ctx, env, wd, project); len(holders) != 0 {
+		t.Errorf("the retried release should remove the holder, got %v", holders)
+	}
+	if st := composeReplicaState(ctx, env, wd, project, "web", 1); st != "exited" {
+		t.Errorf("the replica should be kept stopped, got %q", st)
+	}
+}
+
+func TestComposeHooksDownDoesNotRetryReleaseOfReplicaWhoseMonitorDied(t *testing.T) {
+	t.Parallel()
+	ctx := testContext(t)
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-hooks-stop-release-monitor-died"
+	counter := filepath.Join(wd, "counter.txt")
+	workloadPID := filepath.Join(wd, "workload.pid")
+	monitorPID := filepath.Join(wd, "monitor.pid")
+	// The stop_pre of crash kills the monitor of web, which leaves the workload
+	// running, as a monitor that crashes during a stop does.
+	composePath := writeComposeFile(t, wd, fmt.Sprintf(`name: %s
+commands:
+  web:
+    args: [sh, -c, %q]
+    hooks:
+      - name: crash
+        stop_pre: [sh, -c, %q]
+      - name: net
+        resource: net
+        start_pre: [echo, net-value]
+        stop_post:
+          args: [sh, -c, %q]
+          on_error: continue
+`, project,
+		"echo $$$$ > "+shellQuote(workloadPID)+"; exec sleep 300",
+		"kill -9 $$(cat "+shellQuote(monitorPID)+")",
+		failFirstRunScript(counter)))
+	t.Cleanup(func() {
+		ctx := context.Background()
+		cleanupProject(ctx, env, wd, project)
+		cleanupIntermediates(ctx, env, wd, project)
+	})
+	compose := func(args ...string) *Cmd {
+		return env.Cmd(append([]string{"compose", "--workdir", wd, "-f", composePath}, args...)...)
+	}
+
+	compose("up").Run(ctx, t)
+	id := replicaID(ctx, t, env, wd, project, "web", 1)
+	env.waitForState(ctx, id, "running", defaultTimeout)
+	workload := readPidFile(t, workloadPID)
+	t.Cleanup(func() { killIfAlive(workload) })
+	state, _ := env.inspectJSON(ctx, id)["StateJSON"].(map[string]any)
+	pid, _ := state["monitor_pid"].(float64)
+	if pid <= 0 {
+		t.Fatalf("no monitor pid for web: %v", state)
+	}
+	must(t, os.WriteFile(monitorPID, []byte(strconv.Itoa(int(pid))), 0o644))
+
+	stdout := compose("down", "--progress", "json").Run(ctx, t)
+
+	if !processExists(workload) {
+		t.Fatalf("the workload of web should outlive its monitor")
+	}
+	if got := runCount(t, counter); got != 1 {
+		t.Errorf("the release ran %d times, want 1", got)
+	}
+	unreleased := unreleasedRecords(t, stdout)
+	if len(unreleased) != 1 {
+		t.Fatalf("want one unreleased record, got %+v\n%s", unreleased, stdout)
+	}
+	if ev := unreleased[0]; ev.Command != "web" || ev.Resource != "net" ||
+		ev.Value != "net-value" || ev.Retried || !strings.Contains(ev.Error, "exited with code 1") {
+		t.Errorf("unreleased record wrong: %+v\n%s", ev, stdout)
+	}
+	if holders := resourceHolders(ctx, env, wd, project); len(holders) != 1 {
+		t.Errorf("the holder of net should be kept, got %v", holders)
 	}
 }

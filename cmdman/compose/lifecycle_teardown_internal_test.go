@@ -745,8 +745,8 @@ func TestDownReleasesStopResourceOfReplicaItDidNotStop(t *testing.T) {
 	}
 }
 
-func TestDownRunsTheReleaseOfAReplicaOnce(t *testing.T) {
-	t.Run("a release the stop ran waits for the next down", func(t *testing.T) {
+func TestDownLeavesFailedReleasesOfAReplicaToTheNextDown(t *testing.T) {
+	t.Run("a release the stop and its retry ran", func(t *testing.T) {
 		f := newFakeCmdman()
 		s := f.service(nil)
 		nc := stepCommand("web", 1, portHook(OnErrorContinue))
@@ -761,7 +761,8 @@ func TestDownRunsTheReleaseOfAReplicaOnce(t *testing.T) {
 		assert.Equal(t, len(res.Releases), 1, "the failed release is listed: %+v", res.Releases)
 		assert.NilError(t, res.Releases[0].Err)
 		assert.ErrorContains(t, res.Releases[0].Warning, `value "port-1"`)
-		assert.Equal(t, execCreated(f, release), 1)
+		assert.Assert(t, res.Releases[0].Retried)
+		assert.Equal(t, execCreated(f, release), 2, "the stop ran it, and the retry once more")
 		_, replicaLeft := f.get(r.Name)
 		assert.Assert(t, !replicaLeft)
 		_, held := holderValue(t, f, r, "port")
