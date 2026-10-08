@@ -89,10 +89,15 @@ type ComposeDownMsg struct {
 // whether or not it failed: a teardown that gave up part-way still tore the
 // rest down, and hiding that behind the error would leave the user guessing
 // what is left. They are worded as what the phases covered rather than as what
-// was running, since a command that had already exited counts as stopped.
+// was running, since a command that had already exited counts as stopped. The
+// forced kills are said only when there were any: a stop that resorted to
+// SIGKILL may have left detached processes behind.
 func (msg ComposeDownMsg) Status() string {
 	line := fmt.Sprintf("compose down %s: stopped %d, removed %d",
 		msg.Name, msg.Summary.Stopped, msg.Summary.Removed)
+	if msg.Summary.ForceKilled > 0 {
+		line += fmt.Sprintf(", force-killed %d", msg.Summary.ForceKilled)
+	}
 	if msg.Err != nil {
 		return line + ": " + msg.Err.Error()
 	}

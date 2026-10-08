@@ -146,4 +146,8 @@ type CommandState struct {
 	// Warnings lists run-end anomalies of the latest run that did not stop
 	// the run from ending. Reset on each start.
 	Warnings []string `json:"warnings,omitzero"`
+	// ForceKilled reports that a stop of the latest run ran out its grace
+	// period and the run ended on the SIGKILL that followed. Reset on each
+	// start.
+	ForceKilled bool `json:"force_killed,omitzero"`
 }

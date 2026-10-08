@@ -51,6 +51,19 @@ stop's `SIGKILL`, and reports no count.
 [cmdman-events(1)](./cmdman-events.1.md) describes the `survivors_unreaped`
 attribute.
 
+A command that the `SIGKILL` after the timeout ends counts as force-killed.
+`cmdman stop` writes one line per such command to stderr:
+
+```text
+stop <id>: force-killed after the grace period; detached processes may survive
+```
+
+The line is a warning. The command counts as handled, and the exit status does
+not change. The monitor records the forced kill as a `stopped` event with
+`reason` `timeout`, as `force_killed` on the `exited` event, and in the
+command's state. A stop with `--signal SIGKILL` writes no such line, unless an
+earlier stop of the command is still waiting out its timeout.
+
 The whole process group is targeted, so child processes launched by a shell are
 normally stopped with their parent. A stop request suppresses monitor restart
 policies. Multiple targets are attempted independently; per-target failures are

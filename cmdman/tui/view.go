@@ -48,7 +48,22 @@ var (
 	styleMarkPending  = core.StyleMarkPending
 	styleMarkOK       = core.StyleMarkOK
 	styleMarkErr      = core.StyleMarkErr
+
+	// styleForceKilled is the yellow the compose progress gives a warning.
+	styleForceKilled = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 )
+
+// forceKilledMark follows the exit state on a row whose run a stop
+// force-killed.
+const forceKilledMark = "force-killed"
+
+// showsForceKilled reports whether row c carries forceKilledMark: only a row
+// that shows the exit state of the force-killed run does, not one with an
+// action in flight.
+func showsForceKilled(c core.CommandRow) bool {
+	return c.ForceKilled && c.Pending == "" &&
+		(c.State == model.EventTypeExited || c.State == model.EventTypeFailed)
+}
 
 // statusGlyph returns the single-cell status marker for a command row: spinner
 // while in progress, ◌ created, ✔ exited, ✘ failed — the compose progress
@@ -403,6 +418,15 @@ func (m Model) renderCommandList(title string, width, height int) string {
 					}
 					plain += rowSep + text
 					styled += stylePath.Render(rowSep) + style.Render(text)
+				}
+			}
+			// A run a stop had to SIGKILL may have left detached processes behind,
+			// which is worth a word next to how it ended.
+			if showsForceKilled(c) {
+				room := cw - core.Cells.StringWidth(plain) - core.GlyphWidth(rowSep)
+				if mark := core.ClampCells(forceKilledMark, room); mark != "" {
+					plain += rowSep + mark
+					styled += stylePath.Render(rowSep) + styleForceKilled.Render(mark)
 				}
 			}
 			// Free-floating commands have no project header to carry the workdir, so

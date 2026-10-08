@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ngicks/cmdman/cmdman"
+	"github.com/ngicks/cmdman/cmdman/cli"
 	"github.com/ngicks/cmdman/pkg/hrstr"
 )
 
@@ -66,6 +67,7 @@ func runStop(
 	if err != nil {
 		return err
 	}
+	cli.PrintStopForceKilled(cmd.ErrOrStderr(), results)
 	return reportTargetErrors(cmd.ErrOrStderr(), "stop", ignoreErrors,
 		func(yield func(string, error) bool) {
 			for _, result := range results {

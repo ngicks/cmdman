@@ -34,6 +34,17 @@ that is already stopped runs no hooks. A hook that fails under
 a failed `stop_pre` and stays stopped after a failed `stop_post`. See
 [Lifecycle Hooks](./cmdman-compose.5.md#lifecycle-hooks).
 
+A replica that the `SIGKILL` after the timeout ends counts as force-killed. The
+progress output marks it on the replica's `stopped` record. In `json` mode
+that record sets `forceKilled` to `true`. In `tty` mode a warning line follows
+the replica's `Stopped` line:
+
+```text
+! force-killed after the grace period; detached processes may survive
+```
+
+A forced kill does not fail the stop.
+
 ## Selection Flags
 
 Uses the compose selection flags documented in

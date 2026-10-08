@@ -271,7 +271,7 @@ func (s *Service) restartStop(
 	if e.State != model.EventTypeRunning && e.State != model.EventTypeStarting {
 		return true, nil
 	}
-	hookFailed, err := s.stopReplica(ctx, e, td.force, td.timeout)
+	hookFailed, _, err := s.stopReplica(ctx, e, td.force, td.timeout)
 	return !hookFailed, err
 }
 

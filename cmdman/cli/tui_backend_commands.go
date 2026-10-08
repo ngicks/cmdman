@@ -93,16 +93,17 @@ func commandInfos(entries []store.CommandEntry) []tui.CommandInfo {
 			scaleIndex, scaleCount = 0, 0
 		}
 		out = append(out, tui.CommandInfo{
-			ID:         e.ID,
-			Name:       name,
-			Project:    project,
-			Workdir:    normalizePath(workdir),
-			State:      e.State,
-			ExitCode:   e.ExitCode,
-			LogDriver:  driver,
-			Tty:        tty,
-			ScaleIndex: scaleIndex,
-			ScaleCount: scaleCount,
+			ID:          e.ID,
+			Name:        name,
+			Project:     project,
+			Workdir:     normalizePath(workdir),
+			State:       e.State,
+			ExitCode:    e.ExitCode,
+			LogDriver:   driver,
+			Tty:         tty,
+			ForceKilled: e.StateJSON != nil && e.StateJSON.ForceKilled,
+			ScaleIndex:  scaleIndex,
+			ScaleCount:  scaleCount,
 		})
 	}
 	return out

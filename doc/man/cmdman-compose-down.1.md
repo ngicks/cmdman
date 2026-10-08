@@ -52,6 +52,18 @@ decoding error and runs no hook for that replica.
 A replica whose stop fails for any other reason is removed by force. Down exits
 non-zero when it keeps a replica.
 
+A replica that the `SIGKILL` after the timeout ends counts as force-killed.
+Down reads that from the stop before it removes the replica. The progress
+output marks it on the replica's `stopped` record. In `json` mode that record
+sets `forceKilled` to `true`. In `tty` mode a warning line follows the
+replica's `Stopped` line:
+
+```text
+! force-killed after the grace period; detached processes may survive
+```
+
+A forced kill does not fail the down.
+
 With no command names, down then releases the resources that removed replicas
 left behind. Down runs the release event stored with the value of these
 resources:

@@ -103,23 +103,26 @@ func (s *Service) startReplica(
 // SIGKILL, nil for the replica's stored stop timeout. hookFailed reports that
 // err is the failure of a hook rather than of the stop: the replica still runs
 // after a failed stop_pre and has stopped after a failed stop_post.
+// forceKilled reports that the stop ran out the grace period and ended the
+// replica with SIGKILL; a failed stop_post does not take it back.
 func (s *Service) stopWithHooks(
 	ctx context.Context,
 	r hookReplica,
 	hooks []LifecycleHook,
 	id string,
 	timeout *time.Duration,
-) (hookFailed bool, err error) {
+) (hookFailed, forceKilled bool, err error) {
 	if _, err := s.runLifecycleEvent(ctx, r, hooks, LifecycleStopPre); err != nil {
-		return true, err
+		return true, false, err
 	}
-	if err := s.stopForRecreate(ctx, id, timeout); err != nil {
-		return false, err
+	forceKilled, err = s.stopForRecreate(ctx, id, timeout)
+	if err != nil {
+		return false, forceKilled, err
 	}
 	if _, err := s.runLifecycleEvent(ctx, r, hooks, LifecycleStopPost); err != nil {
-		return true, err
+		return true, forceKilled, err
 	}
-	return false, nil
+	return false, forceKilled, nil
 }
 
 // removeWithHooks runs remove_pre of hooks for r, removes the replica req
@@ -268,18 +271,18 @@ func (s *Service) teardownHooks(
 
 // stopReplica stops the live replica e inside the stop hooks stored on it, as
 // [Service.teardownHooks] says for force. The stop waits timeout as
-// [Service.stopWithHooks] does. hookFailed reports as [Service.stopWithHooks]
-// does. It also reports stored hooks that [Service.teardownHooks] refuses; e
-// keeps running then.
+// [Service.stopWithHooks] does. hookFailed and forceKilled report as
+// [Service.stopWithHooks] does. hookFailed also reports stored hooks that
+// [Service.teardownHooks] refuses; e keeps running then.
 func (s *Service) stopReplica(
 	ctx context.Context,
 	e cmdmanEntry,
 	force bool,
 	timeout *time.Duration,
-) (hookFailed bool, err error) {
+) (hookFailed, forceKilled bool, err error) {
 	r, hooks, err := s.teardownHooks(ctx, e, force, "stop")
 	if err != nil {
-		return true, err
+		return true, false, err
 	}
 	return s.stopWithHooks(ctx, r, hooks, e.ID, timeout)
 }
@@ -348,9 +351,15 @@ func (t *teardown) releaseLeft(h resourceHolder) bool {
 // teardownStop stops the live replica e for t inside the stop hooks stored on
 // it. A failed stop hook keeps e from the removal that follows in a down; a
 // failed stop alone does not, as down removes such a replica by force.
-func (s *Service) teardownStop(ctx context.Context, t *teardown, e cmdmanEntry) error {
+// forceKilled reports as [Service.stopWithHooks] does. It is read off the stop
+// itself, ahead of any removal that would take the replica's state with it.
+func (s *Service) teardownStop(
+	ctx context.Context,
+	t *teardown,
+	e cmdmanEntry,
+) (forceKilled bool, err error) {
 	t.markStopped(e.Name)
-	hookFailed, err := s.stopReplica(ctx, e, t.force, t.timeout)
+	hookFailed, forceKilled, err := s.stopReplica(ctx, e, t.force, t.timeout)
 	if hookFailed {
 		t.mu.Lock()
 		if t.kept == nil {
@@ -359,7 +368,7 @@ func (s *Service) teardownStop(ctx context.Context, t *teardown, e cmdmanEntry) 
 		t.kept[e.ID] = err
 		t.mu.Unlock()
 	}
-	return err
+	return forceKilled, err
 }
 
 // teardownRemove removes the replica e for t, by force should it still run,

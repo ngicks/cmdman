@@ -3,6 +3,7 @@ package compose
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/ngicks/cmdman/cmdman"
@@ -91,6 +92,99 @@ func TestRestartReportsPerTargetStopResultError(t *testing.T) {
 	}
 	if o.StartErr != nil {
 		t.Fatalf("api start should succeed, got %v", o.StartErr)
+	}
+}
+
+// forceKillSvc answers List with entries and every Stop with a success that
+// says the stop force-killed the commands whose IDs forced holds.
+func forceKillSvc(entries []store.CommandEntry, forced ...string) testCmdmanSvc {
+	return testCmdmanSvc{
+		list: func(context.Context, cmdman.ListRequest) ([]store.CommandEntry, error) {
+			return entries, nil
+		},
+		stop: func(_ context.Context, req cmdman.StopRequest) ([]cmdman.StopResult, error) {
+			results := make([]cmdman.StopResult, len(req.Targets))
+			for i, id := range req.Targets {
+				results[i] = cmdman.StopResult{ID: id, ForceKilled: slices.Contains(forced, id)}
+			}
+			return results, nil
+		},
+	}
+}
+
+// stoppedForceKilled returns whether the stopped event reported for command
+// says it was force-killed, and whether there was one.
+func stoppedForceKilled(r *commandPhaseReporter, command string) (forceKilled, ok bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, ev := range r.events {
+		if ev.Command == command && ev.Phase == PhaseStopped {
+			return ev.ForceKilled, true
+		}
+	}
+	return false, false
+}
+
+// A stop that force-killed a replica says so on the replica's stopped event and
+// on its command's outcome, and says nothing for the replica it did not.
+func TestStopReportsForcedKill(t *testing.T) {
+	rep := &commandPhaseReporter{}
+	svc := &Service{
+		reporter: rep,
+		svc: forceKillSvc([]store.CommandEntry{
+			storedGraphEntry("api", model.EventTypeRunning),
+			storedGraphEntry("worker", model.EventTypeRunning),
+		}, "id-api"),
+	}
+
+	result, err := svc.Stop(
+		context.Background(),
+		ProjectSelection{WorkDir: "/wd", Project: "proj"},
+		StopOption{},
+	)
+	if err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	for _, tc := range []struct {
+		command string
+		want    bool
+	}{
+		{command: "api", want: true},
+		{command: "worker", want: false},
+	} {
+		o, ok := stopOutcomeByCommand(result.Stops, tc.command)
+		if !ok {
+			t.Fatalf("expected a %s outcome, got %#v", tc.command, result.Stops)
+		}
+		if o.ForceKilled != tc.want {
+			t.Errorf("%s outcome ForceKilled = %v, want %v", tc.command, o.ForceKilled, tc.want)
+		}
+		got, ok := stoppedForceKilled(rep, tc.command)
+		if !ok {
+			t.Fatalf("no stopped event for %s: %#v", tc.command, rep.events)
+		}
+		if got != tc.want {
+			t.Errorf("%s stopped event ForceKilled = %v, want %v", tc.command, got, tc.want)
+		}
+	}
+}
+
+// The fileless teardown path reports a forced kill the same way.
+func TestStopAllConcurrentReportsForcedKill(t *testing.T) {
+	entries := []store.CommandEntry{storedGraphEntry("api", model.EventTypeRunning)}
+	rep := &commandPhaseReporter{}
+	svc := &Service{reporter: rep, svc: forceKillSvc(entries, "id-api")}
+
+	outcomes := stopAllConcurrent(context.Background(), svc, entries, "proj", &teardown{})
+	o, ok := stopOutcomeByCommand(outcomes, "api")
+	if !ok {
+		t.Fatalf("expected an api outcome, got %#v", outcomes)
+	}
+	if !o.ForceKilled {
+		t.Errorf("api outcome does not say it was force-killed: %#v", o)
+	}
+	if got, ok := stoppedForceKilled(rep, "api"); !ok || !got {
+		t.Errorf("api stopped event ForceKilled = %v (reported %v), want true", got, ok)
 	}
 }
 

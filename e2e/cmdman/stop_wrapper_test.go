@@ -188,6 +188,36 @@ func lastEvent(
 	return ev
 }
 
+// stoppedEvents returns every stopped event recorded for the command name, in
+// order.
+func stoppedEvents(t *testing.T, ctx context.Context, env *testEnv, name string) []recordedEvent {
+	t.Helper()
+	id := env.resolvedID(ctx, name)
+	var out []recordedEvent
+	for _, line := range splitNonEmptyLines(
+		env.run(ctx, "events", "--no-follow", "--id", id, "--type", "stopped"),
+	) {
+		ev := recordedEvent{raw: line}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("decode stopped event %q: %v", line, err)
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
+// forcedKillStops returns the stopped events in stops that record a stop
+// running out its grace period: SIGKILL, for the reason "timeout".
+func forcedKillStops(stops []recordedEvent) []recordedEvent {
+	var out []recordedEvent
+	for _, ev := range stops {
+		if ev.Attrs["reason"] == "timeout" && ev.Attrs["signal"] == "9" {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
 // assertNoSurvivorsUnreaped fails the test when the command's last exited
 // event reports processes the run gave up on.
 func assertNoSurvivorsUnreaped(t *testing.T, ctx context.Context, env *testEnv, name string) {
@@ -379,10 +409,23 @@ func TestStop_WrapperAbandonedClient(t *testing.T) {
 	// its own timeout starts only once that request returns. An interrupt
 	// within a second of the record therefore landed before the client could
 	// have sent its SIGKILL, so the SIGKILL that ended the child was the
-	// monitor's.
-	requested := lastEvent(t, ctx, env, w.name, "stopped").Time
+	// monitor's. The monitor records that SIGKILL as a stopped event of its own,
+	// with a reason the client's record does not carry.
+	stops := stoppedEvents(t, ctx, env, w.name)
+	var requested time.Time
+	for _, ev := range stops {
+		if _, ok := ev.Attrs["reason"]; !ok {
+			requested = ev.Time
+		}
+	}
+	if requested.IsZero() {
+		t.Fatalf("the client recorded no stop: %v", stops)
+	}
 	if gap := interrupted.Sub(requested); gap >= time.Second {
 		t.Fatalf("the interrupt went out %s after the client recorded the stop, too late "+
 			"to rule out the client's own SIGKILL", gap)
+	}
+	if forced := forcedKillStops(stops); len(forced) != 1 {
+		t.Errorf("want one forced-kill stop recorded by the monitor's deadline, got %v", forced)
 	}
 }

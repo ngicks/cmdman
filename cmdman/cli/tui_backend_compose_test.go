@@ -335,6 +335,23 @@ func TestComposeDownSurvivesAFailedWindowRemoval(t *testing.T) {
 	}
 }
 
+// The summary counts the stops that resorted to SIGKILL among the stops the
+// teardown got through, and leaves out one that failed.
+func TestDownSummaryCountsForcedKills(t *testing.T) {
+	got := downSummary(&compose.DownResult{
+		Stops: []compose.StopOutcome{
+			{Command: "a", ForceKilled: true},
+			{Command: "b"},
+			{Command: "c", ForceKilled: true, Err: errors.New("stop_post failed")},
+		},
+		Removes: []compose.RemoveOutcome{{Command: "a"}, {Command: "b"}},
+	})
+	want := tui.DownSummary{Stopped: 2, Removed: 2, ForceKilled: 1}
+	if got != want {
+		t.Errorf("summary = %+v, want %+v", got, want)
+	}
+}
+
 // TestComposeDownKeepsWindowsOnPartialTeardown covers the half-done teardown:
 // a command that would not go away leaves the window something to show, so the
 // window is left alone and the failure is what comes back.

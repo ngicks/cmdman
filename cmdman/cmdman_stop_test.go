@@ -222,11 +222,13 @@ func TestStopWait(t *testing.T) {
 
 // sigkillOnlyMonitor answers Stop like a monitor whose command outlives every
 // signal but SIGKILL: it records when each stop arrived and flips the command
-// to exited on SIGKILL only.
+// to exited on SIGKILL only. forceKilled is what the exited state says about
+// the SIGKILL.
 type sigkillOnlyMonitor struct {
 	cmdmanv1pb.UnimplementedCommandMonitorServiceServer
-	st *store.Store
-	id string
+	st          *store.Store
+	id          string
+	forceKilled bool
 
 	mu    sync.Mutex
 	stops []receivedStop
@@ -253,7 +255,9 @@ func (f *sigkillOnlyMonitor) Stop(
 		return &cmdmanv1pb.StopResponse{}, nil
 	}
 	exitCode := 137
-	err := f.st.UpdateCommandState(f.id, model.EventTypeExited, &exitCode, &model.CommandState{})
+	err := f.st.UpdateCommandState(f.id, model.EventTypeExited, &exitCode, &model.CommandState{
+		ForceKilled: f.forceKilled,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -301,6 +305,54 @@ func TestServiceStopWaitsTwiceTheTimeoutForAStopCommand(t *testing.T) {
 	assert.Equal(t, syscall.Signal(stops[1].signal), syscall.SIGKILL)
 	gap := stops[1].at.Sub(stops[0].at)
 	assert.Assert(t, gap >= 2*timeout, "the client sent SIGKILL %s after the stop", gap)
+}
+
+// A stop reports the forced kill the monitor recorded for the run it ended. A
+// command that had stopped already reports nothing, whatever an earlier stop
+// recorded for it.
+func TestServiceStopReportsForcedKill(t *testing.T) {
+	const id = "stop-force-killed"
+	for _, tc := range []struct {
+		name string
+		// state is what the store holds for the command before the stop.
+		state model.EventType
+		// monitor serves the command when set, recording forceKilled for the run
+		// its SIGKILL ends.
+		monitor     bool
+		forceKilled bool
+		want        bool
+	}{
+		{name: "force-killed", state: model.EventTypeRunning, monitor: true, forceKilled: true,
+			want: true},
+		{name: "killed", state: model.EventTypeRunning, monitor: true},
+		{name: "already exited", state: model.EventTypeExited, forceKilled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			appCfg := testConfig(t, t.TempDir())
+			st := openStopTestStore(t, appCfg)
+			assert.NilError(t, st.InsertCommandConfig(id, "", &model.CommandConfig{}))
+			stateJSON := &model.CommandState{ForceKilled: tc.forceKilled}
+			if tc.monitor {
+				stateJSON = &model.CommandState{SocketPath: serveFakeMonitor(t, &sigkillOnlyMonitor{
+					st:          st,
+					id:          id,
+					forceKilled: tc.forceKilled,
+				})}
+			}
+			assert.NilError(t, st.InsertCommandState(id, tc.state, stateJSON))
+
+			svc := NewService(appCfg)
+			defer svc.Close()
+			results, err := svc.Stop(t.Context(), StopRequest{
+				Targets: []string{id},
+				Timeout: new(100 * time.Millisecond),
+			})
+			assert.NilError(t, err)
+			assert.Equal(t, len(results), 1)
+			assert.NilError(t, results[0].Err)
+			assert.Equal(t, results[0].ForceKilled, tc.want)
+		})
+	}
 }
 
 // An explicit timeout that is not positive fails stop and restart before they

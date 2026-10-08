@@ -514,7 +514,9 @@ func TestMonitorStopDuringSweepHandsOver(t *testing.T) {
 	)
 	assert.Assert(t, len(awaitRec.calls()) == 0, "the await signalled: %v", awaitRec.calls())
 	assert.Assert(t, survivorGone(t, survivor), "the stop's SIGKILL did not end the leftover")
-	assert.Assert(t, len(m.runAnomalies) == 0, "the run reported %v", m.runAnomalies)
+	// The SIGKILL escalated the stop that landed during the sweep, so the run
+	// reports it was force-killed, and nothing beyond that.
+	assert.DeepEqual(t, m.runAnomalyAttrs(), map[string]string{"force_killed": "true"})
 }
 
 // killCall is one signal a sweep or an await sent.

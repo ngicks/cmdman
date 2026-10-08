@@ -250,9 +250,10 @@ type graphVertex struct {
 
 	// Reconcile result, guarded by reconcileGraph.mu. State/ExitCode start from
 	// the snapshot and are overwritten by the action's observation.
-	State    model.EventType
-	ExitCode *int
-	Err      error
+	State       model.EventType
+	ExitCode    *int
+	Err         error
+	ForceKilled bool
 
 	// Order is a monotonic consumption sequence assigned when the vertex is
 	// finished (completed or finalized). It records the order the walk acted on
@@ -302,6 +303,9 @@ type actionResult struct {
 	State    model.EventType
 	ExitCode *int
 	Err      error
+	// ForceKilled reports that a stop the action made ended a replica with the
+	// SIGKILL that followed its grace period.
+	ForceKilled bool
 }
 
 // graphAction performs the operation for one vertex. It runs outside the graph
@@ -543,6 +547,7 @@ func (g *reconcileGraph) complete(id vertexID, res actionResult, dir walkDirecti
 	v.State = res.State
 	v.ExitCode = res.ExitCode
 	v.Err = res.Err
+	v.ForceKilled = res.ForceKilled
 
 	var next []vertexID
 	frontier, skip := v.Children, endVertex
@@ -807,9 +812,10 @@ func (g *reconcileGraph) stopOutcomes(spec ComposeSpec) []StopOutcome {
 	defer g.mu.Unlock()
 
 	type item struct {
-		name  string
-		order int
-		err   error
+		name        string
+		order       int
+		err         error
+		forceKilled bool
 	}
 	var items []item
 	for i := range spec.Commands {
@@ -818,13 +824,18 @@ func (g *reconcileGraph) stopOutcomes(spec ComposeSpec) []StopOutcome {
 		if v == nil || !v.InClosure {
 			continue
 		}
-		items = append(items, item{name: name, order: v.Order, err: v.Err})
+		items = append(items, item{
+			name:        name,
+			order:       v.Order,
+			err:         v.Err,
+			forceKilled: v.ForceKilled,
+		})
 	}
 	slices.SortStableFunc(items, func(a, b item) int { return a.order - b.order })
 
 	out := make([]StopOutcome, 0, len(items))
 	for _, it := range items {
-		out = append(out, StopOutcome{Command: it.name, Err: it.err})
+		out = append(out, StopOutcome{Command: it.name, Err: it.err, ForceKilled: it.forceKilled})
 	}
 	return out
 }

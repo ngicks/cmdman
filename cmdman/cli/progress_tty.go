@@ -76,9 +76,10 @@ func (r *ttyReporter) Report(ev compose.Event) {
 		return
 	}
 	entry := progressEntry{
-		phase: ev.Phase,
-		err:   errString(ev.Err),
-		exit:  ev.ExitCode,
+		phase:       ev.Phase,
+		err:         errString(ev.Err),
+		exit:        ev.ExitCode,
+		forceKilled: ev.ForceKilled,
 	}
 	switch {
 	case len(steps) == 0:
@@ -166,12 +167,14 @@ func (r *ttyReporter) render() {
 	total := 0
 	for _, name := range r.order {
 		for _, e := range r.lines[name] {
-			if total > 0 {
-				b.WriteByte('\n') // separate lines; none trails the final line
+			for _, row := range renderProgressRows(name, e, r.frame) {
+				if total > 0 {
+					b.WriteByte('\n') // separate lines; none trails the final line
+				}
+				b.WriteString("\r\x1b[2K") // carriage return + clear entire line
+				b.WriteString(row)
+				total++
 			}
-			b.WriteString("\r\x1b[2K") // carriage return + clear entire line
-			b.WriteString(renderProgressLine(name, e, r.frame))
-			total++
 		}
 	}
 	r.drawn = total
@@ -197,6 +200,9 @@ type progressEntry struct {
 	exit  *int
 	// output is the latest output line of a running hook.
 	output string
+	// forceKilled marks a stop that ran out the grace period and ended the
+	// command with SIGKILL.
+	forceKilled bool
 }
 
 // maxOutputRunes bounds the hook output shown on a progress line. A line that
@@ -215,6 +221,20 @@ var (
 	styleErr     = lipgloss.NewStyle().Foreground(lipgloss.Color("1")) // error/failed
 	styleWarn    = lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // skipped
 )
+
+// renderProgressRows renders the terminal rows of one step: its status line,
+// and right below it a warning for a stop that force-killed the command. The
+// warning gets a row of its own rather than a place on the status line, where
+// it would wrap an 80-column terminal and break the repaint's count of one row
+// per line. It leaves the name to the status line above it for the same
+// reason.
+func renderProgressRows(name string, e progressEntry, frame int) []string {
+	rows := []string{renderProgressLine(name, e, frame)}
+	if e.forceKilled {
+		rows = append(rows, "  "+styleWarn.Render("! "+forceKilledNote))
+	}
+	return rows
+}
 
 // renderProgressLine renders one command's status line: a phase marker, the
 // command name, the phase label, and (when present) the exit code and error.

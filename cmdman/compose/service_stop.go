@@ -34,6 +34,9 @@ type StopResult struct {
 type StopOutcome struct {
 	Command string
 	Err     error
+	// ForceKilled reports that the stop of at least one replica of Command ran
+	// out its grace period and ended the replica with SIGKILL.
+	ForceKilled bool
 }
 
 // Stop stops project-labeled commands.
@@ -134,8 +137,8 @@ func stopAllConcurrent(
 		id := entry.ID
 		eg.Go(func() error {
 			s.report(name, PhaseStopping, nil, nil)
-			err := s.teardownStop(ctx, td, entry)
-			outcome := StopOutcome{Command: name}
+			forceKilled, err := s.teardownStop(ctx, td, entry)
+			outcome := StopOutcome{Command: name, ForceKilled: forceKilled}
 			if err != nil {
 				outcome.Err = fmt.Errorf("stop command %q (%s): %w", name, id, err)
 				contextkey.ValueSlogLoggerDefault(ctx).Warn("compose stop: stop failed",
@@ -146,7 +149,7 @@ func stopAllConcurrent(
 				)
 				s.report(name, PhaseError, outcome.Err, nil)
 			} else {
-				s.report(name, PhaseStopped, nil, nil)
+				s.reportStopped(name, nil, forceKilled)
 			}
 			mu.Lock()
 			outcomes = append(outcomes, outcome)

@@ -21,6 +21,8 @@ type RestartRequest struct {
 type RestartResult struct {
 	ID  string
 	Err error
+	// ForceKilled is [StopResult.ForceKilled] for the stop phase.
+	ForceKilled bool
 }
 
 func (s *Service) Restart(ctx context.Context, req RestartRequest) ([]RestartResult, error) {
@@ -38,10 +40,8 @@ func (s *Service) Restart(ctx context.Context, req RestartRequest) ([]RestartRes
 
 	results := make([]RestartResult, 0, len(ids))
 	for _, id := range ids {
-		results = append(results, RestartResult{
-			ID:  id,
-			Err: s.restart(ctx, st, id, req.Signal, req.Timeout),
-		})
+		forceKilled, err := s.restart(ctx, st, id, req.Signal, req.Timeout)
+		results = append(results, RestartResult{ID: id, Err: err, ForceKilled: forceKilled})
 	}
 	return results, nil
 }
@@ -52,18 +52,19 @@ func (s *Service) restart(
 	id string,
 	signalOverride string,
 	timeoutOverride *time.Duration,
-) error {
+) (forceKilled bool, err error) {
 	state, _, _, err := st.GetCommandState(id)
 	if err != nil {
-		return fmt.Errorf("get command state: %w", err)
+		return false, fmt.Errorf("get command state: %w", err)
 	}
 	if state == model.EventTypeStarting || state == model.EventTypeRunning {
-		if err := s.stop(ctx, st, id, signalOverride, timeoutOverride); err != nil {
-			return fmt.Errorf("stop: %w", err)
+		forceKilled, err = s.stop(ctx, st, id, signalOverride, timeoutOverride)
+		if err != nil {
+			return forceKilled, fmt.Errorf("stop: %w", err)
 		}
 	}
 	if err := s.Start(ctx, id); err != nil {
-		return fmt.Errorf("start: %w", err)
+		return forceKilled, fmt.Errorf("start: %w", err)
 	}
-	return nil
+	return forceKilled, nil
 }

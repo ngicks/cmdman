@@ -33,6 +33,10 @@ type StopRequest struct {
 type StopResult struct {
 	ID  string
 	Err error
+	// ForceKilled reports that the stop ran out its grace period and the run
+	// ended on the SIGKILL that followed. A process that left the command's
+	// session may have survived it.
+	ForceKilled bool
 }
 
 func (s *Service) Stop(ctx context.Context, req StopRequest) ([]StopResult, error) {
@@ -50,10 +54,8 @@ func (s *Service) Stop(ctx context.Context, req StopRequest) ([]StopResult, erro
 
 	results := make([]StopResult, 0, len(ids))
 	for _, id := range ids {
-		results = append(results, StopResult{
-			ID:  id,
-			Err: s.stop(ctx, st, id, req.Signal, req.Timeout),
-		})
+		forceKilled, err := s.stop(ctx, st, id, req.Signal, req.Timeout)
+		results = append(results, StopResult{ID: id, Err: err, ForceKilled: forceKilled})
 	}
 	return results, nil
 }
@@ -82,42 +84,48 @@ func stopTimeout(override *time.Duration, cfg *model.CommandConfig) time.Duratio
 // stop stops id through its monitor, escalating to SIGKILL after the wait
 // [stopWait] derives from the timeout [stopTimeout] resolves from
 // timeoutOverride. A monitor that does not answer is taken for dead: stop marks
-// the command failed and reports no error.
+// the command failed and reports no error. forceKilled reports that the run
+// this stop ended was force-killed (see [StopResult]).
 func (s *Service) stop(
 	ctx context.Context,
 	st *store.Store,
 	id string,
 	signalOverride string,
 	timeoutOverride *time.Duration,
-) error {
-	_, err := s.stopReportingUnreachable(ctx, st, id, signalOverride, timeoutOverride)
-	return err
+) (forceKilled bool, err error) {
+	_, forceKilled, err = s.stopReportingUnreachable(
+		ctx, st, id, signalOverride, timeoutOverride)
+	return forceKilled, err
 }
 
 // stopReportingUnreachable is stop that also reports whether the monitor did
 // not answer and died short of recording the end of the run, for a caller that
 // has its own way to deal with such a monitor.
+//
+// forceKilled is read from the state the monitor recorded for the end of the
+// run, and only for a run this stop found live: a command that had stopped
+// already reports what an earlier stop did to it, not what this one did.
 func (s *Service) stopReportingUnreachable(
 	ctx context.Context,
 	st *store.Store,
 	id string,
 	signalOverride string,
 	timeoutOverride *time.Duration,
-) (unreachable bool, err error) {
+) (unreachable, forceKilled bool, err error) {
 	state, _, _, err := st.GetCommandState(id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return false, false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("get command state: %w", err)
+		return false, false, fmt.Errorf("get command state: %w", err)
 	}
 	if state == model.EventTypeExited || state == model.EventTypeFailed {
-		return false, nil
+		return false, false, nil
 	}
 
 	_, _, cfg, err := st.GetCommandConfig(id)
 	if err != nil {
-		return false, fmt.Errorf("get command config: %w", err)
+		return false, false, fmt.Errorf("get command config: %w", err)
 	}
 	timeout := stopTimeout(timeoutOverride, cfg)
 	wait := stopWait(timeout, cfg)
@@ -131,7 +139,7 @@ func (s *Service) stopReportingUnreachable(
 	}
 	sig, _, err := hrstr.ParseSignal(effective)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 
 	s.emitEvent(ctx, model.Event{
@@ -147,14 +155,17 @@ func (s *Service) stopReportingUnreachable(
 		if isMonitorUnavailable(err) {
 			// From the user's point of view, a monitor gone before the stop
 			// reached it is a done stop.
-			return s.settleUnreachableMonitor(ctx, st, id, cfg, nil)
+			died, err := s.settleUnreachableMonitor(ctx, st, id, cfg, nil)
+			return died, false, err
 		}
-		return false, err
+		return false, false, err
 	}
+	// The monitor arms its own SIGKILL at the timeout, so a run that ignored the
+	// stop signal can end force-killed within this wait already.
 	if err := waitForStopped(ctx, st, id, wait); err == nil {
-		return false, nil
+		return false, recordedForceKill(st, id), nil
 	} else if !errors.Is(err, context.DeadlineExceeded) {
-		return false, err
+		return false, false, err
 	}
 
 	// The monitor escalates to SIGKILL on its own at the same deadline. This
@@ -168,21 +179,35 @@ func (s *Service) stopReportingUnreachable(
 			// A command that removes itself is gone from the store once the
 			// monitor's own SIGKILL ended its run, which is the stop having
 			// succeeded.
-			return false, nil
+			return false, false, nil
 		}
 		killErr := fmt.Errorf("timeout waiting for stop, and SIGKILL failed: %w", err)
 		if isMonitorUnavailable(err) {
 			// The client's SIGKILL never went out, and a monitor that died short
 			// of recording the end of the run may never have sent its own, so
-			// whatever ignored the stop's signal may still be running.
-			return s.settleUnreachableMonitor(ctx, st, id, cfg, killErr)
+			// whatever ignored the stop's signal may still be running. A monitor
+			// that did record the end of the run is the usual case: its own
+			// SIGKILL ended the run and took the monitor down with it.
+			died, err := s.settleUnreachableMonitor(ctx, st, id, cfg, killErr)
+			if died || err != nil {
+				return died, false, err
+			}
+			return false, recordedForceKill(st, id), nil
 		}
-		return false, killErr
+		return false, false, killErr
 	}
 	if err := waitForStopped(ctx, st, id, wait); err != nil {
-		return false, fmt.Errorf("timeout waiting for stop after SIGKILL: %w", err)
+		return false, false, fmt.Errorf("timeout waiting for stop after SIGKILL: %w", err)
 	}
-	return false, nil
+	return false, recordedForceKill(st, id), nil
+}
+
+// recordedForceKill reports whether the state the monitor recorded for the end
+// of id's run says the run was force-killed. A command gone from the store, or
+// a state that cannot be read, says nothing.
+func recordedForceKill(st *store.Store, id string) bool {
+	_, _, stateJSON, err := st.GetCommandState(id)
+	return err == nil && stateJSON != nil && stateJSON.ForceKilled
 }
 
 // stopWait returns how long a stop of the command cfg describes waits for the

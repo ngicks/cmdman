@@ -66,6 +66,15 @@ func anomalySurvivorsUnreaped(n int) runAnomaly {
 	}
 }
 
+// anomalyForceKilled reports a graceful stop that ran out its grace period and
+// ended the run with SIGKILL. A process that left the command's session is out
+// of that SIGKILL's reach, which is why the warning says it may still run.
+var anomalyForceKilled = runAnomaly{
+	attr: "force_killed",
+	msg: "the stop signal did not end the command within its grace period; " +
+		"resorted to SIGKILL; detached processes may survive",
+}
+
 // noteRunAnomaly records an anomaly of the run being torn down.
 func (m *Monitor) noteRunAnomaly(a runAnomaly) {
 	m.runAnomalies = append(m.runAnomalies, a)
@@ -268,6 +277,14 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	// previous run's anomalies.
 	m.runAnomalies = nil
 	m.stateJSON.Warnings = nil
+	m.stateJSON.ForceKilled = false
+	// A graceful stop that landed before this run began is no stop of this run,
+	// so a SIGKILL stop that follows it is no escalation here. A forced kill
+	// belongs to the run that recorded it.
+	m.procMu.Lock()
+	m.gracefulStop = false
+	m.forceKilled.Store(false)
+	m.procMu.Unlock()
 
 	cmd, err := m.wireUpCmd(ctx)
 	if err != nil {
@@ -371,7 +388,13 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 		m.stopDeadline.Stop()
 		m.stopDeadline = nil
 	}
+	// Read in the same section that gives the group up: a forced kill latches
+	// under procMu, so nothing can latch for this run past this point.
+	forceKilled := m.forceKilled.Load()
 	m.procMu.Unlock()
+	if forceKilled {
+		m.noteRunAnomaly(anomalyForceKilled)
+	}
 
 	// Runtime state dies with the run (D13). Clearing it here rather than only
 	// when the next run gets this far is what keeps a dead run's title, bell or
