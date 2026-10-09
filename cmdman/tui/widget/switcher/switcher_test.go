@@ -1948,6 +1948,45 @@ func TestSwitcherOpensOnTheLastDown(t *testing.T) {
 	}
 }
 
+// TestSwitcherOpensOnADownThatNeverStarted covers a project whose last
+// teardown never got going: the backend finds that job over, and following it
+// reports that it did not start. The switcher says so, and D asks to tear the
+// project down again rather than standing in for a teardown under way.
+func TestSwitcherOpensOnADownThatNeverStarted(t *testing.T) {
+	target := core.DownTarget{
+		Project: "local-dev",
+		Path:    "/work/local-dev/cmd-compose.yaml",
+		WorkDir: "/work/local-dev",
+	}
+	fb := &coretest.FakeBackend{
+		Dir:  "/work/local-dev",
+		Cmds: seedInfos(),
+		Projs: []core.ProjectInfo{{
+			Name: "local-dev", Workdir: "/work/local-dev",
+			Path: "/work/local-dev/cmd-compose.yaml", Identity: "id-local-dev",
+		}},
+		DownJobs:       map[core.DownTarget]core.DownJob{target: {ID: "j1", Finished: true}},
+		ComposeDownErr: errors.New("compose down job did not start"),
+	}
+	m := New(t.Context(), core.Options{Backend: fb})
+	t.Cleanup(func() { _ = m.watcher.Close() })
+	m, _ = updWidget(t, m, tea.WindowSizeMsg{Width: 80, Height: 12})
+	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: fb.Cmds})
+	m, cmd := updWidget(t, m, core.ProjectsLoadedMsg{Infos: fb.Projs})
+	m = settle(t, m, cmd)
+
+	want := "compose down local-dev: stopped 0, removed 0: compose down job did not start"
+	if got := core.StripANSI(m.switcherFooter()); got != want {
+		t.Errorf("the switcher should say the teardown did not start, footer = %q, want %q",
+			got, want)
+	}
+
+	m, _ = updWidget(t, m, coretest.Kr("D"))
+	if m.pendingDown != target {
+		t.Errorf("D should ask to tear the project down, pending = %+v", m.pendingDown)
+	}
+}
+
 // TestSwitcherComposeDownPromptSurvivesAReload pins where the question lives: a
 // listing lands on its own and clears the status line, and a question that went
 // off the screen while the next key still answered it would take the commands

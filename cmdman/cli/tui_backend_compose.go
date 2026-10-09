@@ -277,7 +277,9 @@ func (b *serviceBackend) LaunchComposeDown(
 }
 
 // FindComposeDown finds the project's latest compose down job, which stays on
-// record after it ends until the next down of the project replaces it.
+// record after it ends until the next down of the project replaces it. A job
+// left created with nothing bringing it up never ran, and is found finished:
+// following it reports that it did not start.
 func (b *serviceBackend) FindComposeDown(
 	ctx context.Context,
 	target tui.DownTarget,
@@ -335,8 +337,9 @@ func (b *serviceBackend) composeDownJobOptions(
 
 func downJobOf(job ComposeDownJob) tui.DownJob {
 	return tui.DownJob{
-		ID:       job.ID,
-		Finished: job.State == model.EventTypeExited || job.State == model.EventTypeFailed,
+		ID: job.ID,
+		Finished: job.State == model.EventTypeExited || job.State == model.EventTypeFailed ||
+			job.NeverRan,
 	}
 }
 

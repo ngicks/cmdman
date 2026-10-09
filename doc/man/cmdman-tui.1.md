@@ -96,7 +96,9 @@ it in any terminal or pane. Each widget is its own subcommand.
   too, on the same terms as `d`. A widget opens on the last teardown of its
   project, running or over: the switcher on the project selected when it
   starts, the launcher on the project `S` would launch, and the project manager
-  on its own project.
+  on its own project. A teardown that never got going, because the widget that
+  asked for it went away first, reads `compose down job did not start`, and `D`
+  asks again.
   The widget also stands where the active project stands: each time that mark
   resolves it moves itself into the project's directory, so the pane's own
   path — and any multiplexer binding keyed on it — follows the project the

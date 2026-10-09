@@ -136,9 +136,10 @@ func isStaleCheckState(state model.EventType) bool {
 // held is false, and release nil, when a live monitor already holds the lock.
 //
 // A caller that acts on id having no monitor, by removing its record say, holds
-// the lock across the check and the act. Checking with [Alive] and acting
-// afterwards leaves a monitor that was spawned a moment earlier the time in
-// between to take the lock and run the command whose record is about to go.
+// the lock across the check and the act. Probing the PID file for a live
+// monitor and acting afterwards leaves a monitor that was spawned a moment
+// earlier the time in between to take the lock and run the command whose record
+// is about to go.
 func HoldPIDLock(cfg config.Config, id string) (release func(), held bool, err error) {
 	pidPath, err := cfg.MonitorPIDPath(id)
 	if err != nil {

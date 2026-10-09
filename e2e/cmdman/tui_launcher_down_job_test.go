@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/ngicks/cmdman/cmdman/compose"
 )
 
 // TestLauncherDown_ComposeDownOutlivesTheLauncher is what running the teardown
@@ -81,6 +83,66 @@ func TestLauncherDown_ComposeDownOutlivesTheLauncher(t *testing.T) {
 		widgetCmd(env, wd, t.TempDir(), "launcher").WithTmuxTmpdir(tmuxTmpdir))
 	again.waitFor(t, "compose down "+project+": stopped 1, removed 1", 20*time.Second)
 	again.quitWith(t, "\x03")
+}
+
+// TestLauncherDown_JobThatNeverStarted covers the record a launcher leaves
+// when it goes away between registering the down job and starting it: a job
+// left created with nothing bringing it up. The launcher opens saying that
+// teardown did not start instead of following it for good, and `D` asks again
+// and runs a new job in place of the one that never ran.
+func TestLauncherDown_JobThatNeverStarted(t *testing.T) {
+	requireTmux(t)
+	ctx := testContext(t)
+	env := newTestEnv(t)
+
+	tmuxTmpdir := t.TempDir()
+	t.Cleanup(func() { killDefaultTmuxServer(t, tmuxTmpdir) })
+	tmuxRunWithTmpdir(t, tmuxTmpdir, "new-session", "-d", "-s", "keep", "-n", "home")
+
+	wd := composeWorkdir(t)
+	const project = "lnstale"
+	composePath := writeComposeFile(t, wd, fmt.Sprintf(`name: %s
+commands:
+  idle:
+    args: [sleep, "300"]
+`, project))
+	t.Cleanup(func() { cleanupProject(ctx, env, wd, project) })
+	t.Cleanup(func() { cleanupDownJob(ctx, env, project) })
+
+	if _, stderr, err := env.muxExecWithTmpdir(
+		ctx, tmuxTmpdir, "compose", "--workdir", wd, "-f", composePath, "up",
+	); err != nil {
+		t.Fatalf("compose up failed: %v\nstderr:\n%s", err, stderr)
+	}
+
+	identity := compose.ProjectSelection{WorkDir: wd, Project: project}.ProjectIdentity()
+	if _, stderr, err := env.exec(ctx, "create", "--name", identity+".down",
+		"-l", compose.LabelJob+"="+compose.JobDown,
+		"-l", compose.LabelJobWorkdir+"="+wd,
+		"-l", compose.LabelJobProject+"="+project,
+		"--", "true",
+	); err != nil {
+		t.Fatalf("create the job record: %v\nstderr:\n%s", err, stderr)
+	}
+	stale, _ := downJobEntry(ctx, t, env, project)["ID"].(string)
+
+	w := startWidgetCmd(t, ctx,
+		widgetCmd(env, wd, t.TempDir(), "launcher").WithTmuxTmpdir(tmuxTmpdir))
+	w.waitFor(t, "compose down job did not start", 20*time.Second)
+	w.Send("\r") // enter: the input hands the keyboard to the locations list
+	w.Send("D")
+	w.waitFor(t, project+"? y/n", 10*time.Second)
+	w.Send("y")
+	// The note is redrawn over the running one, which leaves only the part that
+	// changed in the output.
+	w.waitFor(t, "stopped 1, removed 1", 30*time.Second)
+	w.quitWith(t, "\x03")
+
+	job, _ := downJobEntry(ctx, t, env, project)["ID"].(string)
+	if job == stale {
+		t.Errorf("the teardown ran in the job that never started, %s", job)
+	}
+	env.waitForState(ctx, job, "exited", 20*time.Second)
 }
 
 // slowStopYAML is a project of one command that takes three seconds to stop.

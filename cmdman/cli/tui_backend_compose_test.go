@@ -11,6 +11,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/compose"
 	"github.com/ngicks/cmdman/cmdman/model"
+	"github.com/ngicks/cmdman/cmdman/monitor"
 	"github.com/ngicks/cmdman/cmdman/tui"
 )
 
@@ -250,7 +251,8 @@ func TestComposeDownJobOptionsResolveTheProject(t *testing.T) {
 }
 
 // A project's latest down job is found by the project alone, and says whether
-// its run was over when it was found.
+// its run was over when it was found. A record left created is over unless a
+// launch or a monitor is still bringing it up.
 func TestFindComposeDownFindsTheProjectsJob(t *testing.T) {
 	dir, path := downProjectDir(t)
 	cfg := frameSvcConfig(t)
@@ -263,26 +265,48 @@ func TestFindComposeDownFindsTheProjectsJob(t *testing.T) {
 		t.Fatalf("a project that never went down has a job: ok = %v, err = %v", ok, err)
 	}
 
-	res, err := svc.Create(t.Context(), downJobTestRequest(t, svc, dir, "downproj"))
+	req := downJobTestRequest(t, svc, dir, "downproj")
+	res, err := svc.Create(t.Context(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	job, ok, err := b.FindComposeDown(t.Context(), target)
-	if err != nil || !ok {
-		t.Fatalf("the job was not found: ok = %v, err = %v", ok, err)
-	}
-	if job != (tui.DownJob{ID: res.ID}) {
-		t.Errorf("job = %+v, want %s and not finished", job, res.ID)
+	find := func(t *testing.T, want tui.DownJob) {
+		t.Helper()
+		job, ok, err := b.FindComposeDown(t.Context(), target)
+		if err != nil || !ok {
+			t.Fatalf("the job was not found: ok = %v, err = %v", ok, err)
+		}
+		if job != want {
+			t.Errorf("job = %+v, want %+v", job, want)
+		}
 	}
 
-	setJobState(t, cfg, res.ID, model.EventTypeExited, &model.CommandState{})
-	job, _, err = b.FindComposeDown(t.Context(), target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if job != (tui.DownJob{ID: res.ID, Finished: true}) {
-		t.Errorf("job = %+v, want %s finished", job, res.ID)
-	}
+	t.Run("left created with nothing bringing it up", func(t *testing.T) {
+		find(t, tui.DownJob{ID: res.ID, Finished: true})
+	})
+
+	t.Run("left created while a launch holds the job's lock", func(t *testing.T) {
+		unlock, err := lockComposeJob(t.Context(), cfg, req.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer unlock()
+		find(t, tui.DownJob{ID: res.ID})
+	})
+
+	t.Run("left created while a monitor holds its PID lock", func(t *testing.T) {
+		release, held, err := monitor.HoldPIDLock(cfg, res.ID)
+		if err != nil || !held {
+			t.Fatalf("hold the PID lock: held = %v, err = %v", held, err)
+		}
+		defer release()
+		find(t, tui.DownJob{ID: res.ID})
+	})
+
+	t.Run("exited", func(t *testing.T) {
+		setJobState(t, cfg, res.ID, model.EventTypeExited, &model.CommandState{})
+		find(t, tui.DownJob{ID: res.ID, Finished: true})
+	})
 
 	// The same file under another name is another project, with no job.
 	other := tui.DownTarget{Project: "other", Path: path, WorkDir: dir}

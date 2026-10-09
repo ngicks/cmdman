@@ -114,8 +114,9 @@ func (p *downProgress) add(line logdriver.LogLine) bool {
 
 // count folds one progress record into the summary: a stop that went through,
 // a removal, and a resource left unreleased. A stop that failed is reported in
-// a phase of its own, and so is an already-exited command the stop phase
-// skipped, so neither counts as stopped.
+// a phase of its own, so it does not count as stopped. An already-exited
+// command does not either: the stop phase receives only the running commands,
+// so it emits no stopped record for one.
 func (p *downProgress) count(text string) bool {
 	var line progressLine
 	if err := json.Unmarshal([]byte(text), &line); err != nil {

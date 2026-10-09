@@ -400,6 +400,37 @@ func TestLaunchComposeDownJob(t *testing.T) {
 		replaced(t, s, time.Now(), id)
 	})
 
+	// Left created, the record of a start that failed would read as a down that
+	// never ran to whoever looks next.
+	t.Run("removes the job when its start fails", func(t *testing.T) {
+		s := newSetup(t)
+		failing := func(context.Context, string) error { return errors.New("spawn failed") }
+		_, launched, err := launchComposeDownJob(t.Context(), s.svc, s.req, time.Now(), failing)
+		assert.ErrorContains(t, err, "spawn failed")
+		assert.Assert(t, !launched)
+
+		entry, err := findCommandByName(t.Context(), s.svc, s.req.Name)
+		assert.NilError(t, err)
+		assert.Assert(t, entry == nil, "the record outlived its failed start: %+v", entry)
+	})
+
+	// A monitor that came up after all keeps the record its start gave up on.
+	t.Run("keeps the job when its start fails but a monitor came up", func(t *testing.T) {
+		s := newSetup(t)
+		var id string
+		late := func(_ context.Context, started string) error {
+			id = started
+			holdMonitorLock(t, s.cfg, started)
+			return errors.New("timed out waiting for the monitor")
+		}
+		_, _, err := launchComposeDownJob(t.Context(), s.svc, s.req, time.Now(), late)
+		assert.ErrorContains(t, err, "timed out waiting for the monitor")
+
+		entry, err := findCommandByName(t.Context(), s.svc, s.req.Name)
+		assert.NilError(t, err)
+		assert.Assert(t, entry != nil && entry.ID == id, "the record went: %+v", entry)
+	})
+
 	t.Run("stops waiting for another launch when ctx is done", func(t *testing.T) {
 		s := newSetup(t)
 		unlock, err := lockComposeJob(t.Context(), s.cfg, s.req.Name)

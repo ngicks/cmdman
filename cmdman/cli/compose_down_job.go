@@ -46,8 +46,12 @@ type ComposeDownJobOptions struct {
 type ComposeDownJob struct {
 	ID   string
 	Name string
-	// State is the job's state as the launch last read it.
+	// State is the job's state as the launch or the lookup last read it.
 	State model.EventType
+	// NeverRan marks a record the lookup found created with nothing bringing it
+	// up (see composeDownJobNeverRan). Its down never ran and never will, so the
+	// record is over rather than pending, and the next launch replaces it.
+	NeverRan bool
 }
 
 // LaunchComposeDownJob starts `cmdman compose down --progress json
@@ -151,8 +155,10 @@ func composeDownJobName(selection compose.ProjectSelection) string {
 
 // findComposeDownJob finds the down job of the project opts names: the one
 // running, or the last one to have run, since a job is not removed when it
-// ends. ok is false when the project has none. opts.File and opts.Env are not
-// read.
+// ends. A record left created is either a launch still on its way or one that
+// never ran, which the lookup tells apart the way a launch does (see
+// [ComposeDownJob.NeverRan]). ok is false when the project has none. opts.File
+// and opts.Env are not read.
 func findComposeDownJob(
 	ctx context.Context,
 	svc *cmdman.Service,
@@ -170,7 +176,55 @@ func findComposeDownJob(
 	if entry == nil {
 		return ComposeDownJob{}, false, nil
 	}
-	return composeDownJobOf(*entry), true, nil
+	job = composeDownJobOf(*entry)
+	if entry.State == model.EventTypeCreated {
+		if job.NeverRan, err = composeDownJobNeverRan(ctx, svc, *entry); err != nil {
+			return ComposeDownJob{}, false, err
+		}
+	}
+	return job, true, nil
+}
+
+// composeDownJobNeverRan reports whether entry, a record of the job found
+// created, never ran and never will. The rule is the one a launch applies
+// before it replaces such a record (see reuseOrRemoveComposeDownJob): no launch
+// holds the job's lock, and no monitor holds the record's PID lock.
+//
+// The record is read again under the job's lock, so the answer is not about a
+// record a launch has since got going or replaced. The PID lock is tried under
+// the job's lock too: a launch holds that lock until the monitor it spawned has
+// reported in, and trying the PID lock while that monitor comes up would keep it
+// out.
+func composeDownJobNeverRan(
+	ctx context.Context,
+	svc *cmdman.Service,
+	entry store.CommandEntry,
+) (bool, error) {
+	unlock, ok, err := tryLockComposeJob(svc.Config(), entry.Name)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil
+	}
+	defer unlock()
+
+	current, err := findCommandEntryByID(ctx, svc, entry.ID)
+	if err != nil {
+		return false, fmt.Errorf("look up compose down job %q: %w", entry.Name, err)
+	}
+	if current == nil || current.State != model.EventTypeCreated {
+		return false, nil
+	}
+	release, held, err := monitor.HoldPIDLock(svc.Config(), entry.ID)
+	if err != nil {
+		return false, fmt.Errorf("check compose down job %q for a monitor: %w", entry.Name, err)
+	}
+	if !held {
+		return false, nil
+	}
+	release()
+	return true, nil
 }
 
 // launchComposeDownJob is [LaunchComposeDownJob] for the job req describes, as
@@ -214,9 +268,16 @@ func launchComposeDownJob(
 	// Starting returns once the job is running, or once it has already exited,
 	// so the next launch to take the lock finds a record that answers it.
 	if err := start(ctx, id); err != nil {
-		return ComposeDownJob{}, false, fmt.Errorf(
-			"start compose down job %q: %w", req.Name, err,
-		)
+		startErr := fmt.Errorf("start compose down job %q: %w", req.Name, err)
+		// A record the failed start left created would tell whoever looks next of
+		// a down that never ran. A monitor that came up after all keeps it. The
+		// removal runs past a done ctx, which may be what failed the start.
+		if _, err := removeUnmonitoredComposeDownJob(
+			context.WithoutCancel(ctx), svc, id, req.Name,
+		); err != nil {
+			return ComposeDownJob{}, false, errors.Join(startErr, err)
+		}
+		return ComposeDownJob{}, false, startErr
 	}
 
 	started, err := findCommandByName(ctx, svc, req.Name)
@@ -256,21 +317,36 @@ func reuseOrRemoveComposeDownJob(
 
 	// What is left has no run to show for this launch, but a monitor may still be
 	// coming up for it: one spawned by a launch that died before the monitor
-	// reported in, or by a start from elsewhere. The PID lock is held across the
-	// removal, so such a monitor either holds the lock already or takes it only
-	// once the record is gone, finds nothing to run, and exits.
-	release, held, err := monitor.HoldPIDLock(svc.Config(), entry.ID)
+	// reported in, or by a start from elsewhere.
+	removed, err := removeUnmonitoredComposeDownJob(ctx, svc, entry.ID, entry.Name)
 	if err != nil {
-		return false, fmt.Errorf("check compose down job %q for a monitor: %w", entry.Name, err)
+		return false, err
+	}
+	return !removed, nil
+}
+
+// removeUnmonitoredComposeDownJob removes the job's record id unless a monitor
+// holds its PID lock, and reports whether it did. The PID lock is held across
+// the removal, so a monitor coming up for the record either holds the lock
+// already, and the record stays, or takes it only once the record is gone,
+// finds nothing to run, and exits.
+func removeUnmonitoredComposeDownJob(
+	ctx context.Context,
+	svc *cmdman.Service,
+	id, name string,
+) (removed bool, err error) {
+	release, held, err := monitor.HoldPIDLock(svc.Config(), id)
+	if err != nil {
+		return false, fmt.Errorf("check compose down job %q for a monitor: %w", name, err)
 	}
 	if !held {
-		return true, nil
+		return false, nil
 	}
 	defer release()
 
 	results, err := svc.Remove(
 		ctx,
-		cmdman.RemoveRequest{Targets: []string{entry.ID}, Force: true},
+		cmdman.RemoveRequest{Targets: []string{id}, Force: true},
 	)
 	if err == nil {
 		for _, r := range results {
@@ -281,9 +357,9 @@ func reuseOrRemoveComposeDownJob(
 		}
 	}
 	if err != nil {
-		return false, fmt.Errorf("remove previous compose down job %q: %w", entry.Name, err)
+		return false, fmt.Errorf("remove compose down job %q: %w", name, err)
 	}
-	return false, nil
+	return true, nil
 }
 
 // composeDownJobRanSince reports whether entry's run began no earlier than
@@ -361,6 +437,56 @@ func lockComposeJob(
 	cfg cmdman.CmdmanConfig,
 	name string,
 ) (unlock func(), err error) {
+	f, err := openComposeJobLock(cfg, name)
+	if err != nil {
+		return nil, err
+	}
+
+	ticker := time.NewTicker(composeJobLockPoll)
+	defer ticker.Stop()
+	for {
+		acquired, err := flock.TryLockExclusive(f)
+		if err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("compose job: lock %q: %w", f.Name(), err)
+		}
+		if acquired {
+			return func() { _ = f.Close() }, nil
+		}
+		select {
+		case <-ctx.Done():
+			_ = f.Close()
+			return nil, fmt.Errorf("compose job: wait for lock %q: %w", f.Name(), ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+// tryLockComposeJob is [lockComposeJob] without the wait: ok is false, and
+// unlock nil, when a launch holds the lock.
+func tryLockComposeJob(
+	cfg cmdman.CmdmanConfig,
+	name string,
+) (unlock func(), ok bool, err error) {
+	f, err := openComposeJobLock(cfg, name)
+	if err != nil {
+		return nil, false, err
+	}
+	acquired, err := flock.TryLockExclusive(f)
+	if err != nil {
+		_ = f.Close()
+		return nil, false, fmt.Errorf("compose job: lock %q: %w", f.Name(), err)
+	}
+	if !acquired {
+		_ = f.Close()
+		return nil, false, nil
+	}
+	return func() { _ = f.Close() }, true, nil
+}
+
+// openComposeJobLock opens the lock file of the compose job named name,
+// creating it when there is none.
+func openComposeJobLock(cfg cmdman.CmdmanConfig, name string) (*os.File, error) {
 	if cfg.RuntimeDir == "" {
 		return nil, errors.New("compose job: runtime dir is empty")
 	}
@@ -373,25 +499,7 @@ func lockComposeJob(
 	if err != nil {
 		return nil, fmt.Errorf("compose job: open lock %q: %w", path, err)
 	}
-
-	ticker := time.NewTicker(composeJobLockPoll)
-	defer ticker.Stop()
-	for {
-		acquired, err := flock.TryLockExclusive(f)
-		if err != nil {
-			_ = f.Close()
-			return nil, fmt.Errorf("compose job: lock %q: %w", path, err)
-		}
-		if acquired {
-			return func() { _ = f.Close() }, nil
-		}
-		select {
-		case <-ctx.Done():
-			_ = f.Close()
-			return nil, fmt.Errorf("compose job: wait for lock %q: %w", path, ctx.Err())
-		case <-ticker.C:
-		}
-	}
+	return f, nil
 }
 
 func composeDownJobOf(entry store.CommandEntry) ComposeDownJob {

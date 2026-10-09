@@ -908,6 +908,47 @@ func TestLauncherOpensOnTheLastDown(t *testing.T) {
 	}
 }
 
+// TestLauncherOpensOnADownThatNeverStarted covers a project whose last
+// teardown never got going: the backend finds that job over, and following it
+// reports that it did not start. The launcher says so, and D asks to tear the
+// project down again rather than standing in for a teardown under way.
+func TestLauncherOpensOnADownThatNeverStarted(t *testing.T) {
+	target := core.DownTarget{
+		Project: "devenv", Path: "devenv.yaml", WorkDir: "/home/u/gitrepo/cmdman",
+	}
+	fb := &coretest.FakeBackend{
+		LaunchLocs:     launcherFixture(),
+		DownJobs:       map[core.DownTarget]core.DownJob{target: {ID: "j1", Finished: true}},
+		ComposeDownErr: errors.New("compose down job did not start"),
+	}
+	m := New(context.Background(), core.Options{Backend: fb, Widget: core.WidgetLauncher})
+	m = updLauncher(t, m, tea.WindowSizeMsg{Width: 100, Height: 20})
+	next, cmd := m.Update(launchTargetsLoadedMsg{locs: fb.LaunchLocs})
+	m = next.(Model)
+
+	var found []core.ComposeDownMsg
+	for _, msg := range runLauncherCmd(cmd) {
+		if down, ok := msg.(core.ComposeDownMsg); ok {
+			found = append(found, down)
+		}
+	}
+	if len(found) != 1 || !found[0].Earlier {
+		t.Fatalf("the opening should report the earlier teardown once, got %+v", found)
+	}
+	m = updLauncher(t, m, found[0])
+	want := "compose down devenv: stopped 0, removed 0: compose down job did not start"
+	if m.note != want {
+		t.Errorf("the launcher should say the teardown did not start, note = %q, want %q",
+			m.note, want)
+	}
+
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+	next, _ = m.Update(coretest.Kr("D"))
+	if got := next.(Model).pendingDown; got != target {
+		t.Errorf("D should ask to tear the project down, pending = %+v", got)
+	}
+}
+
 // runLauncherCmd runs a command, the members of a batch included, and returns
 // the messages they produced.
 func runLauncherCmd(cmd tea.Cmd) []tea.Msg {

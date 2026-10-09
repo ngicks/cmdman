@@ -12,6 +12,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/store"
 	"github.com/ngicks/cmdman/cmdman/tui"
+	"github.com/ngicks/go-common/contextkey"
 )
 
 const (
@@ -25,7 +26,16 @@ const (
 	// goes only when a later launch replaces a job that is over, and the exit
 	// event of that job is in the log by then.
 	composeDownGoneGrace = 5 * time.Second
+	// composeDownStartWait is how long a follower waits for a launch still on its
+	// way to get the job going. Starting a command gives its monitor about five
+	// seconds to report in, counted from the spawn, while the follower counts from
+	// its first look at the record, which can come before the spawn.
+	composeDownStartWait = 10 * time.Second
 )
+
+// errComposeDownJobNotStarted is the end of a job whose record was left created
+// and that nothing got going: its down never ran.
+var errComposeDownJobNotStarted = errors.New("compose down job did not start")
 
 // followComposeDownJob follows a compose down job (see tui.DownStream).
 //
@@ -39,7 +49,9 @@ func followComposeDownJob(
 	svc *cmdman.Service,
 	job tui.DownJob,
 ) (tui.DownStream, error) {
-	return followComposeDownJobWithin(ctx, svc, job, composeDownExitPoll, composeDownGoneGrace)
+	return followComposeDownJobWithin(
+		ctx, svc, job, composeDownExitPoll, composeDownGoneGrace, composeDownStartWait,
+	)
 }
 
 // followComposeDownJobWithin is [followComposeDownJob] with its waits spelled
@@ -48,7 +60,7 @@ func followComposeDownJobWithin(
 	ctx context.Context,
 	svc *cmdman.Service,
 	job tui.DownJob,
-	interval, grace time.Duration,
+	interval, grace, startWait time.Duration,
 ) (tui.DownStream, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	// Subscribed before any output is read, and from the start of the log, so an
@@ -63,7 +75,7 @@ func followComposeDownJobWithin(
 		return nil, fmt.Errorf("follow compose down job: %w", err)
 	}
 	s := &composeDownStream{ch: make(chan tui.DownSummary, 1), cancel: cancel}
-	go s.run(ctx, svc, sub, job, interval, grace)
+	go s.run(ctx, svc, sub, job, interval, grace, startWait)
 	return s, nil
 }
 
@@ -112,7 +124,7 @@ func (s *composeDownStream) run(
 	svc *cmdman.Service,
 	sub *cmdman.EventsSubscription,
 	job tui.DownJob,
-	interval, grace time.Duration,
+	interval, grace, startWait time.Duration,
 ) {
 	defer func() { _ = sub.Close() }()
 
@@ -121,7 +133,7 @@ func (s *composeDownStream) run(
 		s.publish(tui.DownSummary{Running: true})
 		live = readComposeDownOutput(ctx, svc, job.ID, true, s.publish)
 	}
-	code, exitErr := waitComposeDownJobExit(ctx, svc, sub, job.ID, interval, grace)
+	code, exitErr := waitComposeDownJobExit(ctx, svc, sub, job.ID, interval, grace, startWait)
 
 	final := live
 	if ctx.Err() == nil {
@@ -160,17 +172,21 @@ func composeDownExitErr(code int, lastErr string) error {
 // answer at once, and then answers again at every interval, beside the exit
 // event. A record that is gone gives the exit event grace to turn up before the
 // job is declared gone.
+//
+// A record left created is over at once when nothing is bringing it up (see
+// composeDownJobNeverRan): no run will ever report an exit for it. One that a
+// launch or a monitor is still bringing up gets startWait to reach starting.
 func waitComposeDownJobExit(
 	ctx context.Context,
 	svc *cmdman.Service,
 	sub *cmdman.EventsSubscription,
 	id string,
-	interval, grace time.Duration,
+	interval, grace, startWait time.Duration,
 ) (int, error) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	var goneUntil time.Time
+	var goneUntil, startBy time.Time
 	for {
 		entry, err := findCommandEntryByID(ctx, svc, id)
 		switch {
@@ -188,6 +204,23 @@ func waitComposeDownJobExit(
 				entry.State, entry.ExitCode, stateError(entry.StateJSON),
 			); over {
 				return code, err
+			}
+			if entry.State != model.EventTypeCreated {
+				break
+			}
+			if startBy.IsZero() {
+				startBy = time.Now().Add(startWait)
+			}
+			neverRan, err := composeDownJobNeverRan(ctx, svc, *entry)
+			if err != nil {
+				// A probe that failed says nothing either way, and startWait still
+				// bounds the wait.
+				contextkey.ValueSlogLoggerDefault(ctx).DebugContext(
+					ctx, "compose down job: check for a launch", "id", id, "error", err,
+				)
+			}
+			if neverRan || time.Now().After(startBy) {
+				return 0, errComposeDownJobNotStarted
 			}
 		}
 

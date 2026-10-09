@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/ngicks/cmdman/cmdman/compose"
 	"github.com/ngicks/cmdman/cmdman/logdriver"
 	"github.com/ngicks/cmdman/cmdman/model"
+	"github.com/ngicks/cmdman/cmdman/monitor"
 	"github.com/ngicks/cmdman/cmdman/tui"
 )
 
@@ -53,7 +55,8 @@ func TestDownProgressReadsTheOutput(t *testing.T) {
 		{stdoutLine(progressJSON(t, progressLine{
 			Command: "api", Phase: "error", Error: "stop command api: boom",
 		})), false},
-		// An already-exited command is skipped by the stop phase, not stopped.
+		// The remove phase reports a replica it keeps as skipped, which is neither
+		// a stop nor a removal.
 		{stdoutLine(progressJSON(t, progressLine{Command: "seed", Phase: "skipped"})), false},
 		{stdoutLine(progressJSON(t, progressLine{Command: "web", Phase: "removed"})), true},
 		// A long record can arrive in pieces.
@@ -143,7 +146,8 @@ func TestFollowComposeDownJob(t *testing.T) {
 		assert.NilError(t, err)
 		assert.NilError(t, start(t.Context(), res.ID))
 		s, err := followComposeDownJobWithin(
-			t.Context(), svc, tui.DownJob{ID: res.ID}, 50*time.Millisecond, time.Second,
+			t.Context(), svc, tui.DownJob{ID: res.ID},
+			50*time.Millisecond, time.Second, time.Second,
 		)
 		assert.NilError(t, err)
 		progress, final, err := collectDown(t, s)
@@ -160,7 +164,8 @@ func TestFollowComposeDownJob(t *testing.T) {
 
 		// Found again once it is over, the job reports its end alone.
 		s, err := followComposeDownJobWithin(
-			t.Context(), svc, tui.DownJob{ID: id, Finished: true}, 50*time.Millisecond, time.Second,
+			t.Context(), svc, tui.DownJob{ID: id, Finished: true},
+			50*time.Millisecond, time.Second, time.Second,
 		)
 		assert.NilError(t, err)
 		progress, again, err := collectDown(t, s)
@@ -207,7 +212,8 @@ func TestFollowComposeDownJobThatFailed(t *testing.T) {
 	})
 
 	s, err := followComposeDownJobWithin(
-		t.Context(), svc, tui.DownJob{ID: res.ID, Finished: true}, 50*time.Millisecond, time.Second,
+		t.Context(), svc, tui.DownJob{ID: res.ID, Finished: true},
+		50*time.Millisecond, time.Second, time.Second,
 	)
 	assert.NilError(t, err)
 	_, _, err = collectDown(t, s)
@@ -223,9 +229,117 @@ func TestFollowComposeDownJobThatIsGone(t *testing.T) {
 
 	s, err := followComposeDownJobWithin(
 		t.Context(), svc, tui.DownJob{ID: "0123456789abcdef0123456789abcdef"},
-		50*time.Millisecond, 200*time.Millisecond,
+		50*time.Millisecond, 200*time.Millisecond, time.Second,
 	)
 	assert.NilError(t, err)
 	_, _, err = collectDown(t, s)
 	assert.ErrorContains(t, err, "is gone without reporting an exit")
+}
+
+// A record left created that nothing is bringing up never ran: found, it is
+// over, and following it ends at once with no report of a teardown running.
+// The follow does not wait on such a record even when it is handed one as
+// pending.
+func TestFollowComposeDownJobThatNeverRan(t *testing.T) {
+	cfg := frameSvcConfig(t)
+	svc := cmdman.NewService(cfg)
+	t.Cleanup(func() { _ = svc.Close() })
+	dir := t.TempDir()
+	res, err := svc.Create(t.Context(), downJobTestRequest(t, svc, dir, "tools"))
+	assert.NilError(t, err)
+
+	found, ok, err := findComposeDownJob(
+		t.Context(), svc, ComposeDownJobOptions{WorkDir: dir, Project: "tools"},
+	)
+	assert.NilError(t, err)
+	assert.Assert(t, ok)
+	job := downJobOf(found)
+	assert.DeepEqual(t, job, tui.DownJob{ID: res.ID, Finished: true})
+
+	for _, job := range []tui.DownJob{job, {ID: res.ID}} {
+		begun := time.Now()
+		s, err := followComposeDownJobWithin(
+			t.Context(), svc, job, 50*time.Millisecond, time.Second, time.Minute,
+		)
+		assert.NilError(t, err)
+		progress, final, err := collectDown(t, s)
+		assert.Assert(t, errors.Is(err, errComposeDownJobNotStarted), "got %v", err)
+		assert.DeepEqual(t, final, tui.DownSummary{})
+		assert.Assert(t, time.Since(begun) < 5*time.Second,
+			"the follow waited %s on a job that never ran", time.Since(begun))
+		if job.Finished {
+			assert.Equal(t, len(progress), 0, "a job that never ran was reported running")
+		}
+	}
+}
+
+// A record left created while a launch is still on its way is followed as one
+// under way, and over once the launch lets go without having got it going.
+func TestFollowComposeDownJobThatALaunchLetsGo(t *testing.T) {
+	cfg := frameSvcConfig(t)
+	svc := cmdman.NewService(cfg)
+	t.Cleanup(func() { _ = svc.Close() })
+
+	// follow follows a created record while hold stands for the launch, and
+	// returns once hold's release has ended the follow.
+	follow := func(t *testing.T, hold func(id, name string) (release func())) {
+		t.Helper()
+		req := downJobTestRequest(t, svc, t.TempDir(), "tools")
+		res, err := svc.Create(t.Context(), req)
+		assert.NilError(t, err)
+		release := hold(res.ID, req.Name)
+
+		s, err := followComposeDownJobWithin(
+			t.Context(), svc, tui.DownJob{ID: res.ID},
+			50*time.Millisecond, time.Second, time.Minute,
+		)
+		assert.NilError(t, err)
+		first, ok := <-s.Summaries()
+		assert.Assert(t, ok && first.Running, "a launch in flight is a teardown under way")
+		select {
+		case summary, ok := <-s.Summaries():
+			t.Fatalf("the follow moved on while the launch was in flight: %+v, %v", summary, ok)
+		case <-time.After(300 * time.Millisecond):
+		}
+
+		release()
+		_, final, err := collectDown(t, s)
+		assert.Assert(t, errors.Is(err, errComposeDownJobNotStarted), "got %v", err)
+		assert.DeepEqual(t, final, tui.DownSummary{})
+	}
+
+	t.Run("a monitor holding the PID lock", func(t *testing.T) {
+		follow(t, func(id, _ string) func() {
+			release, held, err := monitor.HoldPIDLock(cfg, id)
+			assert.NilError(t, err)
+			assert.Assert(t, held)
+			return release
+		})
+	})
+
+	t.Run("a launch holding the job's lock", func(t *testing.T) {
+		follow(t, func(_, name string) func() {
+			unlock, err := lockComposeJob(t.Context(), cfg, name)
+			assert.NilError(t, err)
+			return unlock
+		})
+	})
+}
+
+// A launch that never lets go is not waited on past the start wait.
+func TestFollowComposeDownJobThatNeverGetsGoing(t *testing.T) {
+	cfg := frameSvcConfig(t)
+	svc := cmdman.NewService(cfg)
+	t.Cleanup(func() { _ = svc.Close() })
+	res, err := svc.Create(t.Context(), downJobTestRequest(t, svc, t.TempDir(), "tools"))
+	assert.NilError(t, err)
+	holdMonitorLock(t, cfg, res.ID)
+
+	s, err := followComposeDownJobWithin(
+		t.Context(), svc, tui.DownJob{ID: res.ID},
+		50*time.Millisecond, time.Second, 300*time.Millisecond,
+	)
+	assert.NilError(t, err)
+	_, _, err = collectDown(t, s)
+	assert.Assert(t, errors.Is(err, errComposeDownJobNotStarted), "got %v", err)
 }

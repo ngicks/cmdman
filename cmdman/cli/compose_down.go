@@ -34,11 +34,11 @@ func CloseProjectWindows(
 // exist, and the ownership stamp they carry would report the project as running
 // the next time the launcher lists it.
 //
-// The TUI asks for it on every down, while `cmdman compose down` does it only
-// under --close-windows: a window that closes underneath a command line is a
-// surprise, while the TUI issued the gesture that emptied it. Either way the
-// window a pane of which runs this process is restored rather than closed, as
-// [mux.Down] does for every KillCreated teardown.
+// `cmdman compose down` does it only under --close-windows: a window that closes
+// underneath a command line is a surprise. The TUI's down job runs the down with
+// that flag on every down, since the widget issued the gesture that emptied the
+// windows. Either way the window a pane of which runs this process is restored
+// rather than closed, as [mux.Down] does for every KillCreated teardown.
 //
 // The windows are found by the project's identity alone, which is why this goes
 // to mux directly rather than through the compose mux verbs: a project with no
@@ -53,8 +53,8 @@ func CloseProjectWindows(
 //
 // Failing to remove a window is not the down failing: the commands are gone
 // either way, and what the caller reports is about them. The failure is said in
-// the log and as a warning on errOut. The TUI passes io.Discard, because its
-// terminal is the screen it draws.
+// the log and as a warning on errOut, the command line's stderr. In the TUI's
+// down job that stderr is the job's own output.
 func closeProjectWindows(
 	ctx context.Context,
 	selection compose.ProjectSelection,

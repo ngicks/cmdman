@@ -179,9 +179,14 @@ type DownSummary struct {
 // so the teardown outlives the widget that asked for it. ID is that command's
 // id.
 //
-// Finished reports that the job's run was already over when the job was
-// launched or found: what it reports is then an end that came before the
-// caller asked, which a listing the caller loaded may already show.
+// Finished reports that the job's run was over by the time the launch or the
+// lookup returned it, so following it has nothing live to read. From a launch,
+// that run is one the request asked for: a down that finished while the launch
+// waited its turn, or one the launch started that was over before the start
+// returned. From a lookup, it is the last run there was, over before the widget
+// asked, which a listing the widget loaded may already show. A job that never
+// got going and that nothing is bringing up is finished too: following it
+// reports that it did not start.
 type DownJob struct {
 	ID       string
 	Finished bool
@@ -351,8 +356,9 @@ type Backend interface {
 	// the ones on screen — so widgets gate it behind a confirm.
 	LaunchComposeDown(ctx context.Context, target DownTarget) (DownJob, error)
 	// FindComposeDown finds the latest compose down job of the project, running
-	// or finished, for a widget that opens on it. ok is false when the project
-	// has none.
+	// or finished, for a widget that opens on it. A job that never got going and
+	// that nothing is bringing up comes back finished (see DownJob). ok is false
+	// when the project has none.
 	FindComposeDown(ctx context.Context, target DownTarget) (job DownJob, ok bool, err error)
 	// FollowComposeDown reads what a compose down job does, from its start, until
 	// its run is over (see DownStream). A job that is already over is reported

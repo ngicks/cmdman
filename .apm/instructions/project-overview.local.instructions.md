@@ -112,7 +112,9 @@ survives the widget. It carries `compose.LabelJob*` labels, never the project la
 hides it from command lists. Launches serialize on a flock at
 `<runtime-dir>/compose-jobs/<name>.lock`: a running job, or one that ended after the request, is
 reused; any other record is replaced only while the launcher holds its PID lock
-(`monitor.HoldPIDLock`). Widgets follow the job's JSON log and exit event for the summary.
+(`monitor.HoldPIDLock`). Widgets follow the job's JSON log and exit event for the summary. A
+`created` record whose job lock and PID lock are both free never ran: find reports it finished
+and the follow ends with "compose down job did not start"; a failed start removes the record.
 
 `run` = `create` + `start` (+ optional `--attach`). The hidden `cmdman tui __child` subcommand is
 the TUI's popup child: the parent opens a multiplexer popup running it and the two talk over an
