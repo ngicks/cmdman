@@ -101,7 +101,20 @@ Two process roles per command:
   → `wg.Wait()`.
 
 **Stale cleanup** (`monitor/mon_clean.go`): `Service.List` flips DB entries whose monitor PID is
-dead (`kill -0`) to `failed`.
+dead (`kill -0`) to `failed`. It re-reads the state after the probe, so a monitor that recorded
+its run's end just before exiting is not marked dead. A monitor whose record is gone when it takes
+its PID lock exits without running the command.
+
+**TUI compose down job** (`cli/compose_down_job.go`, `cli/compose_down_follow.go`): `D` then `y`
+in a widget launches a supervised command `<workdir-hash>-<project>.down` running
+`cmdman compose down --progress json --close-windows` with the widget's environment, so the down
+survives the widget. It carries `compose.LabelJob*` labels, never the project labels, and the TUI
+hides it from command lists. Launches serialize on a flock at
+`<runtime-dir>/compose-jobs/<name>.lock`: a running job, or one that ended after the request, is
+reused; any other record is replaced only while the launcher holds its PID lock
+(`monitor.HoldPIDLock`). Widgets follow the job's JSON log and exit event for the summary. A
+`created` record whose job lock and PID lock are both free never ran: find reports it finished
+and the follow ends with "compose down job did not start"; a failed start removes the record.
 
 `run` = `create` + `start` (+ optional `--attach`). The hidden `cmdman tui __child` subcommand is
 the TUI's popup child: the parent opens a multiplexer popup running it and the two talk over an

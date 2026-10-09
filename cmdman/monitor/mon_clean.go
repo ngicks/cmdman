@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/ngicks/cmdman/cmdman/config"
 	"github.com/ngicks/cmdman/cmdman/internal/flock"
@@ -127,6 +128,40 @@ func MarkMonitorDied(
 
 func isStaleCheckState(state model.EventType) bool {
 	return state == model.EventTypeStarting || state == model.EventTypeRunning
+}
+
+// HoldPIDLock takes the lock on id's PID file in place of a monitor, creating
+// the file when there is none, and keeps it until release is called. No monitor
+// of id comes up meanwhile: one that starts finds the lock busy and exits.
+// held is false, and release nil, when a live monitor already holds the lock.
+//
+// A caller that acts on id having no monitor, by removing its record say, holds
+// the lock across the check and the act. Probing the PID file for a live
+// monitor and acting afterwards leaves a monitor that was spawned a moment
+// earlier the time in between to take the lock and run the command whose record
+// is about to go.
+func HoldPIDLock(cfg config.Config, id string) (release func(), held bool, err error) {
+	pidPath, err := cfg.MonitorPIDPath(id)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := os.MkdirAll(filepath.Dir(pidPath), 0o700); err != nil {
+		return nil, false, fmt.Errorf("create runtime dir: %w", err)
+	}
+	f, err := os.OpenFile(pidPath, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		return nil, false, fmt.Errorf("open pid file %q: %w", pidPath, err)
+	}
+	acquired, err := flock.TryLockExclusive(f)
+	if err != nil {
+		_ = f.Close()
+		return nil, false, fmt.Errorf("lock pid file %q: %w", pidPath, err)
+	}
+	if !acquired {
+		_ = f.Close()
+		return nil, false, nil
+	}
+	return func() { _ = f.Close() }, true, nil
 }
 
 // isStaleMonitor reports whether the monitor for id has died. It probes

@@ -1830,8 +1830,8 @@ func TestSwitcherComposeDownConfirms(t *testing.T) {
 	if len(fb.MuxDowns) != 0 {
 		t.Errorf("D must not touch the dashboard, mux downs = %v", fb.MuxDowns)
 	}
-	if !strings.Contains(m.status, "stopped 3, removed 2") {
-		t.Errorf("the teardown should report what it did, status = %q", m.status)
+	if got := core.StripANSI(m.switcherFooter()); !strings.Contains(got, "stopped 3, removed 2") {
+		t.Errorf("the teardown should report what it did, footer = %q", got)
 	}
 }
 
@@ -1847,9 +1847,143 @@ func TestSwitcherComposeDownReportsPartialTeardown(t *testing.T) {
 	m, _ = updWidget(t, m, coretest.Kr("D"))
 	m, cmd := updWidget(t, m, coretest.Kr("y"))
 	m = settle(t, m, cmd)
-	if !strings.Contains(m.status, "stopped 2, removed 1") ||
-		!strings.Contains(m.status, "remove seed-db: still running") {
-		t.Errorf("a partial teardown should report both halves, status = %q", m.status)
+	if got := core.StripANSI(m.switcherFooter()); !strings.Contains(got, "stopped 2, removed 1") ||
+		!strings.Contains(got, "remove seed-db: still running") {
+		t.Errorf("a partial teardown should report both halves, footer = %q", got)
+	}
+}
+
+// TestSwitcherFollowsTheDownJob covers a teardown that runs in a job of its
+// own: the line says how far it has got while it runs, D on the same project
+// says so again rather than asking, and the end is said on a line that the
+// listings the teardown itself triggers do not clear. A key press does.
+func TestSwitcherFollowsTheDownJob(t *testing.T) {
+	m := seedWidget(t, 60, 12)
+	fb := m.backend.(*coretest.FakeBackend)
+	fb.ComposeDownProgress = []core.DownSummary{{Stopped: 1, Running: true}}
+	fb.ComposeDownSummary = core.DownSummary{Stopped: 2, Removed: 2}
+
+	m, _ = updWidget(t, m, coretest.Kr("D"))
+	m, cmd := updWidget(t, m, coretest.Kr("y"))
+	progress, ok := cmd().(core.ComposeDownProgressMsg)
+	if !ok {
+		t.Fatalf("the first report of a running job should be its progress")
+	}
+	m, next := updWidget(t, m, progress)
+	if got := core.StripANSI(m.switcherFooter()); !strings.Contains(
+		got, "compose down local-dev: running… stopped 1") {
+		t.Fatalf("a running teardown should say how far it has got, footer = %q", got)
+	}
+
+	m, cmd = updWidget(t, m, coretest.Kr("D"))
+	if cmd != nil || m.pendingDown.Project != "" {
+		t.Fatalf("D while the teardown runs should not ask again")
+	}
+	if got := core.StripANSI(m.switcherFooter()); !strings.Contains(got, "running… stopped 1") {
+		t.Errorf("D while the teardown runs should say how far it has got, footer = %q", got)
+	}
+	if len(fb.ComposeDowns) != 1 {
+		t.Errorf("D while the teardown runs launched %v", fb.ComposeDowns)
+	}
+
+	m = settle(t, m, next)
+	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: seedInfos()})
+	m, _ = updWidget(t, m, core.ProjectsLoadedMsg{Infos: fb.Projs})
+	if got := core.StripANSI(m.switcherFooter()); !strings.Contains(
+		got, "compose down local-dev: stopped 2, removed 2") {
+		t.Errorf("the end should outlive the listings it triggers, footer = %q", got)
+	}
+
+	m, _ = updWidget(t, m, coretest.Kr("j"))
+	if got := core.StripANSI(m.switcherFooter()); strings.Contains(got, "compose down") {
+		t.Errorf("a key press should clear the teardown's line, footer = %q", got)
+	}
+	// Over, the teardown no longer stands in for the question.
+	m, _ = updWidget(t, m, coretest.Kr("k"))
+	m, _ = updWidget(t, m, coretest.Kr("D"))
+	if m.pendingDown.Project != "local-dev" {
+		t.Errorf("D after the teardown ended should ask again, pending = %+v", m.pendingDown)
+	}
+}
+
+// TestSwitcherOpensOnTheLastDown covers the opening: the first project listing
+// asks for the last teardown of the selected project, once, and its line is
+// what the switcher opens with.
+func TestSwitcherOpensOnTheLastDown(t *testing.T) {
+	target := core.DownTarget{
+		Project: "local-dev",
+		Path:    "/work/local-dev/cmd-compose.yaml",
+		WorkDir: "/work/local-dev",
+	}
+	fb := &coretest.FakeBackend{
+		Dir:  "/work/local-dev",
+		Cmds: seedInfos(),
+		Projs: []core.ProjectInfo{{
+			Name: "local-dev", Workdir: "/work/local-dev",
+			Path: "/work/local-dev/cmd-compose.yaml", Identity: "id-local-dev",
+		}},
+		DownJobs:           map[core.DownTarget]core.DownJob{target: {ID: "j1", Finished: true}},
+		ComposeDownSummary: core.DownSummary{Stopped: 1, Removed: 2},
+	}
+	m := New(t.Context(), core.Options{Backend: fb})
+	t.Cleanup(func() { _ = m.watcher.Close() })
+	m, _ = updWidget(t, m, tea.WindowSizeMsg{Width: 60, Height: 12})
+	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: fb.Cmds})
+	m, cmd := updWidget(t, m, core.ProjectsLoadedMsg{Infos: fb.Projs})
+	m = settle(t, m, cmd)
+
+	if want := []coretest.DownCall{{
+		Project: target.Project, Path: target.Path, Workdir: target.WorkDir,
+	}}; !slices.Equal(fb.DownFinds, want) {
+		t.Fatalf("the opening asked about %v, want %v", fb.DownFinds, want)
+	}
+	if got := core.StripANSI(
+		m.switcherFooter(),
+	); got != "compose down local-dev: stopped 1, removed 2" {
+		t.Errorf("the switcher should open on the last teardown, footer = %q", got)
+	}
+
+	if _, cmd = updWidget(t, m, core.ProjectsLoadedMsg{Infos: fb.Projs}); cmd != nil {
+		t.Errorf("a later listing should not ask again")
+	}
+}
+
+// TestSwitcherOpensOnADownThatNeverStarted covers a project whose last
+// teardown never got going: the backend finds that job over, and following it
+// reports that it did not start. The switcher says so, and D asks to tear the
+// project down again rather than standing in for a teardown under way.
+func TestSwitcherOpensOnADownThatNeverStarted(t *testing.T) {
+	target := core.DownTarget{
+		Project: "local-dev",
+		Path:    "/work/local-dev/cmd-compose.yaml",
+		WorkDir: "/work/local-dev",
+	}
+	fb := &coretest.FakeBackend{
+		Dir:  "/work/local-dev",
+		Cmds: seedInfos(),
+		Projs: []core.ProjectInfo{{
+			Name: "local-dev", Workdir: "/work/local-dev",
+			Path: "/work/local-dev/cmd-compose.yaml", Identity: "id-local-dev",
+		}},
+		DownJobs:       map[core.DownTarget]core.DownJob{target: {ID: "j1", Finished: true}},
+		ComposeDownErr: errors.New("compose down job did not start"),
+	}
+	m := New(t.Context(), core.Options{Backend: fb})
+	t.Cleanup(func() { _ = m.watcher.Close() })
+	m, _ = updWidget(t, m, tea.WindowSizeMsg{Width: 80, Height: 12})
+	m, _ = updWidget(t, m, core.CommandsLoadedMsg{Infos: fb.Cmds})
+	m, cmd := updWidget(t, m, core.ProjectsLoadedMsg{Infos: fb.Projs})
+	m = settle(t, m, cmd)
+
+	want := "compose down local-dev: stopped 0, removed 0: compose down job did not start"
+	if got := core.StripANSI(m.switcherFooter()); got != want {
+		t.Errorf("the switcher should say the teardown did not start, footer = %q, want %q",
+			got, want)
+	}
+
+	m, _ = updWidget(t, m, coretest.Kr("D"))
+	if m.pendingDown != target {
+		t.Errorf("D should ask to tear the project down, pending = %+v", m.pendingDown)
 	}
 }
 

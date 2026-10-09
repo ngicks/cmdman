@@ -51,6 +51,11 @@ func (b *serviceBackend) ListCommands(ctx context.Context) ([]tui.CommandInfo, e
 // An intermediate, a command lifecycle hooks created for a replica, is grouped
 // under the project of that replica and named after it (see
 // intermediateName), with the replica's scale.
+//
+// A compose job, the command a compose verb runs in the background (see
+// compose.LabelJob), is left out. It belongs to no project, so it would be
+// listed as a standalone command of the project's directory, and the widget
+// that launched it reports what it does.
 func commandInfos(entries []store.CommandEntry) []tui.CommandInfo {
 	byName := make(map[string]store.CommandEntry, len(entries))
 	for _, e := range entries {
@@ -67,6 +72,9 @@ func commandInfos(entries []store.CommandEntry) []tui.CommandInfo {
 			driver = e.ConfigJSON.LogDriver
 			dir = e.ConfigJSON.Dir
 			tty = e.ConfigJSON.Tty
+		}
+		if labels[compose.LabelJob] != "" {
+			continue
 		}
 		project := labels[compose.LabelProject]
 		workdir, hasWorkdir := labels[compose.LabelWorkdir]

@@ -491,6 +491,90 @@ func TestIsStaleMonitor(t *testing.T) {
 	assert.Assert(t, !errors.Is(err, fs.ErrNotExist))
 }
 
+func TestHoldPIDLock(t *testing.T) {
+	t.Run("keeps a monitor from coming up until released", func(t *testing.T) {
+		cfg := testConfig(t, t.TempDir())
+		const id = "hold-1"
+
+		release, held, err := HoldPIDLock(cfg, id)
+		assert.NilError(t, err)
+		assert.Assert(t, held)
+
+		_, held, err = HoldPIDLock(cfg, id)
+		assert.NilError(t, err)
+		assert.Assert(t, !held, "a second holder took a lock already held")
+
+		release()
+		release, held, err = HoldPIDLock(cfg, id)
+		assert.NilError(t, err)
+		assert.Assert(t, held, "the lock was not given back on release")
+		release()
+	})
+
+	t.Run("reports a live monitor without taking its lock", func(t *testing.T) {
+		cfg := testConfig(t, t.TempDir())
+		const id = "hold-2"
+
+		pidPath, err := cfg.MonitorPIDPath(id)
+		assert.NilError(t, err)
+		assert.NilError(t, os.MkdirAll(filepath.Dir(pidPath), 0o700))
+		f, err := os.OpenFile(pidPath, os.O_RDWR|os.O_CREATE, 0o644)
+		assert.NilError(t, err)
+		defer f.Close()
+		acquired, err := flock.TryLockExclusive(f)
+		assert.NilError(t, err)
+		assert.Assert(t, acquired)
+
+		release, held, err := HoldPIDLock(cfg, id)
+		assert.NilError(t, err)
+		assert.Assert(t, !held)
+		assert.Assert(t, release == nil)
+	})
+}
+
+// A monitor can come up for a command whose record was removed after it was
+// spawned. Running the command then would run what nobody wants run any more,
+// with state writes that land nowhere, so the monitor exits instead.
+func TestMonitorExitsWhenRecordIsGone(t *testing.T) {
+	dir := t.TempDir()
+	appCfg := testConfig(t, dir)
+	dbPath, err := appCfg.DBPath()
+	assert.NilError(t, err)
+	st, err := store.OpenStore(t.Context(), dbPath, true)
+	assert.NilError(t, err)
+	defer st.Close()
+
+	id := "test-monitor-gone"
+	commandDir, err := appCfg.CommandDir(id)
+	assert.NilError(t, err)
+	marker := filepath.Join(dir, "ran")
+	cfg := &model.CommandConfig{
+		Argv:            []string{"/bin/sh", "-c", "touch " + marker},
+		Dir:             dir,
+		Env:             testEnv(),
+		RestartPolicy:   model.RestartPolicyNo,
+		ScrollbackBytes: 4096,
+		LogDriver:       model.DefaultLogDriver,
+		CommandDir:      commandDir,
+	}
+	// The config file is still on disk, as it is for a monitor that read it just
+	// before the record went; the rows are not.
+	assert.NilError(t, store.WriteCommandConfig(commandDir, cfg))
+
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err = RunMonitor(ctx, id, appCfg, logger)
+	assert.ErrorContains(t, err, "no longer exists")
+
+	_, err = os.Stat(marker)
+	assert.Assert(t, errors.Is(err, fs.ErrNotExist), "the command ran: %v", err)
+	stale, err := isStaleMonitor(appCfg, id)
+	assert.NilError(t, err)
+	assert.Assert(t, stale, "the monitor kept its PID lock")
+}
+
 func TestCleanStaleEntrySkipsProbeError(t *testing.T) {
 	st := testStore(t)
 

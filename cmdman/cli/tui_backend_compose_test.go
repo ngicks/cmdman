@@ -1,22 +1,18 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/ngicks/cmdman/cmdman"
 	"github.com/ngicks/cmdman/cmdman/compose"
-	"github.com/ngicks/cmdman/cmdman/mux"
+	"github.com/ngicks/cmdman/cmdman/model"
+	"github.com/ngicks/cmdman/cmdman/monitor"
 	"github.com/ngicks/cmdman/cmdman/tui"
-	"github.com/ngicks/cmdman/pkg/muxctl"
-	"github.com/ngicks/go-common/contextkey"
 )
 
 func TestMergeProjectInfosAddsZeroCommandNamedProjects(t *testing.T) {
@@ -185,239 +181,10 @@ const downComposeYAML = `name: downproj
 commands:
   a:
     args: [echo, a]
-  b:
-    args: [echo, b]
 `
 
-// muxDownRecorder stands in for [mux.Down] so a teardown can be watched without
-// a multiplexer server to run it against.
-type muxDownRecorder struct {
-	calls []mux.DownOptions
-	err   error
-}
-
-func (r *muxDownRecorder) down(_ context.Context, opts mux.DownOptions) error {
-	r.calls = append(r.calls, opts)
-	return r.err
-}
-
-// stubComposeDown returns a canned teardown result, which is how the partial
-// failure gets arranged: a real down of a real project succeeds on every
-// command or on none.
-type stubComposeDown struct {
-	result *compose.DownResult
-	err    error
-}
-
-func (s stubComposeDown) Down(
-	context.Context, compose.ProjectSelection, compose.DownOption,
-) (*compose.DownResult, error) {
-	return s.result, s.err
-}
-
-// TestComposeDownSummarizesTheTeardown drives the teardown against a real
-// cmdman service so the counts come from the store rather than from a fake that
-// could only echo them back. The commands are created and never started, which
-// spawns no monitor: a created command is already terminal, so the stop phase
-// covers it as a no-op and the remove phase is what actually takes it away.
-//
-// The mux teardown is the one thing faked: the window removal a completed down
-// asks for is checked here as a call, not made against whatever multiplexer the
-// test machine happens to be running.
-func TestComposeDownSummarizesTheTeardown(t *testing.T) {
-	dir, path := downProjectDir(t)
-
-	svc := cmdman.NewService(frameSvcConfig(t))
-	defer svc.Close()
-	composeSvc := compose.NewService(svc)
-
-	spec, err := compose.LoadAndNormalize(compose.NormalizeOpts{WorkDir: dir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := composeSvc.Create(t.Context(), spec, compose.CreateOption{}); err != nil {
-		t.Fatal(err)
-	}
-
-	recorder := &muxDownRecorder{}
-	b := &serviceBackend{svc: svc, compose: composeSvc, workDir: dir}
-	summary, err := b.composeDown(t.Context(), "downproj", path, dir, composeSvc, recorder.down)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if summary.Stopped != 2 || summary.Removed != 2 {
-		t.Fatalf("summary = %+v, want both phases to cover the project's two commands", summary)
-	}
-
-	if len(recorder.calls) != 1 {
-		t.Fatalf("mux teardown calls = %d, want 1", len(recorder.calls))
-	}
-	got := recorder.calls[0]
-	want := compose.ProjectSelection{WorkDir: dir, Project: "downproj"}.ProjectIdentity()
-	if got.Identity != want {
-		t.Errorf("teardown Identity = %q, want %q", got.Identity, want)
-	}
-	if !got.KillCreated {
-		t.Error("teardown must remove the windows cmdman created, not restore them")
-	}
-	// This project declares no mux: section, so there is no driver to name and
-	// the window its landing synthesized is found by autodetection.
-	if !reflect.DeepEqual(got.Driver, muxctl.DriverSpec{}) {
-		t.Errorf("teardown Driver = %+v, want the autodetecting zero value", got.Driver)
-	}
-
-	cmds, err := b.ListCommands(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range cmds {
-		if c.Project == "downproj" {
-			t.Fatalf("command %q survived the teardown", c.Name)
-		}
-	}
-}
-
-// TestComposeDownForwardsTheDeclaredDriver pins where the driver comes from for
-// a project that declares a mux: section: its own, so a dashboard built on a
-// non-default server is looked for on that server.
-func TestComposeDownForwardsTheDeclaredDriver(t *testing.T) {
-	conf := t.TempDir()
-	t.Setenv("CMDMAN_CONF", filepath.Join(conf, "config.json"))
-	dir := t.TempDir()
-	path := filepath.Join(dir, "cmd-compose.yaml")
-	writeComposeFile(t, path, muxComposeYAML)
-	t.Chdir(dir)
-
-	recorder := &muxDownRecorder{}
-	b := &serviceBackend{workDir: dir}
-	if _, err := b.composeDown(
-		t.Context(), "tools", path, dir,
-		stubComposeDown{result: &compose.DownResult{}}, recorder.down,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if len(recorder.calls) != 1 {
-		t.Fatalf("mux teardown calls = %d, want 1", len(recorder.calls))
-	}
-	if got := recorder.calls[0].Driver.Name; got != "tmux" {
-		t.Errorf("teardown Driver.Name = %q, want the declared tmux", got)
-	}
-}
-
-// TestComposeDownSurvivesAFailedWindowRemoval pins the best-effort half: the
-// commands are gone whether or not their window could be closed, so the down
-// still reports what it did and the failure is left in the log.
-func TestComposeDownSurvivesAFailedWindowRemoval(t *testing.T) {
-	dir, path := downProjectDir(t)
-
-	var buf bytes.Buffer
-	ctx := contextkey.WithSlogLogger(
-		t.Context(), slog.New(slog.NewTextHandler(&buf, nil)),
-	)
-	recorder := &muxDownRecorder{err: errors.New("no server running")}
-	b := &serviceBackend{workDir: dir}
-	summary, err := b.composeDown(
-		ctx, "downproj", path, dir,
-		stubComposeDown{result: &compose.DownResult{
-			Stops:   []compose.StopOutcome{{Command: "a"}},
-			Removes: []compose.RemoveOutcome{{Command: "a"}},
-		}},
-		recorder.down,
-	)
-	if err != nil {
-		t.Fatalf("a window that would not close must not fail the down: %v", err)
-	}
-	if summary != (tui.DownSummary{Stopped: 1, Removed: 1}) {
-		t.Errorf("summary = %+v, want the commands the teardown got through", summary)
-	}
-	if !strings.Contains(buf.String(), "no server running") {
-		t.Errorf("the failure should be logged, got %q", buf.String())
-	}
-}
-
-// The summary counts the stops that resorted to SIGKILL among the stops the
-// teardown got through, and leaves out one that failed.
-func TestDownSummaryCountsForcedKills(t *testing.T) {
-	got := downSummary(&compose.DownResult{
-		Stops: []compose.StopOutcome{
-			{Command: "a", ForceKilled: true},
-			{Command: "b"},
-			{Command: "c", ForceKilled: true, Err: errors.New("stop_post failed")},
-		},
-		Removes: []compose.RemoveOutcome{{Command: "a"}, {Command: "b"}},
-	})
-	want := tui.DownSummary{Stopped: 2, Removed: 2, ForceKilled: 1}
-	if got != want {
-		t.Errorf("summary = %+v, want %+v", got, want)
-	}
-}
-
-// The summary counts every release that failed, as an error or as a warning,
-// and leaves out one that worked.
-func TestDownSummaryCountsUnreleasedResources(t *testing.T) {
-	got := downSummary(&compose.DownResult{
-		Stops:   []compose.StopOutcome{{Command: "a"}},
-		Removes: []compose.RemoveOutcome{{Command: "a"}},
-		Releases: []compose.ReleaseOutcome{
-			{Holder: "a.res.net", Resource: "net", Err: errors.New("network is in use")},
-			{Holder: "a.res.port", Resource: "port", Warning: errors.New("port is in use")},
-			{Holder: "gone.res.dir", Resource: "dir"},
-		},
-	})
-	want := tui.DownSummary{Stopped: 1, Removed: 1, Unreleased: 2}
-	if got != want {
-		t.Errorf("summary = %+v, want %+v", got, want)
-	}
-}
-
-// TestComposeDownKeepsWindowsOnPartialTeardown covers the half-done teardown:
-// a command that would not go away leaves the window something to show, so the
-// window is left alone and the failure is what comes back.
-func TestComposeDownKeepsWindowsOnPartialTeardown(t *testing.T) {
-	dir, path := downProjectDir(t)
-
-	for _, tc := range []struct {
-		name string
-		stub stubComposeDown
-		want tui.DownSummary
-	}{
-		{
-			name: "one command would not be removed",
-			stub: stubComposeDown{result: &compose.DownResult{
-				Stops: []compose.StopOutcome{{Command: "a"}, {Command: "b"}},
-				Removes: []compose.RemoveOutcome{
-					{Command: "a"},
-					{Command: "b", Err: errors.New("still running")},
-				},
-			}},
-			want: tui.DownSummary{Stopped: 2, Removed: 1},
-		},
-		{
-			name: "the teardown never ran",
-			stub: stubComposeDown{err: errors.New("no store")},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			recorder := &muxDownRecorder{}
-			b := &serviceBackend{workDir: dir}
-			summary, err := b.composeDown(
-				t.Context(), "downproj", path, dir, tc.stub, recorder.down,
-			)
-			if err == nil {
-				t.Fatal("a teardown that did not get through must report the failure")
-			}
-			if summary != tc.want {
-				t.Errorf("summary = %+v, want %+v", summary, tc.want)
-			}
-			if len(recorder.calls) != 0 {
-				t.Errorf("mux teardown calls = %d, want none", len(recorder.calls))
-			}
-		})
-	}
-}
-
-// downProjectDir writes the two-command project the down tests work on into a
-// temp directory and makes it the working directory. The compose config dir is
+// downProjectDir writes the project the down tests work on into a temp
+// directory and makes it the working directory. The compose config dir is
 // derived from $CMDMAN_CONF; without the override the resolution would reach
 // the projects the developer keeps in their own.
 func downProjectDir(t *testing.T) (dir, path string) {
@@ -431,6 +198,121 @@ func downProjectDir(t *testing.T) (dir, path string) {
 	}
 	t.Chdir(dir)
 	return dir, path
+}
+
+// The job is told the project as compose resolves it, whatever directory the
+// widget stands in: the target's own work directory, and the compose file as an
+// absolute path, which a target naming the project by its name key alone gets
+// from the compose config dir.
+func TestComposeDownJobOptionsResolveTheProject(t *testing.T) {
+	dir, path := downProjectDir(t)
+	named := filepath.Join(filepath.Dir(os.Getenv("CMDMAN_CONF")), "compose", "tools.yaml")
+	if err := os.MkdirAll(filepath.Dir(named), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(named, []byte(muxComposeYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+	b := &serviceBackend{}
+
+	for _, tc := range []struct {
+		name   string
+		target tui.DownTarget
+		want   ComposeDownJobOptions
+	}{
+		{
+			name:   "compose file",
+			target: tui.DownTarget{Project: "downproj", Path: path, WorkDir: dir},
+			want:   ComposeDownJobOptions{WorkDir: dir, Project: "downproj", File: path},
+		},
+		{
+			name:   "name key",
+			target: tui.DownTarget{Project: "tools", WorkDir: dir},
+			want:   ComposeDownJobOptions{WorkDir: dir, Project: "tools", File: named},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := b.composeDownJobOptions(tc.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("options = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+
+	if _, err := b.composeDownJobOptions(tui.DownTarget{
+		Project: "downproj", Path: filepath.Join(dir, "gone.yaml"), WorkDir: dir,
+	}); err == nil {
+		t.Error("a compose file that is gone should fail the resolution")
+	}
+}
+
+// A project's latest down job is found by the project alone, and says whether
+// its run was over when it was found. A record left created is over unless a
+// launch or a monitor is still bringing it up.
+func TestFindComposeDownFindsTheProjectsJob(t *testing.T) {
+	dir, path := downProjectDir(t)
+	cfg := frameSvcConfig(t)
+	svc := cmdman.NewService(cfg)
+	defer svc.Close()
+	b := &serviceBackend{svc: svc}
+	target := tui.DownTarget{Project: "downproj", Path: path, WorkDir: dir}
+
+	if _, ok, err := b.FindComposeDown(t.Context(), target); err != nil || ok {
+		t.Fatalf("a project that never went down has a job: ok = %v, err = %v", ok, err)
+	}
+
+	req := downJobTestRequest(t, svc, dir, "downproj")
+	res, err := svc.Create(t.Context(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	find := func(t *testing.T, want tui.DownJob) {
+		t.Helper()
+		job, ok, err := b.FindComposeDown(t.Context(), target)
+		if err != nil || !ok {
+			t.Fatalf("the job was not found: ok = %v, err = %v", ok, err)
+		}
+		if job != want {
+			t.Errorf("job = %+v, want %+v", job, want)
+		}
+	}
+
+	t.Run("left created with nothing bringing it up", func(t *testing.T) {
+		find(t, tui.DownJob{ID: res.ID, Finished: true})
+	})
+
+	t.Run("left created while a launch holds the job's lock", func(t *testing.T) {
+		unlock, err := lockComposeJob(t.Context(), cfg, req.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer unlock()
+		find(t, tui.DownJob{ID: res.ID})
+	})
+
+	t.Run("left created while a monitor holds its PID lock", func(t *testing.T) {
+		release, held, err := monitor.HoldPIDLock(cfg, res.ID)
+		if err != nil || !held {
+			t.Fatalf("hold the PID lock: held = %v, err = %v", held, err)
+		}
+		defer release()
+		find(t, tui.DownJob{ID: res.ID})
+	})
+
+	t.Run("exited", func(t *testing.T) {
+		setJobState(t, cfg, res.ID, model.EventTypeExited, &model.CommandState{})
+		find(t, tui.DownJob{ID: res.ID, Finished: true})
+	})
+
+	// The same file under another name is another project, with no job.
+	other := tui.DownTarget{Project: "other", Path: path, WorkDir: dir}
+	if _, ok, err := b.FindComposeDown(t.Context(), other); err != nil || ok {
+		t.Errorf("another project found a job: ok = %v, err = %v", ok, err)
+	}
 }
 
 func TestAppendCwdProjectFillsPathWhenAlreadyListed(t *testing.T) {

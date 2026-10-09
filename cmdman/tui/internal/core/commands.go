@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -78,22 +79,26 @@ func (msg MuxDownMsg) Status() string {
 
 // ComposeDownMsg reports a compose teardown reaching its end, with what it did.
 // Target carries the project it acted on for the same reason MuxDownMsg does.
+//
+// Earlier marks the end of a teardown that was over before the widget asked
+// about it: the last down of a project a widget opened on. It is a report
+// rather than news, and a listing the widget loaded before asking already
+// shows what it left behind.
 type ComposeDownMsg struct {
 	Name    string
 	Target  DownTarget
 	Summary DownSummary
 	Err     error
+	Earlier bool
 }
 
 // Status is the finished teardown's line. The counts come first and are said
 // whether or not it failed: a teardown that gave up part-way still tore the
 // rest down, and hiding that behind the error would leave the user guessing
-// what is left. They are worded as what the phases covered rather than as what
-// was running, since a command that had already exited counts as stopped. The
-// forced kills are said only when there were any: a stop that resorted to
-// SIGKILL may have left detached processes behind. The unreleased resources
-// are said only when there were any too. A teardown that did not fail can
-// still have some, since on_error continue or ignore lets a failed release
+// what is left. The forced kills are said only when there were any: a stop that
+// resorted to SIGKILL may have left detached processes behind. The unreleased
+// resources are said only when there were any too. A teardown that did not fail
+// can still have some, since on_error continue or ignore lets a failed release
 // pass.
 func (msg ComposeDownMsg) Status() string {
 	line := fmt.Sprintf("compose down %s: stopped %d, removed %d",
@@ -108,6 +113,76 @@ func (msg ComposeDownMsg) Status() string {
 		return line + ": " + msg.Err.Error()
 	}
 	return line
+}
+
+// ComposeDownProgressMsg reports a compose teardown that is still under way,
+// with what it has got through so far. Next keeps following it.
+type ComposeDownProgressMsg struct {
+	Name    string
+	Target  DownTarget
+	Summary DownSummary
+
+	stream DownStream
+}
+
+// Status is the line of a teardown still under way. It says the stops alone:
+// the removals come after every stop, and a line that already read like the
+// finished one would pass for it.
+func (msg ComposeDownProgressMsg) Status() string {
+	return fmt.Sprintf("compose down %s: running… stopped %d", msg.Name, msg.Summary.Stopped)
+}
+
+// Next waits for the teardown's next report: another ComposeDownProgressMsg, or
+// the ComposeDownMsg of its end. A widget returns it from Update so the
+// following goes on, and the job runs to its end whether or not it does.
+func (msg ComposeDownProgressMsg) Next() tea.Cmd {
+	if msg.stream == nil {
+		return nil
+	}
+	return func() tea.Msg { return nextComposeDown(msg.stream, msg.Target, false) }
+}
+
+// DownFollows is what a widget knows of the compose teardowns it follows that
+// are still under way: the latest summary of each, by the project it tears
+// down. The zero value follows none.
+//
+// It is a value: a change returns a new one rather than writing into a map
+// every copy of the model shares. bubbletea hands Update a copy of the model,
+// and a change written into a shared map would reach a copy that was meant to
+// stay as it was.
+type DownFollows struct {
+	running map[DownTarget]DownSummary
+}
+
+// Progress records a teardown still under way.
+func (f DownFollows) Progress(msg ComposeDownProgressMsg) DownFollows {
+	running := maps.Clone(f.running)
+	if running == nil {
+		running = map[DownTarget]DownSummary{}
+	}
+	running[msg.Target] = msg.Summary
+	return DownFollows{running: running}
+}
+
+// Done forgets a teardown that came to its end.
+func (f DownFollows) Done(target DownTarget) DownFollows {
+	if _, ok := f.running[target]; !ok {
+		return f
+	}
+	running := maps.Clone(f.running)
+	delete(running, target)
+	return DownFollows{running: running}
+}
+
+// Status is the line of the teardown of target still under way, which is what
+// a widget says in place of asking to tear the project down again.
+func (f DownFollows) Status(target DownTarget) (string, bool) {
+	summary, ok := f.running[target]
+	if !ok {
+		return "", false
+	}
+	return ComposeDownProgressMsg{Name: target.Project, Target: target, Summary: summary}.Status(),
+		true
 }
 
 // ComposeDownPrompt is the question a widget's status line asks before it tears
@@ -189,14 +264,68 @@ func MuxDownCmd(ctx context.Context, backend Backend, target DownTarget) tea.Cmd
 	}
 }
 
+// ComposeDownCmd launches the project's compose down job and follows it. The
+// reply is the job's first report: a ComposeDownProgressMsg whose Next follows
+// on, or the ComposeDownMsg of a job that is already over.
 func ComposeDownCmd(ctx context.Context, backend Backend, target DownTarget) tea.Cmd {
 	return func() tea.Msg {
-		summary, err := backend.ComposeDown(ctx, target.Project, target.Path, target.WorkDir)
-		return ComposeDownMsg{
+		job, err := backend.LaunchComposeDown(ctx, target)
+		if err != nil {
+			return ComposeDownMsg{Name: target.Project, Target: target, Err: err}
+		}
+		return followComposeDown(ctx, backend, target, job, false)
+	}
+}
+
+// LastComposeDownCmd reports the latest compose down of the project a widget
+// opened on, following it when it is still under way. A project that has had
+// no down replies with nothing, and so does a lookup that failed: the widget
+// asked out of courtesy rather than for an action, and the listings it loaded
+// beside it report a store that cannot be read.
+func LastComposeDownCmd(ctx context.Context, backend Backend, target DownTarget) tea.Cmd {
+	return func() tea.Msg {
+		job, ok, err := backend.FindComposeDown(ctx, target)
+		if err != nil || !ok {
+			return nil
+		}
+		return followComposeDown(ctx, backend, target, job, job.Finished)
+	}
+}
+
+// followComposeDown opens the job's stream and waits for its first report.
+// earlier marks the end the stream reports as one that came before the widget
+// asked (see ComposeDownMsg.Earlier).
+func followComposeDown(
+	ctx context.Context,
+	backend Backend,
+	target DownTarget,
+	job DownJob,
+	earlier bool,
+) tea.Msg {
+	stream, err := backend.FollowComposeDown(ctx, job)
+	if err != nil {
+		return ComposeDownMsg{Name: target.Project, Target: target, Err: err, Earlier: earlier}
+	}
+	return nextComposeDown(stream, target, earlier)
+}
+
+func nextComposeDown(stream DownStream, target DownTarget, earlier bool) tea.Msg {
+	summary, ok := <-stream.Summaries()
+	if ok {
+		return ComposeDownProgressMsg{
 			Name:    target.Project,
 			Target:  target,
 			Summary: summary,
-			Err:     err,
+			stream:  stream,
 		}
+	}
+	final, err := stream.Result()
+	_ = stream.Close()
+	return ComposeDownMsg{
+		Name:    target.Project,
+		Target:  target,
+		Summary: final,
+		Err:     err,
+		Earlier: earlier,
 	}
 }

@@ -153,6 +153,11 @@ type Model struct {
 	// bring-up reporting back would replace while the next key still answered
 	// it.
 	pendingDown core.DownTarget
+	// downs are the compose teardowns under way that the launcher follows, and
+	// downLooked says the last teardown of the project the launcher opened on has
+	// been asked for, which happens once, when the first listing lands.
+	downs      core.DownFollows
+	downLooked bool
 
 	// spin advances the in-flight marker and ticking says a tick loop is already
 	// running, so a second `s` does not start a second one (D29).
@@ -232,6 +237,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onForgot(msg), nil
 	case core.MuxDownMsg:
 		return m.onMuxDown(msg), nil
+	case core.ComposeDownProgressMsg:
+		m.downs = m.downs.Progress(msg)
+		m.note = msg.Status()
+		return m, msg.Next()
 	case core.ComposeDownMsg:
 		return m.onComposeDown(msg), nil
 	case core.ReloadTickMsg:
@@ -260,10 +269,27 @@ func (m Model) onTargetsLoaded(msg launchTargetsLoadedMsg) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 	m.locs = newLauncherLocations(msg.locs)
+	m, lookup := m.clampLeft().lookUpLastDown()
 	// The listing replaces every row, including one a path typed while it was in
 	// flight had already resolved to; asking for that row again is cheaper than
 	// merging two listings, and costs an idle tick when nothing was typed.
-	return m.clampLeft().armResolve()
+	next, resolve := m.armResolve()
+	return next, tea.Batch(resolve, lookup)
+}
+
+// lookUpLastDown asks once for the last compose teardown of the project the
+// launcher opened on, the one `D` would act on, so the launcher opens saying
+// how it went, or how it is going.
+func (m Model) lookUpLastDown() (Model, tea.Cmd) {
+	if m.downLooked {
+		return m, nil
+	}
+	m.downLooked = true
+	target, ok := m.currentTarget()
+	if !ok {
+		return m, nil
+	}
+	return m, core.LastComposeDownCmd(m.bgCtx(), m.backend, target)
 }
 
 // onStarted promotes a finished bring-up: the spinner stops and the row becomes
@@ -349,7 +375,8 @@ func (m Model) onForgot(msg launcherForgotMsg) Model {
 // skips as already up (D31), which is the one project the user just took down.
 //
 // A teardown that failed leaves the row alone — what it says is still what is
-// up.
+// up. So does one that was over before the launcher opened, which the listing
+// already reflects: the project may well have been brought up again since.
 func (m Model) onMuxDown(msg core.MuxDownMsg) Model {
 	if msg.Err == nil {
 		m = m.clearRunning(msg.Target)
@@ -359,7 +386,8 @@ func (m Model) onMuxDown(msg core.MuxDownMsg) Model {
 }
 
 func (m Model) onComposeDown(msg core.ComposeDownMsg) Model {
-	if msg.Err == nil {
+	m.downs = m.downs.Done(msg.Target)
+	if msg.Err == nil && !msg.Earlier {
 		m = m.clearRunning(msg.Target)
 	}
 	m.note = msg.Status()
@@ -1054,10 +1082,15 @@ func (m Model) muxDownSelected() (tea.Model, tea.Cmd) {
 // confirmComposeDown is `D`: it asks before taking the project's commands away.
 // The launcher is where projects are brought up, so the key that takes one down
 // sits next to `s` and `S` — which is exactly why it does not act on the first
-// press.
+// press. A project whose teardown is already under way gets no question: the
+// note says how far that teardown has got instead.
 func (m Model) confirmComposeDown() (tea.Model, tea.Cmd) {
 	target, ok := m.downTarget()
 	if !ok {
+		return m, nil
+	}
+	if status, running := m.downs.Status(target); running {
+		m.note = status
 		return m, nil
 	}
 	m.pendingDown = target
@@ -1085,13 +1118,25 @@ func (m Model) answerComposeDown(key string) (tea.Model, tea.Cmd) {
 // refused here: its commands may well still be running, and the backend is what
 // knows whether the project can be resolved at all.
 func (m *Model) downTarget() (core.DownTarget, bool) {
+	if _, ok := m.currentLoc(); !ok {
+		return core.DownTarget{}, false
+	}
+	target, ok := m.currentTarget()
+	if !ok {
+		m.note = "no compose project here"
+	}
+	return target, ok
+}
+
+// currentTarget is the project downTarget names, without a word for a location
+// that has none.
+func (m Model) currentTarget() (core.DownTarget, bool) {
 	li, ok := m.currentLoc()
 	if !ok {
 		return core.DownTarget{}, false
 	}
 	pi := m.pickProject(li)
 	if pi < 0 {
-		m.note = "no compose project here"
 		return core.DownTarget{}, false
 	}
 	t := m.target(li, pi)

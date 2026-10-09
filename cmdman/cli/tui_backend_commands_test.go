@@ -72,6 +72,36 @@ func TestCommandInfosIncludesStandalone(t *testing.T) {
 	}
 }
 
+// A compose job, which runs a compose verb for a project in the background, is
+// not one of the commands the TUI lists: the widget that launched it reports
+// what it does.
+func TestCommandInfosLeavesOutComposeJobs(t *testing.T) {
+	got := commandInfos([]store.CommandEntry{
+		{
+			ID:    "job",
+			Name:  "h1234.down",
+			State: model.EventTypeRunning,
+			ConfigJSON: &model.CommandConfig{
+				Dir: "/work/api",
+				Labels: map[string]string{
+					compose.LabelJob:        compose.JobDown,
+					compose.LabelJobWorkdir: "/work/api",
+					compose.LabelJobProject: "api-stack",
+				},
+			},
+		},
+		{
+			ID:         "tool",
+			Name:       "standalone-tool",
+			State:      model.EventTypeRunning,
+			ConfigJSON: &model.CommandConfig{Dir: "/work/api"},
+		},
+	})
+	if len(got) != 1 || got[0].ID != "tool" {
+		t.Fatalf("listed %+v, want the standalone command alone", got)
+	}
+}
+
 func TestCommandInfosForceKilled(t *testing.T) {
 	got := commandInfos([]store.CommandEntry{
 		{

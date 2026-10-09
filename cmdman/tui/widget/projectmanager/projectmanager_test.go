@@ -708,6 +708,140 @@ func TestManagerComposeDownReportsPartialTeardown(t *testing.T) {
 	}
 }
 
+// TestManagerFollowsTheDownJob covers a teardown that runs in a job of its own:
+// the panel follows it as its action in flight, says how far it has got, gives
+// D no second question while it runs, and reports the end the way it always
+// did.
+func TestManagerFollowsTheDownJob(t *testing.T) {
+	m, fb := seedManager(t, 100, 24)
+	fb.ComposeDownProgress = []core.DownSummary{{Stopped: 1, Running: true}}
+	fb.ComposeDownSummary = core.DownSummary{Stopped: 3, Removed: 3}
+
+	m, _ = pressManager(t, m, coretest.Kr("D"))
+	m, msg := pressManager(t, m, coretest.Kr("y"))
+	if _, ok := msg.(core.ComposeDownProgressMsg); !ok {
+		t.Fatalf("the first report of a running job should be its progress, got %T", msg)
+	}
+	next, cmd := m.Update(msg)
+	m = next.(Model)
+	if out := plainView(m); !strings.Contains(out, "compose down api: running… stopped 1") {
+		t.Fatalf("a running teardown should say how far it has got:\n%s", out)
+	}
+	if !m.busy() {
+		t.Errorf("the panel should wait for a running teardown as for any action")
+	}
+
+	m, again := pressManager(t, m, coretest.Kr("D"))
+	if again != nil || m.pendingDown.Project != "" {
+		t.Fatalf("D while the teardown runs should not ask again")
+	}
+	if out := plainView(m); !strings.Contains(out, "running… stopped 1") {
+		t.Errorf("D while the teardown runs should leave its line up:\n%s", out)
+	}
+
+	m = updManager(t, m, cmd())
+	if !strings.Contains(m.note, "compose down api: stopped 3, removed 3") {
+		t.Errorf("the end should be reported, note = %q", m.note)
+	}
+	if m.pending != "" || !m.loading {
+		t.Errorf("a finished teardown should end the action and re-read what it changed")
+	}
+	if len(fb.ComposeDowns) != 1 {
+		t.Errorf("one teardown was asked for, launches = %v", fb.ComposeDowns)
+	}
+}
+
+// TestManagerOpensOnTheLastDown covers the opening: the first load asks for
+// the loaded project's last teardown, once. One that was over is said and
+// nothing more; one still running is followed as the action in flight.
+func TestManagerOpensOnTheLastDown(t *testing.T) {
+	target := core.DownTarget{Project: "api", Path: managerPath, WorkDir: managerWorkDir}
+	open := func(t *testing.T, job core.DownJob) (Model, *coretest.FakeBackend, tea.Cmd) {
+		t.Helper()
+		fb := &coretest.FakeBackend{
+			ManagerInfo:         managerFixture(),
+			DownJobs:            map[core.DownTarget]core.DownJob{target: job},
+			ComposeDownProgress: []core.DownSummary{{Stopped: 1, Running: true}},
+			ComposeDownSummary:  core.DownSummary{Stopped: 2, Removed: 3},
+		}
+		m := New(context.Background(), core.Options{Backend: fb})
+		m = updManager(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
+		next, cmd := m.Update(managerLoadedMsg{info: fb.ManagerInfo})
+		if cmd == nil {
+			t.Fatal("the first load should ask for the last teardown")
+		}
+		return next.(Model), fb, cmd
+	}
+
+	t.Run("over", func(t *testing.T) {
+		m, fb, cmd := open(t, core.DownJob{ID: "j1", Finished: true})
+		m = updManager(t, m, cmd())
+		want := coretest.DownCall{Project: "api", Path: managerPath, Workdir: managerWorkDir}
+		if len(fb.DownFinds) != 1 || fb.DownFinds[0] != want {
+			t.Fatalf("the opening asked about %v, want [%v]", fb.DownFinds, want)
+		}
+		if m.note != "compose down api: stopped 2, removed 3" {
+			t.Errorf("the panel should open on the last teardown, note = %q", m.note)
+		}
+		if m.loading || m.busy() {
+			t.Errorf("a teardown that was already over leaves nothing to re-read or wait for")
+		}
+		if _, again := m.Update(managerLoadedMsg{info: fb.ManagerInfo}); again != nil {
+			t.Errorf("a later load should not ask again")
+		}
+	})
+
+	t.Run("running", func(t *testing.T) {
+		m, _, cmd := open(t, core.DownJob{ID: "j1"})
+		m, _ = pressManager(t, m, cmd())
+		if !strings.Contains(m.pending, "running… stopped 1") {
+			t.Fatalf("a running teardown should be followed, pending = %q", m.pending)
+		}
+		m, _ = pressManager(t, m, coretest.Kr("D"))
+		if m.pendingDown.Project != "" {
+			t.Errorf("D while the teardown runs should not ask")
+		}
+	})
+}
+
+// TestManagerOpensOnADownThatNeverStarted covers a project whose last teardown
+// never got going: the backend finds that job over, and following it reports
+// that it did not start. The panel says so and is left free: D asks to tear the
+// project down again, and the other actions go ahead.
+func TestManagerOpensOnADownThatNeverStarted(t *testing.T) {
+	target := core.DownTarget{Project: "api", Path: managerPath, WorkDir: managerWorkDir}
+	fb := &coretest.FakeBackend{
+		ManagerInfo:    managerFixture(),
+		DownJobs:       map[core.DownTarget]core.DownJob{target: {ID: "j1", Finished: true}},
+		ComposeDownErr: errors.New("compose down job did not start"),
+	}
+	m := New(context.Background(), core.Options{Backend: fb})
+	m = updManager(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
+	m, msg := pressManager(t, m, managerLoadedMsg{info: fb.ManagerInfo})
+	end, ok := msg.(core.ComposeDownMsg)
+	if !ok || !end.Earlier {
+		t.Fatalf("the opening should report the teardown as an earlier end, got %+v", msg)
+	}
+	m = updManager(t, m, end)
+	if !strings.Contains(m.errMsg, "compose down api: stopped 0, removed 0: "+
+		"compose down job did not start") {
+		t.Errorf("the panel should say the teardown did not start, errMsg = %q", m.errMsg)
+	}
+	if m.busy() {
+		t.Fatalf("a teardown that never started leaves nothing to wait for")
+	}
+
+	m = updManager(t, m, coretest.Kr("D"))
+	if m.pendingDown != target {
+		t.Fatalf("D should ask to tear the project down, pending = %+v", m.pendingDown)
+	}
+	m = updManager(t, m, coretest.Kr("n"))
+
+	if _, msg = pressManager(t, m, coretest.Kr("+")); msg == nil || len(fb.ScalesSet) != 1 {
+		t.Errorf("+ should scale the service, scales = %v", fb.ScalesSet)
+	}
+}
+
 // TestManagerTeardownsAreTheProjects covers what the two keys are scoped to:
 // the project, not a list — so they act from either zone — and they wait for
 // whatever is in flight, as every other action does. The question also outlives

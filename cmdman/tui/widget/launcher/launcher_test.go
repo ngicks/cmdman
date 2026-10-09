@@ -808,6 +808,165 @@ func TestLauncherComposeDownThenStart(t *testing.T) {
 	}
 }
 
+// TestLauncherFollowsTheDownJob covers a teardown that runs in a job of its
+// own: the note says how far it has got, D on the same project says so again
+// rather than asking, and the end takes the row back to idle as before.
+func TestLauncherFollowsTheDownJob(t *testing.T) {
+	m, fb := seedLauncher(t, 100, 20)
+	fb.ComposeDownProgress = []core.DownSummary{
+		{Running: true},
+		{Stopped: 1, Running: true},
+	}
+	fb.ComposeDownSummary = core.DownSummary{Stopped: 1, Removed: 1}
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+
+	next, _ := m.Update(coretest.Kr("D"))
+	next, cmd := next.(Model).Update(coretest.Kr("y"))
+	m = next.(Model)
+	for range fb.ComposeDownProgress {
+		msg, ok := cmd().(core.ComposeDownProgressMsg)
+		if !ok {
+			t.Fatalf("a running job should report its progress first")
+		}
+		next, cmd = m.Update(msg)
+		m = next.(Model)
+	}
+	if m.note != "compose down devenv: running… stopped 1" {
+		t.Fatalf("a running teardown should say how far it has got, note = %q", m.note)
+	}
+	if !m.locs[0].projects[0].Running {
+		t.Errorf("the row is left as it is while the teardown runs")
+	}
+
+	m = updLauncher(t, m, coretest.Kr("j")) // the note goes with a key
+	m = updLauncher(t, m, coretest.Kr("k"))
+	next, again := m.Update(coretest.Kr("D"))
+	m = next.(Model)
+	if again != nil || m.pendingDown.Project != "" {
+		t.Fatalf("D while the teardown runs should not ask again")
+	}
+	if m.note != "compose down devenv: running… stopped 1" {
+		t.Errorf("D while the teardown runs should say how far it has got, note = %q", m.note)
+	}
+
+	m = updLauncher(t, m, cmd())
+	if m.note != "compose down devenv: stopped 1, removed 1" {
+		t.Errorf("the end should be reported, note = %q", m.note)
+	}
+	if m.locs[0].projects[0].Running {
+		t.Errorf("a finished teardown should leave the row idle")
+	}
+	if len(fb.ComposeDowns) != 1 {
+		t.Errorf("one teardown was asked for, launches = %v", fb.ComposeDowns)
+	}
+	next, _ = m.Update(coretest.Kr("D"))
+	if got := next.(Model).pendingDown.Project; got != "devenv" {
+		t.Errorf("D after the teardown ended should ask again, pending = %q", got)
+	}
+}
+
+// TestLauncherOpensOnTheLastDown covers the opening: the first listing asks
+// for the last teardown of the project `D` would act on, once, and the note is
+// what the launcher opens with. A teardown that was over before the launcher
+// opened leaves the row as the listing has it: the project may have been
+// brought up again since.
+func TestLauncherOpensOnTheLastDown(t *testing.T) {
+	target := core.DownTarget{
+		Project: "devenv", Path: "devenv.yaml", WorkDir: "/home/u/gitrepo/cmdman",
+	}
+	fb := &coretest.FakeBackend{
+		LaunchLocs:         launcherFixture(),
+		DownJobs:           map[core.DownTarget]core.DownJob{target: {ID: "j1", Finished: true}},
+		ComposeDownSummary: core.DownSummary{Stopped: 2, Removed: 2},
+	}
+	m := New(context.Background(), core.Options{Backend: fb, Widget: core.WidgetLauncher})
+	m = updLauncher(t, m, tea.WindowSizeMsg{Width: 100, Height: 20})
+	next, cmd := m.Update(launchTargetsLoadedMsg{locs: fb.LaunchLocs})
+	m = next.(Model)
+
+	var found []core.ComposeDownMsg
+	for _, msg := range runLauncherCmd(cmd) {
+		if down, ok := msg.(core.ComposeDownMsg); ok {
+			found = append(found, down)
+		}
+	}
+	if len(found) != 1 || !found[0].Earlier {
+		t.Fatalf("the opening should report the earlier teardown once, got %+v", found)
+	}
+	m = updLauncher(t, m, found[0])
+	if m.note != "compose down devenv: stopped 2, removed 2" {
+		t.Errorf("the launcher should open on the last teardown, note = %q", m.note)
+	}
+	if !m.locs[0].projects[0].Running {
+		t.Errorf("an earlier teardown must not mark a running row idle")
+	}
+
+	_, cmd = m.Update(launchTargetsLoadedMsg{locs: fb.LaunchLocs})
+	runLauncherCmd(cmd)
+	if len(fb.DownFinds) != 1 {
+		t.Errorf("a later listing should not ask again, lookups = %v", fb.DownFinds)
+	}
+}
+
+// TestLauncherOpensOnADownThatNeverStarted covers a project whose last
+// teardown never got going: the backend finds that job over, and following it
+// reports that it did not start. The launcher says so, and D asks to tear the
+// project down again rather than standing in for a teardown under way.
+func TestLauncherOpensOnADownThatNeverStarted(t *testing.T) {
+	target := core.DownTarget{
+		Project: "devenv", Path: "devenv.yaml", WorkDir: "/home/u/gitrepo/cmdman",
+	}
+	fb := &coretest.FakeBackend{
+		LaunchLocs:     launcherFixture(),
+		DownJobs:       map[core.DownTarget]core.DownJob{target: {ID: "j1", Finished: true}},
+		ComposeDownErr: errors.New("compose down job did not start"),
+	}
+	m := New(context.Background(), core.Options{Backend: fb, Widget: core.WidgetLauncher})
+	m = updLauncher(t, m, tea.WindowSizeMsg{Width: 100, Height: 20})
+	next, cmd := m.Update(launchTargetsLoadedMsg{locs: fb.LaunchLocs})
+	m = next.(Model)
+
+	var found []core.ComposeDownMsg
+	for _, msg := range runLauncherCmd(cmd) {
+		if down, ok := msg.(core.ComposeDownMsg); ok {
+			found = append(found, down)
+		}
+	}
+	if len(found) != 1 || !found[0].Earlier {
+		t.Fatalf("the opening should report the earlier teardown once, got %+v", found)
+	}
+	m = updLauncher(t, m, found[0])
+	want := "compose down devenv: stopped 0, removed 0: compose down job did not start"
+	if m.note != want {
+		t.Errorf("the launcher should say the teardown did not start, note = %q, want %q",
+			m.note, want)
+	}
+
+	m = updLauncher(t, m, coretest.KEnter) // into the left list
+	next, _ = m.Update(coretest.Kr("D"))
+	if got := next.(Model).pendingDown; got != target {
+		t.Errorf("D should ask to tear the project down, pending = %+v", got)
+	}
+}
+
+// runLauncherCmd runs a command, the members of a batch included, and returns
+// the messages they produced.
+func runLauncherCmd(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return []tea.Msg{msg}
+	}
+	var out []tea.Msg
+	for _, c := range batch {
+		out = append(out, runLauncherCmd(c)...)
+	}
+	return out
+}
+
 // TestLauncherMuxDownThenStart is the same for `d`: the dashboard is gone, so
 // `s` is what builds it again — the bring-up finds the commands already up and
 // rebuilds the windows around them.

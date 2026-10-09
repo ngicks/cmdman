@@ -3,15 +3,13 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/ngicks/cmdman/cmdman/compose"
-	"github.com/ngicks/cmdman/cmdman/mux"
+	"github.com/ngicks/cmdman/cmdman/model"
 	"github.com/ngicks/cmdman/cmdman/tui"
-	"github.com/ngicks/go-common/contextkey"
 )
 
 // ListProjects merges store-known project counts with never-run projects found
@@ -252,143 +250,97 @@ func (s *composeUpStream) Close() error {
 	return nil
 }
 
-// composeDownSvc is the teardown half of compose.Service the down action uses,
-// named at the consumer so the branch that follows a teardown can be exercised
-// without a store behind it.
-type composeDownSvc interface {
-	Down(
-		context.Context, compose.ProjectSelection, compose.DownOption,
-	) (*compose.DownResult, error)
-}
-
-// muxTeardown removes a project's multiplexer windows — [mux.Down] as the down
-// action calls it, taken as a value so the call can be observed without a
-// multiplexer server to make it against.
-type muxTeardown func(context.Context, mux.DownOptions) error
-
-// ComposeDown stops and removes the project's commands, wrapping
-// compose.Service.Down — the whole-project teardown `cmdman compose down`
-// performs, orphans of the project included.
+// LaunchComposeDown starts the project's compose down job, or finds the one
+// that answers for it (see [LaunchComposeDownJob]). The job runs `cmdman
+// compose down --close-windows`, the whole-project teardown, orphans of the
+// project included: a teardown that gets all the way through takes the
+// project's multiplexer windows with it, since what would be left is a window
+// of dead panes still claiming the project is running.
 //
-// The project is named as the other project-targeting actions name it (an empty
-// composeFile makes the name the file key, so a never-run named project still
-// resolves), except that it need not declare a mux: section: down is about the
-// supervised commands, which a project without a dashboard has just the same.
-//
-// The summary travels back with the aggregated failure rather than instead of
-// it: a teardown that could not remove one command removed the others, and the
-// caller has both halves to report.
-//
-// A teardown that got all the way through takes the project's multiplexer
-// windows with it (see removeProjectWindows): what would be left is a window of
-// dead panes still claiming the project is running.
-func (b *serviceBackend) ComposeDown(
-	ctx context.Context, projectName, composeFile, workDir string,
-) (tui.DownSummary, error) {
-	return b.composeDown(ctx, projectName, composeFile, workDir, b.compose, mux.Down)
-}
-
-func (b *serviceBackend) composeDown(
+// The job runs under this process's environment. $TMUX names the multiplexer
+// that holds the project's windows, and $TMUX_PANE the pane this widget runs
+// in, whose window the down restores rather than closes.
+func (b *serviceBackend) LaunchComposeDown(
 	ctx context.Context,
-	projectName, composeFile, workDir string,
-	composeSvc composeDownSvc,
-	muxDown muxTeardown,
-) (tui.DownSummary, error) {
-	opts := compose.NormalizeOpts{
-		File:        composeFile,
-		ProjectName: projectName,
-		WorkDir:     b.targetWorkDir(workDir),
+	target tui.DownTarget,
+) (tui.DownJob, error) {
+	opts, err := b.composeDownJobOptions(target)
+	if err != nil {
+		return tui.DownJob{}, err
 	}
-	if composeFile == "" {
-		opts.File, opts.ProjectName = projectName, ""
+	opts.Env = os.Environ()
+	job, _, err := LaunchComposeDownJob(ctx, b.svc, opts)
+	if err != nil {
+		return tui.DownJob{}, err
+	}
+	return downJobOf(job), nil
+}
+
+// FindComposeDown finds the project's latest compose down job, which stays on
+// record after it ends until the next down of the project replaces it. A job
+// left created with nothing bringing it up never ran, and is found finished:
+// following it reports that it did not start.
+func (b *serviceBackend) FindComposeDown(
+	ctx context.Context,
+	target tui.DownTarget,
+) (tui.DownJob, bool, error) {
+	opts, err := b.composeDownJobOptions(target)
+	if err != nil {
+		return tui.DownJob{}, false, err
+	}
+	job, ok, err := findComposeDownJob(ctx, b.svc, opts)
+	if err != nil || !ok {
+		return tui.DownJob{}, false, err
+	}
+	return downJobOf(job), true, nil
+}
+
+func (b *serviceBackend) FollowComposeDown(
+	ctx context.Context,
+	job tui.DownJob,
+) (tui.DownStream, error) {
+	return followComposeDownJob(ctx, b.svc, job)
+}
+
+// composeDownJobOptions names the project target asks about the way the job
+// names it. The project is resolved as the other project-targeting actions
+// resolve one (an empty Path makes the name the file key, so a never-run named
+// project still resolves), except that it need not declare a mux: section: down
+// is about the supervised commands, which a project without a dashboard has just
+// the same.
+//
+// Resolving here rather than in the job is what names the job after the
+// identity compose itself gives the project, the one its windows are stamped
+// with, and hands the job an absolute compose file, which reads the same from
+// the project's directory, where the job runs.
+func (b *serviceBackend) composeDownJobOptions(
+	target tui.DownTarget,
+) (ComposeDownJobOptions, error) {
+	opts := compose.NormalizeOpts{
+		File:        target.Path,
+		ProjectName: target.Project,
+		WorkDir:     b.targetWorkDir(target.WorkDir),
+	}
+	if target.Path == "" {
+		opts.File, opts.ProjectName = target.Project, ""
 	}
 	selection, err := compose.LoadOrProject(opts)
 	if err != nil {
-		return tui.DownSummary{}, err
+		return ComposeDownJobOptions{}, err
 	}
-	result, err := composeSvc.Down(ctx, selection, compose.DownOption{})
-	if err != nil {
-		return tui.DownSummary{}, err
+	job := ComposeDownJobOptions{WorkDir: selection.WorkDir, Project: selection.Project}
+	if selection.Spec != nil {
+		job.File = selection.Spec.ComposeFile
 	}
-	summary := downSummary(result)
-	if downErr := DownResultErr(result); downErr != nil {
-		// A command that would not go away is a command the window still has
-		// something to show, so the window stays until the teardown is asked for
-		// again and gets all the way through.
-		return summary, downErr
-	}
-	removeProjectWindows(ctx, selection, muxDown)
-	return summary, nil
+	return job, nil
 }
 
-// removeProjectWindows takes the project's multiplexer windows down after a
-// teardown that removed every command: their panes view commands that no longer
-// exist, and the ownership stamp they carry would report the project as running
-// the next time the launcher lists it.
-//
-// It is the teardown the TUI asks for, not the one `cmdman compose down` does:
-// a window that closes underneath a command line is a surprise, while the TUI
-// issued the gesture that emptied it.
-//
-// The windows are found by the project's identity alone, which is why this goes
-// to mux directly rather than through the compose mux verbs: a project with no
-// mux: section has no dashboard but does have the bare shell window its landing
-// synthesized, under that same identity, and the compose verbs are only for a
-// project that declares the section. Only a declared section has a driver to
-// name; without one the driver is left to autodetect.
-//
-// Failing to remove a window is not the down failing: the commands are gone
-// either way, and the summary the caller reports is about them. There is
-// nowhere in that summary to say so, so it is said in the log.
-func removeProjectWindows(
-	ctx context.Context,
-	selection compose.ProjectSelection,
-	muxDown muxTeardown,
-) {
-	opts := mux.DownOptions{
-		Identity:    selection.ProjectIdentity(),
-		KillCreated: true,
-		Stdout:      io.Discard,
+func downJobOf(job ComposeDownJob) tui.DownJob {
+	return tui.DownJob{
+		ID: job.ID,
+		Finished: job.State == model.EventTypeExited || job.State == model.EventTypeFailed ||
+			job.NeverRan,
 	}
-	if selection.Spec != nil && selection.Spec.Mux != nil {
-		opts.Driver = selection.Spec.Mux.Driver
-	}
-	if err := muxDown(ctx, opts); err != nil {
-		contextkey.ValueSlogLoggerDefault(ctx).WarnContext(
-			ctx, "compose down: remove project window",
-			"project", selection.Project, "workdir", selection.WorkDir, "error", err,
-		)
-	}
-}
-
-// downSummary counts what a teardown got through: the stop and remove outcomes
-// carrying no error. Counting the failed ones too would report a command as
-// removed in the same breath as the failure to remove it. It also counts the
-// releases that failed, as a warning or as an error, each of which left its
-// resource unreleased.
-func downSummary(result *compose.DownResult) tui.DownSummary {
-	var summary tui.DownSummary
-	for _, s := range result.Stops {
-		if s.Err == nil {
-			summary.Stopped++
-			if s.ForceKilled {
-				summary.ForceKilled++
-			}
-		}
-	}
-	for _, r := range result.Removes {
-		if r.Err == nil {
-			summary.Removed++
-		}
-	}
-	for _, r := range result.Releases {
-		// An outcome without a holder is a failure to list the holders, not a
-		// resource left unreleased.
-		if r.Holder != "" && (r.Err != nil || r.Warning != nil) {
-			summary.Unreleased++
-		}
-	}
-	return summary
 }
 
 // resolveComposePath returns the compose file path for a project. composeFile is
