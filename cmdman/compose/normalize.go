@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -88,14 +89,17 @@ func LoadAndNormalize(opts NormalizeOpts) (ComposeSpec, error) {
 // composeFilePath is the absolute path of the compose file; it is passed explicitly
 // because the caller (DiscoverFile) already resolved it.
 //
-// Env layering (resolved-decision 9):
+// Env layering:
 //  1. OS env (base, for interpolation context only — not stored in the slice).
-//  2. env_file entries in list order; each file's interpolation sees OS + prior env_files.
-//  3. env: entries in list order; interpolation sees OS + merged env_file results.
-//  4. args: interpolation sees the final per-command env (OS + env_file + env:).
+//  2. top-level env_file entries in list order; each file's interpolation sees OS + prior
+//     env_files.
+//  3. top-level env: entries in list order; interpolation sees OS + merged env_file results.
+//  4. command env_file entries, seeded with the project layer (2 + 3).
+//  5. command env: entries; interpolation sees OS + every earlier layer.
+//  6. args: interpolation sees the final per-command env (OS + layers 2 to 5).
 //
 // The stored Env slice contains only entries that were explicitly set by env_file or env:
-// (not raw OS env), so the hash is stable across OS environments.
+// at either level (not raw OS env), so the hash is stable across OS environments.
 func Normalize(
 	ctx context.Context,
 	composeFilePath string,
@@ -174,6 +178,11 @@ func Normalize(
 	baseEnv[ENV_CMDMAN_COMPOSE_WORK_DIR_HASH] = wdHash
 	baseEnv[ENV_CMDMAN_COMPOSE_PROJECT] = project
 
+	projectEnv, err := buildEnvLayer(effectiveWorkDir, raw.EnvFile, raw.Env, baseEnv, nil)
+	if err != nil {
+		return ComposeSpec{}, fmt.Errorf("top-level %w", err)
+	}
+
 	cmdNames := make([]string, 0, len(raw.Commands))
 	for n := range raw.Commands {
 		cmdNames = append(cmdNames, n)
@@ -204,14 +213,14 @@ func Normalize(
 		}
 		cmdDir := resolvePath(effectiveWorkDir, dirVal)
 
-		// commandEnv: KEY→VALUE for env_file + env: entries (not OS env).
-		// finalEnv: OS + env_file + env: (for args interpolation).
-		commandEnv, finalEnv, err := buildCommandEnv(effectiveWorkDir, cmd, baseEnv)
+		// commandEnv: KEY→VALUE for project + command env_file / env: entries (not OS env).
+		commandEnv, err := buildEnvLayer(
+			effectiveWorkDir, cmd.EnvFile, cmd.Env, baseEnv, projectEnv)
 		if err != nil {
 			return ComposeSpec{}, fmt.Errorf("command %q: %w", name, err)
 		}
 
-		finalLookup := buildLookup(finalEnv)
+		finalLookup := buildLookupFromMaps(baseEnv, commandEnv)
 
 		interpolatedArgs := make([]string, len(cmd.Args))
 		for i, arg := range cmd.Args {
@@ -349,18 +358,23 @@ func Normalize(
 	}, nil
 }
 
-// buildCommandEnv processes env_file and env: for a single command.
-// Returns:
-//   - commandEnv: only the keys set by env_file + env: (stored & hashed).
-//   - finalEnv: OS + commandEnv (used for args interpolation, not stored).
-func buildCommandEnv(
+// buildEnvLayer processes one level of env_file and env: on top of seed, the
+// layer below it (nil for the top-level layer). It returns seed plus the keys
+// set by envFiles and env, which is what a command stores and hashes; osEnv
+// only feeds interpolation and bare env: keys.
+func buildEnvLayer(
 	workDir string,
-	cmd RawCommand,
+	envFiles []EnvFileSpec,
+	env []string,
 	osEnv map[string]string,
-) (commandEnv, finalEnv map[string]string, err error) {
-	envFileAccum := make(map[string]string)
+	seed map[string]string,
+) (map[string]string, error) {
+	envFileAccum := maps.Clone(seed)
+	if envFileAccum == nil {
+		envFileAccum = make(map[string]string)
+	}
 
-	for i, ef := range cmd.EnvFile {
+	for i, ef := range envFiles {
 		required := true
 		if ef.Required != nil {
 			required = *ef.Required
@@ -371,22 +385,22 @@ func buildCommandEnv(
 		interpPath, interpErr := template.Substitute(
 			ef.Path, buildLookupFromMaps(osEnv, envFileAccum))
 		if interpErr != nil {
-			return nil, nil, fmt.Errorf("env_file[%d] interpolation: %w", i, interpErr)
+			return nil, fmt.Errorf("env_file[%d] interpolation: %w", i, interpErr)
 		}
 		path := resolvePath(workDir, interpPath)
 
 		if !required {
 			if _, statErr := os.Stat(path); statErr != nil {
-				if os.IsNotExist(statErr) {
+				if errors.Is(statErr, fs.ErrNotExist) {
 					continue
 				}
-				return nil, nil, fmt.Errorf("env_file[%d] stat %s: %w", i, path, statErr)
+				return nil, fmt.Errorf("env_file[%d] stat %s: %w", i, path, statErr)
 			}
 		}
 
 		f, openErr := os.Open(path)
 		if openErr != nil {
-			return nil, nil, fmt.Errorf("env_file[%d] open %s: %w", i, path, openErr)
+			return nil, fmt.Errorf("env_file[%d] open %s: %w", i, path, openErr)
 		}
 
 		// Each file's lookup sees OS env + previously accumulated env_file keys.
@@ -394,7 +408,7 @@ func buildCommandEnv(
 		fileVars, parseErr := dotenv.ParseWithLookup(f, lookupForFile)
 		f.Close()
 		if parseErr != nil {
-			return nil, nil, fmt.Errorf("env_file[%d] parse %s: %w", i, path, parseErr)
+			return nil, fmt.Errorf("env_file[%d] parse %s: %w", i, path, parseErr)
 		}
 		maps.Copy(envFileAccum, fileVars)
 	}
@@ -407,7 +421,7 @@ func buildCommandEnv(
 	cmdEnv := make(map[string]string, len(envFileAccum))
 	maps.Copy(cmdEnv, envFileAccum)
 
-	for j, entry := range cmd.Env {
+	for j, entry := range env {
 		k, v, hasVal := strings.Cut(entry, "=")
 		if !hasVal {
 			if val, found := envFileMerged[k]; found {
@@ -417,16 +431,12 @@ func buildCommandEnv(
 		}
 		interpolated, interpErr := template.Substitute(v, envFileLookup)
 		if interpErr != nil {
-			return nil, nil, fmt.Errorf("env[%d] interpolation: %w", j, interpErr)
+			return nil, fmt.Errorf("env[%d] interpolation: %w", j, interpErr)
 		}
 		cmdEnv[k] = interpolated
 	}
 
-	fin := make(map[string]string, len(osEnv)+len(cmdEnv))
-	maps.Copy(fin, osEnv)
-	maps.Copy(fin, cmdEnv)
-
-	return cmdEnv, fin, nil
+	return cmdEnv, nil
 }
 
 // osEnvMap converts os.Environ() into a map.

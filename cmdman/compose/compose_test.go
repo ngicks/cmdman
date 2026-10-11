@@ -3,6 +3,7 @@ package compose_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -716,6 +717,149 @@ commands:
 	assert.Equal(t, envMap["KEY"], "from-env")
 	// args interpolation sees the final env
 	assert.Equal(t, spec.Commands[0].Args[1], "from-env")
+}
+
+func TestProjectEnvLayeringOrder(t *testing.T) {
+	dir := t.TempDir()
+	assert.NilError(t, os.Mkdir(filepath.Join(dir, "envs"), 0755))
+	assert.NilError(t, os.WriteFile(
+		filepath.Join(dir, "envs", "project.env"),
+		[]byte("KEY=from-project-file\nPROJECT_FILE_ONLY=pf\nENV_DIR=envs\n"),
+		0644,
+	))
+	assert.NilError(t, os.WriteFile(
+		filepath.Join(dir, "envs", "app.env"),
+		[]byte("KEY=from-command-file\nCOMMAND_FILE_ONLY=${PROJECT_ONLY}-cf\n"),
+		0644,
+	))
+
+	yamlContent := `
+name: project-layer-test
+env_file:
+  - path: envs/project.env
+env:
+  - KEY=from-project-env
+  - PROJECT_ONLY=po
+  - SHADOWED=from-project-env
+commands:
+  app:
+    args: [echo, "${KEY}", "${PROJECT_ONLY}"]
+    env_file:
+      - path: ${ENV_DIR}/app.env
+    env:
+      - KEY=from-command-env
+      - SHADOWED=from-command-env
+  plain:
+    args: [echo, "${KEY}"]
+`
+	yamlPath := filepath.Join(dir, "cmd-compose.yaml")
+	assert.NilError(t, os.WriteFile(yamlPath, []byte(yamlContent), 0644))
+
+	raw, err := compose.DecodeFile(yamlPath)
+	assert.NilError(t, err)
+	_, unknownEnv := raw.Unknown["env"]
+	_, unknownEnvFile := raw.Unknown["env_file"]
+	assert.Assert(t, !unknownEnv && !unknownEnvFile)
+
+	spec, err := compose.Normalize(
+		context.Background(),
+		yamlPath,
+		raw,
+		compose.NormalizeOpts{WorkDir: dir},
+	)
+	assert.NilError(t, err)
+	assert.Equal(t, len(spec.Commands), 2)
+
+	app := spec.Commands[0]
+	assert.Equal(t, app.Name, "app")
+	assert.DeepEqual(t, envSliceToMap(app.Env), map[string]string{
+		"KEY":               "from-command-env",
+		"PROJECT_FILE_ONLY": "pf",
+		"ENV_DIR":           "envs",
+		"PROJECT_ONLY":      "po",
+		"SHADOWED":          "from-command-env",
+		"COMMAND_FILE_ONLY": "po-cf",
+	})
+	assert.DeepEqual(t, app.Args, []string{"echo", "from-command-env", "po"})
+
+	plain := spec.Commands[1]
+	assert.Equal(t, plain.Name, "plain")
+	assert.DeepEqual(t, envSliceToMap(plain.Env), map[string]string{
+		"KEY":               "from-project-env",
+		"PROJECT_FILE_ONLY": "pf",
+		"ENV_DIR":           "envs",
+		"PROJECT_ONLY":      "po",
+		"SHADOWED":          "from-project-env",
+	})
+	assert.DeepEqual(t, plain.Args, []string{"echo", "from-project-env"})
+}
+
+func TestProjectEnvBareKeyCopiedByCommand(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CMDMAN_TEST_PROJECT_HOST", "from-host")
+	yamlContent := `
+name: project-bare-test
+env:
+  - CMDMAN_TEST_PROJECT_HOST
+  - FROM_PROJECT=project-value
+  - DERIVED=${CMDMAN_COMPOSE_PROJECT}
+commands:
+  app:
+    args: [echo]
+    import_host_env: false
+    env:
+      - FROM_PROJECT
+`
+	yamlPath := filepath.Join(dir, "cmd-compose.yaml")
+	assert.NilError(t, os.WriteFile(yamlPath, []byte(yamlContent), 0644))
+
+	spec, err := normalizeFromFile(t, yamlPath, compose.NormalizeOpts{WorkDir: dir})
+	assert.NilError(t, err)
+	assert.DeepEqual(t, envSliceToMap(spec.Commands[0].Env), map[string]string{
+		"CMDMAN_TEST_PROJECT_HOST": "from-host",
+		"FROM_PROJECT":             "project-value",
+		"DERIVED":                  "project-bare-test",
+	})
+}
+
+func TestProjectEnvFileRequired_Missing(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := `
+name: project-envfile-missing
+env_file:
+  - path: missing.env
+commands:
+  app:
+    args: [echo]
+`
+	yamlPath := filepath.Join(dir, "cmd-compose.yaml")
+	assert.NilError(t, os.WriteFile(yamlPath, []byte(yamlContent), 0644))
+
+	_, err := normalizeFromFile(t, yamlPath, compose.NormalizeOpts{WorkDir: dir})
+	assert.ErrorContains(t, err, "top-level env_file[0] open")
+}
+
+func TestProjectEnvChangesHash(t *testing.T) {
+	dir := t.TempDir()
+	hashWith := func(value string) string {
+		t.Helper()
+		yamlContent := fmt.Sprintf(`
+name: project-hash-test
+env:
+  - SHARED=%s
+commands:
+  app:
+    args: [echo]
+`, value)
+		yamlPath := filepath.Join(dir, "cmd-compose.yaml")
+		assert.NilError(t, os.WriteFile(yamlPath, []byte(yamlContent), 0644))
+		spec, err := normalizeFromFile(t, yamlPath, compose.NormalizeOpts{WorkDir: dir})
+		assert.NilError(t, err)
+		h, err := compose.Hash(spec.Commands[0])
+		assert.NilError(t, err)
+		return h
+	}
+	assert.Assert(t, hashWith("a") != hashWith("b"), "hash must change with top-level env")
 }
 
 // ---- within-WorkDir collision -----------------------------------------------

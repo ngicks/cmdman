@@ -13,8 +13,9 @@ cmdman compose [selection flags] config
 ## Description
 
 Loads the selected compose file, applies interpolation, resolves work and
-command directories, merges `env_file` and `env`, validates dependency and
-runtime fields, and prints canonical YAML.
+command directories, merges the top-level and command `env_file` and `env`
+into each command's `env`, validates dependency and runtime fields, and prints
+canonical YAML. The output has no top-level `env` or `env_file`.
 
 The output is a valid compose file that produces the same desired plan when fed
 back to cmdman. It is useful for reviewing interpolation and path resolution
