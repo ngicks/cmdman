@@ -197,8 +197,9 @@ the host environment and the compose variables listed above. `work_dir` does
 not see the top-level layer.
 
 Every command stores the top-level values together with its own values. A
-change to the top-level layer therefore changes the configuration hash of
-every command. `cmdman compose config` prints the top-level values merged into
+change that affects a command's merged environment or interpolated fields
+changes its configuration hash. A top-level value that a command overrides
+leaves that command unchanged. `cmdman compose config` prints the top-level values merged into
 the `env` of each command and prints no top-level `env` or `env_file`.
 
 ```yaml

@@ -380,8 +380,8 @@ func buildEnvLayer(
 			required = *ef.Required
 		}
 		// env_file paths interpolate against OS env + compose path variables +
-		// prior env_file keys, so a project can point at a dot env file living
-		// next to its compose file.
+		// seed + prior env_file keys, so a project can point at a dot env file
+		// living next to its compose file.
 		interpPath, interpErr := template.Substitute(
 			ef.Path, buildLookupFromMaps(osEnv, envFileAccum))
 		if interpErr != nil {
@@ -403,7 +403,9 @@ func buildEnvLayer(
 			return nil, fmt.Errorf("env_file[%d] open %s: %w", i, path, openErr)
 		}
 
-		// Each file's lookup sees OS env + previously accumulated env_file keys.
+		// Each file's lookup sees OS env + seed + previously accumulated
+		// env_file keys. For a command layer, the seed holds the top-level
+		// env_file and env: values.
 		lookupForFile := buildLookupFromMaps(osEnv, envFileAccum)
 		fileVars, parseErr := dotenv.ParseWithLookup(f, lookupForFile)
 		f.Close()
