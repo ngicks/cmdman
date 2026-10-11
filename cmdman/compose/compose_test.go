@@ -729,7 +729,11 @@ func TestProjectEnvLayeringOrder(t *testing.T) {
 	))
 	assert.NilError(t, os.WriteFile(
 		filepath.Join(dir, "envs", "app.env"),
-		[]byte("KEY=from-command-file\nCOMMAND_FILE_ONLY=${PROJECT_ONLY}-cf\n"),
+		[]byte(
+			"KEY=from-command-file\n"+
+				"COMMAND_FILE_ONLY=${PROJECT_ONLY}-cf\n"+
+				"FILE_WINS=from-command-file\n",
+		),
 		0644,
 	))
 
@@ -741,6 +745,8 @@ env:
   - KEY=from-project-env
   - PROJECT_ONLY=po
   - SHADOWED=from-project-env
+  - FILE_WINS=from-project-env
+  - PROJECT_FILE_REF=${PROJECT_FILE_ONLY}-ref
 commands:
   app:
     args: [echo, "${KEY}", "${PROJECT_ONLY}"]
@@ -778,6 +784,8 @@ commands:
 		"ENV_DIR":           "envs",
 		"PROJECT_ONLY":      "po",
 		"SHADOWED":          "from-command-env",
+		"FILE_WINS":         "from-command-file",
+		"PROJECT_FILE_REF":  "pf-ref",
 		"COMMAND_FILE_ONLY": "po-cf",
 	})
 	assert.DeepEqual(t, app.Args, []string{"echo", "from-command-env", "po"})
@@ -790,8 +798,32 @@ commands:
 		"ENV_DIR":           "envs",
 		"PROJECT_ONLY":      "po",
 		"SHADOWED":          "from-project-env",
+		"FILE_WINS":         "from-project-env",
+		"PROJECT_FILE_REF":  "pf-ref",
 	})
 	assert.DeepEqual(t, plain.Args, []string{"echo", "from-project-env"})
+}
+
+func TestProjectEnvSurvivesMissingOptionalCommandEnvFile(t *testing.T) {
+	dir := t.TempDir()
+	yamlContent := `
+name: project-optional-test
+env:
+  - SHARED=from-project
+commands:
+  app:
+    args: [echo, "${SHARED}"]
+    env_file:
+      - path: missing.env
+        required: false
+`
+	yamlPath := filepath.Join(dir, "cmd-compose.yaml")
+	assert.NilError(t, os.WriteFile(yamlPath, []byte(yamlContent), 0644))
+
+	spec, err := normalizeFromFile(t, yamlPath, compose.NormalizeOpts{WorkDir: dir})
+	assert.NilError(t, err)
+	assert.DeepEqual(t, spec.Commands[0].Env, []string{"SHARED=from-project"})
+	assert.DeepEqual(t, spec.Commands[0].Args, []string{"echo", "from-project"})
 }
 
 func TestProjectEnvBareKeyCopiedByCommand(t *testing.T) {
