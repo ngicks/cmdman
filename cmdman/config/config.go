@@ -36,11 +36,13 @@ const (
 	// build a child process environment need them (see WithCommandContextEnv).
 	ENV_CMDMAN_DATA_DIR    = "CMDMAN_DATA_DIR"
 	ENV_CMDMAN_RUNTIME_DIR = "CMDMAN_RUNTIME_DIR"
-	// ENV_CMDMAN_CMD_DATA_DIR and ENV_CMDMAN_CMD_ID describe a supervised
-	// command's own context; they are exported to the command, never read back
-	// into a Config.
+	// ENV_CMDMAN_CMD_DATA_DIR, ENV_CMDMAN_CMD_ID and ENV_CMDMAN_CMD_NAME describe
+	// a supervised command's own context; they are exported to the command, never
+	// read back into a Config. ENV_CMDMAN_CMD_NAME is empty for an unnamed
+	// command.
 	ENV_CMDMAN_CMD_DATA_DIR = "CMDMAN_CMD_DATA_DIR"
 	ENV_CMDMAN_CMD_ID       = "CMDMAN_CMD_ID"
+	ENV_CMDMAN_CMD_NAME     = "CMDMAN_CMD_NAME"
 	// ENV_CMDMAN_CONF overrides the config-file path. When unset, the file at
 	// <user config dir>/cmdman/config.json is consulted if it exists. It is the
 	// one variable read by hand: the path is needed before parsing, and it is

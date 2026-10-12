@@ -44,6 +44,16 @@ func (s *Store) ResolveIDByName(name string) (string, error) {
 	return s.queries.ResolveIDByName(context.Background(), name)
 }
 
+// CommandName returns the name of the command with exactly id, or "" when the
+// command has no name. It returns sql.ErrNoRows when no command has that id.
+func (s *Store) CommandName(id string) (string, error) {
+	row, err := s.queries.GetCommandConfig(context.Background(), id)
+	if err != nil {
+		return "", err
+	}
+	return row.Name.String, nil
+}
+
 // GetCommandConfig retrieves a CommandConfig by exact name, exact ID, or ID prefix.
 // If the input matches multiple commands by prefix, an error is returned.
 func (s *Store) GetCommandConfig(

@@ -21,8 +21,8 @@ A command with a stop command stops in three steps. The `stop` key of
 
 1. The stop command runs first, for at most the timeout. It runs in the
    command's working directory and gets the command's environment with
-   `CMDMAN_DATA_DIR`, `CMDMAN_RUNTIME_DIR`, `CMDMAN_CMD_DATA_DIR`, and
-   `CMDMAN_CMD_ID` set for the command. `CMDMAN_MAIN_PID` holds the pid of the
+   `CMDMAN_DATA_DIR`, `CMDMAN_RUNTIME_DIR`, `CMDMAN_CMD_DATA_DIR`,
+   `CMDMAN_CMD_ID`, and `CMDMAN_CMD_NAME` set for the command. `CMDMAN_MAIN_PID` holds the pid of the
    command's own process. It is empty when that process has already exited.
    cmdman discards the output of the stop command.
 2. The stop command exits or the timeout runs out. cmdman then kills the

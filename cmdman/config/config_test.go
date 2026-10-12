@@ -329,6 +329,40 @@ func TestConfigSubDirs(t *testing.T) {
 	})
 }
 
+func TestWithCommandContextEnv(t *testing.T) {
+	cfg := Config{DataDir: "/data", RuntimeDir: "/run"}
+	// Entries an outer cmdman left behind must not survive, even the name of a
+	// command that has none.
+	base := []string{
+		"PATH=/bin",
+		ENV_CMDMAN_DATA_DIR + "=/outer-data",
+		ENV_CMDMAN_RUNTIME_DIR + "=/outer-run",
+		ENV_CMDMAN_CMD_DATA_DIR + "=/outer-data/commands/outer",
+		ENV_CMDMAN_CMD_ID + "=outer",
+		ENV_CMDMAN_CMD_NAME + "=outer-name",
+	}
+	want := func(name string) []string {
+		return []string{
+			"PATH=/bin",
+			ENV_CMDMAN_DATA_DIR + "=/data",
+			ENV_CMDMAN_RUNTIME_DIR + "=/run",
+			ENV_CMDMAN_CMD_DATA_DIR + "=/data/commands/cmd-1",
+			ENV_CMDMAN_CMD_ID + "=cmd-1",
+			ENV_CMDMAN_CMD_NAME + "=" + name,
+		}
+	}
+	assert.DeepEqual(
+		t,
+		WithCommandContextEnv(base, cfg, "cmd-1", "proj-web-1", "/data/commands/cmd-1"),
+		want("proj-web-1"),
+	)
+	assert.DeepEqual(
+		t,
+		WithCommandContextEnv(base, cfg, "cmd-1", "", "/data/commands/cmd-1"),
+		want(""),
+	)
+}
+
 func TestWithStopCommandEnv(t *testing.T) {
 	base := []string{
 		"PATH=/bin",

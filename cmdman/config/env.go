@@ -81,13 +81,15 @@ func WithStopCommandEnv(env []string, mainPID int) []string {
 
 // WithCommandContextEnv strips any caller-supplied ENV_CMDMAN_* variables from
 // env and appends the ones describing the command's own context (data/runtime
-// dirs, per-command dir, and id).
-func WithCommandContextEnv(env []string, cfg Config, id, commandDir string) []string {
+// dirs, per-command dir, id, and name). An empty name is still exported, so an
+// unnamed command does not inherit the name of an outer cmdman's command.
+func WithCommandContextEnv(env []string, cfg Config, id, name, commandDir string) []string {
 	prefixes := []string{
 		ENV_CMDMAN_DATA_DIR + "=",
 		ENV_CMDMAN_RUNTIME_DIR + "=",
 		ENV_CMDMAN_CMD_DATA_DIR + "=",
 		ENV_CMDMAN_CMD_ID + "=",
+		ENV_CMDMAN_CMD_NAME + "=",
 	}
 
 	out := make([]string, 0, len(env)+len(prefixes))
@@ -103,6 +105,7 @@ func WithCommandContextEnv(env []string, cfg Config, id, commandDir string) []st
 		ENV_CMDMAN_RUNTIME_DIR+"="+cfg.RuntimeDir,
 		ENV_CMDMAN_CMD_DATA_DIR+"="+commandDir,
 		ENV_CMDMAN_CMD_ID+"="+id,
+		ENV_CMDMAN_CMD_NAME+"="+name,
 	)
 }
 

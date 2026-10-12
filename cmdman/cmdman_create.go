@@ -29,8 +29,8 @@ type CreateRequest struct {
 	// environment (and keeps PATH) rather than starting bare.
 	ImportHostEnv *bool
 	// InjectEnv controls whether the command's environment gets CMDMAN_DATA_DIR,
-	// CMDMAN_RUNTIME_DIR, CMDMAN_CMD_DATA_DIR and CMDMAN_CMD_ID pointing at this
-	// command. When false, entries with those names are left exactly as the
+	// CMDMAN_RUNTIME_DIR, CMDMAN_CMD_DATA_DIR, CMDMAN_CMD_ID and CMDMAN_CMD_NAME
+	// pointing at this command. When false, entries with those names are left exactly as the
 	// environment already carries them, which keeps a command that runs under an
 	// outer cmdman addressing the outer command. A nil pointer defaults to true.
 	InjectEnv *bool
@@ -87,7 +87,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*CreateResult,
 	}
 	cfg.CommandDir = commandDir
 	if cfg.InjectEnv {
-		cfg.Env = config.WithCommandContextEnv(cfg.Env, s.cfg, id, commandDir)
+		cfg.Env = config.WithCommandContextEnv(cfg.Env, s.cfg, id, req.Name, commandDir)
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err

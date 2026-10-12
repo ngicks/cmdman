@@ -84,7 +84,9 @@ Absolute paths are cleaned and used as-is.
 - `import_host_env`: whether the host environment is imported as the command's
   base environment. Defaults to `true`.
 - `inject_env`: whether cmdman injects `CMDMAN_DATA_DIR`, `CMDMAN_RUNTIME_DIR`,
-  `CMDMAN_CMD_DATA_DIR`, and `CMDMAN_CMD_ID`. Defaults to `true`.
+  `CMDMAN_CMD_DATA_DIR`, `CMDMAN_CMD_ID`, and `CMDMAN_CMD_NAME`. Defaults to
+  `true`. `CMDMAN_CMD_NAME` holds the replica's command name, such as
+  `<workdir-hash>-<project>-web-1`, so it differs per replica.
 - `labels`: user metadata. Keys starting with `cmdman.compose.` are reserved.
 - `restart_policy`: `no`, `always`, `on-failure`, or `on-failure:N`.
 - `stop_signal`: signal used by `cmdman stop` when no signal override is given.
@@ -161,8 +163,9 @@ Injected variables are applied after `env`, so they override an `env` entry of
 the same name. They are injected even when `inject_env` is `false`.
 
 The `stop` command runs with the environment of its command. cmdman sets
-`CMDMAN_DATA_DIR`, `CMDMAN_RUNTIME_DIR`, `CMDMAN_CMD_DATA_DIR`, and
-`CMDMAN_CMD_ID` for the command even when `inject_env` is `false`, and adds
+`CMDMAN_DATA_DIR`, `CMDMAN_RUNTIME_DIR`, `CMDMAN_CMD_DATA_DIR`,
+`CMDMAN_CMD_ID`, and `CMDMAN_CMD_NAME` for the command even when `inject_env`
+is `false`, and adds
 this variable:
 
 - `CMDMAN_MAIN_PID`: the pid of the command's own process. It is empty when
@@ -541,8 +544,8 @@ includes `CMDMAN_COMPOSE_WORK_DIR`, `CMDMAN_COMPOSE_WORK_DIR_HASH`,
   that runs the hook. A `cmdman` started by the hook reaches the same store.
 - `CMDMAN_CONF`: the absolute path of the configuration file. cmdman sets it
   when it runs with `--config`.
-- `CMDMAN_CMD_ID` and `CMDMAN_CMD_DATA_DIR`: the ID and data directory of the
-  exec command. They do not name the replica.
+- `CMDMAN_CMD_ID`, `CMDMAN_CMD_NAME`, and `CMDMAN_CMD_DATA_DIR`: the ID, name,
+  and data directory of the exec command. They do not name the replica.
 
 cmdman interpolates hook `args` when it loads the compose file. Hook `args` see
 the same variables as the `args` of the command. Apart from
