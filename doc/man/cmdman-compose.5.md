@@ -86,7 +86,7 @@ Absolute paths are cleaned and used as-is.
 - `inject_env`: whether cmdman injects `CMDMAN_DATA_DIR`, `CMDMAN_RUNTIME_DIR`,
   `CMDMAN_CMD_DATA_DIR`, `CMDMAN_CMD_ID`, and `CMDMAN_CMD_NAME`. Defaults to
   `true`. `CMDMAN_CMD_NAME` holds the replica's command name, such as
-  `<project>-web-1`, so it differs per replica.
+  `<workdir-hash>-<project>-web-1`, so it differs per replica.
 - `labels`: user metadata. Keys starting with `cmdman.compose.` are reserved.
 - `restart_policy`: `no`, `always`, `on-failure`, or `on-failure:N`.
 - `stop_signal`: signal used by `cmdman stop` when no signal override is given.
