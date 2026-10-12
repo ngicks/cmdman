@@ -116,8 +116,8 @@ type RawCommand struct {
 	// explicit false.
 	ImportHostEnv *bool `yaml:"import_host_env" json:"import_host_env"` //nolint:lll // pointer detects absence; defaults to true
 	// InjectEnv controls whether the command's environment gets CMDMAN_DATA_DIR,
-	// CMDMAN_RUNTIME_DIR, CMDMAN_CMD_DATA_DIR and CMDMAN_CMD_ID pointing at this
-	// command. A pointer so absence (nil → default true) is distinguishable from
+	// CMDMAN_RUNTIME_DIR, CMDMAN_CMD_DATA_DIR, CMDMAN_CMD_ID and CMDMAN_CMD_NAME
+	// pointing at this command. A pointer so absence (nil → default true) is distinguishable from
 	// an explicit false.
 	InjectEnv       *bool                `yaml:"inject_env" json:"inject_env"`
 	Labels          map[string]string    `yaml:"labels" json:"labels"`
@@ -311,8 +311,8 @@ type Command struct {
 	// RawCommand.ImportHostEnv during normalization; defaults to true.
 	ImportHostEnv bool
 	// InjectEnv controls whether the command's environment gets CMDMAN_DATA_DIR,
-	// CMDMAN_RUNTIME_DIR, CMDMAN_CMD_DATA_DIR and CMDMAN_CMD_ID pointing at this
-	// command. Resolved from RawCommand.InjectEnv during normalization; defaults
+	// CMDMAN_RUNTIME_DIR, CMDMAN_CMD_DATA_DIR, CMDMAN_CMD_ID and CMDMAN_CMD_NAME
+	// pointing at this command. Resolved from RawCommand.InjectEnv during normalization; defaults
 	// to true.
 	InjectEnv bool
 	// Labels are user-supplied labels. Reserved cmdman.compose.* labels are absent here;

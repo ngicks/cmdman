@@ -47,8 +47,8 @@ func bindCreateFlags(cmd *cobra.Command, f *createFlags) {
 		&f.InjectEnv,
 		"inject-env",
 		true,
-		"Set CMDMAN_DATA_DIR, CMDMAN_RUNTIME_DIR, CMDMAN_CMD_DATA_DIR and "+
-			"CMDMAN_CMD_ID for this command. Set to false to keep the values "+
+		"Set CMDMAN_DATA_DIR, CMDMAN_RUNTIME_DIR, CMDMAN_CMD_DATA_DIR, "+
+			"CMDMAN_CMD_ID and CMDMAN_CMD_NAME for this command. Set to false to keep the values "+
 			"inherited from an outer cmdman",
 	)
 	flags.StringArrayVarP(&f.Label, "label", "l", nil, "Metadata label KEY=VALUE (repeatable)")

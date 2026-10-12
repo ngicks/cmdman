@@ -15,8 +15,8 @@ type CommandConfig struct {
 	Dir  string   `json:"dir,omitzero"`
 	Env  []string `json:"env,omitzero"`
 	// InjectEnv controls whether CMDMAN_DATA_DIR, CMDMAN_RUNTIME_DIR,
-	// CMDMAN_CMD_DATA_DIR and CMDMAN_CMD_ID are stripped from the command's
-	// environment and re-added for this command. False leaves whatever the
+	// CMDMAN_CMD_DATA_DIR, CMDMAN_CMD_ID and CMDMAN_CMD_NAME are stripped from
+	// the command's environment and re-added for this command. False leaves whatever the
 	// environment already carries untouched, so a command supervised by an
 	// outer cmdman keeps addressing the outer command. Hooks are exempt: a
 	// hook always receives this command's own context.

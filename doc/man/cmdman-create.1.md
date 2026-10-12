@@ -43,12 +43,13 @@ creates the command as usual.
   environment plus the `--env` entries, so include `PATH`, `HOME`, and similar
   variables when the command needs them.
 - `--inject-env`: put `CMDMAN_DATA_DIR`, `CMDMAN_RUNTIME_DIR`,
-  `CMDMAN_CMD_DATA_DIR`, and `CMDMAN_CMD_ID` into the command's environment;
-  default true. cmdman replaces inherited entries of those names with this
-  command's own values. `--inject-env=false` leaves the inherited entries
-  untouched and adds none of the four. Use it when the command runs its own
-  cmdman that must keep addressing an outer cmdman's command. The command's
-  hooks always receive the four variables of the command they belong to.
+  `CMDMAN_CMD_DATA_DIR`, `CMDMAN_CMD_ID`, and `CMDMAN_CMD_NAME` into the
+  command's environment; default true. cmdman replaces inherited entries of
+  those names with this command's own values. `CMDMAN_CMD_NAME` is empty when
+  the command has no `--name`. `--inject-env=false` leaves the inherited
+  entries untouched and adds none of the five. Use it when the command runs its
+  own cmdman that must keep addressing an outer cmdman's command. The command's
+  hooks always receive the five variables of the command they belong to.
 - `-l, --label KEY=VALUE`: metadata used by `ls --label` and `rm --label`.
 - `--restart no|on-failure[:N]|always`: monitor restart policy.
 - `--stop-signal SIGNAL`: default signal used by `stop`.

@@ -236,7 +236,7 @@ func (m *Monitor) wireUpCmd(ctx context.Context) (*exec.Cmd, error) {
 	cmd.Dir = m.cfg.Dir
 	cmd.Env = m.cfg.Env
 	if m.cfg.InjectEnv {
-		cmd.Env = config.WithCommandContextEnv(m.cfg.Env, m.Config, m.ID, m.cfg.CommandDir)
+		cmd.Env = config.WithCommandContextEnv(m.cfg.Env, m.Config, m.ID, m.Name, m.cfg.CommandDir)
 	}
 	if len(cmd.Env) == 0 {
 		return nil, fmt.Errorf("command config env is empty")
@@ -296,7 +296,7 @@ func (m *Monitor) runOnce(ctx context.Context) (int, error) {
 	// itself opted out of it: a hook reports on the command it is attached to,
 	// not on whatever supervises the monitor. The stop command gets the same
 	// directory and environment for the same reason.
-	hookEnv := config.WithCommandContextEnv(m.cfg.Env, m.Config, m.ID, m.cfg.CommandDir)
+	hookEnv := config.WithCommandContextEnv(m.cfg.Env, m.Config, m.ID, m.Name, m.cfg.CommandDir)
 	m.hooks.configure(
 		model.HookLayers{Command: m.cfg.Hooks, Global: m.Config.DefaultHooks},
 		m.cfg.Dir,

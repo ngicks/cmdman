@@ -247,12 +247,15 @@ func TestRun_InjectsCmdmanContextEnv(t *testing.T) {
 	ctx := testContext(t)
 	env := newTestEnv(t)
 
+	const name = "ctx-env"
 	id := env.run(ctx,
 		"run",
+		"--name", name,
 		"-E", cmdman.ENV_CMDMAN_DATA_DIR+"=/wrong",
 		"-E", cmdman.ENV_CMDMAN_RUNTIME_DIR+"=/wrong",
 		"-E", cmdman.ENV_CMDMAN_CMD_DATA_DIR+"=/wrong",
 		"-E", cmdman.ENV_CMDMAN_CMD_ID+"=wrong",
+		"-E", cmdman.ENV_CMDMAN_CMD_NAME+"=wrong",
 		"-E", "EXPECT_DATA="+env.dataHome,
 		"-E", "EXPECT_RUNTIME="+env.runtimeDir,
 		"--",
@@ -260,6 +263,7 @@ func TestRun_InjectsCmdmanContextEnv(t *testing.T) {
 test "$CMDMAN_DATA_DIR" = "$EXPECT_DATA" &&
 test "$CMDMAN_RUNTIME_DIR" = "$EXPECT_RUNTIME" &&
 test "$CMDMAN_CMD_DATA_DIR" = "$CMDMAN_DATA_DIR/commands/$CMDMAN_CMD_ID" &&
+test "$CMDMAN_CMD_NAME" = `+name+` &&
 test -f "$CMDMAN_CMD_DATA_DIR/config.json"
 `,
 	)
@@ -270,6 +274,8 @@ test -f "$CMDMAN_CMD_DATA_DIR/config.json"
 	if exitCode != 0 {
 		t.Fatalf("expected injected cmdman context environment, exit_code=%v", exitCode)
 	}
+	// run prints the name of a named command, so the ID comes from inspect.
+	id, _ = info["ID"].(string)
 
 	cfg, _ := info["Config"].(map[string]any)
 	envList, _ := cfg["env"].([]any)
@@ -278,6 +284,7 @@ test -f "$CMDMAN_CMD_DATA_DIR/config.json"
 		cmdman.ENV_CMDMAN_RUNTIME_DIR:  env.runtimeDir,
 		cmdman.ENV_CMDMAN_CMD_DATA_DIR: filepath.Join(env.dataHome, "commands", id),
 		cmdman.ENV_CMDMAN_CMD_ID:       id,
+		cmdman.ENV_CMDMAN_CMD_NAME:     name,
 	}
 	counts := map[string]int{}
 	for _, e := range envList {

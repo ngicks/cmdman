@@ -37,7 +37,10 @@ import (
 
 // Monitor is the per-command monitor process.
 type Monitor struct {
-	ID         string
+	ID string
+	// Name is the command's name, "" for an unnamed command. init reads it from
+	// the store because the per-command config file does not carry it.
+	Name       string
 	CommandDir string
 	DBPath     string
 	Config     config.Config
@@ -325,6 +328,9 @@ func (m *Monitor) init() (err error) {
 			return fmt.Errorf("command %q no longer exists", m.ID)
 		}
 		return fmt.Errorf("get command state: %w", err)
+	}
+	if m.Name, err = m.store.CommandName(m.ID); err != nil {
+		return fmt.Errorf("get command name: %w", err)
 	}
 
 	if err := m.store.UpdateCommandState(

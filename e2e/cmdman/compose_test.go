@@ -114,18 +114,24 @@ func cleanupProject(ctx context.Context, e *testEnv, workdir, project string) {
 }
 
 // TestComposeScale exercises the scale field, the per-replica "-<n>" command
-// names, the injected scale-index environment, and `compose scale` up/down.
+// names, the injected scale-index and command-name environment, and
+// `compose scale` up/down.
 func TestComposeScale(t *testing.T) {
 	ctx := context.Background()
 	env := newTestEnv(t)
 	wd := composeWorkdir(t)
 	project := "tc-scale"
-	// Each replica prints its injected scale index, then idles so it stays
-	// running long enough to be observed.
+	// Each replica prints its injected scale index and command name, then idles
+	// so it stays running long enough to be observed.
 	yaml := fmt.Sprintf(`name: %s
 commands:
   web:
-    args: [sh, -c, "echo replica $$CMDMAN_COMPOSE_SCALE_INDEX of $$CMDMAN_COMPOSE_SCALE; sleep 30"]
+    args:
+      - sh
+      - -c
+      - >-
+        echo replica $$CMDMAN_COMPOSE_SCALE_INDEX of $$CMDMAN_COMPOSE_SCALE
+        as $$CMDMAN_CMD_NAME; sleep 30
     scale: 3
 `, project)
 	writeComposeFile(t, wd, yaml)
@@ -137,6 +143,7 @@ commands:
 	}
 
 	wantIdx := map[string]bool{"1": false, "2": false, "3": false}
+	var wantLogs []string
 	entries := env.lsJSON(ctx,
 		"-l", "cmdman.compose.workdir="+wd,
 		"-l", "cmdman.compose.command=web",
@@ -155,6 +162,7 @@ commands:
 		if !strings.HasSuffix(name, "-web-"+idx) {
 			t.Fatalf("replica name %q should end with -web-%s", name, idx)
 		}
+		wantLogs = append(wantLogs, "replica "+idx+" of 3 as "+name)
 		env.waitForState(ctx, e["ID"].(string), "running", 10*time.Second)
 	}
 	for idx, seen := range wantIdx {
@@ -167,7 +175,7 @@ commands:
 	if err != nil {
 		t.Fatalf("compose logs failed: %v", err)
 	}
-	for _, want := range []string{"replica 1 of 3", "replica 2 of 3", "replica 3 of 3"} {
+	for _, want := range wantLogs {
 		if !strings.Contains(logs, want) {
 			t.Fatalf("logs missing %q; got:\n%s", want, logs)
 		}
