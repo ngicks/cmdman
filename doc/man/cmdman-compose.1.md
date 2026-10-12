@@ -50,12 +50,14 @@ A different compose file cannot silently take ownership of the same
 
 The compose file format is documented in
 [cmdman-compose(5)](./cmdman-compose.5.md). In short, a compose file declares a
-project name, an effective work directory, command definitions, dependencies,
-and optionally a `mux:` dashboard section.
+project name, an effective work directory, an environment shared by every
+command, command definitions, dependencies, and optionally a `mux:` dashboard
+section.
 
 ```yaml
 name: example
 work_dir: .
+env: ["LOG_LEVEL=info"]
 commands:
   api:
     dir: .
@@ -81,7 +83,9 @@ effective work directory. Interpolation uses `${VAR}`, `${VAR:-default}`,
 
 The host environment is available while interpolating, but only values
 declared by `env_file` or `env` are stored when a command declares environment
-entries. A bare `env` key such as `PATH` copies its current value. This matters
+entries. The top-level `env_file` and `env` apply to every command, and a
+command's own `env_file` and `env` override them. A bare `env` key such as
+`PATH` copies its current value. This matters
 for interactive shells and executables found through `PATH`.
 
 ## Reconciliation

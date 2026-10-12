@@ -86,8 +86,12 @@ func (c AfterCondition) Validate() error {
 
 // RawComposeSpec is the top-level raw YAML model.
 type RawComposeSpec struct {
-	Name     string                `yaml:"name" json:"name"`
-	WorkDir  string                `yaml:"work_dir" json:"work_dir"`
+	Name    string `yaml:"name" json:"name"`
+	WorkDir string `yaml:"work_dir" json:"work_dir"`
+	// Env and EnvFile form the project environment layer. Every command starts
+	// from it and layers its own env_file and env: on top.
+	Env      []string              `yaml:"env" json:"env"`
+	EnvFile  []EnvFileSpec         `yaml:"env_file" json:"env_file"`
 	Commands map[string]RawCommand `yaml:"commands" json:"commands"`
 	// Mux is the embedded cmdman mux layout, decoded straight into the
 	// cmdman-layer spec type (nil when the file has no "mux:" section). Its
@@ -298,8 +302,9 @@ type Command struct {
 	Name string
 	Dir  string
 	Args []string
-	// Env is the merged environment (env_file + env: overrides), interpolated,
-	// in KEY=VALUE form. Does NOT include OS environment; callers inject that.
+	// Env is the merged environment (project env_file + env:, then command
+	// env_file + env: overrides), interpolated, in KEY=VALUE form. Does NOT
+	// include OS environment; callers inject that.
 	Env []string
 	// ImportHostEnv controls whether the host environment is imported as the
 	// base for this command, with Env layered on top as overrides. Resolved from

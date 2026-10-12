@@ -13,6 +13,10 @@ is selected with `cmdman compose -f`.
 ```yaml
 name: example
 work_dir: .
+env_file:
+  - path: ${CMDMAN_COMPOSE_DIR}/shared.env
+env:
+  - LOG_LEVEL=info
 commands:
   api:
     dir: services/api
@@ -54,6 +58,11 @@ Unknown YAML fields are ignored with a warning.
 - `name`: project name. Required unless `--project-name` is passed.
 - `work_dir`: effective project work directory. Defaults to the current
   directory. `--workdir` overrides it.
+- `env_file`: ordered list of dotenv files shared by every command. It takes
+  the same items as the command field of the same name.
+- `env`: ordered list of `KEY=VALUE` assignments or bare `KEY` entries shared
+  by every command. It takes the same entries as the command field of the same
+  name.
 - `commands`: map from command name to command definition.
 - `mux`: optional dashboard layout used by `cmdman compose mux`; see
   [cmdman-mux(5)](./cmdman-mux.5.md) and [Mux Section](#mux-section) below.
@@ -171,10 +180,45 @@ Environment values are layered per command:
 - Host environment is the base interpolation context. Compose keeps it out of
   the merged `env_file` and `env` values. The service imports it into the
   created command at create time unless `import_host_env` is `false`.
-- `env_file` entries are read in list order. Each file sees the host
-  environment and earlier `env_file` values.
-- `env` entries are applied in list order and override `env_file` values.
+- Top-level `env_file` entries are read in list order. Each file sees the host
+  environment and earlier top-level `env_file` values.
+- Top-level `env` entries are applied in list order and override top-level
+  `env_file` values.
+- Command `env_file` entries are read in list order and override the top-level
+  values. Each file sees the host environment, the top-level values, and
+  earlier command `env_file` values.
+- Command `env` entries are applied in list order and override every earlier
+  layer.
 - `args` interpolation sees the final host plus command environment.
+
+The top-level layer uses the same rules as the command fields. Its `env_file`
+paths resolve relative to the effective `work_dir`. Its paths and values see
+the host environment and the compose variables listed above. `work_dir` does
+not see the top-level layer.
+
+Every command stores the top-level values together with its own values. A
+change that affects a command's merged environment or interpolated fields
+changes its configuration hash. A top-level value that a command overrides
+leaves that command unchanged. `cmdman compose config` prints the top-level values merged into
+the `env` of each command and prints no top-level `env` or `env_file`.
+
+```yaml
+name: api
+env_file:
+  - path: ${CMDMAN_COMPOSE_DIR}/shared.env
+env:
+  - MODE=dev
+commands:
+  api:
+    args: [./api]
+    env:
+      - MODE=debug
+  worker:
+    args: [./worker, --mode, "${MODE}"]
+```
+
+`api` runs with `MODE=debug`. `worker` runs with `MODE=dev`. Both receive the
+values of `shared.env`.
 
 An `env_file` item may be a mapping:
 
@@ -186,8 +230,9 @@ env_file:
 
 `required` defaults to `true`. Missing optional files are skipped.
 
-A bare `env` entry copies the value from the host or merged `env_file`
-environment when present. If the key is not defined, it is skipped.
+A bare `env` entry copies the value from the host environment or from the
+`env_file` values merged so far when present. A bare command `env` entry also
+sees the top-level values. If the key is not defined, it is skipped.
 
 ```yaml
 env:
@@ -216,8 +261,8 @@ commands:
 ## Interpolation
 
 String fields that support interpolation include `work_dir`, command `dir`,
-`args`, `env_file.path`, `env` values, `log_opts.path`, and the `args` of hook
-events.
+`args`, `env_file.path` and `env` values at both levels, `log_opts.path`, and
+the `args` of hook events.
 
 Supported forms are compose-style variable expressions such as:
 

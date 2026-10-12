@@ -20,6 +20,9 @@ import (
 // in declaration order, the YAML encoder sorts map keys, and Env is already
 // sorted by normalization — so the output is stable across runs and across host
 // environments.
+//
+// The top-level env and env_file have no field here. Normalization merges them
+// into every command's Env, so rendering them again would apply them twice.
 type CanonicalSpec struct {
 	Name     string                      `yaml:"name" json:"name"`
 	WorkDir  string                      `yaml:"work_dir" json:"work_dir"`

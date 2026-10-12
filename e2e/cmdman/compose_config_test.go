@@ -3,6 +3,7 @@ package cmdman_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -93,6 +94,75 @@ commands:
 
 	if _, ok := got.Commands["db"]; !ok {
 		t.Fatalf("missing db command in output:\n%s", stdout)
+	}
+}
+
+func TestComposeConfigMergesProjectEnv(t *testing.T) {
+	ctx := context.Background()
+	env := newTestEnv(t)
+	wd := composeWorkdir(t)
+	project := "tc-config-project-env"
+
+	must(t, os.WriteFile(filepath.Join(wd, "shared.env"),
+		[]byte("SHARED=from-file\nFILE_ONLY=f\n"), 0o644))
+	composeYAML := fmt.Sprintf(`name: %s
+env_file:
+  - path: shared.env
+env:
+  - SHARED=from-project
+commands:
+  web:
+    args: [sh, -c, "echo ${SHARED}"]
+    env:
+      - SHARED=from-web
+  db:
+    args: [sh, -c, "echo ${SHARED}"]
+`, project)
+	writeComposeFile(t, wd, composeYAML)
+
+	stdout, stderr, err := env.exec(ctx, "compose", "--workdir", wd,
+		"-f", filepath.Join(wd, "cmd-compose.yaml"), "config")
+	if err != nil {
+		t.Fatalf("compose config failed: %v\nstderr:\n%s", err, stderr)
+	}
+
+	var top map[string]any
+	if err := yaml.Unmarshal([]byte(stdout), &top); err != nil {
+		t.Fatalf("parse config output: %v\noutput:\n%s", err, stdout)
+	}
+	for _, key := range []string{"env", "env_file"} {
+		if _, ok := top[key]; ok {
+			t.Errorf("output has top-level %s; want it merged into commands:\n%s", key, stdout)
+		}
+	}
+
+	var got canonicalConfig
+	if err := yaml.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("parse config output: %v\noutput:\n%s", err, stdout)
+	}
+	for name, want := range map[string]struct {
+		env  []string
+		args []string
+	}{
+		"web": {
+			env:  []string{"FILE_ONLY=f", "SHARED=from-web"},
+			args: []string{"sh", "-c", "echo from-web"},
+		},
+		"db": {
+			env:  []string{"FILE_ONLY=f", "SHARED=from-project"},
+			args: []string{"sh", "-c", "echo from-project"},
+		},
+	} {
+		cmd, ok := got.Commands[name]
+		if !ok {
+			t.Fatalf("missing %s command in output:\n%s", name, stdout)
+		}
+		if fmt.Sprint(cmd.Env) != fmt.Sprint(want.env) {
+			t.Errorf("%s.env = %v, want %v", name, cmd.Env, want.env)
+		}
+		if fmt.Sprint(cmd.Args) != fmt.Sprint(want.args) {
+			t.Errorf("%s.args = %v, want %v", name, cmd.Args, want.args)
+		}
 	}
 }
 

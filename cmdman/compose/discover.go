@@ -3,6 +3,7 @@ package compose
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -71,7 +72,7 @@ func DiscoverFile(cwd string, opts NormalizeOpts) (path string, raw RawComposeSp
 		tried = append(tried, candidate)
 		info, statErr := os.Stat(candidate)
 		if statErr != nil {
-			if os.IsNotExist(statErr) {
+			if errors.Is(statErr, fs.ErrNotExist) {
 				continue
 			}
 			return "", RawComposeSpec{}, fmt.Errorf("stat %s: %w", candidate, statErr)
